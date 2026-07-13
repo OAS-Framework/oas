@@ -1,6 +1,7 @@
 # Knowledge Log
 
 ## 2026-07-13
+* **Creation**: [parseYamlNested treated comment-only values as scalars](/lessons/yaml-parser-comment-only-values.md) — promotes the parser gotcha that comment-only values such as `layers:  # comment` must open nested maps, and that doc-example schema failures can reveal parser bugs.
 * **Creation**: [Config shape v2 — agent types in souls, layered capabilities, conventional injection overrides](/decisions/config-shape-agent-types-and-injections.md) — groups→agent-types with soul-declared membership, capabilities split into layers/additive, `from` provenance, commented `injection:` overrides, CLI as config author.
 * **Update**: [oas-config](/architecture/oas-config.md) rewritten for the v2 schema (agent-types, layer slots, from, injection conventions, removed spellings).
 * **Creation**: [npm EOTP failure in tag-driven release CI](/lessons/npm-eotp-in-tag-release.md) — EOTP at npm publish means the CI token is 2FA-constrained; fix with a granular package read/write token and rerun failed jobs without retagging.
