@@ -4,3 +4,4 @@ description: Builds custom OAS integrations with users — knows the five layers
 repo: .
 work: worktree
 runtime: pi
+type: framework-authors

@@ -17,31 +17,72 @@
         }
       ]
     },
-    "capability": {
+    "injection": { "type": "string", "description": "Override an instruction injection: a config-relative path, none, or default. Convention: .agents/injections/…" },
+    "capabilityTargets": {
       "type": "object",
       "properties": {
-        "source": { "type": "string" },
-        "path": { "type": "string" },
+        "from": { "type": "string", "description": "Enforced provenance: bundled | installed | owned | path:<dir>." },
         "global": { "$ref": "#/$defs/binding" },
-        "groups": { "type": "object", "additionalProperties": { "$ref": "#/$defs/binding" } },
+        "agent-types": {
+          "oneOf": [
+            { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+            { "type": "object", "additionalProperties": { "$ref": "#/$defs/binding" } }
+          ]
+        },
         "souls": { "type": "object", "additionalProperties": { "$ref": "#/$defs/binding" } },
-        "agents-md-injection": { "type": "string", "description": "Override this capability's instruction injection: a config-relative path, none, or default." }
+        "settings": { "$ref": "#/$defs/settings" },
+        "injection": { "$ref": "#/$defs/injection" }
+      }
+    },
+    "layerEntry": {
+      "oneOf": [
+        { "const": "none" },
+        {
+          "allOf": [{ "$ref": "#/$defs/capabilityTargets" }],
+          "type": "object",
+          "required": ["capability"],
+          "properties": {
+            "capability": { "type": "string" },
+            "from": true, "global": true, "agent-types": true, "souls": true, "settings": true, "injection": true
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "additiveEntry": {
+      "allOf": [{ "$ref": "#/$defs/capabilityTargets" }],
+      "type": "object",
+      "properties": {
+        "from": true, "global": true, "agent-types": true, "souls": true, "settings": true, "injection": true
       },
       "additionalProperties": false
+    },
+    "workMode": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "properties": {
+            "injection": { "$ref": "#/$defs/injection" },
+            "setup": { "type": "string" }
+          },
+          "additionalProperties": false
+        }
+      ]
     }
   },
   "type": "object",
   "properties": {
     "name": { "type": "string" },
-    "groups": {
+    "agent-types": {
       "type": "object",
+      "description": "Agent families declared by name; membership is `type: <name>` in each soul.yaml.",
       "additionalProperties": {
         "oneOf": [
-          { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+          { "type": "null" },
           {
             "type": "object",
-            "required": ["souls"],
-            "properties": { "souls": { "type": "array", "items": { "type": "string" }, "uniqueItems": true } },
+            "properties": { "description": { "type": "string" } },
             "additionalProperties": false
           }
         ]
@@ -49,21 +90,39 @@
     },
     "capabilities": {
       "type": "object",
-      "propertyNames": { "pattern": "^(?:@?[a-z0-9][a-z0-9._-]*[./])[a-z0-9][a-z0-9._/-]*$" },
-      "additionalProperties": { "$ref": "#/$defs/capability" }
+      "properties": {
+        "layers": {
+          "type": "object",
+          "description": "The three exclusive fundamental slots: a capability entry or an explicit none.",
+          "properties": {
+            "knowledge": { "$ref": "#/$defs/layerEntry" },
+            "messaging": { "$ref": "#/$defs/layerEntry" },
+            "tasks": { "$ref": "#/$defs/layerEntry" }
+          },
+          "additionalProperties": false
+        },
+        "additive": {
+          "type": "object",
+          "propertyNames": { "pattern": "^(?:@?[a-z0-9][a-z0-9._-]*[./])[a-z0-9][a-z0-9._/-]*$" },
+          "additionalProperties": { "$ref": "#/$defs/additiveEntry" }
+        }
+      },
+      "additionalProperties": false
     },
     "skill-overrides": { "type": "object", "additionalProperties": { "type": "string" } },
     "templates": { "type": "object", "additionalProperties": { "type": "string" }, "description": "Named oas init templates: local config paths or git URLs whose main branch carries an oas-config.yaml." },
-    "agents-md-injection": { "oneOf": [{ "type": "string" }, { "type": "object", "additionalProperties": { "type": "string" } }] },
-    "oas": { "type": "object" },
-    "work-modes": { "type": "object" },
-    "layers": {
+    "agents-md-injection": { "oneOf": [{ "type": "string" }, { "type": "object", "additionalProperties": { "type": "string" } }], "description": "Extra unconditional instruction blocks (adds content; does not override packaged defaults)." },
+    "oas": {
       "type": "object",
-      "description": "Explicitly disable an inherited fundamental layer; integrations are activated only through capabilities.",
+      "properties": { "injection": { "$ref": "#/$defs/injection" } },
+      "additionalProperties": false
+    },
+    "work-modes": {
+      "type": "object",
       "properties": {
-        "knowledge": { "const": "none" },
-        "messaging": { "const": "none" },
-        "tasks": { "const": "none" }
+        "worktree": { "$ref": "#/$defs/workMode" },
+        "checkout": { "$ref": "#/$defs/workMode" },
+        "attached": { "$ref": "#/$defs/workMode" }
       },
       "additionalProperties": false
     }

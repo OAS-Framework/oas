@@ -31,25 +31,32 @@ integration even if a messaging tool also happens to offer task features.
 New config activates the package for the intended target:
 
 ```yaml
-groups:
-  product-agents: [planner, developer, reviewer]
+agent-types:
+  product-agents:
+    description: Planner/developer/reviewer souls (they declare `type: product-agents`)
 
 capabilities:
-  oas.okf:
-    global: true
-  oas.aweb:
-    groups:
-      product-agents:
-        enabled: true
-        settings:
-          team: example-team
-  oas.linear:
-    groups:
-      product-agents:
-        enabled: true
-        settings:
-          team: ENG
-          project: Agent Platform
+  layers:
+    knowledge:
+      capability: oas.okf
+      from: bundled
+    messaging:
+      capability: oas.aweb
+      from: bundled
+      agent-types:
+        product-agents:
+          enabled: true
+          settings:
+            team: example-team
+    tasks:
+      capability: oas.linear
+      from: bundled
+      agent-types:
+        product-agents:
+          enabled: true
+          settings:
+            team: ENG
+            project: Agent Platform
 ```
 
 Every matching soul gets one knowledge, messaging, and tasks implementation.
@@ -60,13 +67,14 @@ CLI equivalents:
 
 ```bash
 oas use oas.okf --global
-oas use oas.aweb --group product-agents
-oas use oas.linear --group product-agents
+oas use oas.aweb --type product-agents
+oas use oas.linear --type product-agents
 ```
 
 The manifest-declared layer makes a separate CLI/config layer selection
-unnecessary. To leave an inherited layer deliberately unfilled, use
-`oas use none --layer <layer>` or `layers.<layer>: none`.
+unnecessary — `oas use` writes the entry under `capabilities.layers.<layer>`.
+To leave an inherited layer deliberately unfilled, use
+`oas use none --layer <layer>` (writes `capabilities.layers.<layer>: none`).
 
 ## Bundled integrations
 
@@ -105,5 +113,5 @@ specialist for layer contract design. The `integration-authoring` skill routes
 work to it, while the package itself lives under `capabilities/` or
 `.agents/capabilities/`.
 
-Do not put target soul names in the manifest. Acquisition, groups, activation,
-settings, exclusions, and overrides belong to `oas-config.yaml`.
+Do not put target soul names in the manifest. Acquisition, agent types,
+activation, settings, exclusions, and overrides belong to `oas-config.yaml`.

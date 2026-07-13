@@ -3,11 +3,11 @@ name: oas
 description: >-
   How to operate inside OAS (Open Agent Specialization) and configure it with
   the universal oas CLI. Use for instance layout/lifecycle, status, spawn,
-  retire, doctor, init, capability acquisition/activation/trust, soul groups,
-  fundamental-layer integrations, or explaining OAS. Triggers: "spawn an
-  agent", "what agents are running", "retire this instance", "oas doctor",
-  "install a capability", "bind a layer", "target these souls", "how does
-  OAS work".
+  retire, doctor, init, capability acquisition/activation/trust, agent types,
+  fundamental-layer integrations, injection overrides, or explaining OAS.
+  Triggers: "spawn an agent", "what agents are running", "retire this
+  instance", "oas doctor", "install a capability", "bind a layer", "target
+  these souls", "agent type", "override an injection", "how does OAS work".
 ---
 
 # Operating in OAS
@@ -36,7 +36,7 @@ Follow their injected protocol.
 
 ```bash
 oas status [--json]
-oas create <name> [--description ...] [--repo ...] [--work worktree|checkout]
+oas create <name> [--description ...] [--type <agent-type>] [--repo ...] [--work worktree|checkout]
 oas spawn <agent> [--task ...] [--purpose ...] [--no-launch] [--json]
 oas retire <instance> [--delete-branch]
 ```
@@ -66,30 +66,49 @@ versions of `@oas-framework/oas` and `@oas-framework/pi`. Upgrade both together.
 ## Configuration scopes and targets
 
 Config lives in `oas-config.yaml` at laptop, workspace, and repository levels.
-`global` means every soul governed by the declaring level. V1 also supports
-explicit config-owned groups and individual souls:
+Prefer the CLI for config edits (`oas init`, `oas use`, `oas create --type`);
+hand-editing is valid but the CLI writes the canonical shape.
+
+`global` means every soul governed by the declaring level. Bindings can also
+target **agent types** (families — declared by name in config, joined via
+`type: <name>` in each soul.yaml) and individual souls:
 
 ```yaml
-groups:
-  developers: [api-expert, ui-expert]
+agent-types:
+  developers:
+    description: Agents that build the service
 capabilities:
-  oas.okf:
-    global: true
-  vendor.review:
-    groups:
-      developers:
-        enabled: true
-        settings: {depth: normal}
-    souls:
-      api-expert:
-        enabled: true
-        settings: {depth: exhaustive}
+  layers:                      # exclusive fundamental slots
+    knowledge:
+      capability: oas.okf
+      from: bundled            # enforced provenance: bundled|installed|owned
+      # injection: .agents/injections/capabilities/oas.okf.md
+    messaging: none            # explicit none suppresses inherited integrations
+    tasks: none
+  additive:                    # non-exclusive packages
+    vendor.review:
+      from: installed
+      agent-types:
+        developers:
+          enabled: true
+          settings: {depth: normal}
+      souls:
+        api-expert:
+          enabled: true
+          settings: {depth: exhaustive}
 ```
 
-Matching global + groups + soul bindings compose. Settings precedence is soul
-> group > global, then closer config. Equal-specificity conflicts error.
-`false`/`enabled: false` is an explicit exclusion and follows the same
+Matching global + agent-type + soul bindings compose. Settings precedence is
+soul > agent-type > global, then closer config. Equal-specificity conflicts
+error. `false`/`enabled: false` is an explicit exclusion and follows the same
 precedence. V1 does not target instances or use tags/selectors.
+
+Every injectable item (capability entry, work mode, the `oas:` kernel block)
+takes an `injection: <path>|none|default` override; scaffolded configs carry
+them as comments pointing at `.agents/injections/capabilities/<id>.md`,
+`.agents/injections/workmodes/<mode>.md`, and
+`.agents/injections/oas-defaults/oas.md` — uncomment and create the file to
+override.
 
 ## Acquire, trust, activate
 
@@ -101,7 +120,7 @@ oas install [<git-url|path>] [--dir <level>]  # acquire + exact lock into the sc
                                               # restores locked-but-missing artifacts; inactive
 oas trust <capability> [--dir <level>]                # approve locked commands/hooks
 oas use <capability> --global [--dir <level>]
-oas use <capability> --group <name> [--disable]
+oas use <capability> --type <agent-type> [--disable]
 oas use <capability> --soul <name>
 ```
 
@@ -127,15 +146,17 @@ Bundled defaults/choices:
 | messaging | `oas.aweb` | `aw` CLI |
 | tasks | none by default; `oas.jira` or `oas.linear` available | provider-specific |
 
-Activation uses the manifest-declared layer:
+Activation uses the manifest-declared layer — `oas use` writes the entry
+under `capabilities.layers.<layer>` automatically:
 
 ```bash
-oas use <capability> --global|--group <name>|--soul <name>
+oas use <capability> --global|--type <agent-type>|--soul <name>
 oas use none --layer <layer>
 ```
 
-`capabilities` is the only activation map. `layers.<layer>: none` is reserved
-for suppressing an inherited integration.
+`capabilities` is the only activation map: fundamental integrations under
+`capabilities.layers.<layer>` (entry or explicit `none`), everything else
+under `capabilities.additive`.
 
 ## Commands and doctor
 

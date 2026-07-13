@@ -79,18 +79,21 @@ it does not activate every acquired/bundled package.
 Ask whether reusable non-layer capabilities should apply to:
 
 - every soul governed by this config (`global`);
-- an explicit named soul group; or
+- an explicit agent type (family — souls opt in via `type:` in soul.yaml); or
 - one soul.
 
-Do not invent groups before the souls are known. Example after agents exist:
+Do not invent agent types before the souls are known. Example after agents exist:
 
 ```yaml
-groups:
-  developers: [backend-expert, frontend-expert]
+agent-types:
+  developers:
+    description: Agents that build the product
 capabilities:
-  vendor.code-review:
-    groups:
-      developers: true
+  additive:
+    vendor.code-review:
+      from: installed
+      agent-types:
+        developers: true
 ```
 
 External packages must be acquired/locked before activation; executable
@@ -99,7 +102,7 @@ commands/hooks need explicit trust:
 ```bash
 oas install <git-url> --dir /path/to/workspace
 oas trust vendor.code-review --dir /path/to/workspace
-oas use vendor.code-review --group developers --dir /path/to/workspace
+oas use vendor.code-review --type developers --dir /path/to/workspace
 ```
 
 Acquisition never means activation and never silently updates a lock.

@@ -22,7 +22,7 @@ If the user only wants an existing package, use:
 ```bash
 oas install <source>            # external acquisition + exact lock; inactive
 oas trust <id>                  # only if commands/hooks exist
-oas use <id> --global|--group <g>|--soul <s>
+oas use <id> --global|--type <t>|--soul <s>
 ```
 
 ## 1. Locate the oas-framework repository

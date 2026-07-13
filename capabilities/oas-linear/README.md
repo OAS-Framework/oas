@@ -41,9 +41,10 @@ CLI or SDK dependency.
 
    ```yaml
    capabilities:
-     oas.linear:
-       global:
-         enabled: true
+     layers:
+       tasks:
+         capability: oas.linear
+         from: bundled
          settings: { team: ENG, project: Agent Platform }
    ```
 

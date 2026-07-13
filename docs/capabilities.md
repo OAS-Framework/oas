@@ -67,34 +67,42 @@ contract is [`capability-manifest.schema.json`](capability-manifest.schema.json)
 ## Config and targets
 
 ```yaml
-groups:
-  developers: [api-expert, ui-expert]
-  reviewers: [security-reviewer, release-reviewer]
+agent-types:
+  developers:
+    description: Agents that build the service (souls declare `type: developers`)
+  reviewers:
+    description: Agents that review changes
 
 capabilities:
-  oas.okf:
-    source: bundled
-    global: true
+  layers:
+    knowledge:
+      capability: oas.okf
+      from: bundled
+      # injection: .agents/injections/capabilities/oas.okf.md
+    messaging: none
+    tasks: none
 
-  example.code-review:
-    source: git:https://example.invalid/code-review.git
-    groups:
-      developers:
-        enabled: true
-        settings:
-          depth: normal
-    souls:
-      security-reviewer:
-        enabled: true
-        settings:
-          depth: exhaustive
+  additive:
+    example.code-review:
+      from: installed
+      agent-types:
+        developers:
+          enabled: true
+          settings:
+            depth: normal
+      souls:
+        security-reviewer:
+          enabled: true
+          settings:
+            depth: exhaustive
 
-  example.deploy:
-    global: true
-    groups:
-      reviewers: false       # explicit exclusion
-    souls:
-      release-reviewer: true # more-specific re-enable
+    example.deploy:
+      from: installed
+      global: true
+      agent-types:
+        reviewers: false       # explicit exclusion
+      souls:
+        release-reviewer: true # more-specific re-enable
 
 skill-overrides:
   review: example.code-review
@@ -104,15 +112,18 @@ skill-overrides:
 soul on the machine regardless of scope. Laptop, workspace, and repository
 configs each govern souls beneath that level.
 
-Composition is additive across matching global, group, and soul bindings.
-Settings use `soul > group > global`, then closer config scope. Conflicting
-values at equal specificity and scope are errors. `enabled: false` follows the
-same precedence. V1 groups are explicit soul lists; tags and selectors are not
-implemented, and bindings do not target individual instances.
+Composition is additive across matching global, agent-type, and soul
+bindings. Settings use `soul > agent-type > global`, then closer config scope.
+Conflicting values at equal specificity and scope are errors.
+`enabled: false` follows the same precedence. Agent types are declared by
+name in config; each soul opts in via `type:` in its soul.yaml. Tags and
+selectors are not implemented, and bindings do not target individual
+instances.
 
-`capabilities` is the only activation map. `layers` accepts only
-`knowledge|messaging|tasks: none`, which explicitly suppresses an inherited
-integration without naming a replacement.
+`capabilities` is the only activation map: fundamental integrations live
+under `capabilities.layers.<layer>` (an entry or an explicit `none` that
+suppresses an inherited integration), everything else under
+`capabilities.additive`.
 
 ## Exact runtime composition
 
@@ -217,8 +228,8 @@ under `.agents/capabilities/` are rejected — move them into `installed/` or
 
 ```bash
 oas use oas.okf --global --dir /path/to/repo
-oas use example.code-review --group developers --dir /path/to/repo
-oas use example.deploy --group reviewers --disable --dir /path/to/repo
+oas use example.code-review --type developers --dir /path/to/repo
+oas use example.deploy --type reviewers --disable --dir /path/to/repo
 oas use example.deploy --soul release-reviewer --dir /path/to/repo
 ```
 

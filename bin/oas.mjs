@@ -24,7 +24,7 @@ import {
   acquireCapability, restoreCapabilities,
   capabilityManifests, capabilityManifest, capabilityMissingRequires, capabilityIntegrity, capabilityTrust, capabilityExecutablePath,
   readCapabilityLocks, writeCapabilityLock,
-  resolveOasConfig, resolveWorkMode, composeInstanceAgentsMd,
+  resolveOasConfig, resolveWorkMode, composeInstanceAgentsMd, parseYamlNested,
   ensureRoot, findRoot, findAgent, listAgents, listInstances, listAgentDefs, createAgent as coreCreateAgent,
   spawnInstance, retireInstance, upsertTmpAgent, defaultRepo,
 } from "../lib/core.mjs";
@@ -173,82 +173,146 @@ function doctor(dir) {
   } else console.log("\nPass --soul <name> to inspect final composed AGENTS.md.");
 }
 
-// ---------- config editing (textual, minimal, idempotent) ----------
-function upsertLayerLine(text, layer, value) {
-  const layerLine = `  ${layer}: ${value}`;
-  if (/^layers:\s*$/m.test(text)) {
-    const re = new RegExp(`^(layers:\\s*\\n(?:  [^\\n]*\\n)*?)  ${layer}:[^\\n]*\\n`, "m");
-    if (re.test(text)) return text.replace(re, `$1${layerLine}\n`);
-    return text.replace(/^(layers:\s*\n)/m, `$1${layerLine}\n`);
-  }
-  return text.replace(/\n*$/, "\n\n") + `layers:\n${layerLine}\n`;
+// ---------- config editing (structural: parse → mutate → re-serialize the capabilities block) ----------
+function originToFrom(origin) {
+  const o = String(origin || "");
+  if (o === "bundled") return "bundled";
+  if (o.startsWith("installed:")) return "installed";
+  if (o.startsWith("owned:")) return "owned";
+  if (o.startsWith("path:")) return undefined; // path declarations stay hand-authored
+  return undefined;
 }
-function removeLayerLine(text, layer) {
-  return text.replace(new RegExp(`^  ${layer}:[ \\t]*none[ \\t]*(?:#.*)?\\n?`, "m"), "");
+
+function serializeBinding(value, indent) {
+  if (value === true || value === false) return ` ${value}`;
+  const lines = [""];
+  if (value.enabled !== undefined) lines.push(`${indent}enabled: ${value.enabled}`);
+  if (value.settings && Object.keys(value.settings).length) {
+    lines.push(`${indent}settings:`);
+    for (const [k, v] of Object.entries(value.settings)) lines.push(`${indent}  ${k}: ${typeof v === "object" ? JSON.stringify(v) : v}`);
+  }
+  return lines.join("\n");
 }
-function upsertCapabilityBinding(text, id, targetKind, targetName, enabled, source) {
-  const lines = text.replace(/\n*$/, "").split("\n");
-  let root = lines.findIndex((line) => /^capabilities:\s*$/.test(line));
-  if (root < 0) { lines.push("", "capabilities:"); root = lines.length - 1; }
-  let rootEnd = lines.length;
-  for (let i = root + 1; i < lines.length; i++) if (/^[^ ]/.test(lines[i]) && lines[i].trim()) { rootEnd = i; break; }
-  let start = -1;
-  for (let i = root + 1; i < rootEnd; i++) if (lines[i] === `  ${id}:`) { start = i; break; }
-  if (start < 0) {
-    const block = [`  ${id}:`, ...(source ? [`    source: ${source}`] : []), ...(targetKind === "global" ? [`    global: ${enabled}`] : [`    ${targetKind}:`, `      ${targetName}: ${enabled}`])];
-    lines.splice(root + 1, 0, ...block); return lines.join("\n") + "\n";
+
+/** Serialize one capability entry map at the given base indent, with the conventional injection comment. */
+function serializeCapabilityEntry(id, entry, baseIndent) {
+  const i = baseIndent;
+  const lines = [];
+  if (entry.capability) lines.push(`${i}capability: ${entry.capability}`);
+  if (entry.from) lines.push(`${i}from: ${entry.from}`);
+  if (entry.global !== undefined) lines.push(`${i}global:${serializeBinding(entry.global, i + "  ")}`);
+  const types = entry["agent-types"];
+  if (types && Object.keys(types).length) {
+    lines.push(`${i}agent-types:`);
+    for (const [t, v] of Object.entries(types)) lines.push(`${i}  ${t}:${serializeBinding(v, i + "    ")}`);
   }
-  let end = rootEnd;
-  for (let i = start + 1; i < rootEnd; i++) if (/^  [^ ]/.test(lines[i])) { end = i; break; }
-  if (source && !lines.slice(start + 1, end).some((line) => /^    source:/.test(line))) { lines.splice(start + 1, 0, `    source: ${source}`); end++; }
-  if (targetKind === "global") {
-    const at = lines.slice(start + 1, end).findIndex((line) => /^    global:/.test(line));
-    if (at >= 0) lines[start + 1 + at] = `    global: ${enabled}`;
-    else lines.splice(end, 0, `    global: ${enabled}`);
-    return lines.join("\n") + "\n";
+  if (entry.souls && Object.keys(entry.souls).length) {
+    lines.push(`${i}souls:`);
+    for (const [s, v] of Object.entries(entry.souls)) lines.push(`${i}  ${s}:${serializeBinding(v, i + "    ")}`);
   }
-  let section = -1;
-  for (let i = start + 1; i < end; i++) if (lines[i] === `    ${targetKind}:`) { section = i; break; }
-  if (section < 0) lines.splice(end, 0, `    ${targetKind}:`, `      ${targetName}: ${enabled}`);
-  else {
-    let sectionEnd = end;
-    for (let i = section + 1; i < end; i++) if (/^    [^ ]/.test(lines[i])) { sectionEnd = i; break; }
-    const at = lines.slice(section + 1, sectionEnd).findIndex((line) => line.startsWith(`      ${targetName}:`));
-    if (at >= 0) lines[section + 1 + at] = `      ${targetName}: ${enabled}`;
-    else lines.splice(sectionEnd, 0, `      ${targetName}: ${enabled}`);
+  if (entry.settings && Object.keys(entry.settings).length) {
+    lines.push(`${i}settings:`);
+    for (const [k, v] of Object.entries(entry.settings)) lines.push(`${i}  ${k}: ${typeof v === "object" ? JSON.stringify(v) : v}`);
+  }
+  if (entry.injection !== undefined) lines.push(`${i}injection: ${entry.injection}`);
+  else lines.push(`${i}# injection: .agents/injections/capabilities/${id}.md`);
+  return lines;
+}
+
+/** Re-serialize the whole `capabilities:` block from its parsed model. */
+function serializeCapabilities(caps) {
+  const lines = ["capabilities:", "  # Fundamental layers — exclusive slots; a capability entry or an explicit none.", "  layers:"];
+  for (const layer of LAYERS) {
+    const entry = caps.layers?.[layer];
+    if (entry === undefined) continue;
+    if (entry === "none") { lines.push(`    ${layer}: none`); continue; }
+    lines.push(`    ${layer}:`);
+    lines.push(...serializeCapabilityEntry(entry.capability, entry, "      "));
+  }
+  const additive = Object.entries(caps.additive || {});
+  if (additive.length) {
+    lines.push("  additive:");
+    for (const [id, entry] of additive) {
+      lines.push(`    ${id}:`);
+      lines.push(...serializeCapabilityEntry(id, entry, "      "));
+    }
   }
   return lines.join("\n") + "\n";
+}
+
+/** Replace (or append) the top-level capabilities: block in config text. */
+function replaceCapabilitiesBlock(text, caps) {
+  const serialized = serializeCapabilities(caps);
+  const lines = text.replace(/\n*$/, "\n").split("\n");
+  const start = lines.findIndex((l) => /^capabilities:\s*(#.*)?$/.test(l));
+  if (start < 0) return text.replace(/\n*$/, "\n\n") + serialized;
+  let end = lines.length;
+  for (let i = start + 1; i < lines.length; i++) {
+    if (/^[^\s#]/.test(lines[i])) { end = i; break; }
+    if (/^#/.test(lines[i]) && i + 1 < lines.length && /^[^\s]/.test(lines[i + 1] || "")) { end = i; break; }
+  }
+  return [...lines.slice(0, start), ...serialized.replace(/\n$/, "").split("\n"), "", ...lines.slice(end)].join("\n").replace(/\n{3,}/g, "\n\n").replace(/\n*$/, "\n");
+}
+
+/** Load the parsed capabilities model of a config file ({layers:{}, additive:{}}). */
+function readCapabilitiesModel(file) {
+  if (!existsSync(file)) return { layers: {}, additive: {} };
+  const cfg = parseYamlNested(readFileSync(file, "utf8"));
+  const caps = cfg.capabilities || {};
+  return { layers: { ...(caps.layers || {}) }, additive: { ...(caps.additive || {}) } };
 }
 
 // ---------- use / activation ----------
 function use() {
   const requested = args[1];
-  if (!requested || requested.startsWith("--")) die("usage: oas use <capability|none> [--global|--group <name>|--soul <name>] [--disable] [--layer <name>] [--dir <dir>]");
+  if (!requested || requested.startsWith("--")) die("usage: oas use <capability|none> [--global|--type <agent-type>|--soul <name>] [--disable] [--layer <name>] [--dir <dir>]");
   const dir = resolve(flag("dir") || process.cwd());
   const level = levelOf(dir);
   const file = join(dir, "oas-config.yaml");
   const layer = flag("layer");
   if (layer && !LAYERS.includes(layer)) die(`--layer must be one of: ${LAYERS.join(", ")}`);
+  let text = existsSync(file) ? readFileSync(file, "utf8") : `name: ${basename(dir)}\n`;
+  const caps = readCapabilitiesModel(file);
   if (requested === "none") {
     if (!layer) die("oas use none requires --layer <name>");
-    let text = existsSync(file) ? readFileSync(file, "utf8") : `name: ${basename(dir)}\n`;
-    writeFileSync(file, upsertLayerLine(text, layer, "none"));
+    caps.layers[layer] = "none";
+    writeFileSync(file, replaceCapabilitiesBlock(text, caps));
     console.log(`Disabled fundamental layer ${layer} at ${level} level (${shortPath(file)})`);
     return;
   }
   const manifest = capabilityManifest(requested, dir);
   if (!manifest) die(`unknown capability "${requested}" (acquired: ${Object.keys(capabilityManifests(dir)).join(", ") || "none"}) — acquire it with oas install`);
-  if (layer) die("--layer is only valid with `oas use none`; integrations declare their layer in oas.json");
-  const targets = [["groups", flag("group")], ["souls", flag("soul")]].filter(([, value]) => value);
+  if (layer && manifest.layer !== layer) die(`capability "${manifest.capability}" declares layer "${manifest.layer || "none"}", not "${layer}"`);
+  const targets = [["agent-types", flag("type")], ["souls", flag("soul")]].filter(([, value]) => value);
   if (args.includes("--global")) targets.push(["global", undefined]);
-  if (targets.length > 1) die("choose exactly one of --global, --group, or --soul");
+  if (targets.length > 1) die("choose exactly one of --global, --type, or --soul");
   const [targetKind, targetName] = targets[0] || ["global", undefined];
   const enabled = !args.includes("--disable");
-  let text = existsSync(file) ? readFileSync(file, "utf8") : `name: ${basename(dir)}\n`;
-  if (enabled && manifest.layer) text = removeLayerLine(text, manifest.layer);
-  text = upsertCapabilityBinding(text, manifest.capability, targetKind, targetName, enabled, manifest._origin === "bundled" ? "bundled" : undefined);
-  writeFileSync(file, text.replace(/\n*$/, "\n"));
-  console.log(`${enabled ? "Activated" : "Excluded"} ${manifest.capability} for ${targetKind === "global" ? "global" : `${targetKind.slice(0, -1)} ${targetName}`} at ${level} level (${shortPath(file)})`);
+  // Locate or create the entry in the right subtree.
+  let entry;
+  if (manifest.layer) {
+    const existing = caps.layers[manifest.layer];
+    entry = existing && existing !== "none" && existing.capability === manifest.capability ? existing : { capability: manifest.capability };
+    if (existing && existing !== "none" && existing.capability !== manifest.capability && enabled) {
+      die(`fundamental layer ${manifest.layer} already binds ${existing.capability} at this level — disable it first`);
+    }
+    caps.layers[manifest.layer] = entry;
+  } else {
+    entry = caps.additive[manifest.capability] || {};
+    caps.additive[manifest.capability] = entry;
+  }
+  const from = originToFrom(manifest._origin);
+  if (from && !entry.from) entry.from = from;
+  if (targetKind === "global") entry.global = enabled;
+  else {
+    // A layer entry with no explicit targets is implicitly global — materialize that
+    // before narrowing, so adding a soul/type binding doesn't silently drop everyone else.
+    if (manifest.layer && entry.global === undefined && !entry["agent-types"] && !entry.souls) entry.global = true;
+    entry[targetKind] = entry[targetKind] && typeof entry[targetKind] === "object" ? entry[targetKind] : {};
+    entry[targetKind][targetName] = enabled;
+  }
+  writeFileSync(file, replaceCapabilitiesBlock(text, caps));
+  console.log(`${enabled ? "Activated" : "Excluded"} ${manifest.capability} for ${targetKind === "global" ? "global" : `${targetKind === "agent-types" ? "type" : "soul"} ${targetName}`} at ${level} level (${shortPath(file)})`);
   for (const miss of capabilityMissingRequires(manifest.capability, dir)) console.log(`WARNING: required command "${miss.command}" not on PATH — ${miss.why || ""}${miss.install ? ` (install: ${miss.install})` : ""}`);
   console.log("New instances receive the resolved capability; committed souls are unchanged.");
 }
@@ -390,17 +454,48 @@ function init() {
     ? { knowledge: "none", messaging: "none", tasks: "none" }
     : { knowledge: "oas.okf", messaging: "oas.aweb", tasks: undefined };
   const layers = { ...defaults, ...overrides };
-  let text = `name: ${basename(dir)}\n# Acquisition and activation are separate: only explicit global bindings below are active.\n`;
-  const disabled = [];
+  const lines = [
+    `name: ${basename(dir)}`,
+    "",
+    "# ── Agent types (families) ── declared here by name; each soul opts in via",
+    "# `type: <name>` in its soul.yaml. Capability entries can target them.",
+    "# agent-types:",
+    "#   reviewers:",
+    "#     description: Agents that review changes",
+    "",
+    "capabilities:",
+    "  # Fundamental layers — exclusive slots; a capability entry or an explicit none.",
+    "  layers:",
+  ];
   for (const layer of LAYERS) {
     const selected = layers[layer];
-    if (!selected) continue;
-    if (selected === "none") { disabled.push(layer); continue; }
+    if (!selected) { lines.push(`    # ${layer}: (unset — inherits from outer config scopes; set an entry or "none")`); continue; }
+    if (selected === "none") { lines.push(`    ${layer}: none`); continue; }
     const manifest = capabilityManifest(selected, dir);
-    text = upsertCapabilityBinding(text, manifest.capability, "global", undefined, true, manifest._origin === "bundled" ? "bundled" : undefined);
+    lines.push(`    ${layer}:`);
+    lines.push(`      capability: ${manifest.capability}`);
+    if (manifest._origin === "bundled") lines.push("      from: bundled");
+    else if (String(manifest._origin).startsWith("installed:")) lines.push("      from: installed");
+    else if (String(manifest._origin).startsWith("owned:")) lines.push("      from: owned");
+    lines.push(`      # injection: .agents/injections/capabilities/${manifest.capability}.md`);
   }
-  if (disabled.length) text += `\nlayers:\n${disabled.map((l) => `  ${l}: none`).join("\n")}\n`;
-  writeFileSync(file, text.replace(/\n*$/, "\n"));
+  lines.push(
+    "  # Additive capabilities — non-exclusive; target global, agent-types, or souls.",
+    "  # additive:",
+    "  #   <capability-id>:",
+    "  #     from: installed",
+    "  #     global: true",
+    "  #     # injection: .agents/injections/capabilities/<capability-id>.md",
+    "",
+    "# ── Work modes — per-mode instruction overrides and setup hooks.",
+    "work-modes:",
+    ...["checkout", "worktree", "attached"].flatMap((m) => [`  ${m}:`, `    # injection: .agents/injections/workmodes/${m}.md`]),
+    "",
+    "# ── OAS defaults — the framework's baseline instruction block.",
+    "oas:",
+    "  # injection: .agents/injections/oas-defaults/oas.md",
+  );
+  writeFileSync(file, lines.join("\n") + "\n");
   console.log(`Created ${shortPath(file)} (${levelOf(dir)} level${raw ? ", raw" : ""})`);
 
   const r = resolveOasConfig(dir);
@@ -487,11 +582,11 @@ async function paneCmd() {
 
 function createCmd() {
   const name = args[1];
-  if (!name || name.startsWith("--")) die("usage: oas create <name> [--description <d>] [--repo <r>] [--work worktree|checkout|attached] [--runtime pi|claude] [--model <m>] [--instructions-file <f>]");
+  if (!name || name.startsWith("--")) die("usage: oas create <name> [--description <d>] [--type <agent-type>] [--repo <r>] [--work worktree|checkout|attached] [--runtime pi|claude] [--model <m>] [--instructions-file <f>]");
   const root = ensureRoot(flag("dir") || process.cwd());
   const instrFile = flag("instructions-file");
   const r = coreCreateAgent(root, {
-    name, description: flag("description"), repo: flag("repo") || defaultRepo(process.cwd()),
+    name, description: flag("description"), type: flag("type"), repo: flag("repo") || defaultRepo(process.cwd()),
     work: flag("work"), runtime: flag("runtime"), model: flag("model"),
     instructions: instrFile ? readFileSync(instrFile, "utf8") : undefined,
   });
@@ -580,7 +675,7 @@ Usage:
   oas trust <capability> [--dir <dir>]      approve executable commands/hooks for
                                             the currently locked integrity
   oas use <capability>                      activate for one config-owned target
-      [--global|--group <g>|--soul <s>]     (--global is default); --disable excludes
+      [--global|--type <t>|--soul <s>]      (--global is default); --disable excludes
       [--disable] [--dir <d>]
   oas use none --layer <layer>              explicitly disable a fundamental layer
   oas init [--raw] [--dir <dir>]            create an oas-config.yaml here

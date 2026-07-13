@@ -169,7 +169,7 @@ The harvester itself is an agent like any other: oas-okf ships its soul
 definition and materializes it on first harvest as a **local (gitignored)
 soul** under `agents/local-agents/memory-harvest/` — integration
 infrastructure, not a roster member. It is also fully replaceable: craft
-your own harvester soul and override the okf `agents-md-injection` in your
+your own harvester soul and override the okf `injection` in your
 config to point instances at it. The loop is a convention, not a mechanism
 you are locked into. See [Knowledge](docs/knowledge.md) and
 [knowledge theory](docs/knowledge-theory.md).
@@ -267,8 +267,8 @@ CLI. Claude instances consume the same generated files without a plugin.
 Use `oas init` for default OKF + aweb config, or `oas init --raw` for all
 layers set to `none`.
 
-Status as of 2026-07-11: capability acquisition/activation, explicit soul
-groups and targets, exact pi/Claude instance composition, generated
+Status as of 2026-07-13: capability acquisition/activation, agent types
+declared in souls with config targets, exact pi/Claude instance composition, generated
 instructions, layer exclusivity, lock/integrity/trust, namespaced command
 gating, deterministic hooks, scaffold ownership, the config cascade, all
 three work modes, the first clean capability-package contract, and the live
@@ -325,7 +325,7 @@ your first config and agents.
 - [Souls and instances](docs/souls-and-instances.md) — durable experts and disposable runs.
 - [Knowledge](docs/knowledge.md) — capture, harvest, and promotion.
 - [Knowledge theory](docs/knowledge-theory.md) — what belongs in a soul vs an instance, whatever the format.
-- [Configuration](docs/configuration.md) — scopes, groups, targeting, exclusions, and examples.
+- [Configuration](docs/configuration.md) — scopes, agent types, targeting, exclusions, and examples.
 - [Capability packages](docs/capabilities.md) — distribution, manifests, composition, locks, and trust.
 - [Integrations](docs/integrations.md) — capability packages that satisfy fundamental layers.
 - [Conventions](docs/conventions.md) — canonical files, symlinks, and skill paths.

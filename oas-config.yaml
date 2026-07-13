@@ -1,23 +1,45 @@
-# OAS config for the oas-framework repo — the first full OAS deployment.
+# OAS config for the oas framework repo — the first full OAS deployment.
 # Messaging is not declared here: it resolves at the laptop level (aweb).
 name: oas-framework
 
-groups:
-  framework-authors: [oas-expert, integrations-expert]
+# ── Agent types (families) ── declared here by name; each soul opts in via
+# `type: <name>` in its soul.yaml. Capability entries can target them.
+agent-types:
+  framework-authors:
+    description: Agents that author and steward the OAS framework itself
 
 capabilities:
-  oas.okf:
-    source: bundled
-    global: true
-  oas.authoring:
-    source: bundled
-    groups:
-      framework-authors: true
+  # Fundamental layers — exclusive slots; a capability entry or an explicit none.
+  layers:
+    knowledge:
+      capability: oas.okf
+      from: bundled
+      # injection: .agents/injections/capabilities/oas.okf.md
+    # messaging: (unset — inherits from the laptop level: aweb)
+    # Explicit none prevents an inherited task integration from occupying the
+    # exclusive slot; integrations activate only through capability entries.
+    tasks: none
+  # Additive capabilities — non-exclusive; target global, agent-types, or souls.
+  additive:
+    oas.authoring:
+      from: bundled
+      agent-types:
+        framework-authors: true
+      # injection: .agents/injections/capabilities/oas.authoring.md
 
-# Explicit none prevents an inherited task integration from occupying the
-# exclusive slot; integrations themselves activate only through capabilities.
-layers:
-  tasks: none
+# ── Work modes — per-mode instruction overrides and setup hooks.
+work-modes:
+  checkout:
+    # injection: .agents/injections/workmodes/checkout.md
+  worktree:
+    # injection: .agents/injections/workmodes/worktree.md
+  attached:
+    # injection: .agents/injections/workmodes/attached.md
 
+# ── OAS defaults — the framework's baseline instruction block.
+oas:
+  # injection: .agents/injections/oas-defaults/oas.md
+
+# Extra unconditional instruction blocks for every instance in this workspace.
 agents-md-injection:
   framework: injects/framework-workspace.md

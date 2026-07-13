@@ -1,63 +1,78 @@
 ---
 type: Area Guide
 title: oas-config
-description: The scoped oas-config.yaml model for capability acquisition declarations, explicit soul groups, target bindings, exclusions, settings precedence, and inherited-layer disables.
-tags: [config, workspaces, capabilities, targeting]
-timestamp: 2026-07-11
+description: The scoped oas-config.yaml model — agent-types with soul-declared membership, capabilities split into exclusive layer slots and additive packages, from provenance, injection overrides, and CLI-authored config.
+tags: [config, workspaces, capabilities, targeting, agent-types]
+timestamp: 2026-07-13
 ---
 
 `<level>/oas-config.yaml` can exist at laptop, workspace, and repository
 levels. Resolution starts in a soul's repository and walks outward. Config
 owns deployment policy; packages own reusable artifacts. This guide implements
-[capability packages](/decisions/capability-packages.md) and supersedes the
-ambient skill/injection model formerly described here.
+[capability packages](/decisions/capability-packages.md) as amended by
+[config shape v2](/decisions/config-shape-agent-types-and-injections.md); the
+CLI (`oas init` / `oas use` / `oas create --type`) is the primary config
+author.
 
 # Schema
 
 ```yaml
 name: example
-groups:
-  developers: [backend, frontend]
+agent-types:
+  developers:
+    description: Agents that build the service
 capabilities:
-  oas.okf:
-    source: bundled
-    global: true
-  vendor.review:
-    groups:
-      developers:
-        enabled: true
-        settings: {depth: normal}
-    souls:
-      backend:
-        enabled: true
-        settings: {depth: exhaustive}
-  vendor.deploy:
-    global: true
-    groups:
-      developers: false
+  layers:                       # the three exclusive fundamental slots
+    knowledge:
+      capability: oas.okf
+      from: bundled             # enforced provenance: bundled|installed|owned|path:<dir>
+      # injection: .agents/injections/capabilities/oas.okf.md
+    messaging: none             # explicit none suppresses inherited integrations
+    tasks: none
+  additive:                     # non-exclusive packages
+    vendor.review:
+      from: installed
+      agent-types:
+        developers:
+          enabled: true
+          settings: {depth: normal}
+      souls:
+        backend:
+          enabled: true
+          settings: {depth: exhaustive}
 skill-overrides:
   review: vendor.review
-agents-md-injection:
+agents-md-injection:            # extra unconditional blocks (adds, not overrides)
   repository: injects/repository.md
 work-modes:
   worktree:
-    agents-md-injection: default
+    # injection: .agents/injections/workmodes/worktree.md
     setup: scripts/setup-worktree.sh
+oas:
+  # injection: .agents/injections/oas-defaults/oas.md
 ```
 
-A package declaration without a target is acquired but inactive. Targets are
-`global` (all souls governed by that config level), an explicit named group,
-or one soul. V1 does not use tags/selectors or instance targets.
-
-For one soul, matching global + groups + soul bindings compose. Settings use
-`soul > group > global`, then closer config level. Conflicts at equal
+Agent types are families: config declares names (+ descriptions); each soul
+opts in via a single optional `type: <name>` in its soul.yaml. Membership is
+soul identity, not config policy. Targets are `global` (all souls governed by
+that config level), an agent type, or one soul; specificity is
+soul > type > global, then closer config level. Conflicts at equal
 specificity and level error with provenance. Explicit false/exclusion follows
 the same precedence.
 
-An active capability declaring `layer: knowledge|messaging|tasks` is the
-integration selected for that exclusive fundamental layer. Multiple active
-integrations for one layer error. General packages have no layer and are
-additive.
+A layer entry's capability manifest must declare that layer; a
+layer-declaring capability under `additive` errors. A layer entry with no
+explicit targets is globally enabled at its scope. An additive declaration
+without targets is acquired but inactive. `capabilities.layers.<layer>: none`
+suppresses an inherited integration; an absent slot inherits.
+
+`from:` is doctor-enforced provenance documentation: the discovered artifact
+origin (bundled / installed+locked / owned / path) must match.
+
+Every injectable item (capability entry, work mode, `oas:` kernel block)
+takes `injection: <path>|none|default`; scaffolded configs carry commented
+lines pointing at the `.agents/injections/{capabilities,workmodes,oas-defaults}/`
+conventions.
 
 # Runtime composition
 
@@ -81,11 +96,11 @@ trust for the locked integrity; declarative packages still require lock
 integrity. Acquisition and activation are separate, and no resolver silently
 updates a lock.
 
-# Fundamental-layer disable
+# Removed spellings
 
-`capabilities` is the sole activation map. Because the manifest declares an
-integration's layer, config does not repeat provider selection. The only
-`layers` form is `layers.<knowledge|messaging|tasks>: none`, which suppresses
-an inherited integration at that scope. The unpublished `integrations`,
-`providers`, provider-valued `layers`, config hook/skill, and
-`.agents/workspace.yaml` shapes have no compatibility promise.
+The v0.8 shapes — `groups:` with soul lists, top-level `layers:`, flat
+`capabilities.<id>` maps, `source:`/`path:` capability keys, and
+`agents-md-injection` as a per-item override — are rejected with pointed
+migration errors, per the clean-contract precedent. The free-form top-level
+`agents-md-injection:` map (additional blocks) remains. `oas use` re-serializes
+the `capabilities:` block; custom comments inside it are not preserved.

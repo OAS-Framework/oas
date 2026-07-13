@@ -1,12 +1,16 @@
 # Configuration
 
 OAS configuration lives in `oas-config.yaml` at a laptop, workspace, or
-repository root. It owns deployment policy: acquired capability declarations,
-explicit soul groups, activation targets, settings, exclusions, instruction
-sources, work modes, and explicit inherited-layer disables.
+repository root. It owns deployment policy: agent-type declarations, the three
+fundamental layer slots, additive capability activations, settings,
+exclusions, instruction overrides, and work modes.
 
-Packages never declare their targets. See the machine-readable
-[`oas-config.schema.json`](oas-config.schema.json) alongside the examples below.
+The CLI is the primary config author: `oas init` scaffolds the full shape,
+`oas use` writes capability entries, `oas create --type` sets a soul's type.
+Hand-editing is valid but never required. Packages never declare their
+targets. See the machine-readable
+[`oas-config.schema.json`](oas-config.schema.json) alongside the examples
+below.
 
 ## Scopes
 
@@ -33,88 +37,137 @@ Use `oas doctor <context> --soul <name>` to inspect the result.
 ```yaml
 name: example-service
 
-groups:
-  developers: [api-expert, ui-expert]
+# ── Agent types (families) ── declared here by name; each soul opts in via
+# `type: <name>` in its soul.yaml. Capability entries can target them.
+agent-types:
+  developers:
+    description: Agents that build and maintain the service
   reviewers:
-    souls: [security-reviewer, release-reviewer]
+    description: Agents that review changes
 
 capabilities:
-  oas.okf:
-    source: bundled
-    global:
-      enabled: true
+  # Fundamental layers — exclusive slots; a capability entry or an explicit none.
+  layers:
+    knowledge:
+      capability: oas.okf
+      from: bundled
       settings:
         harvest-model: github-copilot/gpt-5.5
+      # injection: .agents/injections/capabilities/oas.okf.md
+    messaging: none
+    tasks:
+      capability: oas.linear
+      from: bundled
+      agent-types:
+        developers:
+          enabled: true
+          settings: {team: ENG}
+      # injection: .agents/injections/capabilities/oas.linear.md
 
-  example.review:
-    source: git:https://example.invalid/review.git
-    groups:
-      developers:
-        enabled: true
-        settings:
-          depth: normal
-    souls:
-      security-reviewer:
-        enabled: true
-        settings:
-          depth: exhaustive
-
-  example.deploy:
-    global: true
-    groups:
-      reviewers: false
-    souls:
-      release-reviewer: true
+  # Additive capabilities — non-exclusive; target global, agent-types, or souls.
+  additive:
+    example.review:
+      from: installed
+      agent-types:
+        developers:
+          enabled: true
+          settings:
+            depth: normal
+      souls:
+        security-reviewer:
+          enabled: true
+          settings:
+            depth: exhaustive
+      # injection: .agents/injections/capabilities/example.review.md
 
 skill-overrides:
   review: example.review
 
-agents-md-injection:
-  repository: injects/repository.md
-
-oas:
-  agents-md-injection: default
-
+# ── Work modes — per-mode instruction overrides and setup hooks.
 work-modes:
   worktree:
-    agents-md-injection: default
+    # injection: .agents/injections/workmodes/worktree.md
     setup: scripts/setup-worktree.sh
   checkout:
-    agents-md-injection: default
+    # injection: .agents/injections/workmodes/checkout.md
+  attached:
+    # injection: .agents/injections/workmodes/attached.md
+
+# ── OAS defaults — the framework's baseline instruction block.
+oas:
+  # injection: .agents/injections/oas-defaults/oas.md
+
+# Extra unconditional instruction blocks for every instance at this scope.
+agents-md-injection:
+  repository: injects/repository.md
 ```
 
-### `groups`
+### `agent-types`
 
-V1 groups are config-owned explicit soul lists. A group can use an inline list
-or `souls:`. Tags, dynamic selectors, and instance names are not supported.
-Closer declarations replace an outer group with the same name.
+Agent types are agent families. Config declares type names (optionally with a
+description); membership is **not** listed in config — each soul opts in with
+an optional single `type: <name>` in its `soul.yaml` (`oas create --type <t>`
+sets it). A type is identity: what kind of agent a soul is travels with the
+soul, while config decides what each type gets. Tags, dynamic selectors, and
+instance names are not supported.
 
-### `capabilities`
+### `capabilities.layers`
 
-A package declaration without `global`, `groups`, or `souls` is acquired but
+The three fundamental layers — `knowledge`, `messaging`, `tasks` — are
+exclusive slots with an explicit home. Each slot holds either a capability
+entry (`capability: <id>` plus optional `from`, targets, `settings`,
+`injection`) or the explicit string `none`, which suppresses an integration
+inherited from an outer scope. A slot absent from a config inherits from
+outer scopes; `oas init` writes all three so the resolution is visible.
+
+The entry's capability must declare the same layer in its manifest; a
+mismatch is an error, as is a layer-declaring capability placed under
+`additive`. A layer entry with no explicit targets is globally enabled at
+that scope.
+
+### `capabilities.additive`
+
+Additive capabilities are non-exclusive packages keyed by capability ID. A
+declaration without `global`, `agent-types`, or `souls` is acquired but
 inactive. A target value can be `true`, `false`, or an object containing
 `enabled` and `settings`.
 
-For a soul, matching global, group, and soul bindings compose. Setting
+For a soul, matching global, agent-type, and soul bindings compose. Setting
 precedence is:
 
 1. soul;
-2. matching group;
+2. matching agent-type;
 3. global;
 4. at equal target specificity, closer config scope.
 
 Conflicting values at equal specificity and the same scope are errors. OAS
 never uses YAML order as an implicit winner. `enabled: false` uses the same
-precedence, allowing global enable → group exclusion → soul re-enable.
+precedence, allowing global enable → type exclusion → soul re-enable.
 
-An active capability whose manifest declares `layer: knowledge|messaging|tasks`
-is the integration selected for that fundamental layer. More than one active
-integration for the same layer is an error.
+### `from` (provenance)
 
-A capability declaration may also carry `agents-md-injection` to override that
-package's packaged instruction injection: a config-relative path replaces it,
-`none` suppresses it, and `default` restores the packaged file. The closest
-scope declaring the key wins.
+`from:` documents where the artifact must come from, and resolution enforces
+it: `bundled` (ships with the kernel), `installed` (acquired into
+`.agents/capabilities/installed/`, lock-governed), `owned` (authored at this
+scope under `.agents/capabilities/owned/`), or `path:<dir>` (development
+declaration pointing at a manifest directory). A mismatch between `from:` and
+the discovered artifact origin is an error.
+
+### `injection` overrides
+
+Every injectable item — each capability entry, each work mode, and the `oas:`
+kernel block — accepts an `injection:` key: a config-relative path replaces
+the packaged instruction file, `none` suppresses it, and `default` restores
+it. The closest scope declaring the key wins. Scaffolded configs carry these
+as commented-out lines pointing at the conventional locations:
+
+```text
+.agents/injections/capabilities/<capability-id>.md
+.agents/injections/workmodes/<mode>.md
+.agents/injections/oas-defaults/oas.md
+```
+
+Uncomment the line and create the file to take the override.
 
 ### `skill-overrides`
 
@@ -125,7 +178,8 @@ OAS never keeps whichever filesystem entry happened to be discovered first.
 
 ### Instruction sources
 
-`agents-md-injection` adds unconditional config-owned instruction files.
+`agents-md-injection` adds unconditional config-owned instruction files (it
+adds content; it does not override packaged defaults — that is `injection:`).
 Capability packages can ship an `inject`; work modes have their own source.
 
 OAS reads the canonical soul `AGENTS.md`, composes selected blocks in a new
@@ -178,13 +232,18 @@ verification.
 oas init [--raw] [--template <name|path|git-url>] [--knowledge <id|none>] [--messaging <id|none>] [--tasks <id|none>]
 oas install [<id|git-url|path>] [--dir <dir>]  # acquire; bare form restores; inactive by default
 oas trust <capability> [--dir <dir>]
-oas use <capability> [--global|--group <g>|--soul <s>] [--disable]
+oas use <capability> [--global|--type <t>|--soul <s>] [--disable]
 oas use none --layer <layer>
+oas create <name> --type <agent-type> ...
 oas doctor [context] --soul <name> [--json]
 ```
 
 `oas init` writes only explicitly selected defaults. It may discover many
-bundled or installed packages, but does not activate all of them.
+bundled or installed packages, but does not activate all of them. `oas use`
+places a layer-declaring capability under `capabilities.layers.<layer>` and
+everything else under `capabilities.additive`, regenerating the conventional
+injection comments; custom comments inside the `capabilities:` block are not
+preserved.
 
 ### Templates
 
@@ -211,30 +270,36 @@ An inner scope can suppress an inherited integration without selecting a
 replacement:
 
 ```yaml
-layers:
-  tasks: none
+capabilities:
+  layers:
+    tasks: none
 ```
 
-These three `none` values are the only accepted `layers` entries. Activate an
-integration by its namespaced ID under `capabilities`; its manifest supplies
-the layer. Pre-release `integrations`, `providers`, provider-valued `layers`,
-and `.agents/workspace.yaml` shapes are not part of this first contract.
+`oas use none --layer tasks` writes this. Pre-v0.9 spellings (`groups:`,
+top-level `layers:`, flat `capabilities.<id>` maps, `source:`,
+`agents-md-injection` on capability entries) are rejected with pointed
+migration errors.
 
 ## Worked examples
 
 ### All souls use OKF; only developers use Linear
 
 ```yaml
-groups:
-  developers: [backend, frontend]
+agent-types:
+  developers:
+    description: Souls with type: developers in their soul.yaml
 capabilities:
-  oas.okf:
-    global: true
-  oas.linear:
-    groups:
-      developers:
-        enabled: true
-        settings: {team: ENG, project: Product}
+  layers:
+    knowledge:
+      capability: oas.okf
+      from: bundled
+    tasks:
+      capability: oas.linear
+      from: bundled
+      agent-types:
+        developers:
+          enabled: true
+          settings: {team: ENG, project: Product}
 ```
 
 ### Laptop default with repository exclusion
@@ -243,26 +308,29 @@ Laptop:
 
 ```yaml
 capabilities:
-  oas.aweb:
-    global: true
+  layers:
+    messaging:
+      capability: oas.aweb
+      from: bundled
 ```
 
 Solo repository:
 
 ```yaml
 capabilities:
-  oas.aweb:
-    global: false
+  layers:
+    messaging: none
 ```
 
 ### One marketplace capability for one soul
 
 ```yaml
 capabilities:
-  vendor.security-review:
-    source: git:https://example.invalid/security-review.git
-    souls:
-      security-reviewer: true
+  additive:
+    vendor.security-review:
+      from: installed
+      souls:
+        security-reviewer: true
 ```
 
 Acquire and trust executable surfaces before spawn; target activation alone

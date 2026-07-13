@@ -4,3 +4,4 @@ description: The OAS framework expert — holds the what/why, the architecture, 
 repo: .
 work: checkout
 runtime: pi
+type: framework-authors

@@ -1,5 +1,7 @@
 # Decisions
 
+* [Config shape v2 — agent types in souls, layered capabilities, conventional injection overrides](config-shape-agent-types-and-injections.md) - groups become agent-types with membership in soul.yaml; capabilities split into layers/additive with `from` provenance; commented `injection:` overrides point at .agents/injections/ conventions.
+
 * [Scoped capability store, restorable installs, and config templates](scoped-capability-store-and-templates.md) - All capabilities live in the owning scope's .agents/capabilities/ (installed/ vs owned/); bare `oas install` restores from the lock; `oas init --template` seeds configs from local or git templates.
 * [Control Pane v3 card architecture](control-pane-v3-card-architecture.md) - The Control Pane v3 redesign replaces the list+inspector split with a single identity-rail card stack, in-place expansion, variable-height scrolling, and full-screen zoom.
 * [Control Pane is a live standalone TUI](control-pane-live-standalone-tui.md) - OAS exposes its current agent constellation through `oas pane`, with a runtime-neutral data model and no historical reconstruction.
