@@ -82,5 +82,13 @@ what proves the materialized resource shape works.
   run reached npm publish; cut a new patch version instead.
 - **Tag not on main**: CI refuses tags whose commit isn't reachable from
   main. Merge first, then tag.
+- **`npm publish` fails with `EOTP`**: the `NPM_TOKEN` is subject to npm
+  2FA-on-publish. Create a granular npm access token with read/write access
+  for the `@oas-framework` packages/org, update the GitHub Actions secret
+  (`gh secret set NPM_TOKEN`), then rerun failed jobs with
+  `gh run rerun <id> --failed`. Nothing publishes on EOTP, so the existing
+  tag is still safe; repo renames do not matter because npm authority is
+  token/account/package-scoped. See
+  `knowledge/lessons/npm-eotp-in-tag-release.md`.
 - **Publish succeeded for one package only**: cut a new patch release;
   npm versions are immutable.

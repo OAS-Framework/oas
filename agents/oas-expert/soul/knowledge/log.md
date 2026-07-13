@@ -1,5 +1,9 @@
 # Knowledge Log
 
+## 2026-07-13
+* **Creation**: [npm EOTP failure in tag-driven release CI](/lessons/npm-eotp-in-tag-release.md) — EOTP at npm publish means the CI token is 2FA-constrained; fix with a granular package read/write token and rerun failed jobs without retagging.
+* **Update**: skills/git-tag-release — added EOTP/NPM_TOKEN failed-run recovery and recorded that repo renames do not affect npm publish authority.
+
 ## 2026-07-12
 * **Creation**: [Scoped capability store, restorable installs, and config templates](/decisions/scoped-capability-store-and-templates.md) — one config-scoped store (`installed/` vs `owned/`), bare `oas install` restore, snapshot templates, per-capability injection overrides; resolves the lock-cache-sharing watch item.
 * **Update**: [implementation](/architecture/implementation.md) and [roadmap](/roadmap/next-steps.md) reflect the scoped store, restore, templates, and injection overrides; `~/.oas/capabilities/` removed from the canonical account.
