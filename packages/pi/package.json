@@ -1,0 +1,31 @@
+{
+  "name": "@oas-framework/pi",
+  "version": "0.7.0",
+  "description": "Minimal OAS pi adapter — instance-local skill discovery and memory session events over the runtime-neutral @oas-framework/oas kernel",
+  "keywords": [
+    "pi-package",
+    "agents",
+    "oas"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/OAS-Framework/oas-framework",
+    "directory": "packages/pi"
+  },
+  "license": "MIT",
+  "type": "module",
+  "pi": {
+    "extensions": [
+      "./extension/index.ts"
+    ]
+  },
+  "files": [
+    "extension/",
+    "README.md"
+  ],
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  }
+}

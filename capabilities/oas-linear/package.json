@@ -1,0 +1,29 @@
+{
+  "name": "@oas-framework/oas-linear",
+  "version": "0.1.0",
+  "description": "OAS tasks provider: Linear via its GraphQL API, with JSON-first commands and label-based agent identity",
+  "keywords": [
+    "pi-package",
+    "oas",
+    "linear",
+    "tasks"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/OAS-Framework/oas-framework",
+    "directory": "capabilities/oas-linear"
+  },
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  },
+  "bin": {
+    "oas-linear": "./bin/oas-linear.mjs"
+  },
+  "pi": {
+    "skills": [
+      "./skills"
+    ]
+  }
+}

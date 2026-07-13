@@ -1,0 +1,11 @@
+# OAS: instances are transient incarnations — souls are committed, instances never are.
+agents/*/instances/
+agents/local-agents/
+agents/tmp-agents/   # legacy name
+
+# aweb identity material (signing keys) — never committed, at any depth
+.aw/
+
+# OS noise
+.DS_Store
+node_modules/

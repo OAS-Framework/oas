@@ -1,0 +1,23 @@
+# OAS config for the oas-framework repo — the first full OAS deployment.
+# Messaging is not declared here: it resolves at the laptop level (aweb).
+name: oas-framework
+
+groups:
+  framework-authors: [oas-expert, integrations-expert]
+
+capabilities:
+  oas.okf:
+    source: bundled
+    global: true
+  oas.authoring:
+    source: bundled
+    groups:
+      framework-authors: true
+
+# Explicit none prevents an inherited task integration from occupying the
+# exclusive slot; integrations themselves activate only through capabilities.
+layers:
+  tasks: none
+
+agents-md-injection:
+  framework: injects/framework-workspace.md

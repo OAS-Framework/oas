@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oas.dev/schemas/oas-config.schema.json",
+  "title": "OAS scoped configuration",
+  "$defs": {
+    "settings": { "type": "object", "additionalProperties": true },
+    "binding": {
+      "oneOf": [
+        { "type": "boolean" },
+        {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "settings": { "$ref": "#/$defs/settings" }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "capability": {
+      "type": "object",
+      "properties": {
+        "source": { "type": "string" },
+        "path": { "type": "string" },
+        "global": { "$ref": "#/$defs/binding" },
+        "groups": { "type": "object", "additionalProperties": { "$ref": "#/$defs/binding" } },
+        "souls": { "type": "object", "additionalProperties": { "$ref": "#/$defs/binding" } },
+        "agents-md-injection": { "type": "string", "description": "Override this capability's instruction injection: a config-relative path, none, or default." }
+      },
+      "additionalProperties": false
+    }
+  },
+  "type": "object",
+  "properties": {
+    "name": { "type": "string" },
+    "groups": {
+      "type": "object",
+      "additionalProperties": {
+        "oneOf": [
+          { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+          {
+            "type": "object",
+            "required": ["souls"],
+            "properties": { "souls": { "type": "array", "items": { "type": "string" }, "uniqueItems": true } },
+            "additionalProperties": false
+          }
+        ]
+      }
+    },
+    "capabilities": {
+      "type": "object",
+      "propertyNames": { "pattern": "^(?:@?[a-z0-9][a-z0-9._-]*[./])[a-z0-9][a-z0-9._/-]*$" },
+      "additionalProperties": { "$ref": "#/$defs/capability" }
+    },
+    "skill-overrides": { "type": "object", "additionalProperties": { "type": "string" } },
+    "templates": { "type": "object", "additionalProperties": { "type": "string" }, "description": "Named oas init templates: local config paths or git URLs whose main branch carries an oas-config.yaml." },
+    "agents-md-injection": { "oneOf": [{ "type": "string" }, { "type": "object", "additionalProperties": { "type": "string" } }] },
+    "oas": { "type": "object" },
+    "work-modes": { "type": "object" },
+    "layers": {
+      "type": "object",
+      "description": "Explicitly disable an inherited fundamental layer; integrations are activated only through capabilities.",
+      "properties": {
+        "knowledge": { "const": "none" },
+        "messaging": { "const": "none" },
+        "tasks": { "const": "none" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

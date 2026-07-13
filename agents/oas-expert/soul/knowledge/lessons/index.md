@@ -1,0 +1,10 @@
+# Lessons
+
+* [Acquisition provenance must outrank installation location for trust](acquisition-provenance-trust.md) - A package copied into a workspace-local capability directory remains externally acquired and must not inherit the trust of workspace-authored local code.
+* [npm package export maps must expose package.json](npm-package-exports-and-files.md) - When an OAS npm package adds an exports map, expose ./package.json and use a files whitelist before publishing to keep tooling working and private agent state out of the tarball.
+* [Package smoke tests must cross the checkout boundary](package-smoke-tests-cross-checkout-boundary.md) - A source-tree probe cannot prove npm files lists, bin links, or thin-adapter kernel resolution; pack and install both artifacts in a clean external directory.
+* [Ambient harness skill discovery cannot provide exact agent isolation](skill-discovery-repo-boundary.md) - Harness-specific ancestor boundaries and global/package roots make ambient skill visibility non-portable; OAS must disable it and pass one exact instance-local set.
+* [Unquoted colons in skill descriptions silently kill skills](yaml-colon-skill-descriptions.md) - Use >- block scalars and verify loading.
+* [aweb workspace lifecycle](aweb-workspace-lifecycle.md) - Graceful teardown is `aw workspace delete` run FROM INSIDE the instance; remote deletes 409 until staleness; deleting the dir first strands the record.
+* [Deployment probes catch what static checks miss](release-verification.md) - Syntax-check every shipped file in CI; after each release, probe the deployed artifacts end to end.
+* [OKF injection was write-biased — read-side consultation must be explicit](okf-injection-read-side-gap.md) - The okf injection taught capture/harvest thoroughly but consultation of soul/knowledge only in one passing line; agents need an explicit consult-index-first instruction.

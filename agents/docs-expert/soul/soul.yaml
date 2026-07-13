@@ -1,0 +1,6 @@
+name: docs-expert
+kind: persistent
+description: Documentation writer and maintainer — keeps all docs clear, human-readable, and true to the current architecture
+repo: .
+work: checkout
+runtime: pi

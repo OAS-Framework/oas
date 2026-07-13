@@ -1,0 +1,91 @@
+name: Release
+
+# Tag-driven release: push a tag `vX.Y.Z` (on a commit reachable from main)
+# and this workflow bumps both packages to X.Y.Z, publishes them to npm, and
+# pushes the version-bump commit back to main.
+#
+# Requires the repo secret NPM_TOKEN: a granular npm automation token with
+# read/write on the @oas-framework packages (Settings → Secrets → Actions).
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Verify the tag is on main
+        run: |
+          if ! git merge-base --is-ancestor "${GITHUB_SHA}" main; then
+            echo "::error::Tag ${GITHUB_REF_NAME} is not on main — releases cut from main only."
+            exit 1
+          fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: Derive version from tag
+        id: v
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Bump both packages
+        run: |
+          npm version "${{ steps.v.outputs.version }}" --no-git-tag-version
+          cd packages/pi
+          npm version "${{ steps.v.outputs.version }}" --no-git-tag-version
+
+      - name: Syntax-check all shipped JS
+        run: |
+          for f in $(git ls-files 'bin/*.mjs' 'lib/*.mjs' 'capabilities/*/bin/*.mjs' 'capabilities/*/skills/*/scripts/*.mjs'); do
+            node --check "$f" || { echo "::error::syntax error in $f"; exit 1; }
+          done
+
+      - name: Test capability resolution and package commands
+        run: |
+          npm run check
+          npm test
+
+      - name: Sanity-check tarballs
+        run: |
+          npm pack --dry-run 2>&1 | grep -q "name: @oas-framework/oas" || { echo "::error::kernel pack check failed"; exit 1; }
+          # never ship deployment state (top-level agents/ or a workspace config)
+          if npm pack --dry-run 2>&1 | grep -E "^npm notice" | grep -qE " (agents/|oas-config\.yaml)"; then
+            echo "::error::kernel tarball contains workspace state"; exit 1
+          fi
+          cd packages/pi
+          npm pack --dry-run 2>&1 | grep -q "name: @oas-framework/pi" || { echo "::error::adapter pack check failed"; exit 1; }
+
+      - name: Publish @oas-framework/oas
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish @oas-framework/pi
+        run: npm publish --access public
+        working-directory: packages/pi
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Commit version bump back to main
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json packages/pi/package.json
+          git commit -m "release: ${GITHUB_REF_NAME} [skip ci]"
+          git push origin main

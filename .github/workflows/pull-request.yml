@@ -1,0 +1,49 @@
+name: Pull Request CI
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Node 22 / test, validate, pack, smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install supported-node dependencies
+        run: npm ci
+
+      - name: Unit and integration tests
+        run: npm test
+
+      - name: Kernel and CLI syntax
+        run: npm run check
+
+      - name: Pi adapter TypeScript syntax
+        run: npm run check:pi
+
+      - name: Schemas, manifests, config examples, and public links
+        run: npm run validate
+
+      - name: Strict OKF validation
+        run: npm run validate:okf
+
+      - name: Dry-run both npm packages
+        run: npm run pack:check
+
+      - name: Clean-room packed-artifact smoke test
+        run: npm run smoke:tarball

@@ -1,0 +1,24 @@
+{
+  "capability": "oas.aweb",
+  "command": "aweb",
+  "version": "1.0.0",
+  "compatibility": { "oas": ">=0.6.2" },
+  "layer": "messaging",
+  "description": "Messaging layer via aweb: per-instance team identities + native aw mail/chat skills.",
+  "requires": [
+    {
+      "command": "aw",
+      "why": "identity minting at spawn, self-delete at retire, and all agent messaging",
+      "install": "https://aweb.ai/docs (aw CLI)"
+    }
+  ],
+  "skills": [
+    "node_modules/@awebai/pi/skills/aweb-messaging",
+    "node_modules/@awebai/pi/skills/aweb-team-membership"
+  ],
+  "inject": "injects/aweb.md",
+  "hooks": {
+    "spawn": "bin/oas-aweb.mjs spawn",
+    "retire": "bin/oas-aweb.mjs retire"
+  }
+}

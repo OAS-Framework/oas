@@ -1,0 +1,20 @@
+{
+  "name": "@oas-framework/oas-aweb",
+  "version": "0.1.0",
+  "description": "OAS messaging provider: per-instance aweb identities (mint at spawn, self-delete at retire) and agents-md injection",
+  "keywords": [
+    "pi-package",
+    "oas",
+    "aweb"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/OAS-Framework/oas-framework",
+    "directory": "capabilities/oas-aweb"
+  },
+  "license": "MIT",
+  "type": "module",
+  "dependencies": {
+    "@awebai/pi": "^0.2.1"
+  }
+}

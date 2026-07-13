@@ -1,0 +1,6 @@
+name: oas-expert
+kind: persistent
+description: The OAS framework expert — holds the what/why, the architecture, the roadmap, and how OAS is deployed in real workspaces
+repo: .
+work: checkout
+runtime: pi

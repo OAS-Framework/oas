@@ -1,0 +1,25 @@
+{
+  "name": "@oas-framework/oas-jira",
+  "version": "0.1.0",
+  "description": "OAS tasks provider: Jira via acli — epic/story/task protocol, agent roster, label-based agent identity, and agents-md injection",
+  "keywords": [
+    "pi-package",
+    "oas",
+    "jira"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/OAS-Framework/oas-framework",
+    "directory": "capabilities/oas-jira"
+  },
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "oas-jira": "./bin/oas-jira.mjs"
+  },
+  "pi": {
+    "skills": [
+      "./skills"
+    ]
+  }
+}

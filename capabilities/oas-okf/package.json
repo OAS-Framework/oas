@@ -1,0 +1,22 @@
+{
+  "name": "@oas-framework/oas-okf",
+  "version": "0.1.0",
+  "description": "OAS knowledge provider: Open Knowledge Format (OKF) craft skill, bundle validator, and agents-md injection",
+  "keywords": [
+    "pi-package",
+    "oas",
+    "okf"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/OAS-Framework/oas-framework",
+    "directory": "capabilities/oas-okf"
+  },
+  "license": "MIT",
+  "type": "module",
+  "pi": {
+    "skills": [
+      "./skills"
+    ]
+  }
+}

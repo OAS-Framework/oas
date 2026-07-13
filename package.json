@@ -1,0 +1,49 @@
+{
+  "name": "@oas-framework/oas",
+  "version": "0.7.0",
+  "description": "OAS (Open Agent Specialization) — durable souls, disposable instances, targetable capability packages, and the runtime-neutral oas CLI/kernel.",
+  "keywords": [
+    "agents",
+    "oas",
+    "cli"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/OAS-Framework/oas-framework"
+  },
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "check": "node --check lib/core.mjs && node --check bin/oas.mjs",
+    "check:pi": "node --experimental-strip-types --check packages/pi/extension/index.ts",
+    "validate": "node scripts/validate-project.mjs",
+    "validate:okf": "node scripts/validate-okf.mjs",
+    "pack:check": "node scripts/check-package-dry-runs.mjs",
+    "smoke:tarball": "node scripts/clean-room-smoke.mjs"
+  },
+  "exports": {
+    ".": "./lib/core.mjs",
+    "./core": "./lib/core.mjs",
+    "./control-pane": "./lib/control-pane/model.mjs",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "bin/",
+    "lib/",
+    "skills/",
+    "injects/",
+    "capabilities/",
+    "docs/",
+    "README.md"
+  ],
+  "dependencies": {
+    "@awebai/pi": "^0.2.1"
+  },
+  "bin": {
+    "oas": "./bin/oas.mjs"
+  },
+  "devDependencies": {
+    "ajv": "8.17.1"
+  }
+}
