@@ -1,6 +1,6 @@
 # @oas-framework/pi
 
-Minimal pi adapter for [OAS](https://github.com/OAS-Framework/oas-framework).
+Minimal pi adapter for [OAS](https://github.com/OAS-Framework/oas).
 
 The runtime-neutral kernel and universal `oas` CLI live in
 `@oas-framework/oas`. This adapter registers no operational tools. It only:

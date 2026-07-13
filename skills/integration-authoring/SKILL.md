@@ -30,7 +30,7 @@ oas use <id> --global|--group <g>|--soul <s>
 Check a local pi package path, then likely locations such as
 `~/oas-framework`; verify with `git -C <dir> remote get-url origin`. Avoid
 pi-managed git clones because updates reset them. If absent, ask where to
-clone `https://github.com/OAS-Framework/oas-framework`.
+clone `https://github.com/OAS-Framework/oas`.
 
 ## 2. Spawn the expert against the user's repository
 

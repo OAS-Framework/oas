@@ -41,7 +41,7 @@ Never pick a location silently. Suggest `~/oas-framework` or a sibling of
 their workspace, then:
 
 ```bash
-git clone https://github.com/OAS-Framework/oas-framework <chosen-path>
+git clone https://github.com/OAS-Framework/oas <chosen-path>
 ```
 
 ## 3. Instantiate the oas-expert soul
