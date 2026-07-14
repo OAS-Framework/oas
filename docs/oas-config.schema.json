@@ -17,7 +17,7 @@
         }
       ]
     },
-    "injection": { "type": "string", "description": "Override an instruction injection: a config-relative path, none, or default. Convention: .agents/injections/…" },
+    "injection-override": { "type": "string", "description": "Override an instruction injection: a config-relative path, none, or default. Convention: .agents/injections/…" },
     "capabilityTargets": {
       "type": "object",
       "properties": {
@@ -31,7 +31,7 @@
         },
         "souls": { "type": "object", "additionalProperties": { "$ref": "#/$defs/binding" } },
         "settings": { "$ref": "#/$defs/settings" },
-        "injection": { "$ref": "#/$defs/injection" }
+        "injection-override": { "$ref": "#/$defs/injection-override" }
       }
     },
     "layerEntry": {
@@ -43,7 +43,7 @@
           "required": ["capability"],
           "properties": {
             "capability": { "type": "string" },
-            "from": true, "global": true, "agent-types": true, "souls": true, "settings": true, "injection": true
+            "from": true, "global": true, "agent-types": true, "souls": true, "settings": true, "injection-override": true
           },
           "additionalProperties": false
         }
@@ -53,7 +53,7 @@
       "allOf": [{ "$ref": "#/$defs/capabilityTargets" }],
       "type": "object",
       "properties": {
-        "from": true, "global": true, "agent-types": true, "souls": true, "settings": true, "injection": true
+        "from": true, "global": true, "agent-types": true, "souls": true, "settings": true, "injection-override": true
       },
       "additionalProperties": false
     },
@@ -63,7 +63,7 @@
         {
           "type": "object",
           "properties": {
-            "injection": { "$ref": "#/$defs/injection" },
+            "injection-override": { "$ref": "#/$defs/injection-override" },
             "setup": { "type": "string" }
           },
           "additionalProperties": false
@@ -114,7 +114,7 @@
     "agents-md-injection": { "oneOf": [{ "type": "string" }, { "type": "object", "additionalProperties": { "type": "string" } }], "description": "Extra unconditional instruction blocks (adds content; does not override packaged defaults)." },
     "oas": {
       "type": "object",
-      "properties": { "injection": { "$ref": "#/$defs/injection" } },
+      "properties": { "injection-override": { "$ref": "#/$defs/injection-override" } },
       "additionalProperties": false
     },
     "work-modes": {

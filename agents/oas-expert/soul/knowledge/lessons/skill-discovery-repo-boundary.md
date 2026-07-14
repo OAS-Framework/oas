@@ -25,3 +25,12 @@ runtimes with an unrelated ancestor/global skill present and verify both see
 exactly the metadata-recorded instance set. For Pi, also inspect that the
 launch command includes `--no-skills` and exactly one `--skill` path; correct
 materialized files alone do not prove runtime isolation.
+
+**Superseded in part (2026-07-14)**: the founder judged strict exclusion an
+adoption barrier — users migrating to OAS lost their existing ambient skills
+inside instances. The exclusion flags (`--no-skills`, instance
+`CLAUDE_CONFIG_DIR` + `--setting-sources user`) were dropped; ambient skills
+now coexist with the materialized set (see the
+[authorship/ambient decision](/decisions/config-authorship-and-ambient-skills.md)).
+The mechanics above remain the record of *how* exact isolation is achieved if
+a future `strict-skills:` switch reinstates it.

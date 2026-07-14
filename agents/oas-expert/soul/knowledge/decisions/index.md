@@ -1,5 +1,6 @@
 # Decisions
 
+* [Config authorship completeness and ambient skill coexistence](config-authorship-and-ambient-skills.md) - injection renamed to injection-override and forbidden on owned/path capabilities; oas type / inject eject / use --settings close the CLI-authorship gaps; harness skill-restriction flags dropped so ambient skills coexist; oas skill split in two.
 * [Config shape v2 — agent types in souls, layered capabilities, conventional injection overrides](config-shape-agent-types-and-injections.md) - groups become agent-types with membership in soul.yaml; capabilities split into layers/additive with `from` provenance; commented `injection:` overrides point at .agents/injections/ conventions.
 
 * [Scoped capability store, restorable installs, and config templates](scoped-capability-store-and-templates.md) - All capabilities live in the owning scope's .agents/capabilities/ (installed/ vs owned/); bare `oas install` restores from the lock; `oas init --template` seeds configs from local or git templates.

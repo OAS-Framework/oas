@@ -1,7 +1,7 @@
 {
   "name": "@oas-framework/pi",
   "version": "0.9.1",
-  "description": "Minimal OAS pi adapter — instance-local skill discovery and memory session events over the runtime-neutral @oas-framework/oas kernel",
+  "description": "OAS pi runtime bridge — memory session events and pre-workspace bootstrap over the runtime-neutral @oas-framework/oas kernel",
   "keywords": [
     "pi-package",
     "agents",

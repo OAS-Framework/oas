@@ -53,7 +53,7 @@ capabilities:
       from: bundled
       settings:
         harvest-model: github-copilot/gpt-5.5
-      # injection: .agents/injections/capabilities/oas.okf.md
+      # injection-override: .agents/injections/capabilities/oas.okf.md
     messaging: none
     tasks:
       capability: oas.linear
@@ -62,7 +62,7 @@ capabilities:
         developers:
           enabled: true
           settings: {team: ENG}
-      # injection: .agents/injections/capabilities/oas.linear.md
+      # injection-override: .agents/injections/capabilities/oas.linear.md
 
   # Additive capabilities — non-exclusive; target global, agent-types, or souls.
   additive:
@@ -78,7 +78,7 @@ capabilities:
           enabled: true
           settings:
             depth: exhaustive
-      # injection: .agents/injections/capabilities/example.review.md
+      # injection-override: .agents/injections/capabilities/example.review.md
 
 skill-overrides:
   review: example.review
@@ -86,16 +86,16 @@ skill-overrides:
 # ── Work modes — per-mode instruction overrides and setup hooks.
 work-modes:
   worktree:
-    # injection: .agents/injections/workmodes/worktree.md
+    # injection-override: .agents/injections/workmodes/worktree.md
     setup: scripts/setup-worktree.sh
   checkout:
-    # injection: .agents/injections/workmodes/checkout.md
+    # injection-override: .agents/injections/workmodes/checkout.md
   attached:
-    # injection: .agents/injections/workmodes/attached.md
+    # injection-override: .agents/injections/workmodes/attached.md
 
 # ── OAS defaults — the framework's baseline instruction block.
 oas:
-  # injection: .agents/injections/oas-defaults/oas.md
+  # injection-override: .agents/injections/oas-defaults/oas.md
 
 # Extra unconditional instruction blocks for every instance at this scope.
 agents-md-injection:
@@ -107,7 +107,7 @@ agents-md-injection:
 Agent types are agent families. Config declares type names (optionally with a
 description); membership is **not** listed in config — each soul opts in with
 an optional single `type: <name>` in its `soul.yaml` (`oas create --type <t>`
-sets it). A type is identity: what kind of agent a soul is travels with the
+sets it; `oas type add <name>` declares it in config). A type is identity: what kind of agent a soul is travels with the
 soul, while config decides what each type gets. Tags, dynamic selectors, and
 instance names are not supported.
 
@@ -116,7 +116,7 @@ instance names are not supported.
 The three fundamental layers — `knowledge`, `messaging`, `tasks` — are
 exclusive slots with an explicit home. Each slot holds either a capability
 entry (`capability: <id>` plus optional `from`, targets, `settings`,
-`injection`) or the explicit string `none`, which suppresses an integration
+`injection-override`) or the explicit string `none`, which suppresses an integration
 inherited from an outer scope. A slot absent from a config inherits from
 outer scopes; `oas init` writes all three so the resolution is visible.
 
@@ -153,10 +153,10 @@ scope under `.agents/capabilities/owned/`), or `path:<dir>` (development
 declaration pointing at a manifest directory). A mismatch between `from:` and
 the discovered artifact origin is an error.
 
-### `injection` overrides
+### `injection-override`
 
 Every injectable item — each capability entry, each work mode, and the `oas:`
-kernel block — accepts an `injection:` key: a config-relative path replaces
+kernel block — accepts an `injection-override:` key: a config-relative path replaces
 the packaged instruction file, `none` suppresses it, and `default` restores
 it. The closest scope declaring the key wins. Scaffolded configs carry these
 as commented-out lines pointing at the conventional locations:
@@ -167,7 +167,11 @@ as commented-out lines pointing at the conventional locations:
 .agents/injections/oas-defaults/oas.md
 ```
 
-Uncomment the line and create the file to take the override.
+The clean path is `oas inject eject <capability|work-mode|oas>`: it copies
+the packaged default to the conventional path and sets the key — the ejected
+file then deliberately stops tracking package updates. Overrides are not
+allowed on `from: owned`/`path:` entries: the scope owns the package source,
+so its `injects/` file is edited directly.
 
 ### `skill-overrides`
 
@@ -179,7 +183,7 @@ OAS never keeps whichever filesystem entry happened to be discovered first.
 ### Instruction sources
 
 `agents-md-injection` adds unconditional config-owned instruction files (it
-adds content; it does not override packaged defaults — that is `injection:`).
+adds content; it does not override packaged defaults — that is `injection-override:`).
 Capability packages can ship an `inject`; work modes have their own source.
 
 OAS reads the canonical soul `AGENTS.md`, composes selected blocks in a new
@@ -232,8 +236,11 @@ verification.
 oas init [--raw] [--template <name|path|git-url>] [--knowledge <id|none>] [--messaging <id|none>] [--tasks <id|none>]
 oas install [<id|git-url|path>] [--dir <dir>]  # acquire; bare form restores; inactive by default
 oas trust <capability> [--dir <dir>]
-oas use <capability> [--global|--type <t>|--soul <s>] [--disable]
+oas use <capability> [--global|--type <t>|--soul <s>] [--disable] [--settings k=v ...]
 oas use none --layer <layer>
+oas type add <name> [--description <d>]   # declare an agent type
+oas type list
+oas inject eject <capability|work-mode|oas>  # materialize an injection override
 oas create <name> --type <agent-type> ...
 oas doctor [context] --soul <name> [--json]
 ```

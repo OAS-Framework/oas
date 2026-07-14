@@ -26,7 +26,7 @@ capabilities:
     knowledge:
       capability: oas.okf
       from: bundled             # enforced provenance: bundled|installed|owned|path:<dir>
-      # injection: .agents/injections/capabilities/oas.okf.md
+      # injection-override: .agents/injections/capabilities/oas.okf.md
     messaging: none             # explicit none suppresses inherited integrations
     tasks: none
   additive:                     # non-exclusive packages
@@ -46,10 +46,10 @@ agents-md-injection:            # extra unconditional blocks (adds, not override
   repository: injects/repository.md
 work-modes:
   worktree:
-    # injection: .agents/injections/workmodes/worktree.md
+    # injection-override: .agents/injections/workmodes/worktree.md
     setup: scripts/setup-worktree.sh
 oas:
-  # injection: .agents/injections/oas-defaults/oas.md
+  # injection-override: .agents/injections/oas-defaults/oas.md
 ```
 
 Agent types are families: config declares names (+ descriptions); each soul
@@ -70,9 +70,13 @@ suppresses an inherited integration; an absent slot inherits.
 origin (bundled / installed+locked / owned / path) must match.
 
 Every injectable item (capability entry, work mode, `oas:` kernel block)
-takes `injection: <path>|none|default`; scaffolded configs carry commented
-lines pointing at the `.agents/injections/{capabilities,workmodes,oas-defaults}/`
-conventions.
+takes `injection-override: <path>|none|default`; scaffolded configs carry
+commented lines pointing at the
+`.agents/injections/{capabilities,workmodes,oas-defaults}/` conventions, and
+`oas inject eject` materializes one (copy packaged default + set the key).
+Overrides are rejected on `from: owned`/`path:` entries — the scope owns the
+package source and edits its `injects/` file directly (see the
+[authorship decision](/decisions/config-authorship-and-ambient-skills.md)).
 
 # Runtime composition
 

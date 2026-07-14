@@ -63,17 +63,16 @@ plus selected source-marked blocks, leaving the soul byte-identical. It
 copies only kernel + soul + active package skill trees into real directories
 under `.agents/skills`, records sources/settings/trust in `instance.json`, and keeps
 `CLAUDE.md`/Claude skill compatibility symlinks canonical. Skill resolution is
-fully owned by this spawn-time materialization plus harness exclusion flags,
-not by runtime adapter discovery.
+fully owned by this spawn-time materialization, not by runtime adapter
+discovery.
 
-Pi launches with `--no-skills` and one explicit instance path, eliminating
-ambient user/project/settings/package skill discovery. The changed pi adapter
-also stops contributing its older workspace and package roots. Exact pi
-isolation therefore requires matching capability-aware releases of the kernel
-and adapter.
-
-Claude receives the same project skill set through an instance-local
-`CLAUDE_CONFIG_DIR` and only that redirected `user` setting source.
+Pi launches with the instance's `.agents/skills` as one explicit `--skill`
+path; ambient discovery (user/project/package skills) stays enabled so a
+user's existing skills coexist with the OAS-composed set (a deliberate
+adoption trade decided 2026-07-14 — see the ambient-skills decision;
+determinism of the total surface was traded away, `instance.json` records
+only what OAS composed). Claude sees the same set via the instance's
+`.claude/skills` symlink alongside the user's own configuration.
 `oas-getting-started` is the only pre-workspace ambient bootstrap.
 
 # Lifecycle and commands

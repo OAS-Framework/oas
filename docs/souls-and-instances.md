@@ -66,7 +66,6 @@ collide because they are local runtime state, not shared soul state.
   CLAUDE.md → AGENTS.md
   .agents/skills/                  # exact soul + active capability set
   .claude/skills → ../.agents/skills
-  .claude-runtime/skills → ../.agents/skills
   work/                            # worktree, checkout symlink, or attached tree
   TASK.md                          # briefing and task
   instance.json                    # repo/branch, spawn lineage, capabilities, skills, instructions, trust

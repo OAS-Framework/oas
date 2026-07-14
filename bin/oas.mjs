@@ -24,7 +24,7 @@ import {
   acquireCapability, restoreCapabilities,
   capabilityManifests, capabilityManifest, capabilityMissingRequires, capabilityIntegrity, capabilityTrust, capabilityExecutablePath,
   readCapabilityLocks, writeCapabilityLock,
-  resolveOasConfig, resolveWorkMode, composeInstanceAgentsMd, parseYamlNested,
+  resolveOasConfig, resolveWorkMode, composeInstanceAgentsMd, parseYamlNested, packagedInject,
   ensureRoot, findRoot, findAgent, listAgents, listInstances, listAgentDefs, createAgent as coreCreateAgent,
   spawnInstance, retireInstance, upsertTmpAgent, defaultRepo,
 } from "../lib/core.mjs";
@@ -214,8 +214,10 @@ function serializeCapabilityEntry(id, entry, baseIndent) {
     lines.push(`${i}settings:`);
     for (const [k, v] of Object.entries(entry.settings)) lines.push(`${i}  ${k}: ${typeof v === "object" ? JSON.stringify(v) : v}`);
   }
-  if (entry.injection !== undefined) lines.push(`${i}injection: ${entry.injection}`);
-  else lines.push(`${i}# injection: .agents/injections/capabilities/${id}.md`);
+  if (entry["injection-override"] !== undefined) lines.push(`${i}injection-override: ${entry["injection-override"]}`);
+  else if (entry.from === "owned" || String(entry.from || "").startsWith("path:"))
+    lines.push(`${i}# injection edited at source: .agents/capabilities/owned/${id}/injects/`);
+  else lines.push(`${i}# injection-override: .agents/injections/capabilities/${id}.md`);
   return lines;
 }
 
@@ -265,7 +267,7 @@ function readCapabilitiesModel(file) {
 // ---------- use / activation ----------
 function use() {
   const requested = args[1];
-  if (!requested || requested.startsWith("--")) die("usage: oas use <capability|none> [--global|--type <agent-type>|--soul <name>] [--disable] [--layer <name>] [--dir <dir>]");
+  if (!requested || requested.startsWith("--")) die("usage: oas use <capability|none> [--global|--type <agent-type>|--soul <name>] [--disable] [--layer <name>] [--settings k=v ...] [--dir <dir>]");
   const dir = resolve(flag("dir") || process.cwd());
   const level = levelOf(dir);
   const file = join(dir, "oas-config.yaml");
@@ -303,6 +305,15 @@ function use() {
   }
   const from = originToFrom(manifest._origin);
   if (from && !entry.from) entry.from = from;
+  const settingsArgs = args.flatMap((a, idx) => (a === "--settings" && args[idx + 1] ? [args[idx + 1]] : []));
+  if (settingsArgs.length) {
+    entry.settings = entry.settings && typeof entry.settings === "object" ? entry.settings : {};
+    for (const kv of settingsArgs) {
+      const eq = kv.indexOf("=");
+      if (eq <= 0) die(`--settings expects key=value, got "${kv}"`);
+      entry.settings[kv.slice(0, eq)] = kv.slice(eq + 1);
+    }
+  }
   if (targetKind === "global") entry.global = enabled;
   else {
     // A layer entry with no explicit targets is implicitly global — materialize that
@@ -457,8 +468,8 @@ function init() {
   const lines = [
     `name: ${basename(dir)}`,
     "",
-    "# ── Agent types (families) ── declared here by name; each soul opts in via",
-    "# `type: <name>` in its soul.yaml. Capability entries can target them.",
+    "# ── Agent types (families) — declared here by name (or via `oas type add`);",
+    "# each soul opts in via `type: <name>` in its soul.yaml. Capability entries can target them.",
     "# agent-types:",
     "#   reviewers:",
     "#     description: Agents that review changes",
@@ -474,10 +485,9 @@ function init() {
     const manifest = capabilityManifest(selected, dir);
     lines.push(`    ${layer}:`);
     lines.push(`      capability: ${manifest.capability}`);
-    if (manifest._origin === "bundled") lines.push("      from: bundled");
-    else if (String(manifest._origin).startsWith("installed:")) lines.push("      from: installed");
-    else if (String(manifest._origin).startsWith("owned:")) lines.push("      from: owned");
-    lines.push(`      # injection: .agents/injections/capabilities/${manifest.capability}.md`);
+    if (manifest._origin === "bundled") { lines.push("      from: bundled"); lines.push(`      # injection-override: .agents/injections/capabilities/${manifest.capability}.md`); }
+    else if (String(manifest._origin).startsWith("installed:")) { lines.push("      from: installed"); lines.push(`      # injection-override: .agents/injections/capabilities/${manifest.capability}.md`); }
+    else if (String(manifest._origin).startsWith("owned:")) { lines.push("      from: owned"); lines.push(`      # injection edited at source: .agents/capabilities/owned/${manifest.capability}/injects/`); }
   }
   lines.push(
     "  # Additive capabilities — non-exclusive; target global, agent-types, or souls.",
@@ -485,15 +495,15 @@ function init() {
     "  #   <capability-id>:",
     "  #     from: installed",
     "  #     global: true",
-    "  #     # injection: .agents/injections/capabilities/<capability-id>.md",
+    "  #     # injection-override: .agents/injections/capabilities/<capability-id>.md",
     "",
     "# ── Work modes — per-mode instruction overrides and setup hooks.",
     "work-modes:",
-    ...["checkout", "worktree", "attached"].flatMap((m) => [`  ${m}:`, `    # injection: .agents/injections/workmodes/${m}.md`]),
+    ...["checkout", "worktree", "attached"].flatMap((m) => [`  ${m}:`, `    # injection-override: .agents/injections/workmodes/${m}.md`]),
     "",
     "# ── OAS defaults — the framework's baseline instruction block.",
     "oas:",
-    "  # injection: .agents/injections/oas-defaults/oas.md",
+    "  # injection-override: .agents/injections/oas-defaults/oas.md",
   );
   writeFileSync(file, lines.join("\n") + "\n");
   console.log(`Created ${shortPath(file)} (${levelOf(dir)} level${raw ? ", raw" : ""})`);
@@ -633,12 +643,107 @@ function capabilityCommand() {
   process.exit(r.status ?? 1);
 }
 
+// ---------- agent types ----------
+function typeCmd() {
+  const sub = args[1];
+  const dir = resolve(flag("dir") || process.cwd());
+  const file = join(dir, "oas-config.yaml");
+  if (sub === "list") {
+    const seen = new Map();
+    for (const cfg of configChain(dir)) for (const [name, spec] of Object.entries(cfg["agent-types"] || {})) if (!seen.has(name)) seen.set(name, { desc: spec?.description, level: cfg._level });
+    if (!seen.size) { console.log("No agent types declared in the config chain."); return; }
+    for (const [name, { desc, level }] of seen) console.log(`${name}  ${desc ? `— ${desc}  ` : ""}[${shortPath(level)}]`);
+    return;
+  }
+  if (sub !== "add" || !args[2] || args[2].startsWith("--")) die("usage: oas type add <name> [--description <d>] [--dir <dir>] | oas type list [--dir <dir>]");
+  const name = args[2];
+  if (!/^[a-z][a-z0-9-]*$/.test(name)) die(`agent type "${name}" must be lowercase alphanumeric/hyphens`);
+  const description = flag("description");
+  let text = existsSync(file) ? readFileSync(file, "utf8") : `name: ${basename(dir)}\n`;
+  const cfg = existsSync(file) ? parseYamlNested(text) : {};
+  if (cfg["agent-types"]?.[name]) die(`agent type "${name}" already declared in ${shortPath(file)}`);
+  const block = [`  ${name}:`, ...(description ? [`    description: ${description}`] : [])];
+  const lines = text.replace(/\n*$/, "\n").split("\n");
+  // Drop the scaffold comment block once a real agent-types block exists.
+  const scaffold = lines.findIndex((l) => /^# ── Agent types/.test(l));
+  if (scaffold >= 0) {
+    let e = scaffold;
+    while (e < lines.length && (/^#/.test(lines[e]) || lines[e] === "")) { if (lines[e] === "" && !/^#/.test(lines[e + 1] || "x")) break; e++; }
+    lines.splice(scaffold, e - scaffold);
+  }
+  const start = lines.findIndex((l) => /^agent-types:\s*(#.*)?$/.test(l));
+  if (start >= 0) {
+    let end = start + 1;
+    while (end < lines.length && (/^\s/.test(lines[end]) || lines[end] === "")) { if (lines[end] === "" && !/^\s/.test(lines[end + 1] || "x")) break; end++; }
+    lines.splice(end, 0, ...block);
+  } else {
+    lines.splice(1, 0, "", "agent-types:", ...block);
+  }
+  writeFileSync(file, lines.join("\n").replace(/\n{3,}/g, "\n\n").replace(/\n*$/, "\n"));
+  console.log(`Declared agent type "${name}" at ${levelOf(dir)} level (${shortPath(file)})`);
+  console.log(`Souls join it with: oas create <agent> --type ${name} (or type: ${name} in soul.yaml)`);
+}
+
+// ---------- injection eject ----------
+function injectCmd() {
+  const sub = args[1];
+  const target = args[2];
+  if (sub !== "eject" || !target || target.startsWith("--")) die("usage: oas inject eject <capability-id|checkout|worktree|attached|oas> [--dir <dir>]");
+  const dir = resolve(flag("dir") || process.cwd());
+  const file = join(dir, "oas-config.yaml");
+  if (!existsSync(file)) die(`no oas-config.yaml at ${shortPath(dir)} — run oas init first`);
+  const isWorkMode = ["checkout", "worktree", "attached"].includes(target);
+  const isKernel = target === "oas";
+  const src = isKernel ? packagedInject("oas", dir) : isWorkMode ? packagedInject(`work-${target}`, dir) : packagedInject(target, dir);
+  if (!src) die(`no packaged default injection found for "${target}"`);
+  const rel = isKernel ? ".agents/injections/oas-defaults/oas.md" : isWorkMode ? `.agents/injections/workmodes/${target}.md` : `.agents/injections/capabilities/${target}.md`;
+  const destAbs = join(dir, rel);
+  if (existsSync(destAbs)) die(`${shortPath(destAbs)} already exists — edit it directly (it is already your override)`);
+  let text = readFileSync(file, "utf8");
+  if (!isWorkMode && !isKernel) {
+    const caps = readCapabilitiesModel(file);
+    const entry = Object.values(caps.layers).find((e) => e && e !== "none" && e.capability === target) || caps.additive[target];
+    if (!entry) die(`capability "${target}" has no entry in ${shortPath(file)} — activate it first (oas use ${target})`);
+    const m = capabilityManifest(target, dir);
+    const owned = entry.from === "owned" || String(entry.from || "").startsWith("path:") || String(m?._origin || "").startsWith("owned:") || String(m?._origin || "").startsWith("path:");
+    if (owned) die(`"${target}" is owned/path-sourced — you own its source; edit its injects/ file directly instead of ejecting`);
+    entry["injection-override"] = rel;
+    text = replaceCapabilitiesBlock(text, caps);
+  } else {
+    const lines = text.replace(/\n*$/, "\n").split("\n");
+    const headRe = isKernel ? /^oas:\s*(#.*)?$/ : /^work-modes:\s*(#.*)?$/;
+    let idx = lines.findIndex((l) => headRe.test(l));
+    if (idx < 0) { lines.push("", isKernel ? "oas:" : "work-modes:"); idx = lines.length - 1; }
+    if (isKernel) {
+      lines.splice(idx + 1, 0, `  injection-override: ${rel}`);
+      const c = lines.findIndex((l, i2) => i2 > idx + 1 && l.trim() === `# injection-override: ${rel}`);
+      if (c >= 0) lines.splice(c, 1);
+    } else {
+      let mIdx = lines.findIndex((l, i2) => i2 > idx && new RegExp(`^  ${target}:`).test(l));
+      if (mIdx < 0) { lines.splice(idx + 1, 0, `  ${target}:`, `    injection-override: ${rel}`); }
+      else {
+        lines.splice(mIdx + 1, 0, `    injection-override: ${rel}`);
+        const c = lines.findIndex((l, i2) => i2 > mIdx + 1 && l.trim() === `# injection-override: ${rel}`);
+        if (c >= 0) lines.splice(c, 1);
+      }
+    }
+    text = lines.join("\n").replace(/\n*$/, "\n");
+  }
+  mkdirSync(dirname(destAbs), { recursive: true });
+  writeFileSync(destAbs, readFileSync(src, "utf8"));
+  writeFileSync(file, text);
+  console.log(`Ejected packaged injection → ${shortPath(destAbs)}`);
+  console.log(`Set injection-override in ${shortPath(file)}. Edit the ejected file; it no longer tracks package updates.`);
+}
+
 // ---------- main ----------
 if (cmd === "doctor") {
   const doctorDir = args[1] && !args[1].startsWith("--") ? args[1] : undefined;
   args.includes("--json") ? doctorJson(doctorDir) : doctor(doctorDir);
 }
 else if (cmd === "use") use();
+else if (cmd === "type") typeCmd();
+else if (cmd === "inject") injectCmd();
 else if (cmd === "install") install();
 else if (cmd === "trust") trust();
 else if (cmd === "root") console.log(resolve(new URL("..", import.meta.url).pathname));
@@ -676,8 +781,12 @@ Usage:
                                             the currently locked integrity
   oas use <capability>                      activate for one config-owned target
       [--global|--type <t>|--soul <s>]      (--global is default); --disable excludes
-      [--disable] [--dir <d>]
+      [--disable] [--settings k=v ...] [--dir <d>]
   oas use none --layer <layer>              explicitly disable a fundamental layer
+  oas type add <name> [--description <d>]   declare an agent type (family) in config;
+  oas type list                             souls join via create --type / soul.yaml
+  oas inject eject <cap|work-mode|oas>      copy a packaged injection to the conventional
+      [--dir <d>]                           .agents/injections/ path and set injection-override
   oas init [--raw] [--dir <dir>]            create an oas-config.yaml here
       [--template <name|path|git-url>]      seed from a template config (named via
       [--knowledge <id|none>]               outer templates: map, a local file, or a

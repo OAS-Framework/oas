@@ -78,7 +78,7 @@ capabilities:
     knowledge:
       capability: oas.okf
       from: bundled
-      # injection: .agents/injections/capabilities/oas.okf.md
+      # injection-override: .agents/injections/capabilities/oas.okf.md
     messaging: none
     tasks: none
 
@@ -136,11 +136,11 @@ Every spawned instance receives:
 OAS copies only those skill trees into real directories under
 `<instance>/.agents/skills/` and records the names and source capability in
 `instance.json`. `.claude/skills` points to
-the same canonical directory. Pi launches with `--no-skills` plus this one
-explicit directory, preventing user, project, and pi-package skill discovery.
-Claude uses an instance-local `CLAUDE_CONFIG_DIR` pointing at the same set and
-loads only that `user` setting source, excluding project/local customization sources.
-`oas-getting-started` is the one ambient exception before a workspace exists.
+the same canonical directory. Pi launches with this directory as an explicit
+skill path; ambient skills (user-level, pi packages, the work tree) coexist
+with the OAS-composed set rather than being excluded — `instance.json`
+records exactly what OAS composed, not everything the harness may discover.
+`oas-getting-started` is the pi adapter's one ambient contribution before a workspace exists.
 
 Duplicate skill names fail spawn unless `skill-overrides` explicitly names the
 winning source. Pi and Claude therefore receive the same OAS-managed set rather

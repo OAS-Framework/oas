@@ -49,7 +49,6 @@ feature, so the same CLI surface works for pi and Claude instances.
     CLAUDE.md -> AGENTS.md
     .agents/skills/           # exact materialized set
     .claude/skills -> ../.agents/skills
-    .claude-runtime/skills -> ../.agents/skills
     work/
     TASK.md
     instance.json             # capabilities, skills, instruction sources, lifecycle metadata
@@ -90,15 +89,12 @@ an inherited slot and remains distinct from absence.
    files, hooks, capability metadata, and forward-only spawn lineage in
    `instance.json`.
 
-Pi launches with `--no-skills --skill <instance>/.agents/skills`, disabling
-user, ancestor, settings, and pi-package discovery. The pi adapter contributes
+Pi launches with `--skill <instance>/.agents/skills` as an explicit path;
+ambient discovery (user, packages, work tree) remains enabled so existing
+skills coexist with the OAS-composed set. The pi adapter contributes
 only `oas-getting-started` outside an instance and the local directory inside
-one. The older adapter contributed workspace and package roots, so upgrading
-the kernel alone does not provide this exact surface. Install matching
-capability-aware versions of `@oas-framework/oas` and `@oas-framework/pi`.
-
-Claude receives instance-local `.claude` and `CLAUDE_CONFIG_DIR` views of the
-same set. It launches with only the redirected `user` setting source.
+one. Claude discovers the same set through the instance's
+`.claude/skills` symlink alongside the user's own configuration.
 
 ## Instructions
 

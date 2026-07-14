@@ -27,7 +27,6 @@ The only OAS-managed runtime skill root is the instance:
 ```text
 instance/.agents/skills/                    # canonical exact set
 instance/.claude/skills -> ../.agents/skills
-instance/.claude-runtime/skills -> ../.agents/skills
 ```
 
 Spawn copies kernel + soul-private + active capability skills into real

@@ -133,7 +133,7 @@ test("pi and Claude instances receive the same exact local skills and generated 
     const claude = spawnInstance(root, agent, { instance: "dev-claude", runtime: "claude", launch: false });
     for (const meta of [pi, claude]) {
       const names = readdirSync(join(meta.home, ".agents", "skills")).sort();
-      assert.deepEqual(names, ["oas", "private", "review"]);
+      assert.deepEqual(names, ["oas", "oas-config", "private", "review"]);
       assert.equal(lstatSync(join(meta.home, ".agents", "skills", "review")).isDirectory(), true);
       assert.equal(existsSync(join(meta.home, ".agents", "skills", "pollution")), false);
       assert.equal(lstatSync(join(meta.home, "AGENTS.md")).isSymbolicLink(), false);
@@ -142,8 +142,8 @@ test("pi and Claude instances receive the same exact local skills and generated 
       const diskMeta = JSON.parse(readFileSync(join(meta.home, "instance.json"), "utf8"));
       assert.ok(diskMeta.capabilities.some((c) => c.id === "acme.review"));
       assert.deepEqual(diskMeta.skills.map((s) => s.name), names);
-      if (meta.runtime === "pi") assert.match(meta.command, /--no-skills --skill/);
-      else assert.match(meta.command, /CLAUDE_CONFIG_DIR=.* --setting-sources user/);
+      if (meta.runtime === "pi") { assert.match(meta.command, /--skill /); assert.doesNotMatch(meta.command, /--no-skills/); }
+      else assert.doesNotMatch(meta.command, /CLAUDE_CONFIG_DIR/);
     }
     assert.equal(readFileSync(join(soul, "AGENTS.md"), "utf8"), canonical);
   } finally { process.env.PATH = oldPath; }
@@ -193,7 +193,7 @@ test("CLI activation writes stable global/type/soul bindings without activating 
   // Layer capability lands under capabilities.layers.knowledge with from + injection comment.
   assert.match(config, /layers:\n    knowledge:\n      capability: oas\.okf/);
   assert.match(config, /from: bundled/);
-  assert.match(config, /# injection: \.agents\/injections\/capabilities\/oas\.okf\.md/);
+  assert.match(config, /# injection-override: \.agents\/injections\/capabilities\/oas\.okf\.md/);
   assert.match(config, /global: true/); assert.match(config, /reviewers: false/); assert.match(config, /lead: true/);
   assert.equal(resolveOasConfig(repo, "reviewer").capabilities.some((c) => c.id === "oas.okf"), true);
 });
@@ -319,14 +319,52 @@ test("config can override an installed capability's injection per scope", () => 
   const base = temp(); const repo = join(base, "repo"); mkdirSync(repo);
   capability(repo, "chat", { capability: "acme.chat", inject: "inject.md" }, { "inject.md": "## Packaged instructions" });
   write(join(repo, "custom.md"), "## Custom instructions");
-  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.chat:\n      global: true\n      injection: custom.md\n");
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.chat:\n      global: true\n      injection-override: custom.md\n");
   const cap = resolveOasConfig(repo, "dev").capabilities.find((c) => c.id === "acme.chat");
   assert.equal(cap.inject, join(repo, "custom.md"));
   // `none` suppresses; `default` restores the packaged inject.
-  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.chat:\n      global: true\n      injection: none\n");
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.chat:\n      global: true\n      injection-override: none\n");
   assert.equal(resolveOasConfig(repo, "dev").capabilities.find((c) => c.id === "acme.chat").inject, undefined);
-  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.chat:\n      global: true\n      injection: default\n");
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.chat:\n      global: true\n      injection-override: default\n");
   assert.match(resolveOasConfig(repo, "dev").capabilities.find((c) => c.id === "acme.chat").inject, /inject\.md$/);
+});
+
+test("injection-override is rejected on owned/path capabilities; old injection key is rejected", () => {
+  const base = temp(); const repo = join(base, "repo"); gitRepo(repo);
+  capability(repo, "own", { capability: "acme.own", inject: "inject.md" }, { "inject.md": "## Own" });
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.own:\n      from: owned\n      global: true\n      injection-override: custom.md\n");
+  assert.throws(() => resolveOasConfig(repo, "dev"), /not allowed for from: owned.*edit its injects\/ file directly/);
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.own:\n      global: true\n      injection: custom.md\n");
+  assert.throws(() => resolveOasConfig(repo, "dev"), /renamed to "injection-override:"/);
+});
+
+test("oas type add declares agent types; inject eject copies a packaged default and sets the override", () => {
+  const base = temp(); const repo = join(base, "repo"); gitRepo(repo);
+  // Installed-provenance capability (eject allowed) and an owned one (refused).
+  const inst = join(repo, ".agents", "capabilities", "installed", "chat");
+  write(join(inst, "oas.json"), JSON.stringify({ capability: "acme.chat", version: "1.0.0", compatibility: { oas: ">=0.6.2" }, description: "Chat.", inject: "inject.md" }));
+  write(join(inst, "inject.md"), "## Packaged instructions");
+  writeCapabilityLock(repo, "acme.chat", { source: "test", version: "1.0.0", integrity: capabilityIntegrity(inst) });
+  capability(repo, "own", { capability: "acme.own", inject: "inject.md" }, { "inject.md": "## Own" });
+  write(join(repo, "oas-config.yaml"), "name: test\ncapabilities:\n  additive:\n    acme.chat:\n      global: true\n    acme.own:\n      global: true\n");
+  let r = spawnSync(process.execPath, [CLI, "type", "add", "reviewers", "--description", "Review agents", "--dir", repo], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  const cfg = readFileSync(join(repo, "oas-config.yaml"), "utf8");
+  assert.match(cfg, /agent-types:\n  reviewers:\n    description: Review agents/);
+  r = spawnSync(process.execPath, [CLI, "type", "list", "--dir", repo], { encoding: "utf8" });
+  assert.match(r.stdout, /reviewers/);
+  // Eject the capability injection.
+  r = spawnSync(process.execPath, [CLI, "inject", "eject", "acme.chat", "--dir", repo], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  const ejected = join(repo, ".agents", "injections", "capabilities", "acme.chat.md");
+  assert.equal(readFileSync(ejected, "utf8"), "## Packaged instructions");
+  const cap = resolveOasConfig(repo, "dev").capabilities.find((c) => c.id === "acme.chat");
+  assert.equal(cap.inject, ejected);
+  // Second eject refuses; owned capability refuses.
+  r = spawnSync(process.execPath, [CLI, "inject", "eject", "acme.chat", "--dir", repo], { encoding: "utf8" });
+  assert.equal(r.status, 1); assert.match(r.stderr, /already exists/);
+  r = spawnSync(process.execPath, [CLI, "inject", "eject", "acme.own", "--dir", repo], { encoding: "utf8" });
+  assert.equal(r.status, 1); assert.match(r.stderr, /owned\/path-sourced/);
 });
 
 test("init --template snapshots a local or named template with provenance and rewrites name", () => {

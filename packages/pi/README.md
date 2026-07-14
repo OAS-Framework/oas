@@ -1,27 +1,29 @@
 # @oas-framework/pi
 
-Minimal pi adapter for [OAS](https://github.com/OAS-Framework/oas).
+Pi runtime bridge for [OAS](https://github.com/OAS-Framework/oas).
 
 The runtime-neutral kernel and universal `oas` CLI live in
-`@oas-framework/oas`. This adapter registers no operational tools. It only:
+`@oas-framework/oas`. This bridge registers no operational tools. It only:
 
-- exposes `oas-getting-started` before an OAS workspace exists;
-- points spawned sessions at their exact instance-local `.agents/skills` set;
+- exposes `oas-getting-started` before an OAS workspace exists (the
+  acquisition funnel);
+- contributes the instance-local `.agents/skills` set inside a spawned
+  instance;
 - journals compaction summaries and sends resume nudges when the active
-  knowledge capability created `STATE.md`/`log.md`.
+  knowledge capability created `STATE.md`/`log.md` — the OKF session
+  protocol enforced at runtime.
 
-The kernel launches pi with `--no-skills --skill <instance>/.agents/skills`,
-so user, project, settings, ancestor, and pi-package skill discovery cannot
-pollute one soul's selected runtime surface.
+Skill resolution itself is owned by the kernel: spawn materializes the exact
+kernel + soul + active-capability set into each instance's `.agents/skills`
+and launches pi with that directory as an explicit skill path. Ambient
+skills (user-level, packages, work tree) coexist with the OAS-composed set.
 
 ```bash
 npm install -g @oas-framework/oas
 pi install npm:@oas-framework/pi
 ```
 
-Install matching versions and upgrade both packages together. Exact isolation
-needs the new kernel launch flags and this adapter's instance-only discovery.
-An older adapter still contributes workspace and package skill roots. OAS
+OAS
 publishes both packages from the same version tag. Reload pi after an adapter
 install or upgrade.
 

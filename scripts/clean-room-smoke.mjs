@@ -78,11 +78,11 @@ try {
   const spawned = core.spawnInstance(agentsRoot, agent, { instance: "probe-packed", repo: modernRepo, launch: false });
   const meta = JSON.parse(readFileSync(join(spawned.home, "instance.json"), "utf8"));
   const skills = readdirSync(join(spawned.home, ".agents", "skills")).sort();
-  if (JSON.stringify(skills) !== JSON.stringify(["memory-harvest", "oas", "okf", "private"])) throw new Error(`unexpected packed skills: ${skills.join(", ")}`);
+  if (JSON.stringify(skills) !== JSON.stringify(["memory-harvest", "oas", "oas-config", "okf", "private"])) throw new Error(`unexpected packed skills: ${skills.join(", ")}`);
   if (lstatSync(join(spawned.home, "AGENTS.md")).isSymbolicLink()) throw new Error("instance AGENTS.md was not generated");
   if (readlinkSync(join(spawned.home, "CLAUDE.md")) !== "AGENTS.md") throw new Error("instance CLAUDE.md is not canonical");
   if (readFileSync(join(agent._dir, "soul", "AGENTS.md"), "utf8") !== canonical) throw new Error("spawn mutated packed canonical soul");
-  if (!meta.capabilities.some((cap) => cap.id === "oas.okf") || !/--no-skills --skill/.test(meta.command)) throw new Error("packed instance metadata/isolation missing");
+  if (!meta.capabilities.some((cap) => cap.id === "oas.okf") || !/--skill /.test(meta.command)) throw new Error("packed instance metadata/isolation missing");
   const doctor = JSON.parse(run(oas, ["doctor", modernRepo, "--soul", "probe", "--json"], { env: { ...env, PI_AGENTS_ROOT: agentsRoot }, capture: true }));
   if (!doctor.composedInstructions.includes("Canonical instructions") || !doctor.composedInstructions.includes("Knowledge: OKF")) throw new Error("packed doctor composition incomplete");
   core.retireInstance(agentsRoot, spawned.instance);

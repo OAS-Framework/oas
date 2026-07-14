@@ -1,9 +1,10 @@
 /**
- * OAS pi adapter — minimal runtime glue.
+ * OAS pi runtime bridge — minimal glue.
  *
- * Skill visibility is deliberately instance-local. Outside an instance, only
- * oas-getting-started is contributed as pre-workspace bootstrap. The kernel
- * materializes every spawned instance's exact set in .agents/skills.
+ * The kernel materializes every spawned instance's exact set in
+ * .agents/skills; this bridge contributes it inside an instance, plus the
+ * pre-workspace oas-getting-started bootstrap outside one, and drives the
+ * memory session events. Ambient skills coexist with the OAS-composed set.
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { appendLogEntry, PACKAGED_SKILLS_DIR } from "./core-loader.mjs";

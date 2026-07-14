@@ -1,6 +1,7 @@
 # Knowledge Log
 
 ## 2026-07-14
+* **Creation**: [Config authorship completeness and ambient skill coexistence](/decisions/config-authorship-and-ambient-skills.md) — injection→injection-override (forbidden on owned/path), oas type / inject eject / use --settings, ambient skills coexist (restriction flags dropped), oas skill split into oas + oas-config.
 * **Update**: [implementation](/architecture/implementation.md), [skill layering](/architecture/skill-layering.md), [standalone CLI](/decisions/standalone-cli.md), and [roadmap](/roadmap/next-steps.md) now clarify that `@oas-framework/pi` is a runtime bridge for memory session events/resources/bootstrap, while skill resolution belongs to spawn-time materialization plus harness exclusion flags.
 
 ## 2026-07-13

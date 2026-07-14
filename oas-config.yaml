@@ -14,7 +14,7 @@ capabilities:
     knowledge:
       capability: oas.okf
       from: bundled
-      # injection: .agents/injections/capabilities/oas.okf.md
+      # injection-override: .agents/injections/capabilities/oas.okf.md
     # messaging: (unset — inherits from the laptop level: aweb)
     # Explicit none prevents an inherited task integration from occupying the
     # exclusive slot; integrations activate only through capability entries.
@@ -25,20 +25,20 @@ capabilities:
       from: bundled
       agent-types:
         framework-authors: true
-      # injection: .agents/injections/capabilities/oas.authoring.md
+      # injection-override: .agents/injections/capabilities/oas.authoring.md
 
 # ── Work modes — per-mode instruction overrides and setup hooks.
 work-modes:
   checkout:
-    # injection: .agents/injections/workmodes/checkout.md
+    # injection-override: .agents/injections/workmodes/checkout.md
   worktree:
-    # injection: .agents/injections/workmodes/worktree.md
+    # injection-override: .agents/injections/workmodes/worktree.md
   attached:
-    # injection: .agents/injections/workmodes/attached.md
+    # injection-override: .agents/injections/workmodes/attached.md
 
 # ── OAS defaults — the framework's baseline instruction block.
 oas:
-  # injection: .agents/injections/oas-defaults/oas.md
+  # injection-override: .agents/injections/oas-defaults/oas.md
 
 # Extra unconditional instruction blocks for every instance in this workspace.
 agents-md-injection:
