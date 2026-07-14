@@ -1,5 +1,8 @@
 # Knowledge Log
 
+## 2026-07-14
+* **Update**: [implementation](/architecture/implementation.md), [skill layering](/architecture/skill-layering.md), [standalone CLI](/decisions/standalone-cli.md), and [roadmap](/roadmap/next-steps.md) now clarify that `@oas-framework/pi` is a runtime bridge for memory session events/resources/bootstrap, while skill resolution belongs to spawn-time materialization plus harness exclusion flags.
+
 ## 2026-07-13
 * **Creation**: [parseYamlNested treated comment-only values as scalars](/lessons/yaml-parser-comment-only-values.md) — promotes the parser gotcha that comment-only values such as `layers:  # comment` must open nested maps, and that doc-example schema failures can reveal parser bugs.
 * **Creation**: [Config shape v2 — agent types in souls, layered capabilities, conventional injection overrides](/decisions/config-shape-agent-types-and-injections.md) — groups→agent-types with soul-declared membership, capabilities split into layers/additive, `from` provenance, commented `injection:` overrides, CLI as config author.

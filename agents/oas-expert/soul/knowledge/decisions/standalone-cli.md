@@ -2,7 +2,7 @@
 type: Decision
 title: Standalone oas CLI as the single integration point
 description: Ship @oas-framework/oas on npm as a global CLI + runtime-neutral lib; runtimes (pi extension, future Claude plugin) adapt to it rather than embedding the kernel.
-timestamp: 2026-07-10T10:00:00.000Z
+timestamp: 2026-07-14
 ---
 
 # Context
@@ -41,7 +41,9 @@ keeps the split cheap later.
 The capability-package decision resolves the former cross-runtime skill
 constraint: spawn materializes one exact instance-local `.agents/skills` set.
 Pi disables ambient discovery and Claude receives instance-local project and
-config-home views. Runtime adapters no longer bridge workspace skill roots.
+config-home views. Runtime adapters no longer bridge workspace skill roots or
+provide a fallback skill-resolution model; their runtime value is memory-session
+events and harness/bootstrap integration.
 
 # Status
 
@@ -57,6 +59,7 @@ tag-driven CI pipeline):
   flags; global getting-started skill.
 - v0.6.x: **the CLI became the universal command surface** — status/spawn/
   retire(--self)/create in the CLI with `--json` everywhere; the pi adapter
-  dropped ALL tools (glue only: skill discovery + memory automation);
+  dropped ALL tools (glue only: memory session events, instance resource
+  exposure, and the pre-workspace `oas-getting-started` bootstrap);
   skills/injections teach CLI commands exclusively. This completes the
   original intent: runtime adapters ship zero operations.

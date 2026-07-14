@@ -3,7 +3,7 @@ type: Area Guide
 title: The oas implementation
 description: The reference implementation — universal CLI/kernel, targetable capability packages, exact instance-local pi/Claude composition, and locked/trusted executable surfaces.
 tags: [implementation, cli, capabilities, integrations, security]
-timestamp: 2026-07-11
+timestamp: 2026-07-14
 ---
 
 The reference implementation ships two npm packages:
@@ -11,8 +11,10 @@ The reference implementation ships two npm packages:
 - **`@oas-framework/oas`**: runtime-neutral kernel (`lib/core.mjs`), universal
   `oas` CLI (`bin/oas.mjs`), bootstrap skills/instructions, and bundled
   capability packages.
-- **`@oas-framework/pi`**: thin pi adapter for instance resource exposure and
-  memory session events. It registers no operational tools.
+- **`@oas-framework/pi`**: runtime pi bridge for memory session events,
+  pi-facing instance resource exposure, and the pre-workspace
+  `oas-getting-started` bootstrap. It registers no operational tools and does
+  not own skill resolution.
 
 # Repository layout
 
@@ -60,7 +62,9 @@ Spawn generates an instance regular `AGENTS.md` from canonical soul content
 plus selected source-marked blocks, leaving the soul byte-identical. It
 copies only kernel + soul + active package skill trees into real directories
 under `.agents/skills`, records sources/settings/trust in `instance.json`, and keeps
-`CLAUDE.md`/Claude skill compatibility symlinks canonical.
+`CLAUDE.md`/Claude skill compatibility symlinks canonical. Skill resolution is
+fully owned by this spawn-time materialization plus harness exclusion flags,
+not by runtime adapter discovery.
 
 Pi launches with `--no-skills` and one explicit instance path, eliminating
 ambient user/project/settings/package skill discovery. The changed pi adapter

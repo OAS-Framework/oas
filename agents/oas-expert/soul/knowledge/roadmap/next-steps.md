@@ -3,7 +3,7 @@ type: Roadmap
 title: Roadmap and open threads
 description: What is planned, in flight, and unresolved for the OAS framework.
 tags: [roadmap]
-timestamp: 2026-07-11
+timestamp: 2026-07-14
 ---
 
 # In flight / next
@@ -36,6 +36,9 @@ timestamp: 2026-07-11
 - **Semantic instruction conflicts**: doctor exposes final composed prose, but
   machines cannot reliably detect contradictory natural-language blocks.
 - **Roster concurrency** in task integrations and session-only model scope.
+- **Pi package copy**: `@oas-framework/pi` package.json/README should describe
+  a runtime bridge for memory session events and pre-workspace bootstrap, not
+  instance-local skill discovery.
 
 # Done
 

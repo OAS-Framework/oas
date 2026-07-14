@@ -3,7 +3,7 @@ type: Area Guide
 title: Skill layering
 description: The content-layer rule for always-loaded instructions, on-demand skills, and index-first knowledge, plus exact capability-selected instance distribution.
 tags: [skills, memory, capabilities]
-timestamp: 2026-07-11
+timestamp: 2026-07-14
 ---
 
 # Content layers
@@ -23,8 +23,9 @@ capability block, skill, or knowledge concept.
 
 A skill's source may be kernel, soul-private, or an active capability package.
 Spawn resolves the target soul and materializes exactly those sources into the
-instance's `.agents/skills`. Duplicate names error unless config explicitly
-selects an override. `instance.json` records every name and source.
+instance's `.agents/skills`; the runtime adapter package is not a second skill
+resolution layer. Duplicate names error unless config explicitly selects an
+override. `instance.json` records every name and source.
 
 Pi disables ambient skill discovery and receives the one instance directory
 explicitly. Claude receives canonical project and config-home symlinks to the
