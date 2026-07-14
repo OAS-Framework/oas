@@ -62,8 +62,8 @@ that shell is non-interactive:
 ```bash
 oas init --tmux-mouse
 oas init --messaging none --tmux-mouse
-oas init --raw --knowledge okf --no-tmux-mouse
-oas init --tasks linear --tmux-mouse
+oas init --raw --knowledge oas.okf --no-tmux-mouse
+oas init --tasks oas.linear --tmux-mouse
 ```
 
 The scrolling option appends `set -g mouse on` to the existing `~/.tmux.conf`
@@ -121,6 +121,7 @@ skills, trust, and final generated `AGENTS.md` before spawn.
 ```bash
 mkdir -p agents
 oas create backend-expert --description "Owns backend architecture and implementation" --work worktree
+# Optional: --type <agent-type> joins a declared family so typed config targets apply.
 # Edit agents/backend-expert/soul/AGENTS.md: durable role, boundaries, workflow.
 oas doctor . --soul backend-expert
 oas spawn backend-expert --task "First concrete task"

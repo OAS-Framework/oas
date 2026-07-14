@@ -25,10 +25,10 @@ oas trust <id>                  # only if commands/hooks exist
 oas use <id> --global|--type <t>|--soul <s>
 ```
 
-## 1. Locate the oas-framework repository
+## 1. Locate the OAS framework repository
 
 Check a local pi package path, then likely locations such as
-`~/oas-framework`; verify with `git -C <dir> remote get-url origin`. Avoid
+`~/oas`; verify with `git -C <dir> remote get-url origin`. Avoid
 pi-managed git clones because updates reset them. If absent, ask where to
 clone `https://github.com/OAS-Framework/oas`.
 

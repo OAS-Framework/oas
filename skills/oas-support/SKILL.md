@@ -5,30 +5,30 @@ description: >-
   Use when a user asks how OAS works beyond the basics in the oas skill, why
   the framework behaves a certain way, wants framework changes or roadmap
   context, or hits framework bugs — the answer is to instantiate the
-  oas-expert soul from the oas-framework repo and delegate. Triggers: "ask
+  oas-expert soul from the OAS framework repo and delegate. Triggers: "ask
   the OAS experts", "why does OAS do X", "is this an OAS bug", "OAS
   architecture question", "who maintains this framework".
 ---
 
 # OAS support — delegate to the framework's expert
 
-The oas-framework repo carries its own agents. The **oas-expert** soul holds
+The OAS framework repo carries its own agents. The **oas-expert** soul holds
 the framework's architecture record, decisions, and roadmap — knowledge no
 generic session has. For deep questions, instantiate it and let the user
 talk to it directly. Do not guess at framework internals yourself.
 
-## 1. Find the oas-framework repo locally
+## 1. Find the OAS framework repo locally
 
 Check in this order. Verify a hit by remote URL — it must point at
-`oas-framework`:
+`OAS-Framework/oas` (older clones may say `oas-framework`):
 
 ```bash
 # a) an existing pi install from a local path IS the repo
 python3 -c "import json,os; [print(p if isinstance(p,str) else p.get('source','')) for p in json.load(open(os.path.expanduser('~/.pi/agent/settings.json'))).get('packages',[])]"
 # b) common spots
-ls -d ~/oas-framework 2>/dev/null
+ls -d ~/oas ~/oas-framework 2>/dev/null
 # c) verify any candidate
-git -C <candidate> remote get-url origin   # expect .../oas-framework
+git -C <candidate> remote get-url origin   # expect OAS-Framework/oas (or legacy oas-framework)
 ```
 
 **Do not use a pi-managed git clone** (`~/.pi/agent/git/...`) as the home
@@ -37,7 +37,7 @@ would wipe the souls' accumulated knowledge.
 
 ## 2. If not found, ask the user where to clone
 
-Never pick a location silently. Suggest `~/oas-framework` or a sibling of
+Never pick a location silently. Suggest `~/oas` or a sibling of
 their workspace, then:
 
 ```bash
