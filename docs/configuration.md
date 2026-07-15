@@ -121,7 +121,14 @@ it:
 - **Discovery**: `oas status --team` lists agents across every `agents/`
   root in the team scope (the scope's own plus each member repo's), so an
   agent in one repo can see teammates defined at the workspace level or in
-  sibling repos.
+  sibling repos. There is no explicit member list — every repo under the
+  team scope is a member by construction.
+- **Cross-repo spawn/retire**: `oas spawn <soul>` and `oas retire <instance>`
+  resolve across the team scope's repos when the name isn't found locally
+  (unique match wins; ambiguity errors with guidance to pass `--dir`). The
+  instance homes with the soul's own repo, works in that repo, and resolves
+  that repo's config chain — spawning from elsewhere changes nothing about
+  the instance itself.
 - **Messaging**: the aweb integration joins spawned instances into the
   resolved team (id wins over name; a bare name is resolved against the aweb
   root's memberships), with the instance name as the discoverable alias.

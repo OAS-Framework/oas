@@ -1,5 +1,8 @@
 # Knowledge Log
 
+## 2026-07-15
+* **Update**: [Team as a first-class config entity](/decisions/team-as-config-entity.md) — cross-repo spawn/retire implemented (team-scope soul/instance lookup, unique match wins, homing stays with the soul's repo); `team.repos:` closed as not needed (the scope's tree is the member list).
+
 ## 2026-07-14
 * **Update**: [Team as a first-class config entity](/decisions/team-as-config-entity.md) — added onboarding/degradation: `oas aweb setup` guided flow, graceful no-aw spawn, `oas update` + doctor-as-code for framework updates.
 * **Creation**: [Team as a first-class config entity](/decisions/team-as-config-entity.md) — `team:` (name + optional id) declares the deployment boundary; drives identity, `oas status --team` cross-repo discovery, and the aweb join preference chain (config id > name > settings pin > active team).

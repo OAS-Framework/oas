@@ -202,6 +202,43 @@ test("team block resolves closest-first, reaches hooks/TASK.md, and drives team-
   } finally { process.env.PATH = oldPath; }
 });
 
+test("cross-repo spawn resolves a sibling repo's soul via the team scope and homes it there", () => {
+  const base = temp(); const ws = join(base, "lfx"); mkdirSync(ws);
+  const repoA = join(ws, "self-serve"); gitRepo(repoA);
+  const repoB = join(ws, "projects-api"); gitRepo(repoB);
+  write(join(ws, "oas-config.yaml"), "name: lfx\nteam:\n  name: lfx-engineering\n");
+  mkdirSync(join(repoA, "agents"), { recursive: true });
+  write(join(repoB, "agents", "api-dev", "soul", "soul.yaml"), `name: api-dev\nkind: persistent\nrepo: ${repoB}\nwork: checkout\nruntime: pi\n`);
+  write(join(repoB, "agents", "api-dev", "soul", "AGENTS.md"), "# api-dev\n");
+  const env = { ...process.env, PATH: fakeRuntimes(base) }; delete env.PI_AGENTS_ROOT;
+  // Spawn from repo A; soul lives in repo B — unique team-wide match wins.
+  let r = spawnSync(process.execPath, [CLI, "spawn", "api-dev", "--no-launch", "--json", "--dir", repoA], { encoding: "utf8", env });
+  assert.equal(r.status, 0, r.stderr);
+  const res = JSON.parse(r.stdout.slice(r.stdout.indexOf("{")));
+  assert.match(res.home, new RegExp(`^${repoB.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/agents/api-dev/instances/`));
+  assert.equal(JSON.parse(readFileSync(join(res.home, "instance.json"), "utf8")).repo, repoB);
+  // Ambiguity: same soul name in repo A errors with guidance.
+  write(join(repoA, "agents", "api-dev", "soul", "soul.yaml"), `name: api-dev\nkind: persistent\nrepo: ${repoA}\nwork: checkout\nruntime: pi\n`);
+  write(join(repoA, "agents", "api-dev", "soul", "AGENTS.md"), "# local api-dev\n");
+  const repoC = join(ws, "third"); gitRepo(repoC);
+  write(join(repoC, "agents", "other-dev", "soul", "soul.yaml"), `name: other-dev\nkind: persistent\nrepo: ${repoC}\nwork: checkout\nruntime: pi\n`);
+  write(join(repoC, "agents", "other-dev", "soul", "AGENTS.md"), "# other\n");
+  write(join(repoB, "agents", "other-dev", "soul", "soul.yaml"), `name: other-dev\nkind: persistent\nrepo: ${repoB}\nwork: checkout\nruntime: pi\n`);
+  write(join(repoB, "agents", "other-dev", "soul", "AGENTS.md"), "# other\n");
+  r = spawnSync(process.execPath, [CLI, "spawn", "other-dev", "--no-launch", "--dir", repoA], { encoding: "utf8", env });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /multiple team repos/);
+  // Local soul still wins over team lookup (no cross-repo redirect).
+  r = spawnSync(process.execPath, [CLI, "spawn", "api-dev", "--purpose", "local", "--no-launch", "--json", "--dir", repoA], { encoding: "utf8", env });
+  assert.equal(r.status, 0, r.stderr);
+  const local = JSON.parse(r.stdout.slice(r.stdout.indexOf("{")));
+  assert.ok(local.home.startsWith(join(repoA, "agents")));
+  // Cross-repo retire finds the instance home in repo B.
+  r = spawnSync(process.execPath, [CLI, "retire", res.instance, "--dir", repoA], { encoding: "utf8", env });
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(!existsSync(res.home));
+});
+
 test("hooks run in deterministic order, with retire reversing spawn", () => {
   const base = temp(); const repo = join(base, "repo"); const home = join(base, "home"); mkdirSync(home); mkdirSync(repo);
   const script = `import {appendFileSync} from 'node:fs'; appendFileSync(process.env.OAS_HOME + '/order', process.env.OAS_EVENT + ':' + process.env.OAS_CAPABILITY + '\\n');`;

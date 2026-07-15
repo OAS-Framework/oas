@@ -83,7 +83,20 @@ doctor), not in a skill that could go stale.
 - Team declarations per-repo overriding the workspace: allowed by
   closest-wins mechanics (a repo can belong to a different team), but the
   normal pattern is one workspace-scope declaration.
-- Cross-repo *spawning* (spawn a sibling repo's soul from another repo):
-  deferred — homing and work-mode questions deserve their own decision.
-- `team.repos:` explicit member list: deferred, scan-of-direct-children is
-  deterministic and covers the workspace-of-repos pattern.
+- `team.repos:` explicit member list: **closed as not needed** (2026-07-15,
+  with the founder) — the team scope's directory tree *is* the member list;
+  every repo under the scope is a member by construction. Revisit only if a
+  deployment needs members outside the scope directory or nested deeper than
+  one level.
+
+# Cross-repo spawn (amended 2026-07-15)
+
+Implemented: `oas spawn <soul>` and `oas retire <instance>` fall back to a
+team-scope-wide lookup (`findTeamAgent`/`findTeamInstance` over
+`teamAgentRoots`) when the name isn't found at the local agents root. Unique
+match wins; multiple matches error with guidance to pass `--dir`; a local
+soul always shadows the team lookup. **Homing stays with the soul's repo**:
+the instance directory, work tree, and resolved config chain are all the
+owning repo's — where you spawned *from* changes nothing about the instance.
+This keeps `spawnInstance`/`retireInstance` untouched; only CLI root
+resolution learned the team.

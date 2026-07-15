@@ -40,6 +40,9 @@ oas status --team [--json]   # whole-team roster when config declares team: (all
 # cross-machine view: aweb team members, where OAS aliases are instance names
 oas create <name> [--description ...] [--type <agent-type>] [--repo ...] [--work worktree|checkout]
 oas spawn <agent> [--task ...] [--purpose ...] [--no-launch] [--json]
+# when config declares team:, spawn/retire also resolve souls and instances
+# defined in sibling repos of the team scope (unique match wins; the instance
+# homes with its owning repo, works in that repo, resolves that repo's config)
 oas retire <instance> [--delete-branch]
 ```
 

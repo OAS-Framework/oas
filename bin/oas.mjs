@@ -25,6 +25,7 @@ import {
   capabilityManifests, capabilityManifest, capabilityMissingRequires, capabilityIntegrity, capabilityTrust, capabilityExecutablePath,
   readCapabilityLocks, writeCapabilityLock,
   resolveOasConfig, resolveWorkMode, composeInstanceAgentsMd, parseYamlNested, packagedInject, teamAgentRoots,
+  findTeamAgent, findTeamInstance, workspaceOf,
   ensureRoot, findRoot, findAgent, listAgents, listInstances, listAgentDefs, createAgent as coreCreateAgent,
   spawnInstance, retireInstance, upsertTmpAgent, defaultRepo,
 } from "../lib/core.mjs";
@@ -568,11 +569,23 @@ function statusTeam() {
 function spawnCmd() {
   const name = args[1];
   if (!name || name.startsWith("--")) die("usage: oas spawn <agent> [--task <text>|--task-file <f>] [--purpose <slug>] [--repo <r>] [--work worktree|checkout|attached] [--work-dir <owner-work>] [--model <m>] [--branch <b>] [--instructions-file <f>|--def-file <f>] [--no-launch] [--json]");
-  const root = ensureRoot(flag("dir") || process.cwd());
+  let root = ensureRoot(flag("dir") || process.cwd());
   let agent = findAgent(root, name);
-  // tmp agents: create/update from raw instructions or a single-file def
   const instrFile = flag("instructions-file");
   const defFile = flag("def-file");
+  if (!agent && !instrFile && !defFile) {
+    // Cross-repo lookup: the soul may live in a sibling repo of the team scope.
+    // Unique match wins; the instance homes with its owning repo's agents root.
+    const teamHit = findTeamAgent(flag("dir") || process.cwd(), name);
+    const remote = (teamHit?.matches || []).filter((m) => resolve(m.root) !== resolve(root));
+    if (remote.length > 1) die(`soul "${name}" found in multiple team repos: ${remote.map((m) => shortPath(m.root)).join(", ")} — re-run with --dir <that repo>`);
+    if (remote.length === 1) {
+      root = remote[0].root;
+      agent = remote[0].agent;
+      console.log(`(cross-repo: soul "${name}" found at ${shortPath(root)} — instance homes there)`);
+    }
+  }
+  // tmp agents: create/update from raw instructions or a single-file def
   if (instrFile || defFile || !agent) {
     if (!agent && !instrFile && !defFile) {
       const def = listAgentDefs(process.cwd()).find((d) => d.name === name);
@@ -589,7 +602,7 @@ function spawnCmd() {
   }
   const r = spawnInstance(root, agent, {
     purpose: flag("purpose"), task: flag("task"), taskFile: flag("task-file"),
-    repo: flag("repo") || agent.repo || defaultRepo(process.cwd()),
+    repo: flag("repo") || agent.repo || defaultRepo(workspaceOf(root)) || defaultRepo(process.cwd()),
     work: flag("work"), workDir: flag("work-dir"), model: flag("model"), branch: flag("branch"),
     launch: !args.includes("--no-launch"),
   });
@@ -607,7 +620,12 @@ function retireCmd() {
   const isSelf = process.env.PI_AGENT_INSTANCE === name || process.env.OAS_INSTANCE === name;
   if (isSelf && !args.includes("--self")) die(`"${name}" is the calling instance — self-retire is irreversible; if your task is complete and you were told to retire, re-run with --self (finish your memory files FIRST; your session dies ~8s after)`);
   if (!isSelf && args.includes("--self")) die(`--self given but "${name}" is not the calling instance`);
-  const root = ensureRoot(flag("dir") || process.cwd());
+  let root = ensureRoot(flag("dir") || process.cwd());
+  // Cross-repo: the instance may home in a sibling repo of the team scope.
+  if (!listAgents(root).some((a) => existsSync(join(a._dir, "instances", name)))) {
+    const hit = findTeamInstance(flag("dir") || process.cwd(), name);
+    if (hit && resolve(hit.root) !== resolve(root)) { root = hit.root; console.log(`(cross-repo: instance homes at ${shortPath(root)})`); }
+  }
   const r = retireInstance(root, name, { self: isSelf, deleteBranch: args.includes("--delete-branch"), keepDir: args.includes("--keep-dir") });
   if (args.includes("--json")) { console.log(JSON.stringify(r, null, 2)); return; }
   console.log(`Retired ${r.retired} (agent ${r.agent})${r.worktreeRemoved ? ", worktree removed" : ""}${r.branchDeleted ? ", branch deleted" : ""}${r.harvested?.length ? `, harvested: ${r.harvested.join(", ")}` : ""}`);
@@ -849,6 +867,8 @@ Usage:
       [--work worktree|checkout|attached]   --def-file create a local (tmp) agent
       [--work-dir <owner-work>] [--model <m>] [--branch <b>]
       [--instructions-file <f>|--def-file <f>] [--no-launch] [--json]
+                                            with team: declared, unknown local souls
+                                            resolve across the team scope's repos
   oas retire <instance>                     retire an instance (window, hooks,
       [--self] [--delete-branch]            worktree, home); --self = retire the
       [--keep-dir] [--json]                 CALLING instance (delayed window kill)
