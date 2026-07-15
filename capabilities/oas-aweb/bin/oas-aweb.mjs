@@ -5,6 +5,8 @@
  * Invoked by the OAS kernel at instance lifecycle events (hook contract):
  *   oas-aweb spawn    mint a team-scoped aweb identity for the instance
  *   oas-aweb retire   gracefully self-delete it (BEFORE the home dir is removed)
+ *   oas-aweb roster   list the aweb team's members — the cross-machine directory
+ *                     of live instances (alias = instance name) and humans
  *
  * Env contract (set by the kernel):
  *   OAS_EVENT     spawn|retire
@@ -12,7 +14,7 @@
  *   OAS_HOME      instance home dir (cwd is also set to it)
  *   OAS_CONTEXT   resolution context dir (the soul's repo / agents root parent)
  *   OAS_WORKSPACE the agents root's parent — the team boundary
- *   OAS_SETTINGS  JSON of the provider's `settings:` block ({ team? })
+ *   OAS_SETTINGS  JSON of the provider's `settings:` block
  *   OAS_TEAM_NAME/OAS_TEAM_ID/OAS_TEAM_SCOPE  resolved config `team:` block (may be empty)
  *   OAS_META      JSON persisted from this hook's previous spawn output (retire only)
  *
@@ -34,7 +36,6 @@ const warn = (m) => out({ warning: `oas-aweb: ${String(m).slice(0, 300)}` });
 const event = process.env.OAS_EVENT || process.argv[2];
 const instance = process.env.OAS_INSTANCE;
 const home = process.env.OAS_HOME || process.cwd();
-const settings = JSON.parse(process.env.OAS_SETTINGS || "{}");
 
 /**
  * The aweb root (minting authority). BOUNDED candidates — the workspace is the team
@@ -73,13 +74,14 @@ if (event === "spawn") {
   const root = awebRoot();
   if (!root) warn(`no initialized aweb root (.aw) in the bounded candidates (home, its git repo, context repo, workspace ${process.env.OAS_WORKSPACE || "?"}) — no identity minted`);
   try {
-    // Team correctness: the config's `team:` block wins (id, then name), then a
-    // legacy settings.team pin, then the root's active team. ALWAYS pass --team-id
-    // explicitly — never inherit whatever team happens to be active at mint time —
-    // and verify the joined cert matches. The instance name IS the discoverable alias.
-    let team = process.env.OAS_TEAM_ID || process.env.OAS_TEAM_NAME || settings.team;
+    // Team correctness: the config's `team:` block wins (id, then name), else the
+    // root's active team. ALWAYS pass --team-id explicitly — never inherit whatever
+    // team happens to be active at mint time — and verify the joined cert matches.
+    // The instance name IS the discoverable alias (the team roster doubles as the
+    // cross-machine instance directory).
+    let team = process.env.OAS_TEAM_ID || process.env.OAS_TEAM_NAME;
     if (!team) team = JSON.parse(sh("aw team list --json", root)).active_team;
-    if (!team) warn("cannot determine target team (no config team block, no settings.team pin, no active team at root)");
+    if (!team) warn("cannot determine target team (no config team block, no active team at root)");
     // A bare team name (no namespace) resolves against the root's memberships.
     if (!team.includes(":")) {
       const teams = JSON.parse(sh("aw team list --json", root));
@@ -109,6 +111,24 @@ if (event === "spawn") {
     sh(`aw workspace delete ${shq(meta.alias)}`, home);
     out({ meta: { retired: true } });
   } catch (e) { warn(`self-delete failed (record will linger until stale): ${e.message || e}`); }
+} else if (event === "roster") {
+  // Cross-machine directory: every OAS-spawned instance joins the team with
+  // alias = instance name, so the team's member roster lists live instances
+  // wherever they run (plus human members). Local liveness comes from
+  // `oas status --team`; this is the network view.
+  const root = awebRoot();
+  if (!root) { console.error("oas aweb roster: no initialized aweb root (.aw) found"); process.exit(1); }
+  const team = process.env.OAS_TEAM_ID || process.env.OAS_TEAM_NAME || JSON.parse(sh("aw team list --json", root)).active_team;
+  if (!team) { console.error("oas aweb roster: cannot determine team (no config team block, no active team)"); process.exit(1); }
+  const teamFlag = team.includes(":") ? `--team-id ${shq(team)}` : `--team ${shq(team)}`;
+  const r = JSON.parse(sh(`aw id team members ${teamFlag} --json`, root, 60000));
+  if (process.argv.includes("--json")) { console.log(JSON.stringify(r, null, 2)); process.exit(0); }
+  console.log(`aweb team ${r.team_id || team} — member roster (cross-machine):`);
+  const members = r.members || [];
+  if (!members.length) console.log("  (no member certificates visible from this workspace)");
+  for (const m of members) console.log(`  ${m.alias || m.name || m.did || JSON.stringify(m)}`);
+  console.log("\nAliases minted by OAS are instance names; message one with `aw mail send <alias> ...`.");
+  process.exit(0);
 } else {
   warn(`unknown event "${event}" (expected spawn|retire)`);
 }

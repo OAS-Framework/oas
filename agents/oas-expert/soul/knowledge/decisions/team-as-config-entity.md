@@ -39,14 +39,26 @@ discovery.
    explicit `team.repos:` list was considered and deferred until scanning
    proves insufficient). `oas status --team` renders the whole-deployment
    roster; doctor shows the resolved team.
-3. **Messaging (aweb)**: the spawn hook's team preference is now config
-   `id` > config `name` > legacy `settings.team` pin > active team at the
-   aweb root. A bare name (no `:namespace`) is resolved against the root's
+3. **Messaging (aweb)**: the spawn hook's team preference is config `id` >
+   config `name` > active team at the aweb root (the legacy `settings.team`
+   pin was dropped — no legacy care on 0.x). A bare name (no `:namespace`) is resolved against the root's
    memberships — unique match wins, ambiguity/no-match warns with guidance
    to set `team.id`. The hook keeps its invariants: always `--team-id`
    explicit at invite, verify the joined cert, never inherit the ambient
    active team. **The instance name is the discoverable alias** (`aw team
    join --name <instance>`), unchanged and now documented as contract.
+
+# Cross-machine discovery
+
+`oas status --team` is the *local* view (this machine's filesystem). The
+cross-machine view rides the messaging layer: every OAS-spawned instance
+joins the aweb team with alias = instance name, so the team's certificate
+roster doubles as the network directory of live instances (plus humans).
+`oas aweb roster` (a trusted operational command on the oas.aweb package,
+v1.1.0) lists it via `aw id team members` from the resolved team; the aweb
+injection teaches both commands. Liveness across machines is
+eventually-consistent — retire self-deletes the workspace, but a crashed
+machine's records linger until the server marks them stale.
 
 # Rejected / deferred
 

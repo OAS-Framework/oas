@@ -125,6 +125,9 @@ it:
 - **Messaging**: the aweb integration joins spawned instances into the
   resolved team (id wins over name; a bare name is resolved against the aweb
   root's memberships), with the instance name as the discoverable alias.
+  Because every instance joins with its own name, the aweb team roster is
+  also the **cross-machine directory**: `oas aweb roster` lists team members
+  wherever they run, complementing the local `oas status --team`.
 
 ### `agent-types`
 

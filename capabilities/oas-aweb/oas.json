@@ -1,10 +1,12 @@
 {
   "capability": "oas.aweb",
   "command": "aweb",
-  "version": "1.0.0",
-  "compatibility": { "oas": ">=0.6.2" },
+  "version": "1.1.0",
+  "compatibility": {
+    "oas": ">=0.6.2"
+  },
   "layer": "messaging",
-  "description": "Messaging layer via aweb: per-instance team identities + native aw mail/chat skills.",
+  "description": "Messaging layer via aweb: per-instance team identities + native aw mail/chat skills + cross-machine team roster.",
   "requires": [
     {
       "command": "aw",
@@ -17,6 +19,9 @@
     "node_modules/@awebai/pi/skills/aweb-team-membership"
   ],
   "inject": "injects/aweb.md",
+  "commands": {
+    "roster": "bin/oas-aweb.mjs roster"
+  },
   "hooks": {
     "spawn": "bin/oas-aweb.mjs spawn",
     "retire": "bin/oas-aweb.mjs retire"

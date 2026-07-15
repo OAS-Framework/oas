@@ -36,6 +36,8 @@ Follow their injected protocol.
 ```bash
 oas status [--json]
 oas status --team [--json]   # whole-team roster when config declares team: (all repos in the team scope)
+# with the aweb messaging integration active, `oas aweb roster` adds the
+# cross-machine view: aweb team members, where OAS aliases are instance names
 oas create <name> [--description ...] [--type <agent-type>] [--repo ...] [--work worktree|checkout]
 oas spawn <agent> [--task ...] [--purpose ...] [--no-launch] [--json]
 oas retire <instance> [--delete-branch]

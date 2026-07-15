@@ -638,13 +638,19 @@ function createCmd() {
 function capabilityCommand() {
   let activeIds;
   let context = process.cwd();
+  let teamCtx;
   const instanceHome = process.env.PI_AGENT_HOME || process.env.OAS_HOME;
   const metaFile = instanceHome && join(instanceHome, "instance.json");
   if (metaFile && existsSync(metaFile)) {
     const meta = JSON.parse(readFileSync(metaFile, "utf8"));
     activeIds = (meta.capabilities || []).map((c) => c.id);
     context = meta.repo || context;
-  } else activeIds = resolveOasConfig(context, flag("soul")).capabilities.map((c) => c.id);
+    teamCtx = meta.team;
+  } else {
+    const resolved = resolveOasConfig(context, flag("soul"));
+    activeIds = resolved.capabilities.map((c) => c.id);
+    teamCtx = resolved.team;
+  }
   const mans = Object.values(capabilityManifests(context)).filter((m) => m.command === cmd && m.commands);
   if (!mans.length) return false;
   if (mans.length > 1) die(`duplicate operational command namespace "${cmd}": ${mans.map((m) => m.capability).join(", ")}`);
@@ -663,7 +669,10 @@ function capabilityCommand() {
   try { abs = capabilityExecutablePath(m, script); }
   catch (e) { die(e.message); }
   if (!abs) die(`${cmd} ${sub}: script not found (${join(m._dir, script)})`);
-  const r = spawnSync("node", [abs, ...rest, ...args.slice(2)], { stdio: "inherit", env: { ...process.env, OAS_CAPABILITY: m.capability } });
+  const r = spawnSync("node", [abs, ...rest, ...args.slice(2)], { stdio: "inherit", env: {
+    ...process.env, OAS_CAPABILITY: m.capability,
+    OAS_TEAM_NAME: teamCtx?.name || "", OAS_TEAM_ID: teamCtx?.id || "", OAS_TEAM_SCOPE: teamCtx?.scope || "",
+  } });
   process.exit(r.status ?? 1);
 }
 
