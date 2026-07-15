@@ -20,6 +20,9 @@ writes the canonical shape.
 ## Shape
 
 ```yaml
+team:                          # deployment boundary (typically workspace scope)
+  name: lfx-engineering
+  # id: lfx-engineering:example.com   # provider team id (aweb <name>:<namespace>)
 agent-types:
   developers:
     description: Agents that build the service
@@ -51,6 +54,10 @@ global + agent-type + soul bindings compose. Settings precedence is
 soul > agent-type > global, then closer config. Equal-specificity conflicts
 error. `false`/`enabled: false` is an explicit exclusion and follows the same
 precedence. V1 does not target instances or use tags/selectors.
+
+The closest `team:` declaration marks the deployment boundary: all repos
+under it share one team (identity + `oas status --team` discovery + the
+messaging provider's team). Declare it once at the workspace scope.
 
 ```bash
 oas type add <name> [--description <d>] [--dir <level>]

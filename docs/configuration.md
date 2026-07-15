@@ -37,6 +37,12 @@ Use `oas doctor <context> --soul <name>` to inspect the result.
 ```yaml
 name: example-service
 
+# ── Team — the deployment boundary. The closest scope declaring team: wins;
+# every repo under it resolves the same team (identity, discovery, messaging).
+team:
+  name: example-engineering
+  # id: example-engineering:example.com   # explicit provider team id (e.g. aweb <name>:<namespace>)
+
 # ── Agent types (families) ── declared here by name; each soul opts in via
 # `type: <name>` in its soul.yaml. Capability entries can target them.
 agent-types:
@@ -101,6 +107,24 @@ oas:
 agents-md-injection:
   repository: injects/repository.md
 ```
+
+### `team`
+
+`team:` declares the deployment boundary — typically at the workspace scope.
+The closest scope declaring it wins, so every repo under `~/lfx` resolves the
+same team. `name:` is required; `id:` optionally pins the provider team id
+(for aweb, the canonical `<name>:<namespace>` form). Three things hang off
+it:
+
+- **Identity**: instances record their team in `instance.json` and their
+  TASK.md briefing; hooks receive `OAS_TEAM_NAME`/`OAS_TEAM_ID`/`OAS_TEAM_SCOPE`.
+- **Discovery**: `oas status --team` lists agents across every `agents/`
+  root in the team scope (the scope's own plus each member repo's), so an
+  agent in one repo can see teammates defined at the workspace level or in
+  sibling repos.
+- **Messaging**: the aweb integration joins spawned instances into the
+  resolved team (id wins over name; a bare name is resolved against the aweb
+  root's memberships), with the instance name as the discoverable alias.
 
 ### `agent-types`
 

@@ -74,6 +74,16 @@
   "type": "object",
   "properties": {
     "name": { "type": "string" },
+    "team": {
+      "type": "object",
+      "description": "The deployment/team boundary. Closest scope declaring team: wins; used for identity, cross-repo agent discovery (oas status --team), and messaging providers.",
+      "properties": {
+        "name": { "type": "string" },
+        "id": { "type": "string", "description": "Explicit provider team id (e.g. aweb <name>:<namespace>)." }
+      },
+      "required": ["name"],
+      "additionalProperties": false
+    },
     "agent-types": {
       "type": "object",
       "description": "Agent families declared by name; membership is `type: <name>` in each soul.yaml.",

@@ -13,6 +13,7 @@
  *   OAS_CONTEXT   resolution context dir (the soul's repo / agents root parent)
  *   OAS_WORKSPACE the agents root's parent — the team boundary
  *   OAS_SETTINGS  JSON of the provider's `settings:` block ({ team? })
+ *   OAS_TEAM_NAME/OAS_TEAM_ID/OAS_TEAM_SCOPE  resolved config `team:` block (may be empty)
  *   OAS_META      JSON persisted from this hook's previous spawn output (retire only)
  *
  * Output (spawn, stdout JSON):
@@ -72,12 +73,21 @@ if (event === "spawn") {
   const root = awebRoot();
   if (!root) warn(`no initialized aweb root (.aw) in the bounded candidates (home, its git repo, context repo, workspace ${process.env.OAS_WORKSPACE || "?"}) — no identity minted`);
   try {
-    // Team correctness: the workspace config's pin wins; else the root's active team.
-    // ALWAYS pass --team-id explicitly — never inherit whatever team happens to be
-    // active at mint time — and verify the joined cert matches.
-    let team = settings.team;
+    // Team correctness: the config's `team:` block wins (id, then name), then a
+    // legacy settings.team pin, then the root's active team. ALWAYS pass --team-id
+    // explicitly — never inherit whatever team happens to be active at mint time —
+    // and verify the joined cert matches. The instance name IS the discoverable alias.
+    let team = process.env.OAS_TEAM_ID || process.env.OAS_TEAM_NAME || settings.team;
     if (!team) team = JSON.parse(sh("aw team list --json", root)).active_team;
-    if (!team) warn("cannot determine target team (no settings.team pin, no active team at root)");
+    if (!team) warn("cannot determine target team (no config team block, no settings.team pin, no active team at root)");
+    // A bare team name (no namespace) resolves against the root's memberships.
+    if (!team.includes(":")) {
+      const teams = JSON.parse(sh("aw team list --json", root));
+      const match = (teams.teams || []).map((t) => t.team_id || t.id || t).filter((tid) => String(tid).startsWith(`${team}:`));
+      if (match.length === 1) team = match[0];
+      else if (match.length > 1) warn(`team name "${team}" is ambiguous at ${root}: ${match.join(", ")} — set team.id in oas-config.yaml`);
+      else warn(`no membership matching team "${team}" at ${root} — join/create it first (aweb-team-membership skill), or set team.id`);
+    }
     const inv = JSON.parse(sh(`aw team invite --team-id ${shq(team)} --json`, root));
     const joined = JSON.parse(sh(`aw team join ${shq(inv.token)} --name ${shq(instance)} --json`, home));
     sh("aw init --do-not-touch-agents-md", home);

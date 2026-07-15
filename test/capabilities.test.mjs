@@ -163,6 +163,45 @@ test("duplicate skill names fail unless config explicitly selects a source", () 
   } finally { process.env.PATH = oldPath; }
 });
 
+test("team block resolves closest-first, reaches hooks/TASK.md, and drives team-wide status", () => {
+  const base = temp(); const ws = join(base, "lfx"); mkdirSync(ws);
+  const repo = join(ws, "self-serve"); gitRepo(repo);
+  write(join(ws, "oas-config.yaml"), "name: lfx\nteam:\n  name: lfx-engineering\n  id: lfx-engineering:example.com\n");
+  // Team env reaches hooks.
+  const script = `import {appendFileSync} from 'node:fs'; appendFileSync(process.env.OAS_HOME + '/team', process.env.OAS_TEAM_NAME + '|' + process.env.OAS_TEAM_ID);`;
+  capability(repo, "t", { capability: "acme.t", hooks: { spawn: "hook.mjs" } }, { "hook.mjs": script });
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.t:\n      global: true\n");
+  const resolved = resolveOasConfig(repo, "dev");
+  assert.equal(resolved.team.name, "lfx-engineering");
+  assert.equal(resolved.team.id, "lfx-engineering:example.com");
+  assert.equal(resolved.team.scope, ws);
+  const home = join(base, "home"); mkdirSync(home);
+  runLifecycleHooks("spawn", { home, instance: "dev-1", agentName: "dev", soulDir: home, contextDir: repo, resolved });
+  assert.equal(readFileSync(join(home, "team"), "utf8"), "lfx-engineering|lfx-engineering:example.com");
+  // Two agents roots inside the team scope: workspace-level and repo-level.
+  write(join(ws, "agents", "ws-agent", "soul", "soul.yaml"), `name: ws-agent\nkind: persistent\nrepo: ${repo}\nwork: checkout\n`);
+  write(join(ws, "agents", "ws-agent", "soul", "AGENTS.md"), "# ws-agent\n");
+  write(join(repo, "agents", "repo-agent", "soul", "soul.yaml"), `name: repo-agent\nkind: persistent\nrepo: ${repo}\nwork: checkout\n`);
+  write(join(repo, "agents", "repo-agent", "soul", "AGENTS.md"), "# repo-agent\n");
+  const env = { ...process.env }; delete env.PI_AGENTS_ROOT;
+  const r = spawnSync(process.execPath, [CLI, "status", "--team", "--json", "--dir", repo], { encoding: "utf8", env });
+  assert.equal(r.status, 0, r.stderr);
+  const payload = JSON.parse(r.stdout);
+  assert.equal(payload.team.name, "lfx-engineering");
+  const names = payload.roots.flatMap((x) => x.agents.map((a) => a.name)).sort();
+  assert.deepEqual(names, ["repo-agent", "ws-agent"]);
+  // TASK.md carries the team line at spawn; instance.json records the team.
+  const oldPath = process.env.PATH; process.env.PATH = fakeRuntimes(base);
+  try {
+    const root = join(repo, "agents");
+    const agent = { name: "repo-agent", kind: "persistent", repo, work: "checkout", runtime: "pi", _dir: join(root, "repo-agent"), _soulDir: join(root, "repo-agent", "soul") };
+    const res = spawnInstance(root, agent, { instance: "repo-agent-t", launch: false });
+    assert.match(readFileSync(join(res.home, "TASK.md"), "utf8"), /Team: lfx-engineering \(lfx-engineering:example\.com\)/);
+    const meta = JSON.parse(readFileSync(join(res.home, "instance.json"), "utf8"));
+    assert.equal(meta.team.name, "lfx-engineering");
+  } finally { process.env.PATH = oldPath; }
+});
+
 test("hooks run in deterministic order, with retire reversing spawn", () => {
   const base = temp(); const repo = join(base, "repo"); const home = join(base, "home"); mkdirSync(home); mkdirSync(repo);
   const script = `import {appendFileSync} from 'node:fs'; appendFileSync(process.env.OAS_HOME + '/order', process.env.OAS_EVENT + ':' + process.env.OAS_CAPABILITY + '\\n');`;

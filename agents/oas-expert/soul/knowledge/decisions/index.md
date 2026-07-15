@@ -1,5 +1,6 @@
 # Decisions
 
+* [Team as a first-class config entity](team-as-config-entity.md) - a team block (name + optional provider id) at the deployment scope drives instance identity, cross-repo discovery via oas status --team, and the aweb integration's team join with instance-name aliases.
 * [Config authorship completeness and ambient skill coexistence](config-authorship-and-ambient-skills.md) - injection renamed to injection-override and forbidden on owned/path capabilities; oas type / inject eject / use --settings close the CLI-authorship gaps; harness skill-restriction flags dropped so ambient skills coexist; oas skill split in two.
 * [Config shape v2 — agent types in souls, layered capabilities, conventional injection overrides](config-shape-agent-types-and-injections.md) - groups become agent-types with membership in soul.yaml; capabilities split into layers/additive with `from` provenance; commented `injection:` overrides point at .agents/injections/ conventions.
 

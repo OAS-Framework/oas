@@ -24,7 +24,7 @@ import {
   acquireCapability, restoreCapabilities,
   capabilityManifests, capabilityManifest, capabilityMissingRequires, capabilityIntegrity, capabilityTrust, capabilityExecutablePath,
   readCapabilityLocks, writeCapabilityLock,
-  resolveOasConfig, resolveWorkMode, composeInstanceAgentsMd, parseYamlNested, packagedInject,
+  resolveOasConfig, resolveWorkMode, composeInstanceAgentsMd, parseYamlNested, packagedInject, teamAgentRoots,
   ensureRoot, findRoot, findAgent, listAgents, listInstances, listAgentDefs, createAgent as coreCreateAgent,
   spawnInstance, retireInstance, upsertTmpAgent, defaultRepo,
 } from "../lib/core.mjs";
@@ -87,6 +87,7 @@ function doctorJson(dir) {
   const composition = doctorComposition(ctx, soulName);
   console.log(JSON.stringify({
     context: ctx,
+    team: r.team || null,
     chain: r.chain.map((c) => ({ file: c._file, level: c._level, levelKind: levelOf(c._level) })),
     layers: Object.fromEntries(LAYERS.map((l) => [l, r.layers[l] ? {
       integration: r.layers[l].id, level: r.layers[l].level, inject: r.layers[l].inject,
@@ -115,6 +116,8 @@ function doctor(dir) {
   for (const c of chain) {
     console.log(`  ${shortPath(c._file)}  [${levelOf(c._level)}]`);
   }
+
+  if (r.team) console.log(`\nTeam: ${r.team.name}${r.team.id ? `  (id: ${r.team.id})` : ""}  [scope: ${shortPath(r.team.scope)}]`);
 
   console.log("\nLayers:");
   for (const layer of LAYERS) {
@@ -518,6 +521,7 @@ function init() {
 
 // ---------- roster: status / spawn / retire / create ----------
 function status() {
+  if (args.includes("--team")) return statusTeam();
   const root = ensureRoot(flag("dir") || process.cwd());
   const data = listInstances(root);
   if (args.includes("--json")) { console.log(JSON.stringify({ root, agents: data }, null, 2)); return; }
@@ -532,6 +536,26 @@ function status() {
   }
   const defs = listAgentDefs(process.cwd());
   if (defs.length) console.log(`\n  importable defs: ${defs.map((d) => d.name).join(", ")}`);
+}
+
+function statusTeam() {
+  const ctx = resolve(flag("dir") || process.cwd());
+  const r = resolveOasConfig(ctx);
+  if (!r.team) die(`no team declared in the config chain from ${shortPath(ctx)} — add a "team:" block (name, optional id) at the deployment scope`);
+  const roots = teamAgentRoots(r.team.scope);
+  const payload = { team: r.team, roots: [] };
+  for (const root of roots) payload.roots.push({ root, agents: listInstances(root) });
+  if (args.includes("--json")) { console.log(JSON.stringify(payload, null, 2)); return; }
+  console.log(`oas status — team ${r.team.name}${r.team.id ? ` (${r.team.id})` : ""}  [scope: ${shortPath(r.team.scope)}]\n`);
+  if (!roots.length) { console.log("  (no agents/ directories in the team scope)"); return; }
+  for (const { root, agents } of payload.roots) {
+    console.log(`  ${shortPath(root)}`);
+    if (!agents.length) { console.log("    (no agents)"); continue; }
+    for (const a of agents) {
+      console.log(`    ${a.name}${a.kind === "tmp" ? " (local)" : ""}${a.description ? `  — ${a.description}` : ""}`);
+      for (const i of a.instances) console.log(`      • ${i.instance}  ${i.running ? "RUNNING" : "idle"}`);
+    }
+  }
 }
 
 function spawnCmd() {
@@ -759,6 +783,7 @@ else {
 
 Usage:
   oas status [--json]                       agents, souls, running instances
+  oas status --team [--json]                whole-team roster across the team scope's repos
   oas pane [--dir <dir>]                    open Control Pane, the live agent TUI
   oas create <name> [--description <d>]     create a persistent agent soul
       [--repo <r>] [--work <mode>] [--runtime pi|claude] [--model <m>]
