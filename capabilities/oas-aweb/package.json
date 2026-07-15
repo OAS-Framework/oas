@@ -1,7 +1,7 @@
 {
   "name": "@oas-framework/oas-aweb",
-  "version": "0.1.0",
-  "description": "OAS messaging provider: per-instance aweb identities (mint at spawn, self-delete at retire) and agents-md injection",
+  "version": "0.2.0",
+  "description": "OAS messaging provider: per-instance aweb identities (mint at spawn, self-delete at retire), cross-machine roster, guided setup, and agents-md injection",
   "keywords": [
     "pi-package",
     "oas",
