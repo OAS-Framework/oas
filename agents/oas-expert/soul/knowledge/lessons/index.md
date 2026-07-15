@@ -1,6 +1,7 @@
 # Lessons
 
 * [Acquisition provenance must outrank installation location for trust](acquisition-provenance-trust.md) - A package copied into a workspace-local capability directory remains externally acquired and must not inherit the trust of workspace-authored local code.
+* [Cross-repo spawn belongs in CLI root resolution, not the kernel](cross-repo-spawn-cli-root-resolution.md) - Team-scope cross-repo spawn/retire belongs in CLI-level root selection; keep spawnInstance/retireInstance untouched so homing follows the soul's own repo.
 * [npm package export maps must expose package.json](npm-package-exports-and-files.md) - When an OAS npm package adds an exports map, expose ./package.json and use a files whitelist before publishing to keep tooling working and private agent state out of the tarball.
 * [npm EOTP failure in tag-driven release CI](npm-eotp-in-tag-release.md) - CI npm publish fails with EOTP when NPM_TOKEN is subject to 2FA-on-publish; use a granular package read/write token, and treat repo renames as irrelevant to npm publish authority.
 * [Package smoke tests must cross the checkout boundary](package-smoke-tests-cross-checkout-boundary.md) - A source-tree probe cannot prove npm files lists, bin links, or thin-adapter kernel resolution; pack and install both artifacts in a clean external directory.
