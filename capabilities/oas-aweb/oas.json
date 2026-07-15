@@ -1,7 +1,7 @@
 {
   "capability": "oas.aweb",
   "command": "aweb",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "compatibility": {
     "oas": ">=0.6.2"
   },
@@ -20,7 +20,8 @@
   ],
   "inject": "injects/aweb.md",
   "commands": {
-    "roster": "bin/oas-aweb.mjs roster"
+    "roster": "bin/oas-aweb.mjs roster",
+    "setup": "bin/oas-aweb.mjs setup"
   },
   "hooks": {
     "spawn": "bin/oas-aweb.mjs spawn",

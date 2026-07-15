@@ -57,7 +57,10 @@ precedence. V1 does not target instances or use tags/selectors.
 
 The closest `team:` declaration marks the deployment boundary: all repos
 under it share one team (identity + `oas status --team` discovery + the
-messaging provider's team). Declare it once at the workspace scope.
+messaging provider's team). Declare it once at the workspace scope. With
+aweb messaging active, `oas aweb setup` walks the onboarding (aw CLI →
+workspace init → team create/join) and `oas aweb roster` shows the
+cross-machine member directory.
 
 ```bash
 oas type add <name> [--description <d>] [--dir <level>]

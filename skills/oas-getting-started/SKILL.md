@@ -55,6 +55,13 @@ Present these defaults to the user and ask before creating config. Common
 choices: disable messaging for a solo repo; choose `oas.linear`/`oas.jira` for
 tasks; use `--raw` for all layers off.
 
+If the user keeps aweb messaging: declare the team in the deployment scope's
+config (`team:` with a name; see the oas-config skill), then run
+`oas aweb setup` — it checks the `aw` CLI, the aweb workspace at the team
+scope, and team membership, and prints exactly the one next step each time
+(including first-ever aweb account creation via `aw init`). Users who have
+never used aweb just follow its prompts; nothing else is required.
+
 Also ask whether they want normal mouse/trackpad scrolling in tmux agent
 windows. Pass the answer explicitly when commands run through an agent, because
 that shell is non-interactive:

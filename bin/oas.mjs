@@ -20,7 +20,7 @@ import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { enableTmuxMouse, tmuxConfigPath, tmuxMouseEnabled } from "../lib/tmux-config.mjs";
 import {
-  LAYERS, LEGACY_HOME_CAPABILITIES_DIR, OAS_LOCK_FILE, configChain,
+  LAYERS, LEGACY_HOME_CAPABILITIES_DIR, OAS_LOCK_FILE, OAS_VERSION, configChain,
   acquireCapability, restoreCapabilities,
   capabilityManifests, capabilityManifest, capabilityMissingRequires, capabilityIntegrity, capabilityTrust, capabilityExecutablePath,
   readCapabilityLocks, writeCapabilityLock,
@@ -110,6 +110,13 @@ function doctor(dir) {
   const chain = configChain(ctx);
   const r = resolveOasConfig(ctx, soulName);
   console.log(`oas doctor — resolved from ${shortPath(ctx)}\n`);
+
+  // Kernel/bridge version skew (published in lockstep from one tag).
+  const piPkgFile = join(homedir(), ".pi", "agent", "npm", "node_modules", "@oas-framework", "pi", "package.json");
+  if (existsSync(piPkgFile)) {
+    const bridge = JSON.parse(readFileSync(piPkgFile, "utf8")).version;
+    if (bridge !== OAS_VERSION) console.log(`WARNING: version skew — kernel ${OAS_VERSION}, pi bridge ${bridge}; run \`oas update\` (they publish in lockstep)\n`);
+  }
 
   console.log("Config chain (closest first):");
   if (chain.length === 0) console.log("  (none — no oas-config.yaml found walking up)");
@@ -769,12 +776,52 @@ function injectCmd() {
   console.log(`Set injection-override in ${shortPath(file)}. Edit the ejected file; it no longer tracks package updates.`);
 }
 
+// ---------- update ----------
+function updateCmd() {
+  const checkOnly = args.includes("--check");
+  let latest;
+  try { latest = execFileSync("npm", ["view", "@oas-framework/oas", "version"], { encoding: "utf8", timeout: 30000 }).trim(); }
+  catch (e) { die(`cannot check npm for the latest version: ${e.message}`); }
+  console.log(`@oas-framework/oas  installed: ${OAS_VERSION}  latest: ${latest}`);
+  // pi bridge, if a pi installation carries it.
+  let piBridge;
+  const piPkg = join(homedir(), ".pi", "agent", "npm", "node_modules", "@oas-framework", "pi", "package.json");
+  if (existsSync(piPkg)) piBridge = JSON.parse(readFileSync(piPkg, "utf8")).version;
+  if (piBridge) console.log(`@oas-framework/pi   installed: ${piBridge}  latest: ${latest} (published in lockstep)`);
+  if (latest === OAS_VERSION && (!piBridge || piBridge === latest)) { console.log("Up to date."); return; }
+  const steps = [];
+  if (latest !== OAS_VERSION) steps.push(`npm install -g @oas-framework/oas@${latest}`);
+  if (piBridge && piBridge !== latest) steps.push(`pi uninstall npm:@oas-framework/pi@${piBridge}`, `pi install npm:@oas-framework/pi@${latest}`);
+  console.log("\nUpdate steps:");
+  for (const s of steps) console.log(`  ${s}`);
+  if (checkOnly) { console.log("\n(--check: not executing)"); return; }
+  const interactive = process.stdin.isTTY && process.stdout.isTTY;
+  if (interactive) {
+    process.stdout.write("\nRun these now? [y/N] ");
+    const buf = Buffer.alloc(16);
+    let answer = "";
+    try { answer = buf.toString("utf8", 0, readSync(0, buf, 0, 16)).trim().toLowerCase(); } catch { /* no input */ }
+    if (answer !== "y" && answer !== "yes") { console.log("Not updating."); return; }
+  } else if (!args.includes("--yes")) {
+    console.log("\nNon-interactive: pass --yes to execute, or run the steps yourself.");
+    return;
+  }
+  for (const s of steps) {
+    console.log(`\n$ ${s}`);
+    const [bin, ...rest] = s.split(/\s+/);
+    const r = spawnSync(bin, rest, { stdio: "inherit" });
+    if (r.status !== 0) die(`step failed: ${s}`);
+  }
+  console.log(`\nUpdated to ${latest}. Now verify each deployment: run \`oas doctor\` at your workspace/repo scopes — it reports config spellings this version rejects, version skew, and missing requirements. Restart running pi sessions to pick up the new bridge.`);
+}
+
 // ---------- main ----------
 if (cmd === "doctor") {
   const doctorDir = args[1] && !args[1].startsWith("--") ? args[1] : undefined;
   args.includes("--json") ? doctorJson(doctorDir) : doctor(doctorDir);
 }
 else if (cmd === "use") use();
+else if (cmd === "update") updateCmd();
 else if (cmd === "type") typeCmd();
 else if (cmd === "inject") injectCmd();
 else if (cmd === "install") install();
@@ -807,6 +854,8 @@ Usage:
       [--keep-dir] [--json]                 CALLING instance (delayed window kill)
   oas doctor [dir] [--soul <name>] [--json] resolved targets, trust, requirements;
                                             --soul shows final composed AGENTS.md
+  oas update [--check] [--yes]              check npm for a newer kernel+pi bridge and
+                                            optionally run the update; then run oas doctor
   oas install [<id|git-url|path>] [--dir <d>] acquire + lock into <level>/.agents/
                                             capabilities/installed/; bare \`oas install\`
                                             restores locked-but-missing artifacts;

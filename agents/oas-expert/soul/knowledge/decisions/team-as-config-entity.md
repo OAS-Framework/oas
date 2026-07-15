@@ -60,6 +60,24 @@ injection teaches both commands. Liveness across machines is
 eventually-consistent — retire self-deletes the workspace, but a crashed
 machine's records linger until the server marks them stale.
 
+# Onboarding and degradation
+
+`oas aweb setup` (operational command, oas.aweb v1.2.0) is the guided,
+idempotent onboarding: it checks in order (1) config `team:` declared, (2)
+`aw` CLI present, (3) aweb workspace at the team scope (`aw init` — including
+first-ever hosted account creation), (4) membership matching the configured
+team (`aw team create` / `aw team join <token>`), printing exactly the one
+next step at each stage. The aweb root candidate list now puts the declared
+team scope (OAS_TEAM_SCOPE) first. When `aw` is missing, spawn degrades
+gracefully — the hook warns "messaging disabled for this instance" with the
+install pointer, never blocks; roster/setup exit 1 with the same pointer.
+
+`oas update [--check|--yes]` checks npm for the latest kernel+bridge (they
+publish in lockstep from one tag), shows the steps, executes on confirmation,
+and directs the user to `oas doctor` afterwards — migration knowledge ships
+in the new kernel (pointed config-spelling errors, version-skew warning in
+doctor), not in a skill that could go stale.
+
 # Rejected / deferred
 
 - Team declarations per-repo overriding the workspace: allowed by
