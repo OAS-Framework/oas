@@ -271,6 +271,39 @@ test("team block resolves closest-first, reaches hooks/TASK.md, and drives team-
   } finally { process.env.PATH = oldPath; }
 });
 
+test("workspace mode links work to the team scope, records no branch, and requires a boundary", () => {
+  const base = temp(); const ws = join(base, "lfx"); mkdirSync(ws);
+  const agentsRepo = join(ws, "lfx-agents"); gitRepo(agentsRepo);
+  const member = join(ws, "member-repo"); gitRepo(member);
+  write(join(ws, "oas-config.yaml"), "name: lfx\nteam:\n  name: lfx\n");
+  const root = join(agentsRepo, "agents");
+  write(join(root, "coord", "soul", "soul.yaml"), `name: coord\nkind: persistent\nrepo: ${agentsRepo}\nwork: workspace\nruntime: pi\n`);
+  write(join(root, "coord", "soul", "AGENTS.md"), "# coord\n");
+  const agent = findAgent(root, "coord");
+  const oldPath = process.env.PATH; process.env.PATH = fakeRuntimes(base);
+  try {
+    const res = spawnInstance(root, agent, { instance: "coord-1", launch: false });
+    assert.equal(res.work, "workspace");
+    assert.equal(readlinkSync(join(res.home, "work")), resolve(ws));
+    assert.ok(readFileSync(join(res.home, "TASK.md"), "utf8").includes("WHOLE WORKSPACE"));
+    assert.ok(readFileSync(join(res.home, "AGENTS.md"), "utf8").includes("Work mode: workspace"));
+    const meta = JSON.parse(readFileSync(join(res.home, "instance.json"), "utf8"));
+    assert.equal(meta.branch, undefined);
+    // Retire never touches the workspace tree.
+    retireInstance(root, "coord-1", {});
+    assert.ok(existsSync(join(ws, "member-repo")));
+  } finally { process.env.PATH = oldPath; }
+  // No boundary: a bare repo outside any team/workspace config refuses workspace mode.
+  const lone = join(base, "lone"); gitRepo(lone);
+  const loneRoot = join(lone, "agents");
+  write(join(loneRoot, "solo", "soul", "soul.yaml"), `name: solo\nkind: persistent\nrepo: ${lone}\nwork: workspace\nruntime: pi\n`);
+  write(join(loneRoot, "solo", "soul", "AGENTS.md"), "# solo\n");
+  const oldPath2 = process.env.PATH; process.env.PATH = fakeRuntimes(base);
+  try {
+    assert.throws(() => spawnInstance(loneRoot, findAgent(loneRoot, "solo"), { instance: "solo-1", launch: false }), /needs a declared boundary/);
+  } finally { process.env.PATH = oldPath2; }
+});
+
 test("cross-repo spawn resolves a sibling repo's soul via the team scope and homes it there", () => {
   const base = temp(); const ws = join(base, "lfx"); mkdirSync(ws);
   const repoA = join(ws, "self-serve"); gitRepo(repoA);

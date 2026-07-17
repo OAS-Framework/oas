@@ -151,7 +151,7 @@ function doctor(dir) {
   if (r.injects.length === 0) console.log("  (none)");
   for (const inj of r.injects) console.log(`  ${inj.source}: ${shortPath(inj.file)}`);
 
-  for (const mode of ["worktree", "checkout", "attached"]) {
+  for (const mode of ["worktree", "checkout", "attached", "workspace"]) {
     const wm = resolveWorkMode(ctx, mode);
     console.log(`\nWork mode ${mode}: inject ${wm.inject ? shortPath(wm.inject) : "none"}${wm.setup ? `, setup ${shortPath(wm.setup)}` : ""}`);
   }
@@ -611,7 +611,7 @@ function statusTeam() {
 
 function spawnCmd() {
   const name = args[1];
-  if (!name || name.startsWith("--")) die("usage: oas spawn <agent> [--task <text>|--task-file <f>] [--purpose <slug>] [--repo <r>] [--work worktree|checkout|attached] [--work-dir <owner-work>] [--runtime pi|claude] [--model <m>] [--branch <b>] [--instructions-file <f>|--def-file <f>] [--no-launch] [--json]");
+  if (!name || name.startsWith("--")) die("usage: oas spawn <agent> [--task <text>|--task-file <f>] [--purpose <slug>] [--repo <r>] [--work worktree|checkout|attached|workspace] [--work-dir <owner-work>] [--runtime pi|claude] [--model <m>] [--branch <b>] [--instructions-file <f>|--def-file <f>] [--no-launch] [--json]");
   let root = ensureRoot(flag("dir") || process.cwd());
   let agent = findAgent(root, name);
   const instrFile = flag("instructions-file");
@@ -684,7 +684,7 @@ async function paneCmd() {
 
 function createCmd() {
   const name = args[1];
-  if (!name || name.startsWith("--")) die("usage: oas create <name> [--description <d>] [--type <agent-type>] [--repo <r>] [--work worktree|checkout|attached] [--runtime pi|claude] [--model <m>] [--instructions-file <f>]");
+  if (!name || name.startsWith("--")) die("usage: oas create <name> [--description <d>] [--type <agent-type>] [--repo <r>] [--work worktree|checkout|attached|workspace] [--runtime pi|claude] [--model <m>] [--instructions-file <f>]");
   const root = ensureRoot(flag("dir") || process.cwd());
   const instrFile = flag("instructions-file");
   const r = coreCreateAgent(root, {
@@ -793,7 +793,7 @@ function injectCmd() {
   const dir = resolve(flag("dir") || process.cwd());
   const file = join(dir, "oas-config.yaml");
   if (!existsSync(file)) die(`no oas-config.yaml at ${shortPath(dir)} — run oas init first`);
-  if (["checkout", "worktree", "attached"].includes(target)) die("work-mode injection overrides were removed — the packaged briefings are the contract; work modes support only setup: (env bootstrap script)");
+  if (["checkout", "worktree", "attached", "workspace"].includes(target)) die("work-mode injection overrides were removed — the packaged briefings are the contract; work modes support only setup: (env bootstrap script)");
   const isWorkMode = false;
   const isKernel = target === "oas";
   const src = isKernel ? packagedInject("oas", dir) : isWorkMode ? packagedInject(`work-${target}`, dir) : packagedInject(target, dir);
@@ -908,7 +908,7 @@ Usage:
       [--instructions-file <f>]
   oas spawn <agent> [--task <text>]         spawn an instance (tmux; --no-launch
       [--purpose <slug>] [--repo <r>]       = scaffold only); --instructions-file/
-      [--work worktree|checkout|attached]   --def-file create a local (tmp) agent
+      [--work worktree|checkout|attached|workspace]  --def-file creates a local (tmp) agent
       [--work-dir <owner-work>] [--runtime pi|claude] [--model <m>] [--branch <b>]
       [--instructions-file <f>|--def-file <f>] [--no-launch] [--json]
                                             with team: declared, unknown local souls

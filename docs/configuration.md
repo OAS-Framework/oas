@@ -230,7 +230,10 @@ Work modes remain soul/instance topology, not capability packages:
 
 - `worktree`: dedicated branch/worktree;
 - `checkout`: shared current checkout;
-- `attached`: another instance's work tree.
+- `attached`: another instance's work tree;
+- `workspace`: the whole team scope — cross-repo coordinators that read all
+  member repos but never edit them (their soul's knowledge updates arrive as
+  PRs to the soul's home repo).
 
 Work-mode briefings are packaged with the kernel and are not overridable;
 the only work-mode configuration is `setup:` — an env-bootstrap command that

@@ -179,6 +179,32 @@ only what the briefing names, keep commits small and attributable. Retiring
 an attached instance never removes the shared tree. The packaged
 `work-attached` instruction source carries this discipline into each generated instance AGENTS.md.
 
+### `workspace` — cross-repo coordinator
+
+`work/` is a symlink to the **whole workspace** (the team scope declared by
+`team:`, else the workspace-scope config directory) — not a repo. Every
+member repo is read-context; the instance's product is coordination:
+routing, analysis, task-writing, messaging, spawning specialists.
+
+Use this for free agents that support cross-repo work but are not tied to
+any one repo — coordinators, dispatchers, architects. The soul itself still
+lives in (and is committed to) its home repo (e.g. a workspace's
+`lfx-agents/` repo); where the soul lives and where it works are decoupled.
+
+Rules:
+
+- Read freely across member repos; **never edit or commit inside them** —
+  route changes to the owning repo's agents or the human.
+- No git state operations in any member repo.
+- The one exception is the soul's own home repo: knowledge promotion writes
+  there via the knowledge layer's harvest, **as a PR on a branch**, never a
+  direct push (the OKF integration does this automatically for
+  workspace-mode instances).
+
+Spawning workspace mode requires a declared boundary (a `team:` block or a
+workspace-scope config); the instance records no branch — the workspace is
+not a git tree.
+
 ## Agents root
 
 The agents root is the nearest `agents/` directory walking upward from the

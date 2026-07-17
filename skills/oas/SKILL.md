@@ -38,7 +38,10 @@ oas status [--json]
 oas status --team [--json]   # whole-team roster when config declares team: (all repos in the team scope)
 # with the aweb messaging integration active, `oas aweb roster` adds the
 # cross-machine view: aweb team members, where OAS aliases are instance names
-oas create <name> [--description ...] [--type <agent-type>] [--repo ...] [--work worktree|checkout]
+oas create <name> [--description ...] [--type <agent-type>] [--repo ...] [--work worktree|checkout|attached|workspace]
+# workspace mode = cross-repo coordinator: ./work is the whole team scope; read
+# all member repos, edit none; soul knowledge updates arrive as PRs to the
+# soul's home repo via `oas okf harvest`
 oas spawn <agent> [--task ...] [--purpose ...] [--no-launch] [--json]
 # when config declares team:, spawn/retire also resolve souls and instances
 # defined in sibling repos of the team scope (unique match wins; the instance

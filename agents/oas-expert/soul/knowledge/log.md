@@ -1,6 +1,7 @@
 # Knowledge Log
 
 ## 2026-07-17
+* **Creation**: [Workspace work mode for cross-repo coordinators](/decisions/workspace-work-mode.md) — fourth work mode: ./work = team scope, read-all edit-none discipline, soul knowledge lands as PRs to the soul's home repo (oas.okf v1.1.0 harvest branch+PR flow).
 * **Creation**: [Init-time acquisition cannot rely on config-chain discovery](/lessons/init-acquisition-discovery-gotcha.md) — promoted the init-time gotcha that commands acquiring capabilities before writing config must use the acquisition result directly instead of rediscovering through config-chain manifest lookup.
 * **Creation**: [Marketplace over bundled, work modes simplified, runtime integration at spawn](/decisions/marketplace-workmodes-runtime.md) — v0.13.0 breaking set: marketplace acquisition replaces bundled origin, work-mode overrides removed (setup: stays), init prompts per layer in a TTY, claude runtime wired end-to-end (oas-claude-config + aweb channel plugin via hook launch args).
 
