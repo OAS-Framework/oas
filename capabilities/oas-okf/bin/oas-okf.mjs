@@ -23,8 +23,21 @@
 import { existsSync, mkdirSync, writeFileSync, readFileSync, readdirSync, copyFileSync, realpathSync } from "node:fs";
 import { join, isAbsolute, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { execSync } from "node:child_process";
 
-const FRAMEWORK_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
+/** The kernel install root. When this package runs from inside the kernel
+ * (marketplace source tree), ../../.. works; when it runs as a copied
+ * marketplace install (.agents/capabilities/installed/oas-okf), resolve the
+ * kernel through `oas root` — the same mechanism adapters use. */
+const FRAMEWORK_ROOT = (() => {
+  const rel = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
+  if (existsSync(join(rel, "lib", "core.mjs"))) return rel;
+  try {
+    const root = execSync("oas root", { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 15000 }).trim();
+    if (root && existsSync(join(root, "lib", "core.mjs"))) return root;
+  } catch { /* fall through */ }
+  return rel; // callers report the missing module with a clear path
+})();
 
 const out = (o) => { process.stdout.write(JSON.stringify(o) + "\n"); process.exit(0); };
 const warn = (m) => out({ warning: `oas-okf: ${String(m).slice(0, 300)}` });
@@ -165,7 +178,7 @@ _(the single next action — keep this current; a fresh session on any model res
     if (["local-agents", "tmp-agents"].some((b) => existsSync(harvesterHome(b)))) skip("harvester already running for this instance");
     let agentDef = core.findAgent(root, "memory-harvest");
     if (!agentDef) {
-      core.upsertTmpAgent(root, { name: "memory-harvest", instructions: readFileSync(join(FRAMEWORK_ROOT, "capabilities", "oas-okf", "agents", "memory-harvest.md"), "utf8") });
+      core.upsertTmpAgent(root, { name: "memory-harvest", instructions: readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "agents", "memory-harvest.md"), "utf8") });
       agentDef = core.findAgent(root, "memory-harvest");
     }
     // Harvest model: explicit okf settings win (hook env, or resolved from config
