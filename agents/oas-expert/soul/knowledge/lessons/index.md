@@ -1,5 +1,6 @@
 # Lessons
 
+* [Init-time acquisition cannot rely on config-chain discovery](init-acquisition-discovery-gotcha.md) - capabilityManifests only scans scopes that already have an oas-config.yaml, so oas init must use acquisition results directly before writing config.
 * [Acquisition provenance must outrank installation location for trust](acquisition-provenance-trust.md) - A package copied into a workspace-local capability directory remains externally acquired and must not inherit the trust of workspace-authored local code.
 * [Cross-repo spawn belongs in CLI root resolution, not the kernel](cross-repo-spawn-cli-root-resolution.md) - Team-scope cross-repo spawn/retire belongs in CLI-level root selection; keep spawnInstance/retireInstance untouched so homing follows the soul's own repo.
 * [npm package export maps must expose package.json](npm-package-exports-and-files.md) - When an OAS npm package adds an exports map, expose ./package.json and use a files whitelist before publishing to keep tooling working and private agent state out of the tarball.
