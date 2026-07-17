@@ -45,7 +45,7 @@ selects a source.
 ## Package locations
 
 ```text
-<package>/capabilities/<name>/oas.json                 # bundled with the framework
+<package>/capabilities/<name>/oas.json                 # the official marketplace (install source, not ambient)
 <level>/.agents/capabilities/installed/<name>/oas.json # acquired (gitignored, restorable)
 <level>/.agents/capabilities/owned/<name>/oas.json     # authored at this scope (source; committed where the scope is a repo)
 <level>/oas-lock.json                                  # external source/integrity/trust

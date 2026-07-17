@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import {
   capabilityIntegrity, capabilityManifest, composeInstanceAgentsMd, createAgent, findAgent, resolveOasConfig,
-  retireInstance, runLifecycleHooks, spawnInstance, writeCapabilityLock,
+  resolveClaudeBinary, resolveWorkMode, retireInstance, runLifecycleHooks, spawnInstance, writeCapabilityLock,
 } from "../lib/core.mjs";
 
 const CLI = resolve(new URL("../bin/oas.mjs", import.meta.url).pathname);
@@ -163,6 +163,75 @@ test("duplicate skill names fail unless config explicitly selects a source", () 
   } finally { process.env.PATH = oldPath; }
 });
 
+test("marketplace lifecycle: init acquires layers, bundled is rejected, restore re-copies", () => {
+  const base = temp(); const repo = join(base, "repo"); gitRepo(repo);
+  let r = spawnSync(process.execPath, [CLI, "init", "--knowledge", "oas.okf", "--messaging", "none", "--no-tmux-mouse", "--dir", repo], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  const config = readFileSync(join(repo, "oas-config.yaml"), "utf8");
+  assert.match(config, /from: installed/);
+  assert.doesNotMatch(config, /bundled/);
+  // Work modes scaffold shows setup:, not injection overrides.
+  assert.match(config, /work-modes:\n  worktree:\n    # setup: scripts\/setup-worktree\.sh/);
+  assert.doesNotMatch(config, /injections\/workmodes/);
+  // The acquired copy resolves and is trusted (marketplace source).
+  const cap = resolveOasConfig(repo, "dev").capabilities.find((c) => c.id === "oas.okf");
+  assert.ok(cap.trust.trusted);
+  assert.ok(cap._dir || cap.provenance);
+  // from: bundled is rejected with migration guidance.
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  layers:\n    knowledge:\n      capability: oas.okf\n      from: bundled\n");
+  assert.throws(() => resolveOasConfig(repo, "dev"), /no longer supported.*oas install/s);
+  // Restore: delete the artifact, bare install brings it back at locked integrity.
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  layers:\n    knowledge:\n      capability: oas.okf\n      from: installed\n");
+  rmSync(join(repo, ".agents", "capabilities", "installed", "oas-okf"), { recursive: true });
+  r = spawnSync(process.execPath, [CLI, "install", "--dir", repo], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /restored\s+oas\.okf/);
+});
+
+test("work-mode injection overrides are rejected; setup script resolves and runs at worktree spawn", () => {
+  const base = temp(); const { repo, root, agent } = fixtureSoul(base);
+  write(join(repo, "oas-config.yaml"), "work-modes:\n  worktree:\n    injection-override: x.md\n");
+  assert.throws(() => resolveOasConfig(repo, "dev"), /work-mode injection overrides were removed/);
+  write(join(repo, "oas-config.yaml"), "work-modes:\n  worktree:\n    setup: setup.sh\n");
+  write(join(repo, "setup.sh"), "#!/bin/sh\necho ran > setup-ran\n");
+  execFileSync("chmod", ["+x", join(repo, "setup.sh")]);
+  const wm = resolveWorkMode(repo, "worktree");
+  assert.equal(wm.setup, join(repo, "setup.sh"));
+  assert.ok(wm.inject.endsWith("work-worktree.md")); // packaged briefing, no override
+  const oldPath = process.env.PATH; process.env.PATH = fakeRuntimes(base);
+  try {
+    const res = spawnInstance(root, agent, { instance: "dev-wt", work: "worktree", launch: false });
+    assert.equal(readFileSync(join(res.home, "work", "setup-ran"), "utf8").trim(), "ran");
+  } finally { process.env.PATH = oldPath; }
+  // inject eject refuses work modes.
+  const r = spawnSync(process.execPath, [CLI, "inject", "eject", "worktree", "--dir", repo], { encoding: "utf8" });
+  assert.equal(r.status, 1); assert.match(r.stderr, /removed/);
+});
+
+test("claude runtime resolves oas-claude-config and hooks contribute launch args", () => {
+  const base = temp(); const { repo, root, agent } = fixtureSoul(base, "claude");
+  // Closest oas-claude-config names the binary; none → claude.
+  assert.equal(resolveClaudeBinary(repo), "claude");
+  write(join(base, "oas-claude-config"), "# personal account\nclaude-personal\n");
+  assert.equal(resolveClaudeBinary(repo), "claude-personal");
+  const bin = join(base, "bin"); mkdirSync(bin, { recursive: true });
+  write(join(bin, "claude-personal"), "#!/bin/sh\nexit 0\n");
+  execFileSync("chmod", ["+x", join(bin, "claude-personal")]);
+  // A spawn hook contributes runtime launch args (the aweb channel-plugin pattern).
+  const script = `console.log(JSON.stringify({ launch: { claude: "--extra-flag", pi: "--never-used" } }));`;
+  capability(repo, "chan", { capability: "acme.chan", hooks: { spawn: "hook.mjs" } }, { "hook.mjs": script });
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.chan:\n      global: true\n");
+  const oldPath = process.env.PATH; process.env.PATH = `${bin}:${fakeRuntimes(base)}`;
+  try {
+    const res = spawnInstance(root, agent, { instance: "dev-cl", launch: false });
+    const meta = JSON.parse(readFileSync(join(res.home, "instance.json"), "utf8"));
+    assert.equal(meta.runtime, "claude");
+    assert.match(meta.command, /claude-personal/);
+    assert.match(meta.command, /--extra-flag/);
+    assert.doesNotMatch(meta.command, /--never-used/);
+  } finally { process.env.PATH = oldPath; }
+});
+
 test("team block resolves closest-first, reaches hooks/TASK.md, and drives team-wide status", () => {
   const base = temp(); const ws = join(base, "lfx"); mkdirSync(ws);
   const repo = join(ws, "self-serve"); gitRepo(repo);
@@ -257,6 +326,11 @@ test("CLI activation writes stable global/type/soul bindings without activating 
   assert.equal(r.status, 0, r.stderr);
   r = spawnSync(process.execPath, [CLI, "install", "oas.okf", "--dir", repo], { encoding: "utf8" });
   assert.equal(r.status, 0, r.stderr); assert.match(r.stdout, /not activated/);
+  // Marketplace install: copied into installed/, locked with marketplace source, trusted at acquisition.
+  const okfLock = JSON.parse(readFileSync(join(repo, "oas-lock.json"), "utf8")).capabilities["oas.okf"];
+  assert.match(okfLock.source, /^marketplace:oas\.okf@/);
+  assert.equal(okfLock.trustedExecutables, true);
+  assert.ok(existsSync(join(repo, ".agents", "capabilities", "installed", "oas-okf", "oas.json")));
   assert.equal(resolveOasConfig(repo, "dev").capabilities.length, 0);
   for (const argv of [
     ["use", "oas.okf", "--global", "--dir", repo],
@@ -268,7 +342,7 @@ test("CLI activation writes stable global/type/soul bindings without activating 
   const config = readFileSync(join(repo, "oas-config.yaml"), "utf8");
   // Layer capability lands under capabilities.layers.knowledge with from + injection comment.
   assert.match(config, /layers:\n    knowledge:\n      capability: oas\.okf/);
-  assert.match(config, /from: bundled/);
+  assert.match(config, /from: installed/);
   assert.match(config, /# injection-override: \.agents\/injections\/capabilities\/oas\.okf\.md/);
   assert.match(config, /global: true/); assert.match(config, /reviewers: false/); assert.match(config, /lead: true/);
   assert.equal(resolveOasConfig(repo, "reviewer").capabilities.some((c) => c.id === "oas.okf"), true);

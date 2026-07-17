@@ -13,7 +13,7 @@ capabilities:
   layers:
     knowledge:
       capability: oas.okf
-      from: bundled
+      from: installed
       # injection-override: .agents/injections/capabilities/oas.okf.md
     # messaging: (unset — inherits from the laptop level: aweb)
     # Explicit none prevents an inherited task integration from occupying the
@@ -22,19 +22,16 @@ capabilities:
   # Additive capabilities — non-exclusive; target global, agent-types, or souls.
   additive:
     oas.authoring:
-      from: bundled
+      from: installed
       agent-types:
         framework-authors: true
       # injection-override: .agents/injections/capabilities/oas.authoring.md
 
-# ── Work modes — per-mode instruction overrides and setup hooks.
+# ── Work modes — optional per-mode env bootstrap.
+# `setup:` runs inside each NEW worktree right after `git worktree add`.
 work-modes:
-  checkout:
-    # injection-override: .agents/injections/workmodes/checkout.md
   worktree:
-    # injection-override: .agents/injections/workmodes/worktree.md
-  attached:
-    # injection-override: .agents/injections/workmodes/attached.md
+    # setup: scripts/setup-worktree.sh
 
 # ── OAS defaults — the framework's baseline instruction block.
 oas:

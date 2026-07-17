@@ -53,7 +53,11 @@ implementations are capability packages called integrations.
 
 Present these defaults to the user and ask before creating config. Common
 choices: disable messaging for a solo repo; choose `oas.linear`/`oas.jira` for
-tasks; use `--raw` for all layers off.
+tasks; use `--raw` for all layers off. Official integrations live in the
+marketplace shipped with the kernel; `oas init` acquires the selected ones
+into this scope's installed/ store (locked and trusted at acquisition). In an
+interactive terminal with no layer flags, bare `oas init` prompts per layer;
+through an agent, always pass explicit flags.
 
 If the user keeps aweb messaging: declare the team in the deployment scope's
 config (`team:` with a name; see the oas-config skill), then run
@@ -79,7 +83,7 @@ keyboard mappings. An interactive terminal prompts when neither tmux flag is
 provided.
 
 `init` activates only packages explicitly represented by the layer choices;
-it does not activate every acquired/bundled package.
+it acquires the chosen marketplace layer capabilities into this scope's installed/ store, and does not activate anything else.
 
 ## 4. Decide shared capability targets
 

@@ -106,10 +106,23 @@ if (event === "spawn") {
     const alias = joined.alias || instance;
     const mismatch = joined.team_id !== team
       ? ` [WARNING: joined ${joined.team_id}, expected ${team}]` : "";
+    // Runtime integration: for Claude Code sessions, wire the aweb-channel plugin
+    // (real-time push events; `aw run claude` is deprecated). Idempotent installs;
+    // the launch map contributes the plugin flag to the instance's session command.
+    let launch;
+    let channelWarning;
+    if ((process.env.OAS_RUNTIME || "") === "claude") {
+      try {
+        try { sh("claude plugin marketplace add awebai/claude-plugins", home, 60000); } catch { /* already added */ }
+        try { sh("claude plugin install aweb-channel@awebai-marketplace", home, 60000); } catch { /* already installed */ }
+        launch = { claude: "--dangerously-load-development-channels plugin:aweb-channel@awebai-marketplace" };
+      } catch (e) { channelWarning = `oas-aweb: channel plugin setup failed — session starts without push events (aw CLI still works): ${String(e.message || e).slice(0, 160)}`; }
+    }
     out({
       meta: { team: joined.team_id, alias },
       brief: `Comms: you have an aweb identity — alias "${alias}" on team ${joined.team_id}.${mismatch} Use \`aw mail\`/\`aw chat\` for messaging (see the aweb-messaging skill); coordination stays in your deployment's task layer.`,
-      ...(mismatch ? { warning: `oas-aweb: team mismatch — joined ${joined.team_id}, expected ${team}` } : {}),
+      ...(launch ? { launch } : {}),
+      ...(mismatch ? { warning: `oas-aweb: team mismatch — joined ${joined.team_id}, expected ${team}` } : channelWarning ? { warning: channelWarning } : {}),
     });
   } catch (e) { warn(`identity minting failed (continuing without): ${e.message || e}`); }
 } else if (event === "retire") {

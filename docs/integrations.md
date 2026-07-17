@@ -39,10 +39,10 @@ capabilities:
   layers:
     knowledge:
       capability: oas.okf
-      from: bundled
+      from: installed
     messaging:
       capability: oas.aweb
-      from: bundled
+      from: installed
       agent-types:
         product-agents:
           enabled: true
@@ -50,7 +50,7 @@ capabilities:
             team: example-team
     tasks:
       capability: oas.linear
-      from: bundled
+      from: installed
       agent-types:
         product-agents:
           enabled: true

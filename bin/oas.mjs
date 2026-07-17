@@ -21,7 +21,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { enableTmuxMouse, tmuxConfigPath, tmuxMouseEnabled } from "../lib/tmux-config.mjs";
 import {
   LAYERS, LEGACY_HOME_CAPABILITIES_DIR, OAS_LOCK_FILE, OAS_VERSION, configChain,
-  acquireCapability, restoreCapabilities,
+  acquireCapability, restoreCapabilities, marketplaceCapabilities,
   capabilityManifests, capabilityManifest, capabilityMissingRequires, capabilityIntegrity, capabilityTrust, capabilityExecutablePath,
   readCapabilityLocks, writeCapabilityLock,
   resolveOasConfig, resolveWorkMode, composeInstanceAgentsMd, parseYamlNested, packagedInject, teamAgentRoots,
@@ -187,7 +187,6 @@ function doctor(dir) {
 // ---------- config editing (structural: parse → mutate → re-serialize the capabilities block) ----------
 function originToFrom(origin) {
   const o = String(origin || "");
-  if (o === "bundled") return "bundled";
   if (o.startsWith("installed:")) return "installed";
   if (o.startsWith("owned:")) return "owned";
   if (o.startsWith("path:")) return undefined; // path declarations stay hand-authored
@@ -294,7 +293,7 @@ function use() {
     return;
   }
   const manifest = capabilityManifest(requested, dir);
-  if (!manifest) die(`unknown capability "${requested}" (acquired: ${Object.keys(capabilityManifests(dir)).join(", ") || "none"}) — acquire it with oas install`);
+  if (!manifest) die(`unknown capability "${requested}" (acquired: ${Object.keys(capabilityManifests(dir)).join(", ") || "none"}) — acquire it with \`oas install ${requested}\` (marketplace: ${Object.keys(marketplaceCapabilities()).join(", ")})`);
   if (layer && manifest.layer !== layer) die(`capability "${manifest.capability}" declares layer "${manifest.layer || "none"}", not "${layer}"`);
   const targets = [["agent-types", flag("type")], ["souls", flag("soul")]].filter(([, value]) => value);
   if (args.includes("--global")) targets.push(["global", undefined]);
@@ -346,7 +345,7 @@ function install() {
   if (!src || src.startsWith("--")) { restore(dir); return; }
   const known = capabilityManifest(src, dir);
   if (known) {
-    console.log(`${known._origin === "bundled" ? "Acquired bundled" : "Already acquired"} capability ${known.capability} (${known.version || "unversioned"}); not activated or updated.`);
+    console.log(`Already acquired capability ${known.capability} (${known.version || "unversioned"}); not activated or updated.`);
     return;
   }
   let r;
@@ -355,12 +354,15 @@ function install() {
     source: r.source,
     version: r.manifest.version || null,
     ...(r.commit ? { commit: r.commit } : {}), integrity: r.integrity,
-    trustedExecutables: false,
+    // Marketplace packages ship with the kernel you already installed — they are
+    // trusted at acquisition; third-party git/path installs need explicit `oas trust`.
+    trustedExecutables: !!r.marketplace,
   };
   const lockFile = writeCapabilityLock(dir, r.manifest.capability, lock);
   console.log(`Acquired ${r.manifest.capability} → ${shortPath(r.dest)}`);
   console.log(`Locked ${r.manifest.version || r.commit || "exact artifact"} (${r.integrity}) in ${shortPath(lockFile)}; not activated.`);
-  if (r.manifest.commands || r.manifest.hooks) console.log(`Executable surface is blocked until: oas trust ${r.manifest.capability} --dir ${shortPath(dir)}`);
+  if (r.marketplace) console.log("Marketplace package: executables trusted at acquisition.");
+  else if (r.manifest.commands || r.manifest.hooks) console.log(`Executable surface is blocked until: oas trust ${r.manifest.capability} --dir ${shortPath(dir)}`);
 }
 
 /** Bare `oas install`: restore every locked-but-missing capability in the config chain. */
@@ -382,7 +384,6 @@ function trust() {
   const dir = resolve(flag("dir") || process.cwd());
   const manifest = capabilityManifest(id, dir);
   if (!manifest) die(`unknown capability "${id}"`);
-  if (manifest._origin === "bundled") { console.log(`${manifest.capability} is bundled and already trusted.`); return; }
   const lock = readCapabilityLocks(dir)[manifest.capability];
   if (!lock) die(`${manifest.capability} is not locked in ${OAS_LOCK_FILE}`);
   const integrity = capabilityIntegrity(manifest._dir);
@@ -460,7 +461,8 @@ function init() {
 
   // Per-layer overrides: --knowledge oas.okf, --messaging none, --tasks oas.jira …
   const overrides = {};
-  const mans = capabilityManifests(dir);
+  const market = marketplaceCapabilities();
+  const mans = { ...market, ...capabilityManifests(dir) };
   for (const layer of LAYERS) {
     const v = flag(layer);
     if (v === undefined) continue;
@@ -475,7 +477,32 @@ function init() {
   const defaults = raw
     ? { knowledge: "none", messaging: "none", tasks: "none" }
     : { knowledge: "oas.okf", messaging: "oas.aweb", tasks: undefined };
-  const layers = { ...defaults, ...overrides };
+  let layers = { ...defaults, ...overrides };
+
+  // Interactive TTY with no explicit layer flags: present each default and ask.
+  // Non-interactive contexts (agents, CI) keep flags-or-silent-defaults — never hang.
+  if (!raw && process.stdin.isTTY && process.stdout.isTTY && !Object.keys(overrides).length) {
+    const byLayer = (l) => Object.values(mans).filter((m) => m.layer === l).map((m) => m.capability);
+    console.log("Fundamental layers for this scope — Enter keeps the default, or type a capability id / \"none\":");
+    const ask = (prompt) => {
+      process.stdout.write(prompt);
+      const buffer = Buffer.alloc(256);
+      let length = 0;
+      try { length = readSync(process.stdin.fd, buffer, 0, buffer.length); } catch { /* EOF */ }
+      return buffer.subarray(0, length).toString("utf8").trim();
+    };
+    for (const layer of LAYERS) {
+      const options = byLayer(layer);
+      const def = layers[layer] || "none";
+      while (true) {
+        const answer = ask(`  ${layer.padEnd(10)} [${def}]  (options: ${[...options, "none"].join(", ")}): `);
+        if (!answer) break;
+        if (answer === "none" || options.includes(answer)) { layers[layer] = answer; break; }
+        console.log(`    unknown "${answer}" — pick one of: ${[...options, "none"].join(", ")}`);
+      }
+    }
+    if ((layers.messaging || "none") !== "none") console.log("  (messaging via aweb: after init, run `oas aweb setup` for guided onboarding)");
+  }
   const lines = [
     `name: ${basename(dir)}`,
     "",
@@ -493,11 +520,23 @@ function init() {
     const selected = layers[layer];
     if (!selected) { lines.push(`    # ${layer}: (unset — inherits from outer config scopes; set an entry or "none")`); continue; }
     if (selected === "none") { lines.push(`    ${layer}: none`); continue; }
-    const manifest = capabilityManifest(selected, dir);
+    let manifest = capabilityManifest(selected, dir);
+    // Marketplace capabilities are acquired into this scope's installed/ store first.
+    if (!manifest && market[selected]) {
+      try {
+        const r = acquireCapability(dir, selected);
+        writeCapabilityLock(dir, r.manifest.capability, {
+          source: r.source, version: r.manifest.version || null, integrity: r.integrity, trustedExecutables: true,
+        });
+        console.log(`Acquired ${r.manifest.capability}@${r.manifest.version} from the marketplace → ${shortPath(r.dest)}`);
+        // Discovery needs the config file (written below); trust the acquisition result here.
+        manifest = { ...r.manifest, _origin: `installed:${dir}` };
+      } catch (e) { die(`could not acquire ${selected}: ${e.message}`); }
+    }
+    if (!manifest) die(`capability "${selected}" is not acquired at ${shortPath(dir)} and is not in the marketplace (${Object.keys(market).join(", ") || "empty"})`);
     lines.push(`    ${layer}:`);
     lines.push(`      capability: ${manifest.capability}`);
-    if (manifest._origin === "bundled") { lines.push("      from: bundled"); lines.push(`      # injection-override: .agents/injections/capabilities/${manifest.capability}.md`); }
-    else if (String(manifest._origin).startsWith("installed:")) { lines.push("      from: installed"); lines.push(`      # injection-override: .agents/injections/capabilities/${manifest.capability}.md`); }
+    if (String(manifest._origin).startsWith("installed:")) { lines.push("      from: installed"); lines.push(`      # injection-override: .agents/injections/capabilities/${manifest.capability}.md`); }
     else if (String(manifest._origin).startsWith("owned:")) { lines.push("      from: owned"); lines.push(`      # injection edited at source: .agents/capabilities/owned/${manifest.capability}/injects/`); }
   }
   lines.push(
@@ -508,9 +547,13 @@ function init() {
     "  #     global: true",
     "  #     # injection-override: .agents/injections/capabilities/<capability-id>.md",
     "",
-    "# ── Work modes — per-mode instruction overrides and setup hooks.",
+    "# ── Work modes — optional per-mode env bootstrap.",
+    "# `setup:` runs inside each NEW worktree right after `git worktree add` — use it",
+    "# for env setup scripts (installs, .env copying, direnv, mise, etc.).",
+    "# The path is relative to this config's directory.",
     "work-modes:",
-    ...["checkout", "worktree", "attached"].flatMap((m) => [`  ${m}:`, `    # injection-override: .agents/injections/workmodes/${m}.md`]),
+    "  worktree:",
+    "    # setup: scripts/setup-worktree.sh",
     "",
     "# ── OAS defaults — the framework's baseline instruction block.",
     "oas:",
@@ -568,7 +611,7 @@ function statusTeam() {
 
 function spawnCmd() {
   const name = args[1];
-  if (!name || name.startsWith("--")) die("usage: oas spawn <agent> [--task <text>|--task-file <f>] [--purpose <slug>] [--repo <r>] [--work worktree|checkout|attached] [--work-dir <owner-work>] [--model <m>] [--branch <b>] [--instructions-file <f>|--def-file <f>] [--no-launch] [--json]");
+  if (!name || name.startsWith("--")) die("usage: oas spawn <agent> [--task <text>|--task-file <f>] [--purpose <slug>] [--repo <r>] [--work worktree|checkout|attached] [--work-dir <owner-work>] [--runtime pi|claude] [--model <m>] [--branch <b>] [--instructions-file <f>|--def-file <f>] [--no-launch] [--json]");
   let root = ensureRoot(flag("dir") || process.cwd());
   let agent = findAgent(root, name);
   const instrFile = flag("instructions-file");
@@ -590,11 +633,11 @@ function spawnCmd() {
     if (!agent && !instrFile && !defFile) {
       const def = listAgentDefs(process.cwd()).find((d) => d.name === name);
       if (!def) die(`unknown agent "${name}" (known: ${listAgents(root).map((a) => a.name).join(", ") || "none"}; importable defs: ${listAgentDefs(process.cwd()).map((d) => d.name).join(", ") || "none"}) — pass --instructions-file or --def-file to create a local agent`);
-      agent = upsertTmpAgent(root, { name: def.name, file: def.path, repo: flag("repo"), work: flag("work"), model: flag("model") });
+      agent = upsertTmpAgent(root, { name: def.name, file: def.path, repo: flag("repo"), work: flag("work"), runtime: flag("runtime"), model: flag("model") });
     } else if (!agent || agent.kind === "tmp") {
       agent = upsertTmpAgent(root, {
         name, file: defFile, instructions: instrFile ? readFileSync(instrFile, "utf8") : undefined,
-        repo: flag("repo"), work: flag("work"), model: flag("model"),
+        repo: flag("repo"), work: flag("work"), runtime: flag("runtime"), model: flag("model"),
       });
     } else {
       die(`"${name}" is a persistent agent — spawn it without --instructions-file/--def-file`);
@@ -603,7 +646,7 @@ function spawnCmd() {
   const r = spawnInstance(root, agent, {
     purpose: flag("purpose"), task: flag("task"), taskFile: flag("task-file"),
     repo: flag("repo") || agent.repo || defaultRepo(workspaceOf(root)) || defaultRepo(process.cwd()),
-    work: flag("work"), workDir: flag("work-dir"), model: flag("model"), branch: flag("branch"),
+    work: flag("work"), workDir: flag("work-dir"), runtime: flag("runtime"), model: flag("model"), branch: flag("branch"),
     launch: !args.includes("--no-launch"),
   });
   if (args.includes("--json")) { console.log(JSON.stringify(r, null, 2)); return; }
@@ -746,11 +789,12 @@ function typeCmd() {
 function injectCmd() {
   const sub = args[1];
   const target = args[2];
-  if (sub !== "eject" || !target || target.startsWith("--")) die("usage: oas inject eject <capability-id|checkout|worktree|attached|oas> [--dir <dir>]");
+  if (sub !== "eject" || !target || target.startsWith("--")) die("usage: oas inject eject <capability-id|oas> [--dir <dir>]");
   const dir = resolve(flag("dir") || process.cwd());
   const file = join(dir, "oas-config.yaml");
   if (!existsSync(file)) die(`no oas-config.yaml at ${shortPath(dir)} — run oas init first`);
-  const isWorkMode = ["checkout", "worktree", "attached"].includes(target);
+  if (["checkout", "worktree", "attached"].includes(target)) die("work-mode injection overrides were removed — the packaged briefings are the contract; work modes support only setup: (env bootstrap script)");
+  const isWorkMode = false;
   const isKernel = target === "oas";
   const src = isKernel ? packagedInject("oas", dir) : isWorkMode ? packagedInject(`work-${target}`, dir) : packagedInject(target, dir);
   if (!src) die(`no packaged default injection found for "${target}"`);
@@ -865,7 +909,7 @@ Usage:
   oas spawn <agent> [--task <text>]         spawn an instance (tmux; --no-launch
       [--purpose <slug>] [--repo <r>]       = scaffold only); --instructions-file/
       [--work worktree|checkout|attached]   --def-file create a local (tmp) agent
-      [--work-dir <owner-work>] [--model <m>] [--branch <b>]
+      [--work-dir <owner-work>] [--runtime pi|claude] [--model <m>] [--branch <b>]
       [--instructions-file <f>|--def-file <f>] [--no-launch] [--json]
                                             with team: declared, unknown local souls
                                             resolve across the team scope's repos

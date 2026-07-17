@@ -1,0 +1,11 @@
+{
+  "lockfileVersion": 1,
+  "capabilities": {
+    "oas.authoring": {
+      "source": "marketplace:oas.authoring@1.0.0",
+      "version": "1.0.0",
+      "integrity": "sha256-ca809bee6fbec832f8e3137ca87549d6f642b9c03ab073184865bb4da54e2252",
+      "trustedExecutables": true
+    }
+  }
+}

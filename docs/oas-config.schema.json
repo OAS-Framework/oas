@@ -21,7 +21,7 @@
     "capabilityTargets": {
       "type": "object",
       "properties": {
-        "from": { "type": "string", "description": "Enforced provenance: bundled | installed | owned | path:<dir>." },
+        "from": { "type": "string", "description": "Enforced provenance: installed | owned | path:<dir>." },
         "global": { "$ref": "#/$defs/binding" },
         "agent-types": {
           "oneOf": [
@@ -63,8 +63,7 @@
         {
           "type": "object",
           "properties": {
-            "injection-override": { "$ref": "#/$defs/injection-override" },
-            "setup": { "type": "string" }
+            "setup": { "type": "string", "description": "Env-bootstrap command run inside each new worktree after creation (path relative to this config's directory)." }
           },
           "additionalProperties": false
         }

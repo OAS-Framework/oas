@@ -77,7 +77,7 @@ capabilities:
   layers:
     knowledge:
       capability: oas.okf
-      from: bundled
+      from: installed
       # injection-override: .agents/injections/capabilities/oas.okf.md
     messaging: none
     tasks: none
@@ -177,6 +177,7 @@ semantic contradictions between two prose injections; review the output.
 ## Acquisition, lock, restore, and trust
 
 ```bash
+oas install oas.jira --dir /path/to/repo             # official marketplace by id (trusted at acquisition)
 oas install https://example.invalid/team-chat.git --dir /path/to/repo
 oas install ../team-chat --dir /path/to/repo
 oas install                       # bare: restore locked-but-missing artifacts

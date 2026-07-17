@@ -30,7 +30,7 @@ capabilities:
   layers:                      # exclusive fundamental slots
     knowledge:
       capability: oas.okf
-      from: bundled            # enforced provenance: bundled|installed|owned
+      from: installed            # enforced provenance: installed|owned|path:<dir>
       # injection-override: .agents/injections/capabilities/oas.okf.md
     messaging: none            # explicit none suppresses inherited integrations
     tasks: none
@@ -69,16 +69,18 @@ oas type list
 
 ## Injection overrides
 
-Capability entries, work modes, and the `oas:` kernel block take an
-`injection-override: <path>|none|default`. The clean path is ejecting:
+Capability entries and the `oas:` kernel block take an
+`injection-override: <path>|none|default`. Work-mode briefings are packaged
+and NOT overridable; the only work-mode key is `setup:` (env bootstrap run in
+each new worktree). The clean path is ejecting:
 
 ```bash
-oas inject eject <capability-id|checkout|worktree|attached|oas> [--dir <level>]
+oas inject eject <capability-id|oas> [--dir <level>]
 ```
 
 It copies the packaged default to the conventional
-`.agents/injections/{capabilities/<id>.md, workmodes/<mode>.md,
-oas-defaults/oas.md}` path and sets the override — the file then stops
+`.agents/injections/{capabilities/<id>.md, oas-defaults/oas.md}` path and
+sets the override — the file then stops
 tracking package updates, deliberately. Overrides are **not allowed** on
 `from: owned`/`path:` capabilities: the scope owns the package source, so
 edit `.agents/capabilities/owned/<id>/injects/` directly.
@@ -103,7 +105,7 @@ changed artifacts block. Skill/instruction-only packages still need a lock but
 not executable approval.
 
 `oas init` creates config and activates only explicit defaults. Acquired or
-bundled availability does not imply activation.
+marketplace availability does not imply acquisition or activation.
 
 ## Fundamental layers
 

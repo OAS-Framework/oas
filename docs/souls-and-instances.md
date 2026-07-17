@@ -26,7 +26,7 @@ A soul is durable and committed. It is the part you review, improve, and keep.
 | `description` | Short role description. |
 | `repo` | Target repo, absolute or relative to the agents root's parent. |
 | `work` | `worktree` or `checkout`. |
-| `runtime` | `pi` or `claude`. |
+| `runtime` | `pi` or `claude` — the harness new instances launch on; a spawn can override with `--runtime`. For `claude`, the binary is `claude` unless a local-only `oas-claude-config` file (closest one walking up from the repo; one line naming the binary, e.g. `claude-personal`) selects another — a personal machine preference for account selection, never committed. With the aweb messaging integration active, claude sessions get the `aweb-channel` plugin wired at spawn for real-time push events. |
 | `model` | Optional default pi model, `provider/id`. A spawn can override it. |
 
 A soul is model-agnostic as an artifact. Its files are plain operating docs,

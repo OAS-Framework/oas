@@ -3,7 +3,7 @@
 The reference implementation publishes two npm packages:
 
 - **`@oas-framework/oas`**: runtime-neutral kernel, universal `oas` CLI,
-  bootstrap skills, instruction sources, and bundled capability packages.
+  bootstrap skills, instruction sources, and the official capability marketplace.
 - **`@oas-framework/pi`**: minimal pi adapter for instance-local resource
   exposure and memory session events. It registers no agent tools.
 
@@ -24,8 +24,7 @@ Claude's config home to the instance-local view.
 | `test/` | Capability resolver/composition/security lifecycle tests. |
 | `agents/` | The framework's own portable expert souls. |
 
-Capability discovery has one layout: bundled `capabilities/` inside the
-framework package, plus each config scope's `.agents/capabilities/` split into
+Capability discovery has one layout: each config scope's `.agents/capabilities/` split into
 `installed/` (acquired, locked, gitignored, restorable via bare `oas install`)
 and `owned/` (authored at that scope, config-owned trusted; committed where
 the scope is a git repo, plain scope-durable files elsewhere).

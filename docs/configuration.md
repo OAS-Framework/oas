@@ -56,14 +56,14 @@ capabilities:
   layers:
     knowledge:
       capability: oas.okf
-      from: bundled
+      from: installed
       settings:
         harvest-model: github-copilot/gpt-5.5
       # injection-override: .agents/injections/capabilities/oas.okf.md
     messaging: none
     tasks:
       capability: oas.linear
-      from: bundled
+      from: installed
       agent-types:
         developers:
           enabled: true
@@ -89,15 +89,12 @@ capabilities:
 skill-overrides:
   review: example.review
 
-# ── Work modes — per-mode instruction overrides and setup hooks.
+# ── Work modes — optional per-mode env bootstrap (briefings are packaged, not overridable).
 work-modes:
   worktree:
-    # injection-override: .agents/injections/workmodes/worktree.md
+    # Runs inside each NEW worktree right after `git worktree add` — env setup
+    # scripts (installs, .env copying, direnv/mise). Relative to this config's dir.
     setup: scripts/setup-worktree.sh
-  checkout:
-    # injection-override: .agents/injections/workmodes/checkout.md
-  attached:
-    # injection-override: .agents/injections/workmodes/attached.md
 
 # ── OAS defaults — the framework's baseline instruction block.
 oas:
@@ -181,11 +178,14 @@ precedence, allowing global enable → type exclusion → soul re-enable.
 ### `from` (provenance)
 
 `from:` documents where the artifact must come from, and resolution enforces
-it: `bundled` (ships with the kernel), `installed` (acquired into
-`.agents/capabilities/installed/`, lock-governed), `owned` (authored at this
-scope under `.agents/capabilities/owned/`), or `path:<dir>` (development
-declaration pointing at a manifest directory). A mismatch between `from:` and
-the discovered artifact origin is an error.
+it: `installed` (acquired into `.agents/capabilities/installed/`,
+lock-governed — from the official marketplace by id, a git URL, or a local
+path), `owned` (authored at this scope under `.agents/capabilities/owned/`),
+or `path:<dir>` (development declaration pointing at a manifest directory).
+A mismatch between `from:` and the discovered artifact origin is an error.
+`from: bundled` was removed: official capabilities are acquired from the
+marketplace (`oas install <id>`) like any other package — marketplace
+installs are trusted at acquisition.
 
 ### `injection-override`
 
@@ -197,11 +197,10 @@ as commented-out lines pointing at the conventional locations:
 
 ```text
 .agents/injections/capabilities/<capability-id>.md
-.agents/injections/workmodes/<mode>.md
 .agents/injections/oas-defaults/oas.md
 ```
 
-The clean path is `oas inject eject <capability|work-mode|oas>`: it copies
+The clean path is `oas inject eject <capability|oas>`: it copies
 the packaged default to the conventional path and sets the key — the ejected
 file then deliberately stops tracking package updates. Overrides are not
 allowed on `from: owned`/`path:` entries: the scope owns the package source,
@@ -233,8 +232,11 @@ Work modes remain soul/instance topology, not capability packages:
 - `checkout`: shared current checkout;
 - `attached`: another instance's work tree.
 
-A worktree `setup` command runs after creation. Its failure warns without
-hiding the instance.
+Work-mode briefings are packaged with the kernel and are not overridable;
+the only work-mode configuration is `setup:` — an env-bootstrap command that
+runs inside each fresh worktree after creation (a lot of teams prefer a
+script that sets up the environment: installs, .env copying, direnv/mise).
+Its failure warns without hiding the instance.
 
 ## Acquisition and lockfile
 
@@ -274,13 +276,14 @@ oas use <capability> [--global|--type <t>|--soul <s>] [--disable] [--settings k=
 oas use none --layer <layer>
 oas type add <name> [--description <d>]   # declare an agent type
 oas type list
-oas inject eject <capability|work-mode|oas>  # materialize an injection override
+oas inject eject <capability|oas>  # materialize an injection override
 oas create <name> --type <agent-type> ...
 oas doctor [context] --soul <name> [--json]
 ```
 
-`oas init` writes only explicitly selected defaults. It may discover many
-bundled or installed packages, but does not activate all of them. `oas use`
+`oas init` writes only explicitly selected defaults, acquiring marketplace
+layer capabilities into this scope's installed/ store as needed; it does not
+activate every acquired package. `oas use`
 places a layer-declaring capability under `capabilities.layers.<layer>` and
 everything else under `capabilities.additive`, regenerating the conventional
 injection comments; custom comments inside the `capabilities:` block are not
@@ -333,10 +336,10 @@ capabilities:
   layers:
     knowledge:
       capability: oas.okf
-      from: bundled
+      from: installed
     tasks:
       capability: oas.linear
-      from: bundled
+      from: installed
       agent-types:
         developers:
           enabled: true
@@ -352,7 +355,7 @@ capabilities:
   layers:
     messaging:
       capability: oas.aweb
-      from: bundled
+      from: installed
 ```
 
 Solo repository:

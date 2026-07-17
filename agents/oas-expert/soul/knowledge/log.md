@@ -1,5 +1,8 @@
 # Knowledge Log
 
+## 2026-07-17
+* **Creation**: [Marketplace over bundled, work modes simplified, runtime integration at spawn](/decisions/marketplace-workmodes-runtime.md) — v0.13.0 breaking set: marketplace acquisition replaces bundled origin, work-mode overrides removed (setup: stays), init prompts per layer in a TTY, claude runtime wired end-to-end (oas-claude-config + aweb channel plugin via hook launch args).
+
 ## 2026-07-15
 * **Creation**: [Cross-repo spawn belongs in CLI root resolution, not the kernel](/lessons/cross-repo-spawn-cli-root-resolution.md) — promoted the implementation lesson that team-scope cross-repo spawn/retire belongs in CLI root selection, leaving `spawnInstance`/`retireInstance` untouched and preserving soul-repo homing.
 * **Update**: [Team as a first-class config entity](/decisions/team-as-config-entity.md) — cross-repo spawn/retire implemented (team-scope soul/instance lookup, unique match wins, homing stays with the soul's repo); `team.repos:` closed as not needed (the scope's tree is the member list).
