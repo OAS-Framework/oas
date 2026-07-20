@@ -105,6 +105,15 @@ the `linear-tasks` skill, and an advisory spawn hook. It uses
 `LINEAR_API_KEY`; secrets never belong in OAS config. See
 `capabilities/oas-linear/README.md` for its support boundary.
 
+### `oas.web`
+
+The web panel capability contributes `oas web start [--port] [--dir] [--open]`
+— a localhost, zero-dependency control panel: live instance roster, terminal-
+faithful session views (tmux capture), type-into-terminal interaction for pi
+and claude sessions, and a Jira epic/Agent-Roster drawer when `oas.jira` meta
+is present. Binds 127.0.0.1 only; it can type into your terminals, so never
+expose it. It is not a fundamental layer — activate it additively.
+
 ## Build an integration
 
 Use a namespaced capability manifest with exactly one `layer`, then test it as

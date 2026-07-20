@@ -1,0 +1,17 @@
+{
+  "capability": "oas.web",
+  "command": "web",
+  "version": "0.2.0",
+  "compatibility": { "oas": ">=0.14.0" },
+  "description": "Local web control panel: live instance roster, terminal-faithful session views, and type-into-terminal interaction for pi and claude sessions; Jira epic/roster panel when oas.jira is active.",
+  "requires": [
+    {
+      "command": "tmux",
+      "why": "session capture and keystroke injection for the live panel",
+      "install": "brew install tmux"
+    }
+  ],
+  "commands": {
+    "start": "bin/oas-web.mjs start"
+  }
+}

@@ -1,0 +1,359 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>oas — agents</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  /* ── Semantic design tokens. Dark and light palettes both hold WCAG AA
+     (≥4.5:1) for body text; muted text stays ≥4.5:1 against panel surfaces. ── */
+  :root, [data-theme="dark"] {
+    --bg: #0e1116;          /* app background */
+    --surface: #161b22;     /* cards, sidebar */
+    --surface-2: #1c2129;   /* hover / raised */
+    --border: #2d333c;
+    --fg: #e6edf3;          /* primary text  (13.9:1 on bg) */
+    --muted: #9aa4b2;       /* secondary text (5.6:1 on surface) */
+    --faint: #6e7681;       /* tertiary/disabled */
+    --accent: #4493f8;      /* interactive */
+    --accent-fg: #ffffff;
+    --ok: #3fb950; --warn: #d29922; --danger: #f85149;
+    --chip-bg: #21262e; --chip-fg: #adb6c2;
+    --sel: #1f6feb26;       /* selected wash */
+    --term-bg: #0a0d12;     /* terminal stays dark in BOTH themes */
+    --shadow: 0 1px 3px rgb(0 0 0 / .4);
+  }
+  [data-theme="light"] {
+    --bg: #f6f8fa;
+    --surface: #ffffff;
+    --surface-2: #eef1f4;
+    --border: #d1d9e0;
+    --fg: #1f2328;          /* 15.4:1 on surface */
+    --muted: #57606a;       /* 7.2:1 on surface */
+    --faint: #8c959f;
+    --accent: #0969da;
+    --accent-fg: #ffffff;
+    --ok: #1a7f37; --warn: #9a6700; --danger: #cf222e;
+    --chip-bg: #eef1f4; --chip-fg: #57606a;
+    --sel: #0969da14;
+    --term-bg: #14181f;
+    --shadow: 0 1px 3px rgb(31 35 40 / .12);
+  }
+
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); height: 100vh; display: flex; flex-direction: column;
+         font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+         -webkit-font-smoothing: antialiased; }
+
+  /* ── Header ── */
+  header { padding: 0 20px; height: 52px; border-bottom: 1px solid var(--border); display: flex; align-items: center;
+           gap: 14px; background: var(--surface); flex: none; }
+  header h1 { font-size: 14px; margin: 0; font-weight: 650; letter-spacing: .01em; }
+  header h1 .logo { color: var(--accent); }
+  .hmeta { color: var(--muted); font-size: 12px; }
+  .spacer { flex: 1; }
+  .iconbtn { background: none; border: 1px solid var(--border); color: var(--muted); border-radius: 8px;
+             width: 32px; height: 32px; cursor: pointer; font-size: 15px; line-height: 1; }
+  .iconbtn:hover { color: var(--fg); border-color: var(--faint); }
+
+  main { flex: 1; display: flex; min-height: 0; }
+
+  /* ── Sidebar / roster ── */
+  #side { width: 340px; min-width: 280px; max-width: 420px; border-right: 1px solid var(--border);
+          background: var(--surface); display: flex; flex-direction: column; }
+  #filterbar { padding: 12px 12px 8px; display: flex; gap: 8px; }
+  #filter { flex: 1; background: var(--bg); border: 1px solid var(--border); color: var(--fg);
+            border-radius: 8px; padding: 7px 11px; font-size: 13px; outline: none; }
+  #filter:focus { border-color: var(--accent); }
+  #filter::placeholder { color: var(--faint); }
+  #groups { flex: 1; overflow-y: auto; padding: 0 8px 12px; }
+
+  .group { margin-top: 10px; }
+  .ghead { display: flex; align-items: center; gap: 8px; padding: 4px 8px; cursor: pointer; user-select: none;
+           color: var(--muted); font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacing: .06em; }
+  .ghead:hover { color: var(--fg); }
+  .ghead .tri { transition: transform .12s; font-size: 9px; }
+  .group.closed .tri { transform: rotate(-90deg); }
+  .ghead .count { margin-left: auto; font-weight: 500; color: var(--faint); text-transform: none; letter-spacing: 0; }
+  .group.closed .glist { display: none; }
+
+  .repo { margin: 2px 0 2px 6px; }
+  .rhead { color: var(--faint); font-size: 11.5px; padding: 5px 8px 2px; font-weight: 600; }
+
+  .inst { padding: 8px 10px 8px 12px; border-radius: 8px; cursor: pointer; margin: 1px 0;
+          border: 1px solid transparent; position: relative; }
+  .inst:hover { background: var(--surface-2); }
+  .inst.sel { background: var(--sel); border-color: var(--accent); }
+  .inst.idle { opacity: .62; }
+  .inst.child { margin-left: 18px; }
+  .inst.child::before { content: ""; position: absolute; left: -10px; top: 0; bottom: 50%; width: 9px;
+                        border-left: 1px solid var(--border); border-bottom: 1px solid var(--border);
+                        border-bottom-left-radius: 6px; }
+  .iname { font-weight: 600; font-size: 13px; display: flex; align-items: center; gap: 7px; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); flex: none; }
+  .dot.on { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 22%, transparent); }
+  .itask { color: var(--muted); font-size: 12px; margin-top: 3px; overflow: hidden; text-overflow: ellipsis;
+           white-space: nowrap; }
+  .imeta { display: flex; gap: 5px; margin-top: 5px; flex-wrap: wrap; align-items: center; }
+  .chip { background: var(--chip-bg); color: var(--chip-fg); border-radius: 999px; font-size: 10.5px;
+          padding: 1px 8px; font-weight: 550; }
+  .chip.dirty { color: var(--warn); }
+  .chip.rt { color: var(--accent); }
+
+  /* ── Main view ── */
+  #view { flex: 1; display: flex; flex-direction: column; min-width: 0; background: var(--bg); }
+  #vhead { padding: 12px 20px; border-bottom: 1px solid var(--border); background: var(--surface); display: none; }
+  #vhead .row1 { display: flex; align-items: center; gap: 10px; }
+  #vhead .title { font-weight: 650; font-size: 15px; }
+  #vhead .badge { font-size: 11px; padding: 2px 9px; border-radius: 999px; font-weight: 600; }
+  .badge.on { background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); }
+  .badge.off { background: var(--chip-bg); color: var(--muted); }
+  #vhead .row2 { color: var(--muted); font-size: 12.5px; margin-top: 4px; display: flex; gap: 16px; flex-wrap: wrap; }
+  #vhead .row2 b { color: var(--fg); font-weight: 550; }
+  #vhead .actions { margin-left: auto; display: flex; gap: 8px; }
+  button.act { background: var(--surface); color: var(--fg); border: 1px solid var(--border); border-radius: 8px;
+               padding: 6px 13px; cursor: pointer; font-size: 12.5px; font-weight: 550; }
+  button.act:hover { border-color: var(--accent); color: var(--accent); }
+  button.act.danger:hover { border-color: var(--danger); color: var(--danger); }
+
+  #term { flex: 1; overflow-y: auto; padding: 14px 18px; background: var(--term-bg); color: #e6edf3;
+          font: 12.5px/1.45 "SF Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+          white-space: pre-wrap; word-break: break-all; }
+  #term::selection { background: #264f78; }
+
+  #composer { border-top: 1px solid var(--border); background: var(--surface); padding: 12px 18px;
+              display: none; gap: 10px; align-items: center; }
+  #msg { flex: 1; background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 10px;
+         padding: 10px 14px; font: 13px "SF Mono", ui-monospace, monospace; outline: none; }
+  #msg:focus { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 15%, transparent); }
+  #msg::placeholder { color: var(--faint); font-family: inherit; }
+  #sendbtn { background: var(--accent); color: var(--accent-fg); border: none; border-radius: 10px;
+             padding: 10px 18px; cursor: pointer; font-size: 13px; font-weight: 600; }
+  #sendbtn:hover { filter: brightness(1.1); }
+
+  .empty { color: var(--muted); text-align: center; padding: 60px 30px; font-size: 13.5px; }
+  .empty .big { font-size: 32px; display: block; margin-bottom: 12px; opacity: .5; }
+  .empty code { background: var(--chip-bg); border-radius: 6px; padding: 1px 7px; font-size: 12px; }
+
+  /* ANSI palette tuned for the dark terminal surface */
+  .a30{color:#565f6b}.a31{color:#ff7b72}.a32{color:#4ac26b}.a33{color:#d9a032}.a34{color:#6cb2ff}.a35{color:#c297ff}.a36{color:#4ed1db}.a37{color:#c3ccd6}
+  .a90{color:#7b848f}.a91{color:#ffa198}.a92{color:#63e084}.a93{color:#edbb4a}.a94{color:#8cc5ff}.a95{color:#d5b3ff}.a96{color:#70e0e8}.a97{color:#f5f9ff}
+  .ab{font-weight:700}.ad{opacity:.62}.ai{font-style:italic}.au{text-decoration:underline}
+</style>
+</head>
+<body>
+<header>
+  <h1><span class="logo">●</span> oas agents</h1>
+  <span class="hmeta" id="teamline"></span>
+  <span class="spacer"></span>
+  <span class="hmeta" id="stamp"></span>
+  <button class="iconbtn" id="themebtn" title="Toggle light/dark">◐</button>
+</header>
+<main>
+  <div id="side">
+    <div id="filterbar"><input id="filter" placeholder="Filter agents, repos, tasks…" autocomplete="off"></div>
+    <div id="groups"></div>
+  </div>
+  <div id="view">
+    <div id="vhead">
+      <div class="row1">
+        <span class="title" id="vtitle"></span>
+        <span class="badge" id="vbadge"></span>
+        <span class="actions">
+          <button class="act danger" id="intbtn" title="Send Ctrl-C to the session">Interrupt</button>
+        </span>
+      </div>
+      <div class="row2" id="vinfo"></div>
+    </div>
+    <div id="term"><div class="empty"><span class="big">⌥</span>Select an instance to watch its session.<br>You are looking at their terminal — what you type goes straight in.</div></div>
+    <div id="composer">
+      <input id="msg" placeholder="Message the agent — Enter sends into its terminal" autocomplete="off">
+      <button id="sendbtn">Send</button>
+    </div>
+  </div>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+let panel = { instances: [] };
+let sel = null;
+let filterText = "";
+const closedGroups = new Set(JSON.parse(localStorage.getItem("oasweb.closed") || "[]"));
+
+/* ── theme ── */
+const savedTheme = localStorage.getItem("oasweb.theme");
+const sysDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+document.documentElement.dataset.theme = savedTheme || (sysDark ? "dark" : "light");
+$("themebtn").onclick = () => {
+  const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+  document.documentElement.dataset.theme = next;
+  localStorage.setItem("oasweb.theme", next);
+};
+
+/* ── ANSI(SGR) → HTML: 16-color classes, 24-bit inline, everything else stripped ── */
+function ansiToHtml(text) {
+  const esc = (s) => s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  let out = "", open = false, cls = [], fg = null;
+  const flush = () => { if (open) { out += "</span>"; open = false; } };
+  for (const p of String(text).split(/(\x1b\[[0-9;]*m)/)) {
+    const m = p.match(/^\x1b\[([0-9;]*)m$/);
+    if (!m) { out += esc(p.replace(/\x1b\[[^m]*[A-LN-Za-ln-z]/g, "").replace(/\x1b[^[]/g, "")); continue; }
+    const codes = (m[1] || "0").split(";").map(Number);
+    for (let k = 0; k < codes.length; k++) {
+      const c = codes[k];
+      if (c === 0) { cls = []; fg = null; }
+      else if (c === 1) cls.push("ab");
+      else if (c === 2) cls.push("ad");
+      else if (c === 3) cls.push("ai");
+      else if (c === 4) cls.push("au");
+      else if ((c >= 30 && c <= 37) || (c >= 90 && c <= 97)) { cls = cls.filter(x => !/^a[39]/.test(x)); fg = null; cls.push("a" + c); }
+      else if (c === 38 && codes[k+1] === 2) { fg = `rgb(${codes[k+2]},${codes[k+3]},${codes[k+4]})`; cls = cls.filter(x => !/^a[39]/.test(x)); k += 4; }
+      else if (c === 38 && codes[k+1] === 5) { fg = null; k += 2; }
+      else if (c === 39) { cls = cls.filter(x => !/^a[39]/.test(x)); fg = null; }
+    }
+    flush();
+    if (cls.length || fg) { out += "<span" + (cls.length ? ` class="${[...new Set(cls)].join(" ")}"` : "") + (fg ? ` style="color:${fg}"` : "") + ">"; open = true; }
+  }
+  flush();
+  return out;
+}
+
+/* ── grouping: workspace → repo → instances (children indented under parents) ── */
+function groupInstances(list) {
+  const workspaces = new Map();
+  for (const i of list) {
+    const wsName = (i.workspace || "?").split("/").pop();
+    if (!workspaces.has(wsName)) workspaces.set(wsName, new Map());
+    const repos = workspaces.get(wsName);
+    const rName = i.repoName || "?";
+    if (!repos.has(rName)) repos.set(rName, []);
+    repos.get(rName).push(i);
+  }
+  // Order instances inside a repo: roots first (running first), children after their parent.
+  for (const repos of workspaces.values()) {
+    for (const [rName, items] of repos) {
+      const byName = new Map(items.map(i => [i.instance, i]));
+      const roots = items.filter(i => !i.parentInstance || !byName.has(i.parentInstance));
+      const kids = (p) => items.filter(i => i.parentInstance === p.instance);
+      const rank = (a, b) => (a.running === b.running ? a.instance.localeCompare(b.instance) : a.running ? -1 : 1);
+      roots.sort(rank);
+      const ordered = [];
+      const walk = (i, depth) => { ordered.push({ ...i, depth }); kids(i).sort(rank).forEach(k => walk(k, depth + 1)); };
+      roots.forEach(r => walk(r, 0));
+      for (const i of items) if (!ordered.some(o => o.instance === i.instance)) ordered.push({ ...i, depth: 0 });
+      repos.set(rName, ordered);
+    }
+  }
+  return workspaces;
+}
+
+function matches(i) {
+  if (!filterText) return true;
+  const t = filterText.toLowerCase();
+  return [i.instance, i.agent, i.repoName, i.task, i.branch].some(v => String(v || "").toLowerCase().includes(t));
+}
+
+function renderRoster() {
+  const el = $("groups"); el.innerHTML = "";
+  const visible = panel.instances.filter(matches);
+  if (!panel.instances.length) {
+    el.innerHTML = '<div class="empty"><span class="big">◎</span>No instances yet.<br>Spawn one with <code>oas spawn &lt;agent&gt;</code>.</div>';
+    return;
+  }
+  if (!visible.length) { el.innerHTML = '<div class="empty">Nothing matches the filter.</div>'; return; }
+  const workspaces = groupInstances(visible);
+  const multiWs = workspaces.size > 1;
+  for (const [wsName, repos] of workspaces) {
+    const g = document.createElement("div");
+    const gid = "ws:" + wsName;
+    g.className = "group" + (closedGroups.has(gid) ? " closed" : "");
+    const total = [...repos.values()].reduce((n, v) => n + v.length, 0);
+    const runningN = [...repos.values()].flat().filter(i => i.running).length;
+    if (multiWs || true) {
+      const h = document.createElement("div");
+      h.className = "ghead";
+      h.innerHTML = `<span class="tri">▾</span> ${wsName} <span class="count">${runningN}/${total} running</span>`;
+      h.onclick = () => { g.classList.toggle("closed"); g.classList.contains("closed") ? closedGroups.add(gid) : closedGroups.delete(gid);
+                          localStorage.setItem("oasweb.closed", JSON.stringify([...closedGroups])); };
+      g.appendChild(h);
+    }
+    const list = document.createElement("div"); list.className = "glist";
+    const multiRepo = repos.size > 1;
+    for (const [rName, items] of repos) {
+      const rbox = document.createElement("div"); rbox.className = "repo";
+      if (multiRepo) { const rh = document.createElement("div"); rh.className = "rhead"; rh.textContent = rName; rbox.appendChild(rh); }
+      for (const i of items) {
+        const d = document.createElement("div");
+        d.className = "inst" + (sel === i.instance ? " sel" : "") + (i.running ? "" : " idle") + (i.depth ? " child" : "");
+        d.innerHTML = `
+          <div class="iname"><span class="dot ${i.running ? "on" : ""}"></span>${i.instance}</div>
+          <div class="itask">${(i.task || "").slice(0, 100)}</div>
+          <div class="imeta">
+            <span class="chip rt">${i.runtime}</span>
+            <span class="chip">${i.work}${i.branch ? " · " + i.branch : ""}</span>
+            ${i.git && i.git.dirty ? `<span class="chip dirty">±${i.git.dirty}</span>` : ""}
+          </div>`;
+        d.onclick = () => select(i.instance);
+        rbox.appendChild(d);
+      }
+      list.appendChild(rbox);
+    }
+    g.appendChild(list);
+    el.appendChild(g);
+  }
+}
+
+async function refreshPanel() {
+  const r = await fetch("/api/panel"); panel = await r.json();
+  $("teamline").textContent = panel.team ? `team ${panel.team.name}` : "";
+  $("stamp").textContent = `${panel.running} running · ${panel.instances.length} total`;
+  renderRoster();
+}
+
+/* ── session ── */
+function select(name) {
+  sel = name;
+  const i = panel.instances.find(x => x.instance === name);
+  $("vhead").style.display = "block";
+  $("composer").style.display = "flex";
+  $("vtitle").textContent = name;
+  $("vbadge").textContent = i.running ? "running" : "idle";
+  $("vbadge").className = "badge " + (i.running ? "on" : "off");
+  $("vinfo").innerHTML = [
+    `soul <b>${i.agent}</b>`,
+    `repo <b>${i.repoName}</b>${i.branch ? ` @ <b>${i.branch}</b>` : ""}`,
+    `mode <b>${i.work}</b>`,
+    `runtime <b>${i.runtime}</b>${i.model ? ` (${i.model})` : ""}`,
+    i.next ? `next: ${i.next.slice(0, 110)}` : "",
+  ].filter(Boolean).map(x => `<span>${x}</span>`).join("");
+  renderRoster(); refreshSession(true);
+  $("msg").focus();
+}
+
+async function refreshSession(scroll) {
+  if (!sel) return;
+  const r = await fetch(`/api/session/${sel}?lines=600`); const s = await r.json();
+  const term = $("term");
+  const nearBottom = term.scrollHeight - term.scrollTop - term.clientHeight < 80;
+  term.innerHTML = s.running ? ansiToHtml(s.text)
+    : '<div class="empty"><span class="big">◌</span>This instance is not running.</div>';
+  if (scroll || nearBottom) term.scrollTop = term.scrollHeight;
+}
+
+async function sendMsg() {
+  const input = $("msg"); const text = input.value;
+  if (!sel || !text.trim()) return;
+  input.value = "";
+  await fetch(`/api/send/${sel}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text }) });
+  setTimeout(() => refreshSession(true), 350);
+}
+$("sendbtn").onclick = sendMsg;
+$("msg").addEventListener("keydown", (e) => { if (e.key === "Enter") sendMsg(); });
+$("intbtn").onclick = async () => { if (sel) { await fetch(`/api/interrupt/${sel}`, { method: "POST" }); setTimeout(() => refreshSession(true), 350); } };
+$("filter").addEventListener("input", (e) => { filterText = e.target.value; renderRoster(); });
+
+refreshPanel();
+setInterval(refreshPanel, 4000);
+setInterval(() => refreshSession(false), 1200);
+</script>
+</body>
+</html>
