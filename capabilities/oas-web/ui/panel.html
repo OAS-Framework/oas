@@ -20,24 +20,30 @@
     --ok: #3fb950; --warn: #d29922; --danger: #f85149;
     --chip-bg: #21262e; --chip-fg: #adb6c2;
     --sel: #1f6feb26;       /* selected wash */
-    --term-bg: #0a0d12;     /* terminal stays dark in BOTH themes */
+    --term-bg: #0a0d12;     /* session surface follows the theme */
+    --term-fg: #e6edf3;
+    --term-sel: #264f78;
     --shadow: 0 1px 3px rgb(0 0 0 / .4);
   }
   [data-theme="light"] {
-    --bg: #f6f8fa;
-    --surface: #ffffff;
-    --surface-2: #eef1f4;
-    --border: #d1d9e0;
-    --fg: #1f2328;          /* 15.4:1 on surface */
-    --muted: #57606a;       /* 7.2:1 on surface */
-    --faint: #8c959f;
-    --accent: #0969da;
+    /* Slightly solarised light — warm paper surfaces (Solarized base3/base2
+       tints), ink and accents kept AA-readable on them. */
+    --bg: #f3eddd;
+    --surface: #fdf6e3;
+    --surface-2: #f0e9d2;
+    --border: #ddd4bc;
+    --fg: #37424a;          /* 9.9:1 on surface */
+    --muted: #657b83;       /* solarized base00 — 4.9:1 */
+    --faint: #93a1a1;       /* solarized base1 */
+    --accent: #1f6fb2;
     --accent-fg: #ffffff;
-    --ok: #1a7f37; --warn: #9a6700; --danger: #cf222e;
-    --chip-bg: #eef1f4; --chip-fg: #57606a;
-    --sel: #0969da14;
-    --term-bg: #14181f;
-    --shadow: 0 1px 3px rgb(31 35 40 / .12);
+    --ok: #667f00; --warn: #9a6a00; --danger: #c73f3f;
+    --chip-bg: #ede5cc; --chip-fg: #62707a;
+    --sel: #1f6fb21f;
+    --term-bg: #fdf6e3;     /* solarized-light session surface */
+    --term-fg: #586e75;
+    --term-sel: #d3c9a8;
+    --shadow: 0 1px 3px rgb(88 110 117 / .14);
   }
 
   * { box-sizing: border-box; }
@@ -116,10 +122,10 @@
   button.act:hover { border-color: var(--accent); color: var(--accent); }
   button.act.danger:hover { border-color: var(--danger); color: var(--danger); }
 
-  #term { flex: 1; overflow-y: auto; padding: 14px 18px; background: var(--term-bg); color: #e6edf3;
+  #term { flex: 1; overflow-y: auto; padding: 14px 18px; background: var(--term-bg); color: var(--term-fg);
           font: 12.5px/1.45 "SF Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
           white-space: pre-wrap; word-break: break-all; }
-  #term::selection { background: #264f78; }
+  #term ::selection, #term::selection { background: var(--term-sel); }
 
   #composer { border-top: 1px solid var(--border); background: var(--surface); padding: 12px 18px;
               display: none; gap: 10px; align-items: center; }
@@ -135,9 +141,13 @@
   .empty .big { font-size: 32px; display: block; margin-bottom: 12px; opacity: .5; }
   .empty code { background: var(--chip-bg); border-radius: 6px; padding: 1px 7px; font-size: 12px; }
 
-  /* ANSI palette tuned for the dark terminal surface */
+  /* ANSI palette — dark-surface set, with a solarized-leaning override for light */
   .a30{color:#565f6b}.a31{color:#ff7b72}.a32{color:#4ac26b}.a33{color:#d9a032}.a34{color:#6cb2ff}.a35{color:#c297ff}.a36{color:#4ed1db}.a37{color:#c3ccd6}
   .a90{color:#7b848f}.a91{color:#ffa198}.a92{color:#63e084}.a93{color:#edbb4a}.a94{color:#8cc5ff}.a95{color:#d5b3ff}.a96{color:#70e0e8}.a97{color:#f5f9ff}
+  [data-theme="light"] .a30{color:#93a1a1}[data-theme="light"] .a31{color:#dc322f}[data-theme="light"] .a32{color:#859900}[data-theme="light"] .a33{color:#b58900}
+  [data-theme="light"] .a34{color:#268bd2}[data-theme="light"] .a35{color:#d33682}[data-theme="light"] .a36{color:#2aa198}[data-theme="light"] .a37{color:#586e75}
+  [data-theme="light"] .a90{color:#839496}[data-theme="light"] .a91{color:#cb4b16}[data-theme="light"] .a92{color:#6b7f00}[data-theme="light"] .a93{color:#8f6c00}
+  [data-theme="light"] .a94{color:#1f6fb2}[data-theme="light"] .a95{color:#b02e6d}[data-theme="light"] .a96{color:#1f8a82}[data-theme="light"] .a97{color:#37424a}
   .ab{font-weight:700}.ad{opacity:.62}.ai{font-style:italic}.au{text-decoration:underline}
 </style>
 </head>
@@ -187,9 +197,19 @@ $("themebtn").onclick = () => {
   const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
   document.documentElement.dataset.theme = next;
   localStorage.setItem("oasweb.theme", next);
+  refreshSession(false); // re-render the session so 24-bit colors adapt to the new surface
 };
 
-/* ── ANSI(SGR) → HTML: 16-color classes, 24-bit inline, everything else stripped ── */
+/* ── ANSI(SGR) → HTML: 16-color classes, 24-bit inline, everything else stripped.
+   24-bit colors come authored for dark terminals; on the light theme, colors
+   too bright for paper get their lightness folded down to stay readable. ── */
+function adaptRgb(r, g, b) {
+  if (document.documentElement.dataset.theme !== "light") return `rgb(${r},${g},${b})`;
+  const lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+  if (lum <= 0.55) return `rgb(${r},${g},${b})`;
+  const f = 0.55 / lum; // fold toward readable-on-paper, keep the hue
+  return `rgb(${Math.round(r * f)},${Math.round(g * f)},${Math.round(b * f)})`;
+}
 function ansiToHtml(text) {
   const esc = (s) => s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
   let out = "", open = false, cls = [], fg = null;
@@ -206,7 +226,7 @@ function ansiToHtml(text) {
       else if (c === 3) cls.push("ai");
       else if (c === 4) cls.push("au");
       else if ((c >= 30 && c <= 37) || (c >= 90 && c <= 97)) { cls = cls.filter(x => !/^a[39]/.test(x)); fg = null; cls.push("a" + c); }
-      else if (c === 38 && codes[k+1] === 2) { fg = `rgb(${codes[k+2]},${codes[k+3]},${codes[k+4]})`; cls = cls.filter(x => !/^a[39]/.test(x)); k += 4; }
+      else if (c === 38 && codes[k+1] === 2) { fg = adaptRgb(codes[k+2], codes[k+3], codes[k+4]); cls = cls.filter(x => !/^a[39]/.test(x)); k += 4; }
       else if (c === 38 && codes[k+1] === 5) { fg = null; k += 2; }
       else if (c === 39) { cls = cls.filter(x => !/^a[39]/.test(x)); fg = null; }
     }
