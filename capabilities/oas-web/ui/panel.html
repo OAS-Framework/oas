@@ -127,6 +127,56 @@
           white-space: pre-wrap; word-break: break-all; }
   #term ::selection, #term::selection { background: var(--term-sel); }
 
+  /* ── Chat view ── */
+  #chat { flex: 1; overflow-y: auto; padding: 18px 22px; display: none; }
+  .turn { max-width: 860px; margin: 0 auto 14px; }
+  .turn .who { font-size: 11px; font-weight: 650; letter-spacing: .05em; text-transform: uppercase;
+               margin-bottom: 4px; display: flex; align-items: center; gap: 6px; }
+  .turn.user .who { color: var(--accent); justify-content: flex-end; }
+  .turn.ai .who { color: var(--muted); }
+  .bubble { border-radius: 12px; padding: 10px 14px; font-size: 13.5px; line-height: 1.55;
+            white-space: pre-wrap; word-break: break-word; }
+  .turn.user .bubble { background: var(--accent); color: var(--accent-fg); margin-left: 15%;
+                       border-bottom-right-radius: 4px; }
+  .turn.ai .bubble { background: var(--surface); border: 1px solid var(--border); margin-right: 8%;
+                     border-bottom-left-radius: 4px; box-shadow: var(--shadow); }
+  .bubble code, .toolhead code { font: 12px "SF Mono", ui-monospace, monospace; background: color-mix(in srgb, currentColor 8%, transparent);
+                 border-radius: 4px; padding: 0 4px; }
+  .thinking { color: var(--muted); font-style: italic; font-size: 12.5px; border-left: 3px solid var(--border);
+              padding: 2px 12px; margin: 0 8% 6px 0; white-space: pre-wrap; }
+  .thinking summary { cursor: pointer; font-style: normal; font-size: 11px; color: var(--faint);
+                      text-transform: uppercase; letter-spacing: .05em; list-style: none; }
+  .thinking summary::before { content: "▸ "; } details[open].thinking summary::before { content: "▾ "; }
+
+  /* tool calls */
+  .tool { margin: 6px 8% 6px 0; border: 1px solid var(--border); border-radius: 10px; overflow: hidden;
+          background: var(--surface); }
+  .toolhead { display: flex; align-items: center; gap: 8px; padding: 7px 12px; cursor: pointer;
+              font: 12px "SF Mono", ui-monospace, monospace; color: var(--muted); user-select: none; }
+  .toolhead:hover { background: var(--surface-2); }
+  .toolhead .tname { color: var(--fg); font-weight: 650; }
+  .toolhead .ticon { width: 18px; height: 18px; border-radius: 5px; display: inline-flex; align-items: center;
+                     justify-content: center; font-size: 11px; flex: none;
+                     background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
+  .toolhead .targ { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+  .toolhead .tstate { font-size: 10.5px; color: var(--faint); }
+  .toolbody { display: none; border-top: 1px solid var(--border); }
+  .tool.open .toolbody { display: block; }
+  .toolbody pre { margin: 0; padding: 10px 12px; font: 11.5px/1.5 "SF Mono", ui-monospace, monospace;
+                  white-space: pre-wrap; word-break: break-all; max-height: 260px; overflow-y: auto; }
+  .toolbody .lbl { font-size: 10px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase;
+                   color: var(--faint); padding: 8px 12px 0; }
+  .toolbody pre.args { color: var(--muted); }
+  .toolbody pre.result { color: var(--fg); background: color-mix(in srgb, var(--term-bg) 40%, transparent); }
+  .turn .tstamp { font-size: 10.5px; color: var(--faint); margin-top: 3px; }
+  .turn.user .tstamp { text-align: right; }
+
+  /* view switch */
+  .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .seg button { border: none; border-radius: 0; background: var(--surface); color: var(--muted);
+                padding: 5px 14px; font-size: 12px; font-weight: 600; cursor: pointer; }
+  .seg button.on { background: var(--accent); color: var(--accent-fg); }
+
   #composer { border-top: 1px solid var(--border); background: var(--surface); padding: 12px 18px;
               display: none; gap: 10px; align-items: center; }
   #msg { flex: 1; background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 10px;
@@ -170,12 +220,17 @@
         <span class="title" id="vtitle"></span>
         <span class="badge" id="vbadge"></span>
         <span class="actions">
+          <span class="seg">
+            <button id="chatbtn">Chat</button>
+            <button id="termbtn" class="on">Terminal</button>
+          </span>
           <button class="act danger" id="intbtn" title="Send Ctrl-C to the session">Interrupt</button>
         </span>
       </div>
       <div class="row2" id="vinfo"></div>
     </div>
     <div id="term"><div class="empty"><span class="big">⌥</span>Select an instance to watch its session.<br>You are looking at their terminal — what you type goes straight in.</div></div>
+    <div id="chat"></div>
     <div id="composer">
       <input id="msg" placeholder="Message the agent — Enter sends into its terminal" autocomplete="off">
       <button id="sendbtn">Send</button>
@@ -329,7 +384,21 @@ async function refreshPanel() {
   renderRoster();
 }
 
-/* ── session ── */
+/* ── session (terminal + chat views) ── */
+let viewMode = localStorage.getItem("oasweb.view") || "term";
+const openTools = new Set();
+
+function setView(mode) {
+  viewMode = mode; localStorage.setItem("oasweb.view", mode);
+  $("termbtn").classList.toggle("on", mode === "term");
+  $("chatbtn").classList.toggle("on", mode === "chat");
+  $("term").style.display = mode === "term" ? "" : "none";
+  $("chat").style.display = mode === "chat" ? "" : "none";
+  if (sel) mode === "term" ? refreshSession(true) : refreshChat(true);
+}
+$("termbtn").onclick = () => setView("term");
+$("chatbtn").onclick = () => setView("chat");
+
 function select(name) {
   sel = name;
   const i = panel.instances.find(x => x.instance === name);
@@ -345,12 +414,13 @@ function select(name) {
     `runtime <b>${i.runtime}</b>${i.model ? ` (${i.model})` : ""}`,
     i.next ? `next: ${i.next.slice(0, 110)}` : "",
   ].filter(Boolean).map(x => `<span>${x}</span>`).join("");
-  renderRoster(); refreshSession(true);
+  renderRoster();
+  setView(viewMode);
   $("msg").focus();
 }
 
 async function refreshSession(scroll) {
-  if (!sel) return;
+  if (!sel || viewMode !== "term") return;
   const r = await fetch(`/api/session/${sel}?lines=600`); const s = await r.json();
   const term = $("term");
   const nearBottom = term.scrollHeight - term.scrollTop - term.clientHeight < 80;
@@ -364,16 +434,79 @@ async function sendMsg() {
   if (!sel || !text.trim()) return;
   input.value = "";
   await fetch(`/api/send/${sel}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text }) });
-  setTimeout(() => refreshSession(true), 350);
+  setTimeout(() => { refreshSession(true); refreshChat(true); }, 350);
 }
 $("sendbtn").onclick = sendMsg;
 $("msg").addEventListener("keydown", (e) => { if (e.key === "Enter") sendMsg(); });
 $("intbtn").onclick = async () => { if (sel) { await fetch(`/api/interrupt/${sel}`, { method: "POST" }); setTimeout(() => refreshSession(true), 350); } };
 $("filter").addEventListener("input", (e) => { filterText = e.target.value; renderRoster(); });
 
+/* ── chat rendering ── */
+const TOOL_ICONS = { bash: "$", read: "▤", edit: "✎", write: "▣", default: "⚙" };
+function toolSummary(t) {
+  const a = t.args || {};
+  if (t.name === "bash") return a.command || "";
+  if (a.path) return a.path;
+  if (a.file_path) return a.file_path;
+  const first = Object.values(a).find(v => typeof v === "string");
+  return first || JSON.stringify(a).slice(0, 120);
+}
+function escapeHtml(s) { return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function miniMarkdown(s) {
+  return escapeHtml(s)
+    .replace(/```([\s\S]*?)```/g, (m, code) => `<code style="display:block;padding:8px;margin:6px 0;overflow-x:auto">${code.trim()}</code>`)
+    .replace(/`([^`\n]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>");
+}
+function turnHtml(t, idx) {
+  if (t.role === "user") {
+    return `<div class="turn user"><div class="who">you</div><div class="bubble">${miniMarkdown(t.text)}</div></div>`;
+  }
+  let inner = "";
+  if (t.thinking) inner += `<details class="thinking"><summary>thinking</summary>${escapeHtml(t.thinking)}</details>`;
+  for (const [j, tool] of (t.tools || []).entries()) {
+    const key = `${idx}:${j}`;
+    const icon = TOOL_ICONS[tool.name] || TOOL_ICONS.default;
+    const state = tool.result === null ? "running…" : "done";
+    inner += `<div class="tool ${openTools.has(key) ? "open" : ""}" data-key="${key}">
+      <div class="toolhead" onclick="toggleTool('${key}', this)">
+        <span class="ticon">${icon}</span><span class="tname">${escapeHtml(tool.name)}</span>
+        <span class="targ">${escapeHtml(toolSummary(tool)).slice(0, 160)}</span>
+        <span class="tstate">${state}</span>
+      </div>
+      <div class="toolbody">
+        <div class="lbl">arguments</div><pre class="args">${escapeHtml(JSON.stringify(tool.args, null, 2)).slice(0, 3000)}</pre>
+        ${tool.result ? `<div class="lbl">result</div><pre class="result">${escapeHtml(tool.result)}</pre>` : ""}
+      </div>
+    </div>`;
+  }
+  if (t.text) inner += `<div class="bubble">${miniMarkdown(t.text)}</div>`;
+  if (!inner) return "";
+  return `<div class="turn ai"><div class="who">agent</div>${inner}</div>`;
+}
+window.toggleTool = (key, el) => {
+  const box = el.parentElement;
+  box.classList.toggle("open");
+  box.classList.contains("open") ? openTools.add(key) : openTools.delete(key);
+};
+let lastChatSig = "";
+async function refreshChat(scroll) {
+  if (!sel || viewMode !== "chat") return;
+  const r = await fetch(`/api/chat/${sel}?limit=150`); const d = await r.json();
+  const box = $("chat");
+  if (!d.available) { box.innerHTML = '<div class="empty"><span class="big">⎀</span>No session transcript found for this instance.</div>'; return; }
+  const sig = JSON.stringify(d.turns.length) + (d.turns.at(-1)?.text || "") + (d.turns.at(-1)?.tools?.length || 0);
+  if (sig === lastChatSig && !scroll) return; // avoid re-render flicker
+  lastChatSig = sig;
+  const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 120;
+  box.innerHTML = d.turns.map(turnHtml).join("") || '<div class="empty">No messages yet.</div>';
+  if (scroll || nearBottom) box.scrollTop = box.scrollHeight;
+}
+
 refreshPanel();
 setInterval(refreshPanel, 4000);
 setInterval(() => refreshSession(false), 1200);
+setInterval(() => refreshChat(false), 2000);
 </script>
 </body>
 </html>

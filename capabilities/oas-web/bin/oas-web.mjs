@@ -18,9 +18,10 @@
  */
 import { createServer } from "node:http";
 import { execFileSync, execSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { homedir } from "node:os";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -113,6 +114,79 @@ function sendInterrupt(inst) {
   execFileSync("tmux", ["send-keys", "-t", tmuxTarget(inst), "C-c"], { timeout: 4000 });
 }
 
+// ---- Chat transcript: parse the runtime's session log into structured turns ----
+// pi:     ~/.pi/agent/sessions/--<home with / -> ->--/<ts>_<id>.jsonl
+// claude: ~/.claude*/projects/<cwd with / -> ->/<uuid>.jsonl
+function latestFile(dir, filter = () => true) {
+  try {
+    return readdirSync(dir).filter((f) => f.endsWith(".jsonl") && filter(f))
+      .map((f) => join(dir, f))
+      .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)[0];
+  } catch { return undefined; }
+}
+function sessionFileFor(inst) {
+  const home = inst.home;
+  if ((inst.runtime || "pi") === "pi") {
+    const dir = join(homedir(), ".pi", "agent", "sessions", `-${home.replace(/\//g, "-")}--`);
+    return { file: latestFile(dir), kind: "pi" };
+  }
+  const enc = home.replace(/\//g, "-");
+  for (const base of [".claude", ".claude-personal", ".claude-work"]) {
+    const dir = join(homedir(), base, "projects", enc);
+    const f = latestFile(dir);
+    if (f) return { file: f, kind: "claude" };
+  }
+  return { file: undefined, kind: "claude" };
+}
+const asText = (blocks, type = "text", key = "text") =>
+  (Array.isArray(blocks) ? blocks : []).filter((b) => b?.type === type).map((b) => b[key] || "").join("\n");
+
+export function parseTranscript(lines, kind) {
+  const turns = [];
+  const callIndex = new Map(); // toolCallId -> tool entry
+  const push = (t) => { turns.push(t); return t; };
+  for (const line of lines) {
+    let d; try { d = JSON.parse(line); } catch { continue; }
+    const msg = kind === "pi" ? (d.type === "message" ? d.message : undefined)
+                              : (d.type === "user" || d.type === "assistant" ? d.message : undefined);
+    if (!msg) continue;
+    const content = Array.isArray(msg.content) ? msg.content : [{ type: "text", text: String(msg.content || "") }];
+    if (msg.role === "user") {
+      // claude folds tool_result into user messages; keep real user text only
+      const toolResults = content.filter((b) => b.type === "tool_result");
+      for (const r of toolResults) {
+        const entry = callIndex.get(r.tool_use_id);
+        if (entry) entry.result = (typeof r.content === "string" ? r.content : asText(r.content)).slice(0, 4000);
+      }
+      const text = asText(content).trim();
+      if (text) push({ role: "user", text, ts: msg.timestamp || d.timestamp });
+    } else if (msg.role === "assistant") {
+      const text = asText(content).trim();
+      const thinking = asText(content, "thinking", "thinking").trim();
+      const tools = [];
+      for (const b of content) {
+        if (b.type !== "toolCall" && b.type !== "tool_use") continue;
+        const entry = { id: b.id, name: b.name, args: b.arguments || b.input || {}, result: null };
+        callIndex.set(b.id, entry);
+        tools.push(entry);
+      }
+      if (text || thinking || tools.length) push({ role: "assistant", text, thinking, tools, ts: msg.timestamp || d.timestamp, model: msg.model });
+    } else if (msg.role === "toolResult") {
+      const entry = callIndex.get(msg.toolCallId);
+      if (entry) entry.result = asText(content).slice(0, 4000);
+    }
+  }
+  return turns;
+}
+function chatData(inst, limit = 120) {
+  const { file, kind } = sessionFileFor(inst);
+  if (!file) return { available: false, kind, turns: [] };
+  let text;
+  try { text = readFileSync(file, "utf8"); } catch { return { available: false, kind, turns: [] }; }
+  const turns = parseTranscript(text.split("\n").filter(Boolean), kind);
+  return { available: true, kind, file, turns: turns.slice(-limit) };
+}
+
 // ---- Jira (P2): epic + Agent Roster via acli, using the instance's oas.jira meta ----
 function acliJson(argv) {
   try { return JSON.parse(execFileSync("acli", argv, { encoding: "utf8", timeout: 20000 })); }
@@ -174,7 +248,7 @@ const server = createServer(async (req, res) => {
   try {
     if (req.method === "GET" && path === "/") return send(res, 200, UI, "text/html");
     if (req.method === "GET" && path === "/api/panel") return send(res, 200, panelData());
-    const m = path.match(/^\/api\/(session|send|interrupt|jira)\/([A-Za-z0-9._-]+)$/);
+    const m = path.match(/^\/api\/(session|send|interrupt|jira|chat)\/([A-Za-z0-9._-]+)$/);
     if (m) {
       const inst = findInstance(m[2]);
       if (!inst) return send(res, 404, { error: `unknown instance "${m[2]}"` });
@@ -195,6 +269,7 @@ const server = createServer(async (req, res) => {
         return send(res, 200, { sent: true });
       }
       if (m[1] === "jira" && req.method === "GET") return send(res, 200, jiraPanel(inst));
+      if (m[1] === "chat" && req.method === "GET") return send(res, 200, chatData(inst, Number(url.searchParams.get("limit") || 120)));
     }
     return send(res, 404, { error: "not found" });
   } catch (e) {
