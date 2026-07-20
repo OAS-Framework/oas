@@ -11,6 +11,11 @@ It shows the current instance constellation, live tmux state, worktree/branch
 status, task and next action, a pane preview, and each soul's knowledge count.
 It does not keep retired history or reconstruct past relationships.
 
+The pane **infers your terminal's theme** at startup (an OSC 11 background
+query, falling back to `COLORFGBG`, else dark) and renders a light or dark
+palette accordingly — text stays readable on either background with no
+configuration.
+
 ## Navigation
 
 | Key | Action |
