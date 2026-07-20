@@ -202,6 +202,14 @@ const server = createServer(async (req, res) => {
   }
 });
 
+server.on("error", (e) => {
+  if (e.code === "EADDRINUSE") {
+    console.error(`oas web: port ${port} is already in use — an oas web server is likely already running (open http://127.0.0.1:${port}).`);
+    console.error(`Use --port <n> for a second panel, or stop the old one: pkill -f "oas-web.mjs start"`);
+    process.exit(1);
+  }
+  throw e;
+});
 server.listen(port, "127.0.0.1", () => {
   const addr = `http://127.0.0.1:${port}`;
   console.log(`oas web — panel at ${addr}  (context: ${ctx})`);
