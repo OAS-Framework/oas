@@ -198,7 +198,7 @@
   [data-theme="light"] .a34{color:#268bd2}[data-theme="light"] .a35{color:#d33682}[data-theme="light"] .a36{color:#2aa198}[data-theme="light"] .a37{color:#586e75}
   [data-theme="light"] .a90{color:#839496}[data-theme="light"] .a91{color:#cb4b16}[data-theme="light"] .a92{color:#6b7f00}[data-theme="light"] .a93{color:#8f6c00}
   [data-theme="light"] .a94{color:#1f6fb2}[data-theme="light"] .a95{color:#b02e6d}[data-theme="light"] .a96{color:#1f8a82}[data-theme="light"] .a97{color:#37424a}
-  .ab{font-weight:700}.ad{opacity:.62}.ai{font-style:italic}.au{text-decoration:underline}
+  .ab{font-weight:700}.ad{opacity:.78}.ai{font-style:italic}.au{text-decoration:underline}
 </style>
 </head>
 <body>
@@ -256,14 +256,25 @@ $("themebtn").onclick = () => {
 };
 
 /* ── ANSI(SGR) → HTML: 16-color classes, 24-bit inline, everything else stripped.
-   24-bit colors come authored for dark terminals; on the light theme, colors
-   too bright for paper get their lightness folded down to stay readable. ── */
+   24-bit captured colors are clamped to a readable contrast band against the
+   session surface: too-bright folds down on paper, too-faint lifts up on both
+   surfaces (dim diff/context text stays legible). ── */
 function adaptRgb(r, g, b) {
-  if (document.documentElement.dataset.theme !== "light") return `rgb(${r},${g},${b})`;
+  const light = document.documentElement.dataset.theme === "light";
   const lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
-  if (lum <= 0.55) return `rgb(${r},${g},${b})`;
-  const f = 0.55 / lum; // fold toward readable-on-paper, keep the hue
-  return `rgb(${Math.round(r * f)},${Math.round(g * f)},${Math.round(b * f)})`;
+  if (light) {
+    // paper surface (~0.93 luminance): keep colors below 0.55, lift ultra-dark is fine
+    if (lum > 0.55) { const f = 0.55 / lum; return `rgb(${Math.round(r*f)},${Math.round(g*f)},${Math.round(b*f)})`; }
+    return `rgb(${r},${g},${b})`;
+  }
+  // dark surface (~0.04 luminance): lift anything darker than 0.32 toward readable
+  if (lum < 0.32) {
+    if (lum < 0.02) return "rgb(122,132,143)"; // pure/near black: give it the muted gray
+    const f = 0.32 / lum;
+    const lift = (v) => Math.min(255, Math.round(v * f));
+    return `rgb(${lift(r)},${lift(g)},${lift(b)})`;
+  }
+  return `rgb(${r},${g},${b})`;
 }
 function ansiToHtml(text) {
   const esc = (s) => s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
