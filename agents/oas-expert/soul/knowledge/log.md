@@ -1,5 +1,9 @@
 # Knowledge Log
 
+## 2026-07-20
+* **Creation**: [Terminal theme inference for TUIs](/lessons/tui-theme-inference.md) — promoted the Control Pane TUI lesson that OSC 11 should drive light/dark detection, COLORFGBG is the fallback, and semantic palettes must swap as a whole.
+* **Update**: [Control Pane visual language](/decisions/control-pane-visual-language.md) now links to the terminal theme inference lesson for palette and terminal-background handling.
+
 ## 2026-07-17
 * **Creation**: [Web pane — browser control panel as the oas.web marketplace capability](/decisions/web-pane.md) — the agents' Slack: roster + live sessions + type-into-terminal + Jira drawer, shipped as oas.web v0.1.0.
 * **Creation**: [Workspace work mode for cross-repo coordinators](/decisions/workspace-work-mode.md) — fourth work mode: ./work = team scope, read-all edit-none discipline, soul knowledge lands as PRs to the soul's home repo (oas.okf v1.1.0 harvest branch+PR flow).

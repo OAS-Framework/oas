@@ -41,3 +41,4 @@ This decision records the first Control Pane redesign vocabulary. The later
 supersedes the list badge and two-panel implications with identity rails,
 in-place expansion, variable-height scrolling, and zoom. For fast layout
 iteration, use the [mock render playbook](/playbooks/control-pane-mock-render-iteration.md).
+For light/dark terminal handling, use the [terminal theme inference lesson](/lessons/tui-theme-inference.md).
