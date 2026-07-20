@@ -6,6 +6,12 @@
       "version": "1.0.0",
       "integrity": "sha256-ca809bee6fbec832f8e3137ca87549d6f642b9c03ab073184865bb4da54e2252",
       "trustedExecutables": true
+    },
+    "oas.okf": {
+      "source": "marketplace:oas.okf@1.1.0",
+      "version": "1.1.0",
+      "integrity": "sha256-27344eac632e45cf0fb14715af38dc0716aed18b94fa407a08ed7fa6f4b8500c",
+      "trustedExecutables": true
     }
   }
 }
