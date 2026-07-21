@@ -1,6 +1,11 @@
 # OAS config for the oas framework repo — the first full OAS deployment.
-# Messaging is not declared here: it resolves at the laptop level (aweb).
+# Messaging resolves at the laptop level (aweb); the team is declared here.
 name: oas-framework
+
+# ── Team — the deployment boundary; instances join this aweb team at spawn.
+team:
+  name: oas-framework
+  id: default:oas-framework.aweb.ai
 
 agent-types:
   framework-authors:

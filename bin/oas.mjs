@@ -728,7 +728,9 @@ function capabilityCommand() {
     const meta = JSON.parse(readFileSync(metaFile, "utf8"));
     activeIds = (meta.capabilities || []).map((c) => c.id);
     context = meta.repo || context;
-    teamCtx = meta.team;
+    // Team: the spawn-time snapshot, but fall back to live config — instances
+    // spawned before a team: block was declared have no snapshot.
+    teamCtx = meta.team || resolveOasConfig(context).team;
   } else {
     const resolved = resolveOasConfig(context, flag("soul"));
     activeIds = resolved.capabilities.map((c) => c.id);
