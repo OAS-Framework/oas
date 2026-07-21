@@ -1,0 +1,21 @@
+# tui-dev knowledge
+
+Starter knowledge for the Terminal Control Pane developer
+(`lib/control-pane/model.mjs` + `tui.mjs`, `oas pane`).
+
+## Architecture
+
+* [Model/TUI split and shared data layer](architecture-model-tui-split.md) — the runtime-neutral model vs the ANSI frontend, and why model.mjs changes must be coordinated with the oas.web panel.
+* [Card stack rendering](card-stack-rendering.md) — buildCard, in-place expansion, variable-height scrolling, and the rowMap contract for mouse selection.
+* [Constellation from parentInstance lineage](constellation-from-parent-lineage.md) — how the tree is built, sorted, and made cycle-proof so malformed metadata never hides a live instance.
+
+## Theme and rendering
+
+* [Theme inference via OSC 11](theme-inference-osc11.md) — raw-mode background query with a 150ms timeout, luminance threshold, and the COLORFGBG fallback chain.
+* [Palette discipline lesson](palette-discipline-lesson.md) — hardcoded 38;2/48;2 literals outside applyTheme leak the dark design and break light mode.
+* [SGR filtering of captured panes](sgr-filtering-captured-panes.md) — capturedSgr/clipSgr keep colors but strip every non-SGR escape from tmux capture-pane output.
+
+## Verification and decisions
+
+* [Testing with pure functions and fake snapshots](testing-pure-functions-fake-snapshots.md) — how to verify the pane headless: parser tests, parseOsc11 shapes, renderFrame against hand-built snapshots.
+* [Control Pane decisions (reference)](reference-control-pane-decisions.md) — pointers to the binding decisions in the oas-expert soul (standalone read-only TUI, v3 cards, visual language, web pane).

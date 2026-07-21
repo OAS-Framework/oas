@@ -1,0 +1,7 @@
+name: dev-coordinator
+kind: persistent
+description: Development coordinator — plans multi-developer features, spawns and steers developers, owns multi-dev PRs
+repo: .
+work: checkout
+runtime: pi
+model: github-copilot/claude-fable-5:high, anthropic/claude-fable-5:high

@@ -341,6 +341,53 @@ test("cross-repo spawn resolves a sibling repo's soul via the team scope and hom
   assert.ok(!existsSync(res.home));
 });
 
+test("model preference lists resolve to the first available provider/model", async () => {
+  const { resolveModelPreference } = await import("../lib/core.mjs");
+  // single entries and empties pass through untouched (no probe)
+  assert.equal(resolveModelPreference("", "pi"), "");
+  assert.equal(resolveModelPreference("github-copilot/claude-fable-5:high", "pi"), "github-copilot/claude-fable-5:high");
+  // non-pi runtimes take the first preference
+  assert.equal(resolveModelPreference("a/b:high, c/d", "claude"), "a/b:high");
+  // pi probing: fake `pi` whose --list-models only knows provider2/model-x
+  const base = temp(); const bin = join(base, "bin"); mkdirSync(bin, { recursive: true });
+  write(join(bin, "pi"), "#!/bin/sh\necho 'provider2  model-x  1M  128K  yes  yes'\n");
+  execFileSync("chmod", ["+x", join(bin, "pi")]);
+  const oldPath = process.env.PATH; process.env.PATH = `${bin}:${process.env.PATH}`;
+  try {
+    assert.equal(resolveModelPreference("provider1/model-x:high, provider2/model-x:high", "pi"), "provider2/model-x:high");
+    // nothing available -> first preference (pi errors loudly at launch)
+    assert.equal(resolveModelPreference("p/none, q/none", "pi"), "p/none");
+  } finally { process.env.PATH = oldPath; }
+});
+
+test("capability-defined agents resolve when active, home locally, and keep the package soul read-only", () => {
+  const base = temp(); const { repo, root } = fixtureSoul(base);
+  const capDir = capability(repo, "rev", { capability: "acme.review", agents: ["agents/reviewer"] }, {
+    "agents/reviewer/soul.yaml": "name: reviewer\nkind: capability\nwork: checkout\nruntime: pi\nmodel: fake/model\ndescription: Fresh reviewer.\n",
+    "agents/reviewer/AGENTS.md": "# Reviewer\n\nReview fresh.\n",
+  });
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.review:\n      global: true\n");
+  const { findCapabilityAgent, listCapabilityAgents } = { findCapabilityAgent: undefined, listCapabilityAgents: undefined };
+  return import("../lib/core.mjs").then((core) => {
+    const listed = core.listCapabilityAgents(repo);
+    assert.deepEqual(listed.map((a) => a.name), ["reviewer"]);
+    const agent = core.findCapabilityAgent(repo, root, "reviewer");
+    assert.equal(agent.capability, "acme.review");
+    assert.equal(agent._soulDir, join(capDir, "agents", "reviewer"));
+    const oldPath = process.env.PATH; process.env.PATH = fakeRuntimes(base);
+    try {
+      const res = core.spawnInstance(root, { ...agent, repo }, { instance: "reviewer-1", launch: false });
+      // instance homes under the scope's local-agents/, soul symlink points into the package
+      assert.ok(res.home.includes(join("local-agents", "reviewer", "instances")));
+      assert.equal(readlinkSync(join(res.home, "soul")), join(capDir, "agents", "reviewer"));
+      assert.match(readFileSync(join(res.home, "AGENTS.md"), "utf8"), /Review fresh/);
+      // the package soul was not written to (no instances/, no scaffolded memory)
+      assert.ok(!existsSync(join(capDir, "agents", "reviewer", "instances")));
+      core.retireInstance(root, "reviewer-1", {});
+    } finally { process.env.PATH = oldPath; }
+  });
+});
+
 test("hooks run in deterministic order, with retire reversing spawn", () => {
   const base = temp(); const repo = join(base, "repo"); const home = join(base, "home"); mkdirSync(home); mkdirSync(repo);
   const script = `import {appendFileSync} from 'node:fs'; appendFileSync(process.env.OAS_HOME + '/order', process.env.OAS_EVENT + ':' + process.env.OAS_CAPABILITY + '\\n');`;

@@ -2,11 +2,11 @@
 # Messaging is not declared here: it resolves at the laptop level (aweb).
 name: oas-framework
 
-# ── Agent types (families) ── declared here by name; each soul opts in via
-# `type: <name>` in its soul.yaml. Capability entries can target them.
 agent-types:
   framework-authors:
     description: Agents that author and steward the OAS framework itself
+  developers:
+    description: OAS developers — worktree-mode, PR-only to main, post-commit review discipline
 
 capabilities:
   # Fundamental layers — exclusive slots; a capability entry or an explicit none.
@@ -15,17 +15,18 @@ capabilities:
       capability: oas.okf
       from: installed
       # injection-override: .agents/injections/capabilities/oas.okf.md
-    # messaging: (unset — inherits from the laptop level: aweb)
-    # Explicit none prevents an inherited task integration from occupying the
-    # exclusive slot; integrations activate only through capability entries.
     tasks: none
-  # Additive capabilities — non-exclusive; target global, agent-types, or souls.
   additive:
     oas.authoring:
       from: installed
       agent-types:
         framework-authors: true
       # injection-override: .agents/injections/capabilities/oas.authoring.md
+    oas.review:
+      from: installed
+      agent-types:
+        developers: true
+      # injection-override: .agents/injections/capabilities/oas.review.md
 
 # ── Work modes — optional per-mode env bootstrap.
 # `setup:` runs inside each NEW worktree right after `git worktree add`.

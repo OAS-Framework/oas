@@ -42,31 +42,49 @@ const flag = (name) => {
   const i = args.indexOf(`--${name}`);
   return i >= 0 ? (args[i + 1] && !args[i + 1].startsWith("--") ? args[i + 1] : true) : undefined;
 };
+const flagAll = (name) => args.flatMap((a, i) => (a === `--${name}` && args[i + 1] && !args[i + 1].startsWith("--") ? [args[i + 1]] : []));
 
 if (sub !== "start") {
-  console.error("usage: oas web start [--port <n>] [--dir <context>] [--open]");
+  console.error("usage: oas web start [--port <n>] [--dir <workspace>]... [--open]  (repeat --dir for multiple workspaces)");
   process.exit(1);
 }
 
 const core = await import(pathToFileURL(join(FRAMEWORK_ROOT, "lib", "core.mjs")).href);
 const model = await import(pathToFileURL(join(FRAMEWORK_ROOT, "lib", "control-pane", "model.mjs")).href);
 
-const ctx = resolve(String(flag("dir") || process.cwd()));
+/** Workspaces in view. Each --dir registers one (repeatable); no --dir means
+ * the cwd. Every context resolves to its team scope (or config scope) so the
+ * switcher shows deployment-level entries; duplicates collapse. */
+const ctxs = (flagAll("dir").length ? flagAll("dir") : [process.cwd()]).map((d) => resolve(String(d)));
 const port = Number(flag("port") || 4820);
 
-/** All agents roots in view: team scope when declared, else the local root. */
-function agentsRoots() {
+function workspaceEntry(ctx) {
+  let team, roots = [], scope = ctx;
   try {
     const r = core.resolveOasConfig(ctx);
-    if (r.team) return { team: r.team, roots: core.teamAgentRoots(r.team.scope) };
-  } catch { /* fall back to local root */ }
-  try { return { team: undefined, roots: [core.ensureRoot(ctx)] }; } catch { return { team: undefined, roots: [] }; }
+    if (r.team) { team = r.team; scope = r.team.scope; roots = core.teamAgentRoots(r.team.scope); }
+    else {
+      const level = r.chain?.find((c) => c._level !== process.env.HOME)?._level;
+      if (level) scope = level;
+    }
+  } catch { /* fall through to local root */ }
+  if (!roots.length) { try { roots = [core.ensureRoot(ctx)]; } catch { roots = []; } }
+  return { id: scope, name: scope.split("/").pop(), scope, team: team || null, roots };
+}
+function workspaces() {
+  const map = new Map();
+  for (const ctx of ctxs) { const w = workspaceEntry(ctx); if (!map.has(w.id)) map.set(w.id, w); }
+  return [...map.values()];
+}
+function workspaceById(id) {
+  return workspaces().find((w) => w.id === id) || workspaces()[0];
 }
 
-function panelData() {
-  const { team, roots } = agentsRoots();
+function panelData(wsId) {
+  const all = workspaces();
+  const ws = wsId ? workspaceById(wsId) : all[0];
   const instances = [];
-  for (const root of roots) {
+  for (const root of ws?.roots || []) {
     try {
       const data = model.collectControlPane(root);
       for (const inst of data.instances) instances.push({ ...inst, agentsRoot: root });
@@ -74,7 +92,9 @@ function panelData() {
   }
   instances.sort((a, b) => (a.running === b.running ? String(a.instance).localeCompare(b.instance) : a.running ? -1 : 1));
   return {
-    team: team || null,
+    workspace: ws ? { id: ws.id, name: ws.name, team: ws.team } : null,
+    workspaces: all.map((w) => ({ id: w.id, name: w.name, team: w.team })),
+    team: ws?.team || null,
     generatedAt: new Date().toISOString(),
     running: instances.filter((i) => i.running).length,
     instances: instances.map((i) => ({
@@ -92,7 +112,11 @@ function panelData() {
 }
 
 function findInstance(name) {
-  return panelData().instances.find((i) => i.instance === name);
+  for (const w of workspaces()) {
+    const hit = panelData(w.id).instances.find((i) => i.instance === name);
+    if (hit) return hit;
+  }
+  return undefined;
 }
 
 function tmuxTarget(inst) { return `${inst.tmux.session}:${inst.tmux.window}`; }
@@ -105,8 +129,15 @@ function capture(inst, lines) {
 }
 
 function sendText(inst, text) {
-  // -l = literal (no key-name interpretation), then a separate Enter.
-  execFileSync("tmux", ["send-keys", "-t", tmuxTarget(inst), "-l", text], { timeout: 4000 });
+  if (text.includes("\n")) {
+    // Multi-line: bracketed paste via a tmux buffer so the TUI treats it as one
+    // pasted block (a literal \n via send-keys would submit each line).
+    execFileSync("tmux", ["load-buffer", "-b", "oasweb", "-"], { input: text, timeout: 4000 });
+    execFileSync("tmux", ["paste-buffer", "-p", "-d", "-b", "oasweb", "-t", tmuxTarget(inst)], { timeout: 4000 });
+  } else {
+    // -l = literal (no key-name interpretation), then a separate Enter.
+    execFileSync("tmux", ["send-keys", "-t", tmuxTarget(inst), "-l", text], { timeout: 4000 });
+  }
   execFileSync("tmux", ["send-keys", "-t", tmuxTarget(inst), "Enter"], { timeout: 4000 });
 }
 
@@ -247,7 +278,7 @@ const server = createServer(async (req, res) => {
   const path = url.pathname;
   try {
     if (req.method === "GET" && path === "/") return send(res, 200, UI, "text/html");
-    if (req.method === "GET" && path === "/api/panel") return send(res, 200, panelData());
+    if (req.method === "GET" && path === "/api/panel") return send(res, 200, panelData(url.searchParams.get("ws") || undefined));
     const m = path.match(/^\/api\/(session|send|interrupt|jira|chat)\/([A-Za-z0-9._-]+)$/);
     if (m) {
       const inst = findInstance(m[2]);
@@ -287,7 +318,7 @@ server.on("error", (e) => {
 });
 server.listen(port, "127.0.0.1", () => {
   const addr = `http://127.0.0.1:${port}`;
-  console.log(`oas web — panel at ${addr}  (context: ${ctx})`);
+  console.log(`oas web — panel at ${addr}  (workspaces: ${workspaces().map((w) => w.name).join(", ") || "none"})`);
   console.log("Bound to 127.0.0.1 only. This process can type into your agent terminals — do not expose it.");
   if (flag("open")) { try { execFileSync(process.platform === "darwin" ? "open" : "xdg-open", [addr], { stdio: "ignore" }); } catch { /* best-effort */ } }
 });

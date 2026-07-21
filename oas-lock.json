@@ -12,6 +12,12 @@
       "version": "1.1.0",
       "integrity": "sha256-27344eac632e45cf0fb14715af38dc0716aed18b94fa407a08ed7fa6f4b8500c",
       "trustedExecutables": true
+    },
+    "oas.review": {
+      "source": "marketplace:oas.review@1.0.0",
+      "version": "1.0.0",
+      "integrity": "sha256-0a7acc2dd96f32108a391a7e14eecab19ee9bdcbf6b10855ae1f0cccc422f24f",
+      "trustedExecutables": true
     }
   }
 }

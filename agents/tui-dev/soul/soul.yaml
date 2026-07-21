@@ -1,0 +1,8 @@
+name: tui-dev
+kind: persistent
+description: Terminal Control Pane expert developer — owns lib/control-pane
+type: developers
+repo: .
+work: worktree
+runtime: pi
+model: github-copilot/claude-fable-5:high, anthropic/claude-fable-5:high

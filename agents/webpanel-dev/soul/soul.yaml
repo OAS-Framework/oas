@@ -1,0 +1,8 @@
+name: webpanel-dev
+kind: persistent
+description: Web panel (oas.web) expert developer — owns capabilities/oas-web
+type: developers
+repo: .
+work: worktree
+runtime: pi
+model: github-copilot/claude-fable-5:high, anthropic/claude-fable-5:high

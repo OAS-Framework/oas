@@ -1,5 +1,8 @@
 # Knowledge Log
 
+## 2026-07-21
+* **Creation**: [OAS development team — PR-only flow, review capability, capability-defined agents, model preference lists](/decisions/dev-team-and-review-flow.md) — v0.16.0 contracts + the team + oas.review + maintainer pr-review skill; developer knowledge seeded from pi sessions by fan-out workflow.
+
 ## 2026-07-20
 * **Creation**: [Terminal theme inference for TUIs](/lessons/tui-theme-inference.md) — promoted the Control Pane TUI lesson that OSC 11 should drive light/dark detection, COLORFGBG is the fallback, and semantic palettes must swap as a whole.
 * **Update**: [Control Pane visual language](/decisions/control-pane-visual-language.md) now links to the terminal theme inference lesson for palette and terminal-background handling.

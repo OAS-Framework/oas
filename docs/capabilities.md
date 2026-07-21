@@ -238,6 +238,16 @@ oas use example.deploy --soul release-reviewer --dir /path/to/repo
 declares its layer, so activation does not repeat it. Disable an inherited
 fundamental layer with `oas use none --layer <layer>`.
 
+## Capability-defined agents
+
+A manifest may declare `agents: ["agents/<name>"]` — package-relative soul
+directories (`soul.yaml` + `AGENTS.md` directly inside). Wherever the
+capability is **declared** in the config chain, `oas spawn <name>` resolves
+these like local souls: the canonical soul stays read-only inside the package
+(a fresh identity every spawn — by design for service agents like reviewers),
+while instances home under the scope's `local-agents/`. Capability agents
+carry their own `model:`/`runtime:` defaults in soul.yaml.
+
 ## Commands and hooks
 
 Operational commands resolve only when their package is active in the current

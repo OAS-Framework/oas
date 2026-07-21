@@ -25,7 +25,7 @@ import {
   capabilityManifests, capabilityManifest, capabilityMissingRequires, capabilityIntegrity, capabilityTrust, capabilityExecutablePath,
   readCapabilityLocks, writeCapabilityLock,
   resolveOasConfig, resolveWorkMode, composeInstanceAgentsMd, parseYamlNested, packagedInject, teamAgentRoots,
-  findTeamAgent, findTeamInstance, workspaceOf,
+  findTeamAgent, findTeamInstance, findCapabilityAgent, listCapabilityAgents, workspaceOf,
   ensureRoot, findRoot, findAgent, listAgents, listInstances, listAgentDefs, createAgent as coreCreateAgent,
   spawnInstance, retireInstance, upsertTmpAgent, defaultRepo,
 } from "../lib/core.mjs";
@@ -616,6 +616,14 @@ function spawnCmd() {
   let agent = findAgent(root, name);
   const instrFile = flag("instructions-file");
   const defFile = flag("def-file");
+  if (!agent && !instrFile && !defFile) {
+    // Capability-defined agent: a package's `agents:` soul, active in this context.
+    const capAgent = findCapabilityAgent(flag("dir") || process.cwd(), root, name);
+    if (capAgent) {
+      agent = capAgent;
+      console.log(`(capability agent: "${name}" from ${capAgent.capability} — fresh soul, instances home locally)`);
+    }
+  }
   if (!agent && !instrFile && !defFile) {
     // Cross-repo lookup: the soul may live in a sibling repo of the team scope.
     // Unique match wins; the instance homes with its owning repo's agents root.

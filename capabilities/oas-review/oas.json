@@ -1,0 +1,10 @@
+{
+  "capability": "oas.review",
+  "version": "1.0.0",
+  "compatibility": { "oas": ">=0.16.0" },
+  "description": "Post-commit review discipline: a fresh reviewer agent (defined by this capability) runs general code review and security review skills over new commits, attached to the developer's work tree.",
+  "requires": [],
+  "agents": ["agents/reviewer"],
+  "skills": ["skills/code-review", "skills/security-review"],
+  "inject": "injects/review.md"
+}

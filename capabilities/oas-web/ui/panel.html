@@ -61,6 +61,9 @@
   .iconbtn { background: none; border: 1px solid var(--border); color: var(--muted); border-radius: 8px;
              width: 32px; height: 32px; cursor: pointer; font-size: 15px; line-height: 1; }
   .iconbtn:hover { color: var(--fg); border-color: var(--faint); }
+  #wssel { background: var(--surface-2); color: var(--fg); border: 1px solid var(--border); border-radius: 8px;
+           padding: 5px 10px; font: 12.5px inherit; font-weight: 600; cursor: pointer; outline: none; }
+  #wssel:hover, #wssel:focus { border-color: var(--accent); }
 
   main { flex: 1; display: flex; min-height: 0; }
 
@@ -122,66 +125,114 @@
   button.act:hover { border-color: var(--accent); color: var(--accent); }
   button.act.danger:hover { border-color: var(--danger); color: var(--danger); }
 
-  #term { flex: 1; overflow-y: auto; padding: 14px 18px; background: var(--term-bg); color: var(--term-fg);
-          font: 12.5px/1.45 "SF Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
-          white-space: pre-wrap; word-break: break-all; }
-  #term ::selection, #term::selection { background: var(--term-sel); }
+  /* ── Chat view — pi-style terminal transcript: monospace on the session
+     surface; user prompts as bordered blocks (pi's prompt box), agent text as
+     plain prose, tool calls inline with their output visible and dimmed. ── */
+  #chat { flex: 1; overflow-y: auto; padding: 22px 0 30px;
+          background: var(--term-bg); color: var(--term-fg);
+          font: 13px/1.55 "SF Mono", ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .turn { max-width: 900px; margin: 0 auto; padding: 0 26px; }
+  .turn + .turn { margin-top: 16px; }
 
-  /* ── Chat view — codex-style flat transcript: one column, gutter markers,
-     no bubbles; tools inline as $ command + dimmed output preview. ── */
-  #chat { flex: 1; overflow-y: auto; padding: 20px 0; display: none;
-          font: 13.5px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-  .turn { max-width: 760px; margin: 0 auto; padding: 0 24px; }
-  .turn + .turn { margin-top: 18px; }
+  /* user prompt: pi's boxed block — accent rail + tinted surface, full width */
+  .turn.user .utext { border-left: 3px solid var(--accent);
+          background: color-mix(in srgb, var(--accent) 9%, var(--term-bg));
+          border-radius: 6px; padding: 10px 14px; white-space: pre-wrap; word-break: break-word;
+          color: color-mix(in srgb, var(--accent) 55%, var(--term-fg)); font-weight: 500; }
 
-  .turn.user { display: flex; gap: 10px; }
-  .turn.user .gutter { color: var(--accent); font-weight: 700; flex: none; }
-  .turn.user .utext { font-weight: 600; white-space: pre-wrap; word-break: break-word; }
-
-  .turn.ai .atext { white-space: pre-wrap; word-break: break-word; margin: 6px 0; }
-  .turn.ai .atext code { font: 12px "SF Mono", ui-monospace, monospace;
-          background: color-mix(in srgb, var(--fg) 7%, transparent); border-radius: 4px; padding: 0 4px; }
+  .turn.ai .atext { white-space: pre-wrap; word-break: break-word; margin: 8px 0; }
+  .turn.ai .atext code { background: color-mix(in srgb, var(--term-fg) 10%, transparent);
+          border-radius: 4px; padding: 0 4px; }
   .turn.ai .atext code.block { display: block; padding: 10px 12px; margin: 8px 0; overflow-x: auto;
-          background: color-mix(in srgb, var(--term-bg) 55%, var(--bg)); color: var(--term-fg);
-          border-radius: 8px; border: 1px solid var(--border); }
+          background: color-mix(in srgb, var(--term-fg) 6%, transparent);
+          border-radius: 6px; border: none; }
+  .turn.ai .atext b { color: color-mix(in srgb, var(--term-fg) 60%, #fff); }
+  [data-theme="light"] .turn.ai .atext b { color: #1f2328; }
 
-  .thinking { color: var(--faint); font-size: 12.5px; margin: 4px 0; }
+  /* tool call: pi-style inline line + dimmed output underneath */
+  .tool { margin: 8px 0; }
+  .toolhead { display: flex; align-items: baseline; gap: 8px; cursor: pointer; user-select: none; }
+  .toolhead:hover .tcmd { text-decoration: underline; }
+  .toolhead .tverb { color: var(--ok); font-weight: 700; flex: none; }
+  .toolhead.running .tverb { color: var(--warn); }
+  .toolhead .tcmd { color: var(--term-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .toolout { color: color-mix(in srgb, var(--term-fg) 62%, transparent); white-space: pre-wrap;
+             word-break: break-all; font-size: 12px; padding: 3px 0 0 18px; }
+  .toolout.full { max-height: 360px; overflow-y: auto;
+                  color: color-mix(in srgb, var(--term-fg) 80%, transparent); }
+  .tool .more { color: color-mix(in srgb, var(--term-fg) 40%, transparent); padding-left: 18px;
+                font-size: 11px; cursor: pointer; }
+  .tool .more:hover { color: var(--term-fg); }
+
+  /* workflow (pi dynamic-workflows): a distinct boxed panel, like pi renders it */
+  .tool.wf { border: 1px solid color-mix(in srgb, var(--term-fg) 18%, transparent);
+             border-radius: 8px; padding: 10px 14px; margin: 10px 0;
+             background: color-mix(in srgb, var(--term-fg) 5%, transparent); }
+  .wfhead { display: flex; align-items: baseline; gap: 8px; cursor: pointer; user-select: none; }
+  .wfmark { color: var(--violet, #a78bfa); }
+  .tool.wf .wfname { font-weight: 700; color: var(--term-fg); }
+  .tool.wf.running .wfmark { animation: pulse 1.2s ease-in-out infinite; }
+  .wfstate { margin-left: auto; font-size: 11.5px; color: color-mix(in srgb, var(--term-fg) 60%, transparent);
+             display: inline-flex; align-items: center; gap: 6px; }
+  .tool.wf.done .wfstate { color: var(--ok); }
+  .tool.wf.failed .wfstate { color: var(--danger); }
+  .tool.wf.running .wfstate { color: var(--warn); }
+  .wfdesc { color: color-mix(in srgb, var(--term-fg) 62%, transparent); font-size: 12px; margin-top: 4px; }
+  .tool.wf .toolout.full { margin-top: 8px; }
+  .tool.wf .more { padding-left: 0; margin-top: 6px; }
+
+  .thinking { color: color-mix(in srgb, var(--term-fg) 55%, transparent); font-size: 12px; margin: 6px 0; }
   .thinking summary { cursor: pointer; list-style: none; user-select: none; }
   .thinking summary::before { content: "▸ "; }
   details[open].thinking summary::before { content: "▾ "; }
-  .thinking .tbody { font-style: italic; color: var(--muted); white-space: pre-wrap;
-                     border-left: 2px solid var(--border); padding-left: 12px; margin-top: 4px; }
+  .thinking .tbody { font-style: italic; white-space: pre-wrap;
+                     border-left: 2px solid color-mix(in srgb, var(--term-fg) 25%, transparent);
+                     padding-left: 12px; margin-top: 4px; }
 
-  /* tools: inline command lines, codex-style */
-  .tool { margin: 6px 0; font: 12px/1.5 "SF Mono", ui-monospace, SFMono-Regular, Menlo, monospace; }
-  .toolhead { display: flex; align-items: baseline; gap: 8px; cursor: pointer; user-select: none;
-              padding: 2px 0; border-radius: 6px; }
-  .toolhead:hover { background: color-mix(in srgb, var(--fg) 4%, transparent); }
-  .toolhead .tmark { color: var(--ok); font-weight: 700; flex: none; }
-  .toolhead.running .tmark { color: var(--warn); }
-  .toolhead .tverb { color: var(--muted); flex: none; }
-  .toolhead .tcmd { color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .toolout { color: var(--faint); white-space: pre-wrap; word-break: break-all;
-             padding: 2px 0 2px 18px; border-left: 2px solid var(--border); margin-left: 4px; }
-  .toolout.full { color: var(--muted); max-height: 340px; overflow-y: auto; }
-  .tool .more { color: var(--faint); padding-left: 18px; font-size: 11px; }
+  /* ── Loading states ── */
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes pulse { 0%,100% { opacity: .35; } 50% { opacity: 1; } }
+  @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: .2; } }
+  .spinner { width: 14px; height: 14px; border: 2px solid color-mix(in srgb, var(--term-fg) 25%, transparent);
+             border-top-color: var(--accent); border-radius: 50%; animation: spin .7s linear infinite;
+             display: inline-block; vertical-align: -2px; }
+  .loading-block { display: flex; align-items: center; gap: 10px; justify-content: center;
+                   padding: 48px 0; color: color-mix(in srgb, var(--term-fg) 60%, transparent); }
+  .toolhead.running .tverb { animation: pulse 1.2s ease-in-out infinite; }
+  .working { display: flex; align-items: center; gap: 8px; padding: 10px 0 0;
+             color: color-mix(in srgb, var(--term-fg) 65%, transparent); font-size: 12px; }
+  .working .dots span { animation: blink 1.4s infinite; }
+  .working .dots span:nth-child(2) { animation-delay: .2s; }
+  .working .dots span:nth-child(3) { animation-delay: .4s; }
+  .pending { opacity: .55; }
+  .pending .utext { border-left-style: dashed; }
 
   .turn .tstamp { font-size: 10.5px; color: var(--faint); margin-top: 3px; }
 
-  /* view switch */
-  .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
-  .seg button { border: none; border-radius: 0; background: var(--surface); color: var(--muted);
-                padding: 5px 14px; font-size: 12px; font-weight: 600; cursor: pointer; }
-  .seg button.on { background: var(--accent); color: var(--accent-fg); }
 
   #composer { border-top: 1px solid var(--border); background: var(--surface); padding: 12px 18px;
-              display: none; gap: 10px; align-items: center; }
-  #msg { flex: 1; background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 10px;
-         padding: 10px 14px; font: 13px "SF Mono", ui-monospace, monospace; outline: none; }
+              display: none; gap: 10px; align-items: flex-end; }
+  #msgwrap { flex: 1; position: relative; }
+  #msg { width: 100%; background: var(--bg); color: var(--fg); border: 1px solid var(--border);
+         border-radius: 18px; padding: 11px 46px 11px 16px;
+         font: 13.5px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+         outline: none; resize: none; overflow-y: auto;
+         min-height: 44px; max-height: 176px; box-sizing: border-box; display: block;
+         transition: max-height .18s ease, min-height .18s ease; }
   #msg:focus { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 15%, transparent); }
-  #msg::placeholder { color: var(--faint); font-family: inherit; }
-  #sendbtn { background: var(--accent); color: var(--accent-fg); border: none; border-radius: 10px;
-             padding: 10px 18px; cursor: pointer; font-size: 13px; font-weight: 600; }
+  #msg::placeholder { color: var(--faint); }
+  /* Ctrl-E expanded editor — a taller, calmer writing surface (not fullscreen) */
+  #composer.expanded #msg { min-height: 220px; max-height: 46vh; border-radius: 12px;
+         font: 13px/1.55 "SF Mono", ui-monospace, SFMono-Regular, Menlo, monospace; }
+  #msghint { position: absolute; right: 14px; bottom: 7px; font-size: 10px; color: var(--faint);
+             pointer-events: none; user-select: none; }
+  #composer.expanded #msghint { display: none; }
+  #expandbtn { position: absolute; right: 10px; top: 8px; background: none; border: none; cursor: pointer;
+               color: var(--faint); font-size: 13px; padding: 2px 4px; border-radius: 5px; }
+  #expandbtn:hover { color: var(--fg); background: var(--surface-2); }
+  #sendbtn { background: var(--accent); color: var(--accent-fg); border: none; border-radius: 50%;
+             width: 40px; height: 40px; cursor: pointer; font-size: 16px; font-weight: 600; flex: none;
+             display: inline-flex; align-items: center; justify-content: center; margin-bottom: 2px; }
   #sendbtn:hover { filter: brightness(1.1); }
 
   .empty { color: var(--muted); text-align: center; padding: 60px 30px; font-size: 13.5px; }
@@ -189,18 +240,19 @@
   .empty code { background: var(--chip-bg); border-radius: 6px; padding: 1px 7px; font-size: 12px; }
 
   /* ANSI palette — dark-surface set, with a solarized-leaning override for light */
-  .a30{color:#565f6b}.a31{color:#ff7b72}.a32{color:#4ac26b}.a33{color:#d9a032}.a34{color:#6cb2ff}.a35{color:#c297ff}.a36{color:#4ed1db}.a37{color:#c3ccd6}
-  .a90{color:#7b848f}.a91{color:#ffa198}.a92{color:#63e084}.a93{color:#edbb4a}.a94{color:#8cc5ff}.a95{color:#d5b3ff}.a96{color:#70e0e8}.a97{color:#f5f9ff}
+  .a30{color:#768390}.a31{color:#ff7b72}.a32{color:#4ac26b}.a33{color:#d9a032}.a34{color:#6cb2ff}.a35{color:#c297ff}.a36{color:#4ed1db}.a37{color:#c3ccd6}
+  .a90{color:#8b949e}.a91{color:#ffa198}.a92{color:#63e084}.a93{color:#edbb4a}.a94{color:#8cc5ff}.a95{color:#d5b3ff}.a96{color:#70e0e8}.a97{color:#f5f9ff}
   [data-theme="light"] .a30{color:#93a1a1}[data-theme="light"] .a31{color:#dc322f}[data-theme="light"] .a32{color:#859900}[data-theme="light"] .a33{color:#b58900}
   [data-theme="light"] .a34{color:#268bd2}[data-theme="light"] .a35{color:#d33682}[data-theme="light"] .a36{color:#2aa198}[data-theme="light"] .a37{color:#586e75}
   [data-theme="light"] .a90{color:#839496}[data-theme="light"] .a91{color:#cb4b16}[data-theme="light"] .a92{color:#6b7f00}[data-theme="light"] .a93{color:#8f6c00}
   [data-theme="light"] .a94{color:#1f6fb2}[data-theme="light"] .a95{color:#b02e6d}[data-theme="light"] .a96{color:#1f8a82}[data-theme="light"] .a97{color:#37424a}
-  .ab{font-weight:700}.ad{opacity:.78}.ai{font-style:italic}.au{text-decoration:underline}
+  .ab{font-weight:700}.ad{opacity:.9}.ai{font-style:italic}.au{text-decoration:underline}
 </style>
 </head>
 <body>
 <header>
   <h1><span class="logo">●</span> oas agents</h1>
+  <select id="wssel" style="display:none"></select>
   <span class="hmeta" id="teamline"></span>
   <span class="spacer"></span>
   <span class="hmeta" id="stamp"></span>
@@ -217,20 +269,19 @@
         <span class="title" id="vtitle"></span>
         <span class="badge" id="vbadge"></span>
         <span class="actions">
-          <span class="seg">
-            <button id="chatbtn">Chat</button>
-            <button id="termbtn" class="on">Terminal</button>
-          </span>
           <button class="act danger" id="intbtn" title="Send Ctrl-C to the session">Interrupt</button>
         </span>
       </div>
       <div class="row2" id="vinfo"></div>
     </div>
-    <div id="term"><div class="empty"><span class="big">⌥</span>Select an instance to watch its session.<br>You are looking at their terminal — what you type goes straight in.</div></div>
-    <div id="chat"></div>
+    <div id="chat"><div class="empty"><span class="big">⌥</span>Select an instance to follow its session.<br>What you type goes straight into the agent's terminal.</div></div>
     <div id="composer">
-      <input id="msg" placeholder="Message the agent — Enter sends into its terminal" autocomplete="off">
-      <button id="sendbtn">Send</button>
+      <div id="msgwrap">
+        <textarea id="msg" rows="1" placeholder="Message the agent — Enter sends, Shift+Enter new line, Ctrl+E expand" autocomplete="off"></textarea>
+        <button id="expandbtn" title="Expand editor (Ctrl+E)">⤢</button>
+        <span id="msghint">⇧↵ newline · ^E expand</span>
+      </div>
+      <button id="sendbtn" title="Send">↑</button>
     </div>
   </div>
 </main>
@@ -249,56 +300,7 @@ $("themebtn").onclick = () => {
   const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
   document.documentElement.dataset.theme = next;
   localStorage.setItem("oasweb.theme", next);
-  refreshSession(false); // re-render the session so 24-bit colors adapt to the new surface
 };
-
-/* ── ANSI(SGR) → HTML: 16-color classes, 24-bit inline, everything else stripped.
-   24-bit captured colors are clamped to a readable contrast band against the
-   session surface: too-bright folds down on paper, too-faint lifts up on both
-   surfaces (dim diff/context text stays legible). ── */
-function adaptRgb(r, g, b) {
-  const light = document.documentElement.dataset.theme === "light";
-  const lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
-  if (light) {
-    // paper surface (~0.93 luminance): keep colors below 0.55, lift ultra-dark is fine
-    if (lum > 0.55) { const f = 0.55 / lum; return `rgb(${Math.round(r*f)},${Math.round(g*f)},${Math.round(b*f)})`; }
-    return `rgb(${r},${g},${b})`;
-  }
-  // dark surface (~0.04 luminance): lift anything darker than 0.32 toward readable
-  if (lum < 0.32) {
-    if (lum < 0.02) return "rgb(122,132,143)"; // pure/near black: give it the muted gray
-    const f = 0.32 / lum;
-    const lift = (v) => Math.min(255, Math.round(v * f));
-    return `rgb(${lift(r)},${lift(g)},${lift(b)})`;
-  }
-  return `rgb(${r},${g},${b})`;
-}
-function ansiToHtml(text) {
-  const esc = (s) => s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
-  let out = "", open = false, cls = [], fg = null;
-  const flush = () => { if (open) { out += "</span>"; open = false; } };
-  for (const p of String(text).split(/(\x1b\[[0-9;]*m)/)) {
-    const m = p.match(/^\x1b\[([0-9;]*)m$/);
-    if (!m) { out += esc(p.replace(/\x1b\[[^m]*[A-LN-Za-ln-z]/g, "").replace(/\x1b[^[]/g, "")); continue; }
-    const codes = (m[1] || "0").split(";").map(Number);
-    for (let k = 0; k < codes.length; k++) {
-      const c = codes[k];
-      if (c === 0) { cls = []; fg = null; }
-      else if (c === 1) cls.push("ab");
-      else if (c === 2) cls.push("ad");
-      else if (c === 3) cls.push("ai");
-      else if (c === 4) cls.push("au");
-      else if ((c >= 30 && c <= 37) || (c >= 90 && c <= 97)) { cls = cls.filter(x => !/^a[39]/.test(x)); fg = null; cls.push("a" + c); }
-      else if (c === 38 && codes[k+1] === 2) { fg = adaptRgb(codes[k+2], codes[k+3], codes[k+4]); cls = cls.filter(x => !/^a[39]/.test(x)); k += 4; }
-      else if (c === 38 && codes[k+1] === 5) { fg = null; k += 2; }
-      else if (c === 39) { cls = cls.filter(x => !/^a[39]/.test(x)); fg = null; }
-    }
-    flush();
-    if (cls.length || fg) { out += "<span" + (cls.length ? ` class="${[...new Set(cls)].join(" ")}"` : "") + (fg ? ` style="color:${fg}"` : "") + ">"; open = true; }
-  }
-  flush();
-  return out;
-}
 
 /* ── grouping: workspace → repo → instances (children indented under parents) ── */
 function groupInstances(list) {
@@ -385,27 +387,34 @@ function renderRoster() {
   }
 }
 
+let currentWs = localStorage.getItem("oasweb.ws") || "";
 async function refreshPanel() {
-  const r = await fetch("/api/panel"); panel = await r.json();
+  const r = await fetch(`/api/panel${currentWs ? `?ws=${encodeURIComponent(currentWs)}` : ""}`);
+  panel = await r.json();
+  if (panel.workspace) currentWs = panel.workspace.id;
+  // workspace switcher — shown when the server watches more than one
+  const sel2 = $("wssel");
+  if ((panel.workspaces || []).length > 1) {
+    sel2.style.display = "";
+    const options = panel.workspaces.map(w => `<option value="${w.id}" ${w.id === currentWs ? "selected" : ""}>${w.name}${w.team ? ` · ${w.team.name}` : ""}</option>`).join("");
+    if (sel2.innerHTML !== options) sel2.innerHTML = options;
+    sel2.value = currentWs;
+  } else sel2.style.display = "none";
   $("teamline").textContent = panel.team ? `team ${panel.team.name}` : "";
   $("stamp").textContent = `${panel.running} running · ${panel.instances.length} total`;
   renderRoster();
 }
+$("wssel").addEventListener("change", (e) => {
+  currentWs = e.target.value;
+  localStorage.setItem("oasweb.ws", currentWs);
+  sel = null; lastChatSig = ""; pendingSends.length = 0;
+  $("vhead").style.display = "none"; $("composer").style.display = "none";
+  $("chat").innerHTML = '<div class="empty"><span class="big">⌥</span>Select an instance to follow its session.</div>';
+  refreshPanel();
+});
 
-/* ── session (terminal + chat views) ── */
-let viewMode = localStorage.getItem("oasweb.view") || "term";
+/* ── session (chat view) ── */
 const openTools = new Set();
-
-function setView(mode) {
-  viewMode = mode; localStorage.setItem("oasweb.view", mode);
-  $("termbtn").classList.toggle("on", mode === "term");
-  $("chatbtn").classList.toggle("on", mode === "chat");
-  $("term").style.display = mode === "term" ? "" : "none";
-  $("chat").style.display = mode === "chat" ? "" : "none";
-  if (sel) mode === "term" ? refreshSession(true) : refreshChat(true);
-}
-$("termbtn").onclick = () => setView("term");
-$("chatbtn").onclick = () => setView("chat");
 
 function select(name) {
   sel = name;
@@ -423,75 +432,138 @@ function select(name) {
     i.next ? `next: ${i.next.slice(0, 110)}` : "",
   ].filter(Boolean).map(x => `<span>${x}</span>`).join("");
   renderRoster();
-  setView(viewMode);
+  lastChatSig = "";
+  lastChatData = null; // never re-render another instance's cached transcript
+  chatReq++;           // invalidate any in-flight fetch for the previous instance
+  pendingSends.length = 0;
+  $("chat").innerHTML = '<div class="loading-block"><span class="spinner"></span> Loading session…</div>';
+  refreshChat(true);
   $("msg").focus();
 }
 
-async function refreshSession(scroll) {
-  if (!sel || viewMode !== "term") return;
-  const r = await fetch(`/api/session/${sel}?lines=600`); const s = await r.json();
-  const term = $("term");
-  const nearBottom = term.scrollHeight - term.scrollTop - term.clientHeight < 80;
-  term.innerHTML = s.running ? ansiToHtml(s.text)
-    : '<div class="empty"><span class="big">◌</span>This instance is not running.</div>';
-  if (scroll || nearBottom) term.scrollTop = term.scrollHeight;
-}
-
+/* messages you sent that the transcript has not shown yet — rendered
+   immediately as pending (dashed rail) so a send never feels swallowed */
+const pendingSends = [];
+let fastPollUntil = 0;
 async function sendMsg() {
   const input = $("msg"); const text = input.value;
   if (!sel || !text.trim()) return;
   input.value = "";
+  $("composer").classList.remove("expanded");
+  autosize();
+  pendingSends.push(text);
+  lastChatSig = ""; renderChat(lastChatData, true); // pending block + thinking indicator, instantly
+  fastPollUntil = Date.now() + 20000; // tight polling right after a send
   await fetch(`/api/send/${sel}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text }) });
-  setTimeout(() => { refreshSession(true); refreshChat(true); }, 350);
+  refreshChat(true);
 }
 $("sendbtn").onclick = sendMsg;
-$("msg").addEventListener("keydown", (e) => { if (e.key === "Enter") sendMsg(); });
-$("intbtn").onclick = async () => { if (sel) { await fetch(`/api/interrupt/${sel}`, { method: "POST" }); setTimeout(() => refreshSession(true), 350); } };
+
+/* composer: auto-grow textarea, Enter sends / Shift+Enter newline, Ctrl-E expands.
+   Native textarea keeps the classic editing keys (⌘A/C/V/Z, option-arrows, etc.). */
+const msgEl = $("msg");
+function autosize() {
+  msgEl.style.height = "auto";
+  msgEl.style.height = Math.min(msgEl.scrollHeight, $("composer").classList.contains("expanded") ? window.innerHeight * .46 : 176) + "px";
+}
+function toggleExpand() {
+  $("composer").classList.toggle("expanded");
+  autosize(); msgEl.focus();
+}
+msgEl.addEventListener("input", autosize);
+msgEl.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMsg(); return; }
+  if (e.key === "e" && e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); toggleExpand(); return; }
+  if (e.key === "Escape" && $("composer").classList.contains("expanded")) { e.preventDefault(); toggleExpand(); }
+});
+$("expandbtn").onclick = toggleExpand;
+$("intbtn").onclick = async () => { if (sel) { await fetch(`/api/interrupt/${sel}`, { method: "POST" }); setTimeout(() => refreshChat(true), 350); } };
 $("filter").addEventListener("input", (e) => { filterText = e.target.value; renderRoster(); });
 
-/* ── chat rendering — codex-style flat transcript ── */
+/* ── chat rendering — Codex-app style: user blocks, prose, grouped "Worked" activity ── */
 function toolCommand(t) {
   const a = t.args || {};
   if (t.name === "bash") return { verb: "$", cmd: a.command || "" };
-  if (t.name === "read") return { verb: "read", cmd: a.path || a.file_path || "" };
-  if (t.name === "edit" || t.name === "write") return { verb: t.name, cmd: a.path || a.file_path || "" };
+  if (t.name === "read") return { verb: "Read", cmd: a.path || a.file_path || "" };
+  if (t.name === "edit") return { verb: "Edited", cmd: a.path || a.file_path || "" };
+  if (t.name === "write") return { verb: "Wrote", cmd: a.path || a.file_path || "" };
+  if (t.name === "workflow") {
+    const meta = workflowMeta(t);
+    return { verb: "Workflow", cmd: meta.name || "dynamic workflow" };
+  }
   const first = Object.values(a).find(v => typeof v === "string");
   return { verb: t.name, cmd: first || JSON.stringify(a).slice(0, 120) };
 }
+/* pi dynamic-workflows extension: the tool call carries a JS script whose
+   `export const meta = { name, description }` names the workflow. */
+function workflowMeta(t) {
+  const script = String((t.args || {}).script || "");
+  const name = (script.match(/meta\s*=\s*\{[^}]*?name:\s*['"`]([^'"`]+)['"`]/) || [])[1];
+  const description = (script.match(/meta\s*=\s*\{[^}]*?description:\s*['"`]([^'"`]+)['"`]/) || [])[1];
+  return { name, description };
+}
+function workflowResult(t) {
+  const out = String(t.result || "");
+  const head = (out.match(/^Workflow\s+(\S+)\s+(completed|failed)[^\n]*/) || [])[0];
+  const agents = (out.match(/with\s+(\d+)\s+agent/) || [])[1];
+  return { head, agents, body: out };
+}
 function escapeHtml(s) { return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function agentLabel() {
+  const i = panel.instances.find(x => x.instance === sel);
+  return i ? i.agent : "agent";
+}
 function miniMarkdown(s) {
   return escapeHtml(s)
     .replace(/```\w*\n?([\s\S]*?)```/g, (m, code) => `<code class="block">${code.replace(/\n$/, "")}</code>`)
     .replace(/`([^`\n]+)`/g, "<code>$1</code>")
     .replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>");
 }
-const PREVIEW_LINES = 4;
+const PREVIEW_LINES = 5;
+function workflowHtml(tool, key) {
+  const open = openTools.has(key);
+  const running = tool.result === null;
+  const meta = workflowMeta(tool);
+  const res = running ? null : workflowResult(tool);
+  const failed = res && /failed/.test(res.head || "");
+  return `<div class="tool wf ${running ? "running" : failed ? "failed" : "done"}">
+    <div class="wfhead" onclick="toggleTool('${key}')">
+      <span class="wfmark">◆</span>
+      <span class="wfname">Workflow: ${escapeHtml(meta.name || "dynamic")}</span>
+      <span class="wfstate">${running ? '<span class="spinner"></span> running' : failed ? "✗ failed" : `✓ completed${res.agents ? ` · ${res.agents} agents` : ""}`}</span>
+    </div>
+    ${meta.description ? `<div class="wfdesc">${escapeHtml(meta.description)}</div>` : ""}
+    ${!running && open ? `<div class="toolout full">${escapeHtml(res.body)}</div><div class="more" onclick="toggleTool('${key}')">collapse</div>`
+      : !running ? `<div class="more" onclick="toggleTool('${key}')">show result</div>` : ""}
+  </div>`;
+}
+function toolHtml(tool, key) {
+  if (tool.name === "workflow") return workflowHtml(tool, key);
+  const open = openTools.has(key);
+  const { verb, cmd } = toolCommand(tool);
+  const running = tool.result === null;
+  const out = (tool.result || "").replace(/\n+$/, "");
+  const lines = out ? out.split("\n") : [];
+  const preview = lines.slice(0, PREVIEW_LINES).join("\n");
+  const hidden = lines.length - PREVIEW_LINES;
+  return `<div class="tool">
+    <div class="toolhead ${running ? "running" : ""}" onclick="toggleTool('${key}')">
+      <span class="tverb">${running ? "●" : "✓"} ${escapeHtml(verb)}</span><span class="tcmd">${escapeHtml(cmd)}</span>
+    </div>
+    ${running ? "" : open
+      ? `<div class="toolout full">${escapeHtml(out || "(no output)")}</div><div class="more" onclick="toggleTool('${key}')">collapse</div>`
+      : preview
+        ? `<div class="toolout">${escapeHtml(preview)}</div>${hidden > 0 ? `<div class="more" onclick="toggleTool('${key}')">… ${hidden} more lines</div>` : ""}`
+        : ""}
+  </div>`;
+}
 function turnHtml(t, idx) {
   if (t.role === "user") {
-    return `<div class="turn user"><span class="gutter">›</span><div class="utext">${escapeHtml(t.text)}</div></div>`;
+    return `<div class="turn user"><div class="utext">${escapeHtml(t.text)}</div></div>`;
   }
   let inner = "";
   if (t.thinking) inner += `<details class="thinking"><summary>thinking</summary><div class="tbody">${escapeHtml(t.thinking)}</div></details>`;
-  for (const [j, tool] of (t.tools || []).entries()) {
-    const key = `${idx}:${j}`;
-    const open = openTools.has(key);
-    const { verb, cmd } = toolCommand(tool);
-    const running = tool.result === null;
-    const out = (tool.result || "").replace(/\n+$/, "");
-    const lines = out ? out.split("\n") : [];
-    const preview = lines.slice(0, PREVIEW_LINES).join("\n");
-    const hidden = lines.length - PREVIEW_LINES;
-    inner += `<div class="tool">
-      <div class="toolhead ${running ? "running" : ""}" onclick="toggleTool('${key}')">
-        <span class="tmark">${running ? "●" : "✓"}</span><span class="tverb">${escapeHtml(verb)}</span><span class="tcmd">${escapeHtml(cmd)}</span>
-      </div>
-      ${running ? "" : open
-        ? `<div class="toolout full">${escapeHtml(out || "(no output)")}</div>`
-        : preview
-          ? `<div class="toolout">${escapeHtml(preview)}</div>${hidden > 0 ? `<div class="more" onclick="toggleTool('${key}')">… ${hidden} more lines</div>` : ""}`
-          : ""}
-    </div>`;
-  }
+  for (const [j, tool] of (t.tools || []).entries()) inner += toolHtml(tool, `${idx}:${j}`);
   if (t.text) inner += `<div class="atext">${miniMarkdown(t.text)}</div>`;
   if (!inner) return "";
   return `<div class="turn ai">${inner}</div>`;
@@ -501,23 +573,52 @@ window.toggleTool = (key) => {
   lastChatSig = ""; refreshChat(false);
 };
 let lastChatSig = "";
-async function refreshChat(scroll) {
-  if (!sel || viewMode !== "chat") return;
-  const r = await fetch(`/api/chat/${sel}?limit=150`); const d = await r.json();
+let lastChatData = null;
+function renderChat(d, scroll) {
   const box = $("chat");
+  if (!d) return;
   if (!d.available) { box.innerHTML = '<div class="empty"><span class="big">⎀</span>No session transcript found for this instance.</div>'; return; }
-  const sig = JSON.stringify(d.turns.length) + (d.turns.at(-1)?.text || "") + (d.turns.at(-1)?.tools?.length || 0);
+  // clear pending sends once they appear in the transcript
+  const shown = new Set(d.turns.filter(t => t.role === "user").map(t => t.text.trim()));
+  for (let i = pendingSends.length - 1; i >= 0; i--) if (shown.has(pendingSends[i].trim())) pendingSends.splice(i, 1);
+  const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 120;
+  let html = d.turns.map(turnHtml).join("") || "";
+  for (const text of pendingSends) html += `<div class="turn user pending"><div class="utext">${escapeHtml(text)}</div></div>`;
+  // live indicator: working when a tool call is in flight, a send is pending,
+  // or the last transcript turn is the human's (the agent is thinking/streaming
+  // — its reply only lands in the log when a block completes)
+  const last = d.turns.at(-1);
+  const busy = pendingSends.length > 0
+    || (last && last.role === "user")
+    || (last && last.role === "assistant" && (last.tools || []).some(t => t.result === null));
+  if (busy) html += `<div class="turn ai"><div class="working"><span class="spinner"></span> ${last?.role === "user" || pendingSends.length ? "agent is thinking" : "agent is working"}<span class="dots"><span>.</span><span>.</span><span>.</span></span></div></div>`;
+  box.innerHTML = html || '<div class="empty">No messages yet.</div>';
+  if (scroll || nearBottom) box.scrollTop = box.scrollHeight;
+}
+let chatReq = 0; // request generation — stale/out-of-order responses are discarded
+async function refreshChat(scroll) {
+  if (!sel) return;
+  const forSel = sel;
+  const myReq = ++chatReq;
+  let d;
+  try { const r = await fetch(`/api/chat/${encodeURIComponent(forSel)}?limit=150`); d = await r.json(); }
+  catch { return; } // keep the last good render on transient fetch errors
+  // A newer request finished first, or the user switched instance mid-flight:
+  // this payload belongs to another view — never let it paint.
+  if (myReq !== chatReq || forSel !== sel) return;
+  lastChatData = d;
+  const sig = forSel + ":" + JSON.stringify(d.turns.length) + (d.turns.at(-1)?.text || "") + (d.turns.at(-1)?.tools?.length || 0)
+    + ":" + (d.turns.at(-1)?.tools || []).filter(t => t.result === null).length + ":" + pendingSends.length
+    + ":" + (d.turns.at(-1)?.role || "");
   if (sig === lastChatSig && !scroll) return; // avoid re-render flicker
   lastChatSig = sig;
-  const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 120;
-  box.innerHTML = d.turns.map(turnHtml).join("") || '<div class="empty">No messages yet.</div>';
-  if (scroll || nearBottom) box.scrollTop = box.scrollHeight;
+  renderChat(d, scroll);
 }
 
 refreshPanel();
 setInterval(refreshPanel, 4000);
-setInterval(() => refreshSession(false), 1200);
-setInterval(() => refreshChat(false), 2000);
+setInterval(() => refreshChat(false), 1500);
+setInterval(() => { if (Date.now() < fastPollUntil) refreshChat(false); }, 400); // tight loop after sends
 </script>
 </body>
 </html>
