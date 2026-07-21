@@ -275,7 +275,7 @@ verification.
 oas init [--raw] [--template <name|path|git-url>] [--knowledge <id|none>] [--messaging <id|none>] [--tasks <id|none>]
 oas install [<id|git-url|path>] [--dir <dir>]  # acquire; bare form restores; inactive by default
 oas trust <capability> [--dir <dir>]
-oas use <capability> [--global|--type <t>|--soul <s>] [--disable] [--settings k=v ...]
+oas use <capability> [--global|--type <t>|--soul <s>] [--disable] [--settings k=v [k2=v2 ...]]
 oas use none --layer <layer>
 oas type add <name> [--description <d>]   # declare an agent type
 oas type list
