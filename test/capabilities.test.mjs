@@ -446,6 +446,7 @@ test("CLI activation writes stable global/type/soul bindings without activating 
   assert.match(config, /from: installed/);
   assert.match(config, /# injection-override: \.agents\/injections\/capabilities\/oas\.okf\.md/);
   assert.match(config, /global: true/); assert.match(config, /reviewers: false/); assert.match(config, /lead: true/);
+  assert.equal(resolveOasConfig(repo, "reviewer").capabilities.some((c) => c.id === "oas.okf"), true);
 });
 
 test("--settings accepts multiple pairs per flag, repeated flags, and rejects malformed pairs", () => {
