@@ -1,5 +1,6 @@
 # Lessons
 
+* [Multi-agent runs need exact messaging and reviewer protocols](multi-dev-run-failure-modes.md) - The first coordinator-plus-developers run showed that agents sleep-poll live aweb channels, guess CLI flags, misread unread inboxes, and lose fresh-eyes review unless injections give exact commands and reviewer lifecycle rules.
 * [Copilot-proxied models fail mid-session — plan for auth death, not just spawn-time fallback](copilot-auth-fragility.md) - Copilot-proxied model preference fallbacks resolve at spawn, so mid-session OAuth, proxy, or API-key failures can kill long-running sessions and leave panel sends unsurfaced.
 * [Terminal theme inference for TUIs](tui-theme-inference.md) - Control Pane should infer light or dark backgrounds from the terminal with OSC 11, fall back to COLORFGBG, and swap whole semantic palettes rather than isolated colors.
 * [Init-time acquisition cannot rely on config-chain discovery](init-acquisition-discovery-gotcha.md) - capabilityManifests only scans scopes that already have an oas-config.yaml, so oas init must use acquisition results directly before writing config.

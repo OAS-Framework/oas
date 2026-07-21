@@ -1,6 +1,10 @@
 # Knowledge Log
 
 ## 2026-07-21
+* **Creation**: skills/retrofit-aweb-identity — added the live-instance aweb identity retrofit procedure, including replaying the oas-aweb spawn hook, cleaning `undefined`, and persisting retire metadata.
+* **Creation**: skills/capability-source-reinstall — added the local capability source reinstall procedure and gotchas about path installs, trust, hoisted manifest paths, and version bumps.
+* **Update**: [OAS development team — PR-only flow, review capability, capability-defined agents, model preference lists](/decisions/dev-team-and-review-flow.md) now links reviewer protocol to the multi-agent failure-modes lesson.
+* **Creation**: [Multi-agent runs need exact messaging and reviewer protocols](/lessons/multi-dev-run-failure-modes.md) — first coordinator-plus-developers run failures around aweb polling, CLI flags, inbox semantics, reviewer ephemerality, and exact command injections.
 * **Update**: [OAS development team — PR-only flow, review capability, capability-defined agents, model preference lists](/decisions/dev-team-and-review-flow.md) now links model preference lists to the Copilot auth fragility lesson.
 * **Creation**: [Copilot-proxied models fail mid-session — plan for auth death, not just spawn-time fallback](/lessons/copilot-auth-fragility.md) — spawn-time model fallbacks do not protect long-running sessions from Copilot OAuth/proxy/provider errors, and panel sends need post-send error surfacing.
 * **Update**: [dev team decision](/decisions/dev-team-and-review-flow.md) amended — the maintainer commits directly to main; PR-only applies to the dev team.

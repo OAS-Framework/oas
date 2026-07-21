@@ -35,7 +35,10 @@ the PR gate exists to review the dev team's work, not to slow the
 maintainer's stewardship (framework changes still go through the human per
 the soul's boundaries). Every substantive commit triggers the
 injected review discipline: spawn the fresh reviewer attached to the work
-tree; NEEDS CHANGES blocks readiness. The maintainer (oas-expert) reviews
+tree; NEEDS CHANGES blocks readiness. That narrow reviewer protocol reflects
+the first [multi-agent run failure modes](/lessons/multi-dev-run-failure-modes.md):
+reviewers stay ephemeral/diff-only and communicate by aweb mail so developer
+self-review does not replace fresh eyes. The maintainer (oas-expert) reviews
 every PR with the **pr-review** soul skill — four gates: product direction
 (against recorded decisions), correctness (full local gate re-run),
 security (trust-boundary lens), mergeability — merging or returning to the
