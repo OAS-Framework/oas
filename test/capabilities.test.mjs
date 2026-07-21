@@ -388,6 +388,27 @@ test("capability-defined agents resolve when active, home locally, and keep the 
   });
 });
 
+test("capability agents carry their own capability's skills regardless of targeting", () => {
+  const base = temp(); const { repo, root } = fixtureSoul(base);
+  capability(repo, "rev2", { capability: "acme.rev2", agents: ["agents/checker"], skills: ["skills"] }, {
+    "agents/checker/soul.yaml": "name: checker\nkind: capability\nwork: checkout\nruntime: pi\ndescription: Checker.\n",
+    "agents/checker/AGENTS.md": "# Checker\n",
+    "skills/deep-check/SKILL.md": "---\nname: deep-check\ndescription: Deep checking.\n---\n",
+  });
+  // Targeted at a type the checker does NOT belong to — its own skills must still compose.
+  write(join(repo, "oas-config.yaml"), "agent-types:\n  devs:\n    description: devs\ncapabilities:\n  additive:\n    acme.rev2:\n      agent-types:\n        devs: true\n");
+  return import("../lib/core.mjs").then((core) => {
+    const agent = core.findCapabilityAgent(repo, root, "checker");
+    assert.ok(agent, "checker resolves on declaration despite type targeting");
+    const oldPath = process.env.PATH; process.env.PATH = fakeRuntimes(base);
+    try {
+      const res = core.spawnInstance(root, { ...agent, repo }, { instance: "checker-1", launch: false });
+      assert.ok(existsSync(join(res.home, ".agents", "skills", "deep-check", "SKILL.md")), "own capability skill materialized");
+      core.retireInstance(root, "checker-1", {});
+    } finally { process.env.PATH = oldPath; }
+  });
+});
+
 test("hooks run in deterministic order, with retire reversing spawn", () => {
   const base = temp(); const repo = join(base, "repo"); const home = join(base, "home"); mkdirSync(home); mkdirSync(repo);
   const script = `import {appendFileSync} from 'node:fs'; appendFileSync(process.env.OAS_HOME + '/order', process.env.OAS_EVENT + ':' + process.env.OAS_CAPABILITY + '\\n');`;
