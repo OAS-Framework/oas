@@ -25,9 +25,13 @@ the native provider when copilot is unavailable — resolved at spawn.
 
 # Flow
 
-Developers work in worktrees; **main moves only through PRs**. Single-dev
-features: the developer opens the PR. Multi-dev features: the coordinator
-owns the feature branch and PR. Every substantive commit triggers the
+Developers work in worktrees; **the dev team merges to main only through
+PRs**. Single-dev features: the developer opens the PR. Multi-dev features:
+the coordinator owns the feature branch and PR. The **maintainer
+(oas-expert) commits directly to main** — amended by the founder 2026-07-21;
+the PR gate exists to review the dev team's work, not to slow the
+maintainer's stewardship (framework changes still go through the human per
+the soul's boundaries). Every substantive commit triggers the
 injected review discipline: spawn the fresh reviewer attached to the work
 tree; NEEDS CHANGES blocks readiness. The maintainer (oas-expert) reviews
 every PR with the **pr-review** soul skill — four gates: product direction

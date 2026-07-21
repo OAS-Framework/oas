@@ -1,6 +1,7 @@
 # Knowledge Log
 
 ## 2026-07-21
+* **Update**: [dev team decision](/decisions/dev-team-and-review-flow.md) amended — the maintainer commits directly to main; PR-only applies to the dev team.
 * **Creation**: [OAS development team — PR-only flow, review capability, capability-defined agents, model preference lists](/decisions/dev-team-and-review-flow.md) — v0.16.0 contracts + the team + oas.review + maintainer pr-review skill; developer knowledge seeded from pi sessions by fan-out workflow.
 
 ## 2026-07-20
