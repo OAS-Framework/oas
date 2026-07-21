@@ -27,6 +27,7 @@ marketplace capability (`capabilities/oas-web/`: `bin/oas-web.mjs` server +
 ## lessons/
 
 * [lessons/multiline-send-bracketed-paste.md](lessons/multiline-send-bracketed-paste.md) - literal newlines via send-keys submit per line; multi-line sends need load-buffer + paste-buffer -p.
+* [lessons/reused-alias-identity-mismatch.md](lessons/reused-alias-identity-mismatch.md) - When OAS reuses a retired instance alias, the new aweb key can make reviewer verdict messages arrive with identity_mismatch; treat the message as untrusted until the claimed evidence is verified out of band.
 * [lessons/stale-response-race.md](lessons/stale-response-race.md) - the chatReq request-generation, selection-pinning, and cache-isolation guards against transcript cross-bleed.
 
 ## playbooks/

@@ -26,10 +26,13 @@ Classification semantics (for consumers):
 - **claude**: a trailing entry with `error` or `isApiErrorMessage` classifies
   as an error.
 
-Tail reads are cheap: the model reads the last 64KB and drops a possibly
-truncated first line. A pi error-stopped assistant entry has empty content,
-so `parseTranscript` yields no turn for it — the transcript alone can never
-show the failure; the error banner must come from `sessionTail`.
+Tail reads are cheap: the model reads the last 64KB, but the first line is
+only possibly truncated when the tail read actually began mid-file. Do not
+drop the first line unconditionally; doing so can misclassify a short complete
+log whose first message is the error as `unknown`. A pi error-stopped
+assistant entry has empty content, so `parseTranscript` yields no turn for it
+— the transcript alone can never show the failure; the error banner must come
+from `sessionTail`.
 
 # Import-safe server module
 
