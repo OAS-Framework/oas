@@ -87,6 +87,11 @@ test("classifySessionTail truncates long error messages", () => {
   assert.equal(classifySessionTail([line], "pi").errorMessage.length, 500);
 });
 
+test("classifySessionTail neutralizes control characters and newlines in error text", () => {
+  const line = JSON.stringify({ type: "message", timestamp: "t", message: { role: "assistant", stopReason: "error", errorMessage: "boom\n\x1b]0;spoof\x07  line2\ttail" } });
+  assert.equal(classifySessionTail([line], "pi").errorMessage, "boom ]0;spoof line2 tail");
+});
+
 test("sessionFileFor and sessionTailState tolerate missing session dirs", () => {
   const instance = { home: "/nonexistent/home/for/tests", runtime: "pi" };
   assert.deepEqual(sessionFileFor(instance), { file: undefined, kind: "pi" });
