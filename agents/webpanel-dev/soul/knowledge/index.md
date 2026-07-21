@@ -16,7 +16,7 @@ marketplace capability (`capabilities/oas-web/`: `bin/oas-web.mjs` server +
 * [architecture/transcript-data-sources.md](architecture/transcript-data-sources.md) - pi vs claude session JSONL locations, naming schemes, and tool-result folding differences that parseTranscript normalizes.
 * [architecture/color-adaptation.md](architecture/color-adaptation.md) - adaptRgb luminance folding of 24-bit colors and the solarized-light ANSI remap for captured terminal colors.
 * [architecture/optimistic-sends-and-indicators.md](architecture/optimistic-sends-and-indicators.md) - pendingSends reconciliation, the fastPollUntil window, and thinking/working indicator states.
-* [architecture/session-tail-error-surfacing.md](architecture/session-tail-error-surfacing.md) - oas-web classifies the tail of pi and claude session JSONL files into ok/error/unknown sessionTail state so the chat pane can stop dead-turn spinners with an error banner and the roster can mark errored agents.
+* [architecture/session-tail-error-surfacing.md](architecture/session-tail-error-surfacing.md) - oas-web consumes the shared control-pane session-tail classification (lib/control-pane/model.mjs, sole owner) so the chat pane can stop dead-turn spinners with an error banner and the roster can mark errored agents.
 * [architecture/workflow-tool-rendering.md](architecture/workflow-tool-rendering.md) - extracting workflow meta from the script source, and why per-step live progress cannot come from the transcript.
 * [architecture/multi-workspace-switcher.md](architecture/multi-workspace-switcher.md) - repeatable --dir, team-scope resolution, and the deployment-level workspace dropdown.
 
