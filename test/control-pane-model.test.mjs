@@ -118,6 +118,25 @@ test("renderFrame is responsive and maps visible constellation rows", () => {
   }
 });
 
+test("renderFrame marks errored sessions and surfaces the error text", () => {
+  const instance = {
+    instance: "worker", agent: "builder", running: true, createdAt: new Date().toISOString(),
+    next: "Recover the session", task: "Build the pane", git: { branch: "main", dirty: 0, ahead: 0, behind: 0 },
+    runtime: "pi", work: "worktree", knowledgeCount: 1, home: "/tmp/worker",
+    tmux: { session: "pi-agents", window: "worker" },
+    sessionTail: { state: "error", errorMessage: "No API key for provider anthropic", ts: null },
+  };
+  const snapshot = { root: "/tmp/demo/agents", generatedAt: new Date().toISOString(), instances: [instance], rows: [{ instance, depth: 0, ancestorsLast: [], last: true }], running: 1, soulCount: 1, tmuxAvailable: true };
+  const frame = renderFrame(snapshot, { selected: 0, preview: "tail" }, 120, 30);
+  assert.match(frame.text, /✗ err/);
+  assert.match(frame.text, /session error: No API key for provider anthropic/);
+  const details = renderFrame(snapshot, { selected: 0, preview: "", previewMode: false }, 120, 30);
+  assert.match(details.text, /error {4}/);
+  assert.match(details.text, /No API key for provider anthropic/);
+  const zoom = renderFrame(snapshot, { selected: 0, preview: "tail", zoom: true }, 120, 30);
+  assert.match(zoom.text, /✗ session error: No API key/);
+});
+
 test("terminal theme inference: OSC 11 luminance and COLORFGBG fallback shapes", async () => {
   const { parseOsc11 } = await import("../lib/control-pane/tui.mjs");
   assert.equal(parseOsc11("\x1b]11;rgb:ffff/ffff/ffff\x07"), true);          // white bg
