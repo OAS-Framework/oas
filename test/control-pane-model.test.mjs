@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  buildConstellation, parseGitDiffStat, parseGitStatus, parseTmuxWindows, readMarkdownSection, relativeAge,
+  buildConstellation, classifySessionTail, parseGitDiffStat, parseGitStatus, parseTmuxWindows,
+  readMarkdownSection, relativeAge, sessionFileFor, sessionTailState,
 } from "../lib/control-pane/model.mjs";
 import { renderFrame } from "../lib/control-pane/tui.mjs";
 
@@ -51,6 +52,48 @@ test("relativeAge chooses compact stable units", () => {
   assert.equal(relativeAge("2026-07-09T11:00:00Z", now), "2d");
 });
 
+test("classifySessionTail: pi error tail is surfaced with its message", () => {
+  const lines = [
+    '{"type":"message","timestamp":"2026-07-21T10:00:00Z","message":{"role":"user","content":"do it"}}',
+    '{"type":"message","timestamp":"2026-07-21T10:01:00Z","message":{"role":"assistant","stopReason":"error","errorMessage":"No API key for provider anthropic"}}',
+  ];
+  assert.deepEqual(classifySessionTail(lines, "pi"), {
+    state: "error", errorMessage: "No API key for provider anthropic", ts: "2026-07-21T10:01:00Z",
+  });
+});
+
+test("classifySessionTail: a later normal message means the session recovered", () => {
+  const lines = [
+    '{"type":"message","timestamp":"t1","message":{"role":"assistant","stopReason":"error","errorMessage":"Token is expired"}}',
+    '{"type":"message","timestamp":"t2","message":{"role":"assistant","stopReason":"stop","content":[]}}',
+  ];
+  assert.deepEqual(classifySessionTail(lines, "pi"), { state: "ok", errorMessage: null, ts: "t2" });
+});
+
+test("classifySessionTail: non-message entries and garbage are ignored", () => {
+  assert.equal(classifySessionTail(['{"type":"meta"}', "not json"], "pi").state, "unknown");
+  assert.equal(classifySessionTail([], "pi").state, "unknown");
+});
+
+test("classifySessionTail: claude error markers and recovery", () => {
+  const error = '{"type":"assistant","timestamp":"t1","isApiErrorMessage":true,"message":{"content":[{"type":"text","text":"OAuth token expired"}]}}';
+  assert.deepEqual(classifySessionTail([error], "claude"), { state: "error", errorMessage: "OAuth token expired", ts: "t1" });
+  const ok = '{"type":"user","timestamp":"t2","message":{"content":"hi"}}';
+  assert.equal(classifySessionTail([error, ok], "claude").state, "ok");
+});
+
+test("classifySessionTail truncates long error messages", () => {
+  const line = JSON.stringify({ type: "message", timestamp: "t", message: { role: "assistant", stopReason: "error", errorMessage: "x".repeat(2000) } });
+  assert.equal(classifySessionTail([line], "pi").errorMessage.length, 500);
+});
+
+test("sessionFileFor and sessionTailState tolerate missing session dirs", () => {
+  const instance = { home: "/nonexistent/home/for/tests", runtime: "pi" };
+  assert.deepEqual(sessionFileFor(instance), { file: undefined, kind: "pi" });
+  assert.deepEqual(sessionTailState(instance), { state: "unknown", errorMessage: null, ts: null });
+  assert.equal(sessionFileFor({ home: "/nonexistent", runtime: "claude" }).kind, "claude");
+});
+
 test("renderFrame is responsive and maps visible constellation rows", () => {
   const instance = {
     instance: "worker", agent: "builder", running: true, createdAt: new Date().toISOString(),
@@ -73,6 +116,25 @@ test("renderFrame is responsive and maps visible constellation rows", () => {
     }
     assert.ok([...frame.rowMap.values()].includes(0));
   }
+});
+
+test("renderFrame marks errored sessions and surfaces the error text", () => {
+  const instance = {
+    instance: "worker", agent: "builder", running: true, createdAt: new Date().toISOString(),
+    next: "Recover the session", task: "Build the pane", git: { branch: "main", dirty: 0, ahead: 0, behind: 0 },
+    runtime: "pi", work: "worktree", knowledgeCount: 1, home: "/tmp/worker",
+    tmux: { session: "pi-agents", window: "worker" },
+    sessionTail: { state: "error", errorMessage: "No API key for provider anthropic", ts: null },
+  };
+  const snapshot = { root: "/tmp/demo/agents", generatedAt: new Date().toISOString(), instances: [instance], rows: [{ instance, depth: 0, ancestorsLast: [], last: true }], running: 1, soulCount: 1, tmuxAvailable: true };
+  const frame = renderFrame(snapshot, { selected: 0, preview: "tail" }, 120, 30);
+  assert.match(frame.text, /✗ err/);
+  assert.match(frame.text, /session error: No API key for provider anthropic/);
+  const details = renderFrame(snapshot, { selected: 0, preview: "", previewMode: false }, 120, 30);
+  assert.match(details.text, /error {4}/);
+  assert.match(details.text, /No API key for provider anthropic/);
+  const zoom = renderFrame(snapshot, { selected: 0, preview: "tail", zoom: true }, 120, 30);
+  assert.match(zoom.text, /✗ session error: No API key/);
 });
 
 test("terminal theme inference: OSC 11 luminance and COLORFGBG fallback shapes", async () => {
