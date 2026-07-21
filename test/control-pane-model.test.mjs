@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  buildConstellation, parseGitDiffStat, parseGitStatus, parseTmuxWindows, readMarkdownSection, relativeAge,
+  buildConstellation, classifySessionTail, parseGitDiffStat, parseGitStatus, parseTmuxWindows,
+  readMarkdownSection, relativeAge, sessionFileFor, sessionTailState,
 } from "../lib/control-pane/model.mjs";
 import { renderFrame } from "../lib/control-pane/tui.mjs";
 
@@ -49,6 +50,48 @@ test("relativeAge chooses compact stable units", () => {
   const now = new Date("2026-07-11T12:00:00Z").getTime();
   assert.equal(relativeAge("2026-07-11T11:58:00Z", now), "2m");
   assert.equal(relativeAge("2026-07-09T11:00:00Z", now), "2d");
+});
+
+test("classifySessionTail: pi error tail is surfaced with its message", () => {
+  const lines = [
+    '{"type":"message","timestamp":"2026-07-21T10:00:00Z","message":{"role":"user","content":"do it"}}',
+    '{"type":"message","timestamp":"2026-07-21T10:01:00Z","message":{"role":"assistant","stopReason":"error","errorMessage":"No API key for provider anthropic"}}',
+  ];
+  assert.deepEqual(classifySessionTail(lines, "pi"), {
+    state: "error", errorMessage: "No API key for provider anthropic", ts: "2026-07-21T10:01:00Z",
+  });
+});
+
+test("classifySessionTail: a later normal message means the session recovered", () => {
+  const lines = [
+    '{"type":"message","timestamp":"t1","message":{"role":"assistant","stopReason":"error","errorMessage":"Token is expired"}}',
+    '{"type":"message","timestamp":"t2","message":{"role":"assistant","stopReason":"stop","content":[]}}',
+  ];
+  assert.deepEqual(classifySessionTail(lines, "pi"), { state: "ok", errorMessage: null, ts: "t2" });
+});
+
+test("classifySessionTail: non-message entries and garbage are ignored", () => {
+  assert.equal(classifySessionTail(['{"type":"meta"}', "not json"], "pi").state, "unknown");
+  assert.equal(classifySessionTail([], "pi").state, "unknown");
+});
+
+test("classifySessionTail: claude error markers and recovery", () => {
+  const error = '{"type":"assistant","timestamp":"t1","isApiErrorMessage":true,"message":{"content":[{"type":"text","text":"OAuth token expired"}]}}';
+  assert.deepEqual(classifySessionTail([error], "claude"), { state: "error", errorMessage: "OAuth token expired", ts: "t1" });
+  const ok = '{"type":"user","timestamp":"t2","message":{"content":"hi"}}';
+  assert.equal(classifySessionTail([error, ok], "claude").state, "ok");
+});
+
+test("classifySessionTail truncates long error messages", () => {
+  const line = JSON.stringify({ type: "message", timestamp: "t", message: { role: "assistant", stopReason: "error", errorMessage: "x".repeat(2000) } });
+  assert.equal(classifySessionTail([line], "pi").errorMessage.length, 500);
+});
+
+test("sessionFileFor and sessionTailState tolerate missing session dirs", () => {
+  const instance = { home: "/nonexistent/home/for/tests", runtime: "pi" };
+  assert.deepEqual(sessionFileFor(instance), { file: undefined, kind: "pi" });
+  assert.deepEqual(sessionTailState(instance), { state: "unknown", errorMessage: null, ts: null });
+  assert.equal(sessionFileFor({ home: "/nonexistent", runtime: "claude" }).kind, "claude");
 });
 
 test("renderFrame is responsive and maps visible constellation rows", () => {
