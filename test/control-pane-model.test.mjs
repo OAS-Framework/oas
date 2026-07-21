@@ -92,6 +92,22 @@ test("classifySessionTail neutralizes control characters and newlines in error t
   assert.equal(classifySessionTail([line], "pi").errorMessage, "boom ]0;spoof line2 tail");
 });
 
+test("sessionTailState: short complete log keeps its first line (no truncation shift)", async () => {
+  const { mkdirSync, writeFileSync, rmSync } = await import("node:fs");
+  const { homedir } = await import("node:os");
+  const { join } = await import("node:path");
+  const home = `/tmp/oas-test-session-tail-${process.pid}`;
+  const dir = join(homedir(), ".pi", "agent", "sessions", `-${home.replace(/\//g, "-")}--`);
+  try {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "s.jsonl"),
+      '{"type":"message","timestamp":"t1","message":{"role":"assistant","stopReason":"error","errorMessage":"No API key"}}\n{"type":"meta"}\n');
+    assert.deepEqual(sessionTailState({ home, runtime: "pi" }), { state: "error", errorMessage: "No API key", ts: "t1" });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("sessionFileFor and sessionTailState tolerate missing session dirs", () => {
   const instance = { home: "/nonexistent/home/for/tests", runtime: "pi" };
   assert.deepEqual(sessionFileFor(instance), { file: undefined, kind: "pi" });
