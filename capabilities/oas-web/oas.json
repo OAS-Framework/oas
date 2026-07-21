@@ -1,9 +1,9 @@
 {
   "capability": "oas.web",
   "command": "web",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "compatibility": { "oas": ">=0.14.0" },
-  "description": "Local web control panel: live instance roster, terminal-faithful session views, and type-into-terminal interaction for pi and claude sessions; Jira epic/roster panel when oas.jira is active.",
+  "description": "Local web control panel: live instance roster with session-error markers, terminal-faithful session views, transcript error banners when the agent's turn errors, and type-into-terminal interaction for pi and claude sessions; Jira epic/roster panel when oas.jira is active.",
   "requires": [
     {
       "command": "tmux",
