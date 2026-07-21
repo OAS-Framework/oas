@@ -16,7 +16,7 @@
     "oas.review": {
       "source": "marketplace:oas.review@1.0.0",
       "version": "1.0.0",
-      "integrity": "sha256-0a7acc2dd96f32108a391a7e14eecab19ee9bdcbf6b10855ae1f0cccc422f24f",
+      "integrity": "sha256-57072bc7f99625606cde12aa936f43cfa0f792760cac09311e41bfbe6cfc38c4",
       "trustedExecutables": true
     }
   }
