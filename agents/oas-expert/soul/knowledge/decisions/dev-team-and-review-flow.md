@@ -21,7 +21,9 @@ Decided with the founder, 2026-07-21.
 | oas-expert | maintainer + vision | checkout | (unchanged) |
 
 Copilot-authenticated models are the default; the second entry falls back to
-the native provider when copilot is unavailable — resolved at spawn.
+the native provider when copilot is unavailable — resolved at spawn. That
+spawn-time contract does not cover mid-session provider/auth failures; see
+[Copilot-proxied models fail mid-session](/lessons/copilot-auth-fragility.md).
 
 # Flow
 

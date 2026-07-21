@@ -1,5 +1,6 @@
 # Lessons
 
+* [Copilot-proxied models fail mid-session — plan for auth death, not just spawn-time fallback](copilot-auth-fragility.md) - Copilot-proxied model preference fallbacks resolve at spawn, so mid-session OAuth, proxy, or API-key failures can kill long-running sessions and leave panel sends unsurfaced.
 * [Terminal theme inference for TUIs](tui-theme-inference.md) - Control Pane should infer light or dark backgrounds from the terminal with OSC 11, fall back to COLORFGBG, and swap whole semantic palettes rather than isolated colors.
 * [Init-time acquisition cannot rely on config-chain discovery](init-acquisition-discovery-gotcha.md) - capabilityManifests only scans scopes that already have an oas-config.yaml, so oas init must use acquisition results directly before writing config.
 * [Acquisition provenance must outrank installation location for trust](acquisition-provenance-trust.md) - A package copied into a workspace-local capability directory remains externally acquired and must not inherit the trust of workspace-authored local code.
