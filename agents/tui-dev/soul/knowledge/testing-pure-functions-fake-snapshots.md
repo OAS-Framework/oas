@@ -1,7 +1,7 @@
 ---
 type: Playbook
 title: Testing the pane — pure exported functions and fake snapshots
-description: The pane is verified without a TTY or tmux by unit-testing exported pure functions (parseOsc11, buildConstellation, parsers, readMarkdownSection, relativeAge) and by calling renderFrame directly with a hand-built snapshot at multiple terminal sizes.
+description: The pane is verified without a TTY or tmux by unit-testing exported pure functions (buildConstellation, parsers, readMarkdownSection, relativeAge) and by calling renderFrame directly with a hand-built snapshot at multiple terminal sizes.
 tags: [control-pane, testing, verification]
 timestamp: 2026-07-20
 ---
@@ -25,8 +25,7 @@ What to test and how:
   preserves SGR from the preview while stripping `\x1b[2J`, and `rowMap`
   points at card 0. This works headless because `applyTheme(false)` runs at
   module load.
-- **`parseOsc11`** shapes: 16-bit xterm reply, ST terminator, 8-bit reply,
-  garbage → `undefined`.
+
 
 Run and full-repo verification:
 

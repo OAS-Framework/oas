@@ -103,6 +103,12 @@ architecture/, codebase/) — list them here and log the growth in log.md.
 if (event === "soul-scaffold") {
   try { out({ meta: { scaffolded: scaffoldSoul() } }); } catch (e) { warn(e.message || e); }
 } else if (event === "spawn") {
+  // Ephemeral agents (capability/tmp service agents: reviewer, memory-harvest)
+  // carry no episodic state of their own — no STATE.md/log.md/notes scaffolding,
+  // and no session-protocol brief that would contradict their souls.
+  if (["capability", "tmp"].includes(process.env.OAS_KIND || "")) {
+    out({ meta: { memory: "none" }, brief: "Memory: none — you are ephemeral; no STATE.md/log.md/notes upkeep, no harvest." });
+  }
   try {
     const task = (process.env.OAS_TASK || "").trim();
     writeFileSync(join(home, "STATE.md"), `---

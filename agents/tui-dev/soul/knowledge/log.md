@@ -1,5 +1,11 @@
 # Knowledge Log
 
+## 2026-07-21
+
+- **Removed**: theme-inference-osc11.md — superseded by
+  [named-themes-decision.md](named-themes-decision.md) (dark + solarized,
+  explicit selection; OSC 11/COLORFGBG detection deleted from tui.mjs).
+
 ## 2026-07-20
 
 - Seeded the starter bundle from the framework sessions and source: model/TUI
