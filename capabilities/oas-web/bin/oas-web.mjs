@@ -18,10 +18,9 @@
  */
 import { createServer } from "node:http";
 import { execFileSync, execSync } from "node:child_process";
-import { closeSync, existsSync, openSync, readFileSync, readSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { homedir } from "node:os";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -153,81 +152,9 @@ function sendInterrupt(inst) {
 }
 
 // ---- Chat transcript: parse the runtime's session log into structured turns ----
-// pi:     ~/.pi/agent/sessions/--<home with / -> ->--/<ts>_<id>.jsonl
-// claude: ~/.claude*/projects/<cwd with / -> ->/<uuid>.jsonl
-function latestFile(dir, filter = () => true) {
-  try {
-    return readdirSync(dir).filter((f) => f.endsWith(".jsonl") && filter(f))
-      .map((f) => join(dir, f))
-      .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)[0];
-  } catch { return undefined; }
-}
-function localSessionFileFor(inst) {
-  const home = inst.home;
-  if ((inst.runtime || "pi") === "pi") {
-    const dir = join(homedir(), ".pi", "agent", "sessions", `-${home.replace(/\//g, "-")}--`);
-    return { file: latestFile(dir), kind: "pi" };
-  }
-  const enc = home.replace(/\//g, "-");
-  for (const base of [".claude", ".claude-personal", ".claude-work"]) {
-    const dir = join(homedir(), base, "projects", enc);
-    const f = latestFile(dir);
-    if (f) return { file: f, kind: "claude" };
-  }
-  return { file: undefined, kind: "claude" };
-}
-// Prefer the shared control-pane model (feature/session-error-surfacing contract);
-// fall back to the local copy until it lands.
-const sessionFileFor = typeof model.sessionFileFor === "function" ? model.sessionFileFor : localSessionFileFor;
-
-// ---- Session tail state: did the agent's last turn end in a provider error? ----
-// Contract: { state: 'ok'|'error'|'unknown', errorMessage, ts }. A later normal
-// message means the session recovered (=> 'ok').
-export function classifySessionTail(lines, kind) {
-  let tail = { state: "unknown", errorMessage: null, ts: null };
-  let sawMessage = false;
-  for (const line of lines) {
-    let d; try { d = JSON.parse(line); } catch { continue; }
-    if (kind === "pi") {
-      if (d.type !== "message" || !d.message) continue;
-      sawMessage = true;
-      const m = d.message;
-      tail = m.stopReason === "error"
-        ? { state: "error", errorMessage: String(m.errorMessage || "session errored").trim().slice(0, 500), ts: m.timestamp || d.timestamp || null }
-        : { state: "ok", errorMessage: null, ts: m.timestamp || d.timestamp || null };
-    } else {
-      if (d.type !== "user" && d.type !== "assistant") continue;
-      sawMessage = true;
-      const errText = d.isApiErrorMessage || d.error
-        ? String(d.error || (Array.isArray(d.message?.content) ? d.message.content.map((b) => b.text || "").join(" ") : d.message?.content) || "session errored")
-        : null;
-      tail = errText
-        ? { state: "error", errorMessage: errText.trim().slice(0, 500), ts: d.timestamp || null }
-        : { state: "ok", errorMessage: null, ts: d.timestamp || null };
-    }
-  }
-  return sawMessage ? tail : { state: "unknown", errorMessage: null, ts: null };
-}
-const TAIL_BYTES = 64 * 1024;
-function readTailLines(file) {
-  try {
-    const size = statSync(file).size;
-    const start = Math.max(0, size - TAIL_BYTES);
-    const fd = openSync(file, "r");
-    try {
-      const buf = Buffer.alloc(size - start);
-      readSync(fd, buf, 0, buf.length, start);
-      const lines = buf.toString("utf8").split("\n").filter(Boolean);
-      return start > 0 ? lines.slice(1) : lines; // drop a possibly-truncated first line
-    } finally { closeSync(fd); }
-  } catch { return []; }
-}
-function localSessionTailState(inst) {
-  const { file, kind } = sessionFileFor(inst);
-  if (!file) return { state: "unknown", errorMessage: null, ts: null };
-  return classifySessionTail(readTailLines(file), kind);
-}
-const sessionTailState = typeof model.sessionTailState === "function" ? model.sessionTailState : localSessionTailState;
+// Session-file location and tail-error classification live in the shared
+// control-pane model (sessionFileFor / sessionTailState / classifySessionTail).
+const { sessionFileFor, sessionTailState } = model;
 const asText = (blocks, type = "text", key = "text") =>
   (Array.isArray(blocks) ? blocks : []).filter((b) => b?.type === type).map((b) => b[key] || "").join("\n");
 
