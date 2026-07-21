@@ -277,7 +277,7 @@ function readCapabilitiesModel(file) {
 // ---------- use / activation ----------
 function use() {
   const requested = args[1];
-  if (!requested || requested.startsWith("--")) die("usage: oas use <capability|none> [--global|--type <agent-type>|--soul <name>] [--disable] [--layer <name>] [--settings k=v ...] [--dir <dir>]");
+  if (!requested || requested.startsWith("--")) die("usage: oas use <capability|none> [--global|--type <agent-type>|--soul <name>] [--disable] [--layer <name>] [--settings k=v [k2=v2 ...]] [--dir <dir>]");
   const dir = resolve(flag("dir") || process.cwd());
   const level = levelOf(dir);
   const file = join(dir, "oas-config.yaml");
@@ -315,7 +315,14 @@ function use() {
   }
   const from = originToFrom(manifest._origin);
   if (from && !entry.from) entry.from = from;
-  const settingsArgs = args.flatMap((a, idx) => (a === "--settings" && args[idx + 1] ? [args[idx + 1]] : []));
+  const settingsArgs = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] !== "--settings") continue;
+    let consumed = 0;
+    for (let j = i + 1; j < args.length && !args[j].startsWith("--"); j++, consumed++) settingsArgs.push(args[j]);
+    if (!consumed) die("--settings expects one or more key=value pairs");
+    i += consumed;
+  }
   if (settingsArgs.length) {
     entry.settings = entry.settings && typeof entry.settings === "object" ? entry.settings : {};
     for (const kv of settingsArgs) {
@@ -936,7 +943,7 @@ Usage:
                                             the currently locked integrity
   oas use <capability>                      activate for one config-owned target
       [--global|--type <t>|--soul <s>]      (--global is default); --disable excludes
-      [--disable] [--settings k=v ...] [--dir <d>]
+      [--disable] [--settings k=v [k2=v2 ...]] [--dir <d>]
   oas use none --layer <layer>              explicitly disable a fundamental layer
   oas type add <name> [--description <d>]   declare an agent type (family) in config;
   oas type list                             souls join via create --type / soul.yaml

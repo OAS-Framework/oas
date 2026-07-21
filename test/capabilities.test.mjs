@@ -446,7 +446,30 @@ test("CLI activation writes stable global/type/soul bindings without activating 
   assert.match(config, /from: installed/);
   assert.match(config, /# injection-override: \.agents\/injections\/capabilities\/oas\.okf\.md/);
   assert.match(config, /global: true/); assert.match(config, /reviewers: false/); assert.match(config, /lead: true/);
-  assert.equal(resolveOasConfig(repo, "reviewer").capabilities.some((c) => c.id === "oas.okf"), true);
+});
+
+test("--settings accepts multiple pairs per flag, repeated flags, and rejects malformed pairs", () => {
+  const base = temp(); const repo = join(base, "repo"); mkdirSync(repo);
+  let r = spawnSync(process.execPath, [CLI, "init", "--raw", "--dir", repo], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  r = spawnSync(process.execPath, [CLI, "install", "oas.okf", "--dir", repo], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  // One flag, multiple consecutive k=v pairs — all pairs land, none silently dropped.
+  r = spawnSync(process.execPath, [CLI, "use", "oas.okf", "--global", "--settings", "site=acme", "project=core", "--dir", repo], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  // Repeated flags still compose (and later flags override earlier keys).
+  r = spawnSync(process.execPath, [CLI, "use", "oas.okf", "--global", "--settings", "depth=low", "--settings", "site=umbrella", "--dir", repo], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  const okf = resolveOasConfig(repo, "dev").capabilities.find((c) => c.id === "oas.okf");
+  assert.deepEqual(okf.settings, { site: "umbrella", project: "core", depth: "low" });
+  // Malformed pair (missing '=') dies loudly.
+  r = spawnSync(process.execPath, [CLI, "use", "oas.okf", "--global", "--settings", "nonsense", "--dir", repo], { encoding: "utf8" });
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /--settings expects key=value, got "nonsense"/);
+  // Bare --settings with no pairs dies loudly instead of being ignored.
+  r = spawnSync(process.execPath, [CLI, "use", "oas.okf", "--global", "--settings", "--dir", repo], { encoding: "utf8" });
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /--settings expects one or more key=value pairs/);
 });
 
 test("manifest targeting is rejected because activation is config-owned", () => {

@@ -96,7 +96,7 @@ oas install [<git-url|path>] [--dir <level>]  # acquire + exact lock into the sc
 oas trust <capability> [--dir <level>]        # approve locked commands/hooks
 oas use <capability> --global [--dir <level>]
 oas use <capability> --type <agent-type> [--disable]
-oas use <capability> --soul <name> [--settings k=v ...]
+oas use <capability> --soul <name> [--settings k=v [k2=v2 ...]]
 ```
 
 External `oas-lock.json` entries pin source, exact version/commit, and
