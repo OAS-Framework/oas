@@ -1,44 +1,35 @@
 ---
 type: Concept
 title: Session-tail error surfacing for oas-web chat and roster
-description: oas-web classifies the tail of pi and claude session JSONL files into ok/error/unknown sessionTail state so the chat pane can stop dead-turn spinners with an error banner and the roster can mark errored agents.
+description: oas-web consumes the shared control-pane session-tail classification (ok/error/unknown) so the chat pane can stop dead-turn spinners with an error banner and the roster can mark errored agents.
 tags: [oas-web, sessionTail, session-errors, control-pane, parseTranscript]
 timestamp: 2026-07-21
 ---
 
-# Session-tail classification
+# Session-tail classification lives in the shared model
 
-`bin/oas-web.mjs` exposes `classifySessionTail(lines, kind)` for the
-control-pane session-error contract:
+`lib/control-pane/model.mjs` is the sole owner of session-tail logic:
+`sessionFileFor(instance)`, `classifySessionTail(lines, kind)`, and
+`sessionTailState(instance)`. oas-web imports `sessionFileFor` and
+`sessionTailState` from it (`const { sessionFileFor, sessionTailState } =
+model;`) — do not reintroduce local copies or fallbacks in
+`bin/oas-web.mjs`; that duplication was deliberately deleted. Classification
+tests live with the model in `test/control-pane-model.test.mjs`; oas-web's
+tests cover only its own transcript parsing.
 
-- **pi**: inspect the tail for the last `type: "message"` entry. If that
-  message has `stopReason === "error"`, classify as `state: "error"` and
-  expose a trimmed `errorMessage` capped at 500 characters. If any later
-  message exists, the session has recovered and classifies as `state: "ok"`.
-  With no messages, classify as `state: "unknown"`.
+Classification semantics (for consumers):
+
+- **pi**: the last `type: "message"` entry decides. `stopReason === "error"`
+  ⇒ `state: "error"` with a trimmed `errorMessage` capped at 500 characters;
+  any later message means the session recovered (`"ok"`); no messages ⇒
+  `"unknown"`.
 - **claude**: a trailing entry with `error` or `isApiErrorMessage` classifies
   as an error.
 
-Tail reads are intentionally cheap: read the last 64KB with `openSync` /
-`readSync`, then drop the first line when the read starts in the middle of a
-file so a truncated JSON line is not parsed.
-
-# Shared-model fallback pattern
-
-During the split between local server helpers and the shared control-pane
-model, prefer exported shared helpers when present and keep a local fallback
-for older checkouts:
-
-```js
-const sessionFileFor = typeof model.sessionFileFor === "function"
-  ? model.sessionFileFor
-  : localSessionFileFor;
-```
-
-Use the same pattern for `sessionTailState`. `collectControlPane` should prefer
-an existing model-provided tail (`i.sessionTail || safeTail(i)`) so the local
-fallback removes itself naturally once `lib/control-pane/model.mjs` exports the
-shared implementation.
+Tail reads are cheap: the model reads the last 64KB and drops a possibly
+truncated first line. A pi error-stopped assistant entry has empty content,
+so `parseTranscript` yields no turn for it — the transcript alone can never
+show the failure; the error banner must come from `sessionTail`.
 
 # Import-safe server module
 
