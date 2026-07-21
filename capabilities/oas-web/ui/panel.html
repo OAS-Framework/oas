@@ -108,6 +108,15 @@
           padding: 1px 8px; font-weight: 550; }
   .chip.dirty { color: var(--warn); }
   .chip.rt { color: var(--accent); }
+  .chip.err { color: var(--danger); background: color-mix(in srgb, var(--danger) 14%, transparent); cursor: help; }
+
+  /* session-tail error banner in the transcript */
+  .turn.err .ebox { border-left: 3px solid var(--danger);
+          background: color-mix(in srgb, var(--danger) 9%, var(--term-bg));
+          border-radius: 6px; padding: 10px 14px; }
+  .turn.err .ehead { color: var(--danger); font-weight: 700; }
+  .turn.err .etext { white-space: pre-wrap; word-break: break-word; margin-top: 4px;
+          color: color-mix(in srgb, var(--danger) 55%, var(--term-fg)); }
 
   /* ── Main view ── */
   #view { flex: 1; display: flex; flex-direction: column; min-width: 0; background: var(--bg); }
@@ -370,7 +379,7 @@ function renderRoster() {
         const d = document.createElement("div");
         d.className = "inst" + (sel === i.instance ? " sel" : "") + (i.running ? "" : " idle") + (i.depth ? " child" : "");
         d.innerHTML = `
-          <div class="iname"><span class="dot ${i.running ? "on" : ""}"></span>${i.instance}</div>
+          <div class="iname"><span class="dot ${i.running ? "on" : ""}"></span>${i.instance}${i.sessionTail && i.sessionTail.state === "error" ? `<span class="chip err" title="${escapeHtml(i.sessionTail.errorMessage || "session error")}">⚠ error</span>` : ""}</div>
           <div class="itask">${(i.task || "").slice(0, 100)}</div>
           <div class="imeta">
             <span class="chip rt">${i.runtime}</span>
@@ -508,7 +517,7 @@ function workflowResult(t) {
   const agents = (out.match(/with\s+(\d+)\s+agent/) || [])[1];
   return { head, agents, body: out };
 }
-function escapeHtml(s) { return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function escapeHtml(s) { return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 function agentLabel() {
   const i = panel.instances.find(x => x.instance === sel);
   return i ? i.agent : "agent";
@@ -591,7 +600,11 @@ function renderChat(d, scroll) {
   const busy = pendingSends.length > 0
     || (last && last.role === "user")
     || (last && last.role === "assistant" && (last.tools || []).some(t => t.result === null));
-  if (busy) html += `<div class="turn ai"><div class="working"><span class="spinner"></span> ${last?.role === "user" || pendingSends.length ? "agent is thinking" : "agent is working"}<span class="dots"><span>.</span><span>.</span><span>.</span></span></div></div>`;
+  const errored = d.sessionTail && d.sessionTail.state === "error";
+  if (errored) {
+    // The turn evaporated server-side: say so, with the provider's error text.
+    html += `<div class="turn err"><div class="ebox"><div class="ehead">⚠ agent errored after your message</div><div class="etext">${escapeHtml(d.sessionTail.errorMessage || "The session ended in an error.")}</div></div></div>`;
+  } else if (busy) html += `<div class="turn ai"><div class="working"><span class="spinner"></span> ${last?.role === "user" || pendingSends.length ? "agent is thinking" : "agent is working"}<span class="dots"><span>.</span><span>.</span><span>.</span></span></div></div>`;
   box.innerHTML = html || '<div class="empty">No messages yet.</div>';
   if (scroll || nearBottom) box.scrollTop = box.scrollHeight;
 }
@@ -609,7 +622,8 @@ async function refreshChat(scroll) {
   lastChatData = d;
   const sig = forSel + ":" + JSON.stringify(d.turns.length) + (d.turns.at(-1)?.text || "") + (d.turns.at(-1)?.tools?.length || 0)
     + ":" + (d.turns.at(-1)?.tools || []).filter(t => t.result === null).length + ":" + pendingSends.length
-    + ":" + (d.turns.at(-1)?.role || "");
+    + ":" + (d.turns.at(-1)?.role || "")
+    + ":" + (d.sessionTail ? d.sessionTail.state + (d.sessionTail.errorMessage || "") : "");
   if (sig === lastChatSig && !scroll) return; // avoid re-render flicker
   lastChatSig = sig;
   renderChat(d, scroll);

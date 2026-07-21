@@ -18,10 +18,9 @@
  */
 import { createServer } from "node:http";
 import { execFileSync, execSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { homedir } from "node:os";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -44,7 +43,9 @@ const flag = (name) => {
 };
 const flagAll = (name) => args.flatMap((a, i) => (a === `--${name}` && args[i + 1] && !args[i + 1].startsWith("--") ? [args[i + 1]] : []));
 
-if (sub !== "start") {
+const IS_MAIN = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+
+if (IS_MAIN && sub !== "start") {
   console.error("usage: oas web start [--port <n>] [--dir <workspace>]... [--open]  (repeat --dir for multiple workspaces)");
   process.exit(1);
 }
@@ -105,10 +106,15 @@ function panelData(wsId) {
       workspace: dirname(i.agentsRoot), repoName: (i.repo || dirname(i.agentsRoot)).split("/").pop(),
       parentInstance: i.parentInstance || null,
       tmux: i.tmux, git: i.git, task: i.task, next: i.next,
+      sessionTail: i.sessionTail || safeTail(i),
       jira: i.capabilityMeta?.["oas.jira"] || null,
       team: i.team || null,
     })),
   };
+}
+
+function safeTail(inst) {
+  try { return sessionTailState(inst); } catch { return { state: "unknown", errorMessage: null, ts: null }; }
 }
 
 function findInstance(name) {
@@ -146,29 +152,9 @@ function sendInterrupt(inst) {
 }
 
 // ---- Chat transcript: parse the runtime's session log into structured turns ----
-// pi:     ~/.pi/agent/sessions/--<home with / -> ->--/<ts>_<id>.jsonl
-// claude: ~/.claude*/projects/<cwd with / -> ->/<uuid>.jsonl
-function latestFile(dir, filter = () => true) {
-  try {
-    return readdirSync(dir).filter((f) => f.endsWith(".jsonl") && filter(f))
-      .map((f) => join(dir, f))
-      .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)[0];
-  } catch { return undefined; }
-}
-function sessionFileFor(inst) {
-  const home = inst.home;
-  if ((inst.runtime || "pi") === "pi") {
-    const dir = join(homedir(), ".pi", "agent", "sessions", `-${home.replace(/\//g, "-")}--`);
-    return { file: latestFile(dir), kind: "pi" };
-  }
-  const enc = home.replace(/\//g, "-");
-  for (const base of [".claude", ".claude-personal", ".claude-work"]) {
-    const dir = join(homedir(), base, "projects", enc);
-    const f = latestFile(dir);
-    if (f) return { file: f, kind: "claude" };
-  }
-  return { file: undefined, kind: "claude" };
-}
+// Session-file location and tail-error classification live in the shared
+// control-pane model (sessionFileFor / sessionTailState / classifySessionTail).
+const { sessionFileFor, sessionTailState } = model;
 const asText = (blocks, type = "text", key = "text") =>
   (Array.isArray(blocks) ? blocks : []).filter((b) => b?.type === type).map((b) => b[key] || "").join("\n");
 
@@ -210,12 +196,14 @@ export function parseTranscript(lines, kind) {
   return turns;
 }
 function chatData(inst, limit = 120) {
+  const empty = { state: "unknown", errorMessage: null, ts: null };
   const { file, kind } = sessionFileFor(inst);
-  if (!file) return { available: false, kind, turns: [] };
+  if (!file) return { available: false, kind, turns: [], sessionTail: empty };
   let text;
-  try { text = readFileSync(file, "utf8"); } catch { return { available: false, kind, turns: [] }; }
-  const turns = parseTranscript(text.split("\n").filter(Boolean), kind);
-  return { available: true, kind, file, turns: turns.slice(-limit) };
+  try { text = readFileSync(file, "utf8"); } catch { return { available: false, kind, turns: [], sessionTail: empty }; }
+  const lines = text.split("\n").filter(Boolean);
+  const turns = parseTranscript(lines, kind);
+  return { available: true, kind, file, turns: turns.slice(-limit), sessionTail: safeTail(inst) };
 }
 
 // ---- Jira (P2): epic + Agent Roster via acli, using the instance's oas.jira meta ----
@@ -316,7 +304,7 @@ server.on("error", (e) => {
   }
   throw e;
 });
-server.listen(port, "127.0.0.1", () => {
+if (IS_MAIN) server.listen(port, "127.0.0.1", () => {
   const addr = `http://127.0.0.1:${port}`;
   console.log(`oas web — panel at ${addr}  (workspaces: ${workspaces().map((w) => w.name).join(", ") || "none"})`);
   console.log("Bound to 127.0.0.1 only. This process can type into your agent terminals — do not expose it.");
