@@ -158,11 +158,9 @@ test("renderFrame marks errored sessions and surfaces the error text", () => {
   assert.match(zoom.text, /✗ session error: No API key/);
 });
 
-test("terminal theme inference: OSC 11 luminance and COLORFGBG fallback shapes", async () => {
-  const { parseOsc11 } = await import("../lib/control-pane/tui.mjs");
-  assert.equal(parseOsc11("\x1b]11;rgb:ffff/ffff/ffff\x07"), true);          // white bg
-  assert.equal(parseOsc11("\x1b]11;rgb:f6f6/f8f8/fafa\x1b\\"), true);        // light bg, ST terminator
-  assert.equal(parseOsc11("\x1b]11;rgb:0e0e/1111/1616\x07"), false);         // dark bg
-  assert.equal(parseOsc11("\x1b]11;rgb:1a/1b/1c\x07"), false);               // 8-bit form
-  assert.equal(parseOsc11("no-osc-here"), undefined);                        // unsupported terminal
+test("control pane themes: named set, no terminal guessing", async () => {
+  const { THEMES, startControlPane } = await import("../lib/control-pane/tui.mjs");
+  assert.deepEqual(THEMES, ["dark", "solarized"]);
+  await assert.rejects(() => startControlPane("/nonexistent", { theme: "disco" }), /unknown theme/);
+
 });

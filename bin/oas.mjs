@@ -693,7 +693,7 @@ function retireCmd() {
 async function paneCmd() {
   const root = ensureRoot(flag("dir") || process.cwd());
   const { startControlPane } = await import("../lib/control-pane/tui.mjs");
-  try { await startControlPane(root); }
+  try { await startControlPane(root, { theme: flag("theme") }); }
   catch (error) { die(error.message || String(error)); }
 }
 
@@ -919,7 +919,7 @@ else {
 Usage:
   oas status [--json]                       agents, souls, running instances
   oas status --team [--json]                whole-team roster across the team scope's repos
-  oas pane [--dir <dir>]                    open Control Pane, the live agent TUI
+  oas pane [--dir <dir>] [--theme dark|solarized]  open Control Pane, the live agent TUI
   oas create <name> [--description <d>]     create a persistent agent soul
       [--repo <r>] [--work <mode>] [--runtime pi|claude] [--model <m>]
       [--instructions-file <f>]

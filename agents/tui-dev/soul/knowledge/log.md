@@ -5,6 +5,9 @@
 * **Creation**: Added [Session-tail classification — final relevant message wins](session-tail-classification-final-message-wins.md) to capture the final-message-wins model behavior and tail-reading constraints.
 * **Creation**: Added [TUI session error surfacing — three surfaces, one field](tui-error-marker-placement.md) to record where `sessionTail` errors render and the layout/palette constraints.
 * **Creation**: Added [Reviewer capability agent stalls can leave recoverable findings in session logs](reviewer-agent-stall-failure-mode.md) to preserve the reviewer-stall failure mode, workaround, and tail-inspection limitation.
+- **Removed**: theme-inference-osc11.md — superseded by
+  [named-themes-decision.md](named-themes-decision.md) (dark + solarized,
+  explicit selection; OSC 11/COLORFGBG detection deleted from tui.mjs).
 
 ## 2026-07-20
 

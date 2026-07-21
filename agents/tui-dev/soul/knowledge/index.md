@@ -12,14 +12,14 @@ Starter knowledge for the Terminal Control Pane developer
 
 ## Theme and rendering
 
-* [Theme inference via OSC 11](theme-inference-osc11.md) — raw-mode background query with a 150ms timeout, luminance threshold, and the COLORFGBG fallback chain.
+* [Named themes decision](named-themes-decision.md) — dark (default) + solarized, explicit --theme/OAS_PANE_THEME selection; OSC 11/COLORFGBG inference removed.
 * [Palette discipline lesson](palette-discipline-lesson.md) — hardcoded 38;2/48;2 literals outside applyTheme leak the dark design and break light mode.
 * [SGR filtering of captured panes](sgr-filtering-captured-panes.md) — capturedSgr/clipSgr keep colors but strip every non-SGR escape from tmux capture-pane output.
 * [TUI session error surfacing — three surfaces, one field](tui-error-marker-placement.md) — Session errors in tui.mjs render from instance.sessionTail on the card title, expanded card, and zoom view, with layout adjusted so the extra error line does not overflow.
 
 ## Verification and decisions
 
-* [Testing with pure functions and fake snapshots](testing-pure-functions-fake-snapshots.md) — how to verify the pane headless: parser tests, parseOsc11 shapes, renderFrame against hand-built snapshots.
+* [Testing with pure functions and fake snapshots](testing-pure-functions-fake-snapshots.md) — how to verify the pane headless: parser tests, renderFrame against hand-built snapshots.
 * [Control Pane decisions (reference)](reference-control-pane-decisions.md) — pointers to the binding decisions in the oas-expert soul (standalone read-only TUI, v3 cards, visual language, web pane).
 
 ## Operational lessons

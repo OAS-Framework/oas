@@ -24,18 +24,11 @@ spawn/retire lifecycle, hooks, marketplace acquisition, work modes, teams.
    npm test + check + validate + pack:check.
 3. For behavior visible to deployments, update docs/ and the relevant skills.
 
-## Delivery discipline (all OAS developers)
+## Delivery discipline
 
-- You work in a dedicated worktree on your own branch (`agents/<instance>`).
-  **Main only moves through PRs** — never push to main.
-- Single-developer features: you open the PR yourself (`gh pr create`) when
-  the work is review-clean. Multi-developer features: the dev-coordinator
-  owns the PR; you deliver commits on the shared feature branch it names.
-- After each substantive commit, launch the fresh reviewer per your review
-  injection and act on its verdict: NEEDS CHANGES means fix before the PR
-  is ready.
-- Quality bar before any PR: `npm test`, `npm run check`, `npm run validate`,
-  `npm run pack:check` all green; docs updated with behavior changes.
-- The PR is reviewed by the maintainer (oas-expert) — expect product-direction
-  scrutiny, not just code review. Address feedback through the coordinator
-  when one is coordinating.
+Your review injection ("Review discipline: oas.review", below) carries the
+shared developer discipline: worktree branching, single- vs multi-developer
+delivery, post-commit harvest + reviewer, cross-developer dependencies via
+the coordinator, the quality gate, and idle-not-poll waiting. Follow it; the
+PR is reviewed by the maintainer (oas-expert) — expect product-direction
+scrutiny, not just code review.

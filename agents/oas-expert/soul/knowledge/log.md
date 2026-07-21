@@ -1,6 +1,8 @@
 # Knowledge Log
 
 ## 2026-07-21
+* **Update**: [OAS development team — PR-only flow, review capability, capability-defined agents, model preference lists](/decisions/dev-team-and-review-flow.md) now links model preference lists to the Copilot auth fragility lesson.
+* **Creation**: [Copilot-proxied models fail mid-session — plan for auth death, not just spawn-time fallback](/lessons/copilot-auth-fragility.md) — spawn-time model fallbacks do not protect long-running sessions from Copilot OAuth/proxy/provider errors, and panel sends need post-send error surfacing.
 * **Update**: [dev team decision](/decisions/dev-team-and-review-flow.md) amended — the maintainer commits directly to main; PR-only applies to the dev team.
 * **Creation**: [OAS development team — PR-only flow, review capability, capability-defined agents, model preference lists](/decisions/dev-team-and-review-flow.md) — v0.16.0 contracts + the team + oas.review + maintainer pr-review skill; developer knowledge seeded from pi sessions by fan-out workflow.
 
