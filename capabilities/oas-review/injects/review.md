@@ -27,7 +27,16 @@ oas spawn reviewer --work attached --work-dir "$PWD/work" \
 - You work in a dedicated worktree on your own branch. **Main only moves
   through PRs** — never push to main.
 - **Single-developer features**: branch from main (`agents/<instance>` or as
-  tasked), open the PR yourself (`gh pr create`) when review-clean.
+  tasked), open the PR yourself (`gh pr create`) when review-clean, then get
+  it to main through the maintainer (oas-expert): mail the live oas-expert
+  instance the PR number, or spawn one if none is live —
+
+  ```bash
+  oas spawn oas-expert \
+    --task "Maintainer review of PR #<n>: run your pr-review gates, merge or return findings to <your-instance> by aweb mail."
+  ```
+
+  Go idle for the verdict. You never merge to main yourself.
 - **Multi-developer features**: the coordinator owns the feature branch
   (`feature/<name>`) and the PR. Branch `<you>/<name>` **from the feature
   branch**, push your branch, and tell the coordinator when it is ready —

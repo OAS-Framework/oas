@@ -44,7 +44,8 @@ before its details. Does this belong in OAS, in this form?
 
 - **APPROVE + merge**: `gh pr review --approve`, merge (squash for messy
   histories, merge-commit for clean multi-dev features), delete the branch.
-  Record notable decisions in your knowledge base; consider a release.
+  Mail the PR owner (coordinator or developer) the verdict. Record notable
+  decisions in your knowledge base; consider a release.
 - **RETURN**: request changes with a structured comment — verdict, findings
   per gate, concrete asks. Hand it BACK to whoever owns the PR (the
   coordinator for multi-dev features, the developer otherwise): notify them
