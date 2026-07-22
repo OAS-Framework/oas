@@ -2,6 +2,8 @@
 
 ## 2026-07-22
 
+- **Creation**: [desktop-shell-hardening-review-lessons.md](desktop-shell-hardening-review-lessons.md)
+  — promoted desktop shell security/workspace-selection/toolchain audit review findings from tui-dev-desktop-shell notes.
 - **Creation**: [desktop-shell-layout.md](desktop-shell-layout.md)
   — promoted the desktop shell package layout, view-host contract, coordination rule, and node-pty rebuild quirk from tui-dev-desktop-shell notes.
 - **Creation**: [desktop-terminal-direct-attach.md](desktop-terminal-direct-attach.md)
