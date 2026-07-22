@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { spawn } from "node:child_process";
+import { spawn, execFileSync } from "node:child_process";
 import { request as httpRequest } from "node:http";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -20,22 +20,13 @@ function extractBlock(file, marker) {
   return m[1];
 }
 
-test("oas-web server: registry cache serves from cache within TTL and recollects on expiry", () => {
-  const src = extractBlock(join(CAP, "bin", "oas-web.mjs"), "REGCACHE");
-  const makeRegistryCache = new Function(src + "\nreturn makeRegistryCache;")();
-  let clock = 0, collections = 0;
-  const find = makeRegistryCache(
-    () => { collections++; return new Map([["a", { instance: "a", v: collections }]]); },
-    2500, () => clock);
-  clock = 10_000;
-  assert.equal(find("a").v, 1, "first lookup collects");
-  clock += 500; find("a"); clock += 500; find("a");
-  assert.equal(collections, 1, "lookups within TTL do not recollect");
-  assert.equal(find("missing"), undefined, "miss within TTL does not recollect");
-  assert.equal(collections, 1);
-  clock += 2600;
-  assert.equal(find("a").v, 2, "expiry refreshes the roster");
-  assert.equal(collections, 2);
+test("oas-web server: collect subcommand emits the roster snapshot JSON", () => {
+  const out = execFileSync(process.execPath, [join(CAP, "bin", "oas-web.mjs"), "collect", "--dir", ROOT],
+    { encoding: "utf8", timeout: 30000, maxBuffer: 16 * 1024 * 1024 });
+  const parsed = JSON.parse(out);
+  const ws = Object.values(parsed);
+  assert.ok(ws.length >= 1, "at least one workspace in the snapshot");
+  assert.ok(Array.isArray(ws[0].instances), "each workspace carries an instances array");
 });
 
 test("oas-web attach: tail-then-deep order, and pane switches cancel the backfill", async () => {
