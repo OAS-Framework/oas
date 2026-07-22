@@ -92,3 +92,32 @@ test("diff: context rows keep distinct old/new numbers when offsets differ", () 
   assert.equal(lines[0].oldNo, 10);
   assert.equal(lines[0].newNo, 20, "right side of a context row must use newNo");
 });
+
+test("markdown: sanitizeHtml strips scripts/handlers and normalizes every anchor", async () => {
+  const { JSDOM } = await import("jsdom");
+  const doc = new JSDOM("<!doctype html><body>").window.document;
+  const dirty = [
+    `<script>bad()</script>`,
+    `<img src=x onerror="bad()">`,
+    `<a href="https://evil.example" target="_self" rel="opener">nav</a>`,
+    `<a href="javascript:bad()">js</a>`,
+    `<a href="relative.md">raw-rel</a>`,
+    `<a href="#" data-open-file="/ws/x.md" target="_top">open</a>`,
+    `<p onclick="bad()">text</p>`,
+  ].join("");
+  const out = md.sanitizeHtml(dirty, doc);
+  assert.ok(!/script>|onerror|onclick|javascript:/i.test(out), "active content removed");
+  const div = doc.createElement("div"); div.innerHTML = out;
+  for (const a of div.querySelectorAll("a")) {
+    if (a.hasAttribute("data-open-file")) {
+      assert.equal(a.getAttribute("href"), "#");
+      assert.equal(a.getAttribute("target"), null, "file links carry no target");
+    } else {
+      assert.equal(a.getAttribute("target"), "_blank", "external anchors forced to _blank");
+      assert.equal(a.getAttribute("rel"), "noreferrer noopener", "rel re-forced");
+      assert.ok(/^https:/.test(a.getAttribute("href")), "only allowlisted schemes survive");
+    }
+  }
+  assert.ok(div.textContent.includes("js") && !out.includes('href="javascript:'), "js: anchor neutralized to text");
+  assert.ok(div.textContent.includes("raw-rel"), "raw relative anchor neutralized to text");
+});

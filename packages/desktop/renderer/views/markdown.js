@@ -56,15 +56,38 @@ export function externalHref(href) {
 }
 
 /** SECURITY: repository markdown is untrusted — marked preserves raw HTML, so
- * everything we insert goes through DOMPurify. data-open-file survives via an
- * explicit attribute allowance; targets/rel are re-forced after sanitize. */
+ * everything we insert goes through DOMPurify, then EVERY surviving anchor is
+ * normalized: data-open-file links become local (href="#", no target); all
+ * other links must pass the external-scheme allowlist and are forced to
+ * target="_blank" rel="noreferrer noopener" — raw-HTML anchors cannot keep
+ * attacker-chosen target/rel (renderer navigation, tabnabbing). */
 export function sanitizeHtml(html, doc) {
   const purify = typeof DOMPurify === "function" ? DOMPurify(doc.defaultView) : DOMPurify;
-  return purify.sanitize(html, {
-    ADD_ATTR: ["data-open-file", "target"],
+  const frag = purify.sanitize(html, {
+    RETURN_DOM_FRAGMENT: true,
+    ADD_ATTR: ["data-open-file"],
     FORBID_TAGS: ["style", "form", "input", "button"],
     ALLOWED_URI_REGEXP: /^(?:https?|mailto):|^#$/i,
   });
+  for (const a of frag.querySelectorAll("a")) {
+    if (a.hasAttribute("data-open-file")) {
+      a.setAttribute("href", "#");
+      a.removeAttribute("target");
+      a.removeAttribute("rel");
+      continue;
+    }
+    const safe = externalHref(a.getAttribute("href") || "");
+    if (!safe) { // unsafe/relative raw-HTML anchor: neutralize to plain text
+      a.replaceWith(...a.childNodes);
+      continue;
+    }
+    a.setAttribute("href", safe);
+    a.setAttribute("target", "_blank");
+    a.setAttribute("rel", "noreferrer noopener");
+  }
+  const div = doc.createElement("div");
+  div.append(frag);
+  return div.innerHTML;
 }
 
 function makeMarked(filePath) {

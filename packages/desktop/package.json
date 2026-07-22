@@ -8,5 +8,8 @@
     "dompurify": "^3.4.12",
     "highlight.js": "^11.11.1",
     "marked": "^16.4.2"
+  },
+  "devDependencies": {
+    "jsdom": "^29.1.1"
   }
 }

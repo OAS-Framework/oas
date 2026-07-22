@@ -433,3 +433,29 @@ test("oas-web diff stats: -z rename records key by the new path with R status", 
   const mod = files.find((f) => f.path === "plain.js");
   assert.equal(mod.status, "M"); assert.equal(mod.additions, 5);
 });
+
+test("oas-web diff synthesis: untracked symlinks render link text, FIFOs are skipped unread", async () => {
+  const { mkdtempSync, writeFileSync, symlinkSync, lstatSync, readlinkSync, readFileSync } = await import("node:fs");
+  const { execFileSync: xfs } = await import("node:child_process");
+  const { tmpdir } = await import("node:os");
+  const src = extractBlock(join(CAP, "bin", "oas-web.mjs"), "UNTRACKED");
+  const synthUntracked = new Function(`${src}; return synthUntracked;`)();
+  const dir = mkdtempSync(join(tmpdir(), "oasweb-untracked-"));
+  writeFileSync(join(dir, "secret-target"), "TOP-SECRET-KEY-MATERIAL");
+  symlinkSync(join(dir, "secret-target"), join(dir, "leak.txt"));
+  writeFileSync(join(dir, "plain.txt"), "hello\n");
+  try { xfs("mkfifo", [join(dir, "pipe")], { timeout: 4000 }); } catch { /* platform without mkfifo */ }
+  const untracked = ["leak.txt", "plain.txt", ...(lstatSync(join(dir, "pipe"), { throwIfNoEntry: false }) ? ["pipe"] : [])];
+  const files = [];
+  const io = { lstatSync, readlinkSync, readFileSync, join, maxBytes: 2 * 1024 * 1024 };
+  const diff = synthUntracked(dir, untracked, files, io);
+  assert.ok(!diff.includes("TOP-SECRET-KEY-MATERIAL"), "symlink target content never read into the diff");
+  assert.ok(diff.includes("+hello"), "regular file content synthesized");
+  const leak = files.find((f) => f.path === "leak.txt");
+  assert.ok(leak, "symlink listed as added");
+  assert.ok(diff.includes("secret-target"), "symlink renders its link text (readlink)");
+  const pipe = files.find((f) => f.path === "pipe");
+  if (pipe) assert.equal(pipe.additions, null, "FIFO listed but never opened");
+  // swap-in guard: a statSync-based implementation would follow the symlink
+  assert.ok(src.includes("lstatSync") || src.includes("io.lstatSync"), "implementation lstat's entries");
+});

@@ -511,31 +511,38 @@ function diffData(inst, staged) {
     git(cwd, ["diff", ...mode, "--name-status", "-M", "-z"]));
   let diff = git(cwd, ["diff", ...mode, "-M"]);
   if (!staged) {
-    // untracked files: show as additions so new work is visible in the viewer
     const untracked = git(cwd, ["ls-files", "--others", "--exclude-standard"]).split("\n").filter(Boolean);
-    for (const path of untracked) {
-      let text;
-      try {
-        // SECURITY: lstat first — an untrusted worktree can plant a symlink to
-        // ~/.ssh keys (leak) or a FIFO/device (server hang); only regular files
-        // are read, and symlinks render as their link text.
-        const full = join(cwd, path);
-        const st = lstatSync(full);
-        if (st.isSymbolicLink()) { text = readlinkSync(full); }
-        else if (!st.isFile()) { files.push({ path, status: "A", additions: null, deletions: null }); continue; }
-        else {
-          const buf = readFileSync(full);
-          if (buf.includes(0) || buf.length > FILE_MAX_BYTES) { files.push({ path, status: "A", additions: null, deletions: null }); continue; }
-          text = buf.toString("utf8");
-        }
-      } catch { continue; }
-      const lines = text.length ? text.replace(/\n$/, "").split("\n") : [];
-      files.push({ path, status: "A", additions: lines.length, deletions: 0 });
-      diff += `diff --git a/${path} b/${path}\nnew file mode 100644\n--- /dev/null\n+++ b/${path}\n@@ -0,0 +1,${lines.length} @@\n${lines.map((l) => "+" + l).join("\n")}\n`;
-    }
+    diff += synthUntracked(cwd, untracked, files, { lstatSync, readlinkSync, readFileSync, join, maxBytes: FILE_MAX_BYTES });
   }
   return { body: { repo: cwd, branch, staged: !!staged, files, diff } };
 }
+
+/* OASWEB_UNTRACKED_BEGIN — untracked-file diff synthesis, extracted by tests.
+   SECURITY: lstat first — an untrusted worktree can plant a symlink to
+   ~/.ssh keys (leak) or a FIFO/device (server hang); only regular files are
+   read, and symlinks render as their link text (readlink), never the target. */
+function synthUntracked(cwd, untracked, files, io) {
+  let diff = "";
+  for (const path of untracked) {
+    let text;
+    try {
+      const full = io.join(cwd, path);
+      const st = io.lstatSync(full);
+      if (st.isSymbolicLink()) { text = io.readlinkSync(full); }
+      else if (!st.isFile()) { files.push({ path, status: "A", additions: null, deletions: null }); continue; }
+      else {
+        const buf = io.readFileSync(full);
+        if (buf.includes(0) || buf.length > io.maxBytes) { files.push({ path, status: "A", additions: null, deletions: null }); continue; }
+        text = buf.toString("utf8");
+      }
+    } catch { continue; }
+    const lines = text.length ? text.replace(/\n$/, "").split("\n") : [];
+    files.push({ path, status: "A", additions: lines.length, deletions: 0 });
+    diff += `diff --git a/${path} b/${path}\nnew file mode 100644\n--- /dev/null\n+++ b/${path}\n@@ -0,0 +1,${lines.length} @@\n${lines.map((l) => "+" + l).join("\n")}\n`;
+  }
+  return diff;
+}
+/* OASWEB_UNTRACKED_END */
 
 // ---- HTTP ----
 const UI = readFileSync(join(HERE, "..", "ui", "panel.html"), "utf8");
