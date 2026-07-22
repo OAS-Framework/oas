@@ -45,12 +45,12 @@ panel is terminal-mirror-only and no longer contains it.
 
 `oas-web` sends no CORS headers and its loopback origin guard rejects cross-port
 POSTs, so a plain static file server cannot host the harness. The desktop
-renderer `harness-server.mjs` serves the renderer dir and proxies `/api/*` to
-the `oas-web` server so harness development stays same-origin like the real
-shell.
+renderer `dev-serve.mjs` serves the renderer dir and proxies `/api/*` to the
+`oas-web` server so harness development stays same-origin like the real shell.
 
-The proxy must not launder browser origins by rewriting `Origin` to the API's
-loopback authority. It must apply the same loopback `Host`/`Origin` check at its
-own boundary, forward the browser's real `Origin` unchanged, and rewrite only
-`Host` for upstream routing. See
+The proxy must apply the same loopback `Host` check before serving static files
+or proxying `/api/*`. For POSTs it must also validate the inbound `Origin`. It
+must not launder browser origins by rewriting `Origin` to the API's loopback
+authority; forward the browser's real `Origin` unchanged, and rewrite only
+`Host` for upstream routing after the inbound host has been accepted. See
 [Harness proxy must guard origins, not launder them](/lessons/harness-proxy-origin-guard.md).

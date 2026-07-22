@@ -18,8 +18,8 @@ The web panel lives in `capabilities/oas-web/` and is deliberately tiny:
     with `task: ""` meaning "await instructions" (see
     [spawn endpoint](spawn-endpoint.md)).
   - `GET /api/brain/<agent>?ws=<id>` — returns soul artifact paths, package-level
-    capability-agent skills, and running-state for the desktop brain view while
-    resolving agent names through kernel lookup seams (see
+    capability-agent skills, and workspace-scoped running-state for the desktop
+    brain view while resolving agent names through kernel lookup seams (see
     [agent brain endpoint](agent-brain-endpoint-and-view.md)).
   - `GET /api/session/<instance>?lines=n` — raw ANSI tmux `capture-pane` text plus pane geometry, cursor state, and history depth.
   - `GET /api/chat/<instance>?limit=n` — parsed structured transcript turns.
@@ -47,8 +47,11 @@ The web panel lives in `capabilities/oas-web/` and is deliberately tiny:
 - **Roster**: `lib/control-pane/model.mjs` `collectControlPane(root)` — same
   data as the TUI (`oas pane`). Slow collection runs in the hidden
   `oas-web.mjs collect` child-process path; the serving process answers
-  `/api/panel` and `findInstance` from an in-memory snapshot so key/input
-  endpoints are not blocked by roster rebuilds. The kernel is found in-tree
+  `/api/panel` and scoped `findInstance(name, wsId)` from an in-memory snapshot
+  so key/input endpoints are not blocked by roster rebuilds. Callers that have
+  resolved a workspace must pass that workspace id so same-named instances in
+  other workspaces do not leak into running-state or terminal decisions (see
+  [the scoped snapshot lookup lesson](/lessons/workspace-scoped-snapshot-lookups.md)). The kernel is found in-tree
   (`../../..`) or, for marketplace installs, via `oas root` (a copied package
   must never assume it sits inside the kernel tree). Control-pane instance
   objects expose `work` as the work mode, not a filesystem path; endpoints that

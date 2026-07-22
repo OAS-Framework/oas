@@ -1,6 +1,9 @@
 # Knowledge Log
 
 ## 2026-07-22
+* **Creation**: added [Scope snapshot lookups to the caller's workspace](/lessons/workspace-scoped-snapshot-lookups.md) from the workspace-scoped snapshot note: callers that have resolved a workspace must pass its id into `findInstance`, because first-match lookup can mark same-named stopped instances as running across workspaces.
+* **Update**: [Agent brain endpoint and desktop brain view](/architecture/agent-brain-endpoint-and-view.md) now records manifest skills leaf/parent-tree expansion, local-over-package skill merge behavior, and workspace-scoped running-state lookup.
+* **Update**: [Harness proxy must guard origins, not launder them](/lessons/harness-proxy-origin-guard.md) and [Desktop renderer views port of the panel](/architecture/desktop-renderer-views-port.md) now record the `dev-serve.mjs` Host-guard trap: validate inbound Host before static serving or proxying, then rewrite Host only for upstream routing.
 * **Update**: merged the capability-agent skills and harness-origin note into [Agent brain endpoint and desktop brain view](/architecture/agent-brain-endpoint-and-view.md): capability-defined agents get package-level skills via `core.capabilitySkillDirs`, `/api/brain` tests must cover a capability agent, and the desktop brain harness must use the same-origin `dev-serve.mjs` proxy because oas-web sends no CORS headers.
 * **Update**: [oas-web architecture](/architecture/oas-web-architecture.md) now records package-level capability-agent skills in `/api/brain` and the no-CORS same-origin harness rule.
 * **Update**: [Capability manifest compatibility floor must cover core APIs](/lessons/manifest-compat-floor-core-apis.md) now includes `core.capabilitySkillDirs` as the brain endpoint's package-skill helper.
