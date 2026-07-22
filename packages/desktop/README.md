@@ -11,7 +11,7 @@ package; its dependencies (electron, node-pty, xterm) live here only.
 
 ```bash
 cd packages/desktop
-npm install          # also rebuilds node-pty for Electron (postinstall-free: run `npm run rebuild` if needed)
+npm install          # postinstall bundles renderer/vendor/highlight.mjs (esbuild)
 npm run rebuild      # rebuild node-pty against the Electron ABI (first install / electron upgrade)
 npm start            # launches the app; connects to oas-web on 127.0.0.1:4820 or spawns it
 ```
@@ -33,7 +33,14 @@ Flags/env:
   view/terminal/file), integrated terminal tabs.
 - `renderer/views/*.mjs` — feature views per the shared contract:
   `mount(el, ctx)` / `unmount()`, `ctx = { api, openFile, openTerminal }`.
-  instances (roster + chat transcript + jira card), spawn, jira, and brain
-  are real (webpanel-dev ports); markdown / diff are placeholders their
-  owning developer replaces. `views/common.mjs` carries shared helpers and
-  the workspace bus; `theme.css` the shared design tokens.
+  `mount()` MAY return a disposer function; the shell prefers it over the
+  module-level `unmount()` (required for views opened in several tabs at
+  once, like markdown and diff). All views are real: instances (roster +
+  chat transcript + jira card), spawn, jira, brain, markdown (reader for
+  any text file via `ctx.path`), diff (per-instance git diff via
+  `ctx.instance`/`ctx.ws`). `views/common.mjs` carries shared helpers and
+  the workspace bus; `theme.css` the shared design tokens. Bare ESM deps
+  (marked, dompurify, highlight.js) resolve through the importmap in
+  `index.html`; highlight.js is bundled to `renderer/vendor/` by
+  `build-vendor.mjs` (postinstall) because its `es/` entry is a
+  dual-package CJS shim browsers cannot load.

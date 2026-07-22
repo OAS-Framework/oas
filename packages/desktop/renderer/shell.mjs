@@ -92,13 +92,24 @@ async function openViewTab(name, title, extra = {}, key = `view:${name}`) {
   const made = addTab({
     title,
     key,
-    onClose: () => { try { mod.unmount?.(); } catch (e) { console.error(e); } },
+    // Filled after mount: prefer the disposer mount() returns (per-mount
+    // cleanup — supports several tabs of one module); fall back to the
+    // module-level unmount() for views that keep the original contract.
+    onClose: () => {
+      try {
+        if (typeof made.dispose === "function") made.dispose();
+        else mod.unmount?.();
+      } catch (e) { console.error(e); }
+    },
   });
   if (!made) return; // existing tab activated
   const el = document.createElement("div");
   el.style.height = "100%";
   made.paneEl.append(el);
-  try { await mod.mount(el, { ...ctx, ...extra }); }
+  try {
+    const r = await mod.mount(el, { ...ctx, ...extra });
+    if (typeof r === "function") made.dispose = r;
+  }
   catch (e) { el.innerHTML = `<div class="placeholder"><h2>${name}</h2><div>mount failed: ${e.message}</div></div>`; }
 }
 
@@ -221,7 +232,8 @@ for (const v of NAV) {
 
 async function openDiffPicker() {
   const ws = currentWorkspace();
-  const made = addTab({ title: "Diff", key: "view:diff-picker" });
+  // keyed per workspace — switching workspaces must not resurrect a stale roster
+  const made = addTab({ title: "Diff", key: `view:diff-picker:${ws}` });
   if (!made) return;
   const el = document.createElement("div");
   el.className = "placeholder";
@@ -236,7 +248,7 @@ async function openDiffPicker() {
     const btn = document.createElement("button");
     btn.className = "nav-item";
     btn.textContent = `${i.instance}${i.branch ? ` · ${i.branch}` : ""}`;
-    btn.addEventListener("click", () => openViewTab("diff", `± ${i.instance}`, { instance: i.instance }, `diff:${ws}:${i.instance}`));
+    btn.addEventListener("click", () => openViewTab("diff", `± ${i.instance}`, { instance: i.instance, ws }, `diff:${ws}:${i.instance}`));
     list.append(btn);
   }
   if (!panel.instances.length) list.textContent = "no instances";
