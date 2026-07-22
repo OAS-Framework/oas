@@ -192,7 +192,7 @@
 </head>
 <body>
 <header>
-  <button class="iconbtn" id="sidebtn" title="Toggle sidebar (Ctrl+B)">☰</button>
+  <button class="iconbtn" id="sidebtn" title="Toggle sidebar (⌘B)">☰</button>
   <h1><span class="logo">●</span> oas agents</h1>
   <select id="wssel" style="display:none"></select>
   <span class="hmeta" id="teamline"></span>
@@ -233,8 +233,8 @@ $("themebtn").onclick = () => {
   panes.forEach((p) => { p.lastSig = ""; if (p.sel) refreshTerm(p, true); });
 };
 
-/* ── sidebar collapse — persisted, Ctrl/Cmd-B toggles (except while a
-   terminal pane has focus: Ctrl-B is the tmux prefix). ── */
+/* ── sidebar collapse — persisted; Cmd-B toggles. Ctrl-B is never a panel
+   shortcut: it is the tmux prefix and always flows to the focused session. ── */
 const sideEl = $("side");
 if (localStorage.getItem("oasweb.side") === "closed") sideEl.classList.add("collapsed");
 function toggleSide() {
@@ -669,6 +669,7 @@ function closePane(p) {
   if (panes.length === 1) { // last pane: just clear it, don't remove
     p.sel = null; p.gen++; p.lastSig = ""; p.headEl.style.display = "none";
     p.termEl.innerHTML = '<div class="empty"><span class="big">⌥</span>Select an instance to sit at its terminal.<br>Everything you type goes straight into the agent\'s session — the terminal input line is the composer.</div>';
+    focusPane(p);   // re-run focus-class logic: no session → no .term.focused ring
     renderRoster();
     return;
   }
@@ -691,6 +692,7 @@ function wirePaneEvents(p) {
   // any click inside the pane (header included) claims keyboard input for it
   p.el.addEventListener("mousedown", () => focusPane(p));
 }
+/* OASWEB_KEYROUTE_BEGIN — DOM-free routing predicates, extracted by tests */
 const inEditable = (el) => !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" ||
                                     el.tagName === "SELECT" || el.isContentEditable);
 window.addEventListener("keydown", (e) => {
@@ -765,6 +767,7 @@ function keyToBytes(e) {
   if (k.length === 1) return e.altKey ? "\x1b" + k : k; // printable (alt = ESC prefix)
   return null; // Shift, F-keys, media keys… let them be
 }
+/* OASWEB_KEYROUTE_END */
 
 makePane();
 focusPane(panes[0]);
