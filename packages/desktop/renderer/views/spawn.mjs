@@ -12,7 +12,7 @@ let state = null;
 
 export function mount(el, ctx) {
   ensureTheme(el.ownerDocument);
-  const s = state = { el, ctx, souls: { agents: [] }, filterText: "", sel: null, timers: [], unsubWs: null, alive: true };
+  const s = state = { el, ctx, souls: { agents: [] }, filterText: "", sel: null, timers: [], unsubWs: null, alive: true, spawnOp: 0 };
   el.innerHTML = `
     <div class="oas-view">
       <div class="side">
@@ -129,15 +129,26 @@ function showForm(s, a) {
   s.q("fspawn").textContent = "Spawn";
 }
 
-/* Exported for the in-flight-spawn regression. A spawn begun in workspace A
-   that completes after a switch to B must NOT auto-open the terminal: with
-   the workspace switched, ctx.openTerminal(name) would resolve the name in
-   B — a same-named B instance would receive input meant for the new A one. */
+/* Exported for the in-flight-spawn regressions.
+
+   Two invalidation tokens gate ALL post-await mutation:
+   - workspace generation: a spawn begun in workspace A that completes after a
+     switch to B must NOT auto-open the terminal (openTerminal resolves names
+     in the CURRENT workspace — a same-named B instance would receive input
+     meant for the new A one);
+   - a per-spawn operation token (s.spawnOp): the FORM is shared UI — after a
+     switch the user may already be spawning a B agent, and A's late
+     completion must not clear B's fields, overwrite B's status, or re-enable
+     the button while B's spawn is in flight (duplicate-spawn hazard). Only
+     the currently active operation may touch the form — success, error, and
+     finally paths alike. */
 export async function doSpawn(s) {
   const a = s.selAgent;
   if (!a) return;
   const myGen = workspaceGeneration();       // capture at dispatch
+  const myOp = ++s.spawnOp;                  // this spawn owns the form until superseded
   const btn = s.q("fspawn"), status = s.q("fstatus");
+  const owns = () => myOp === s.spawnOp;     // stale ops must not touch shared UI
   btn.disabled = true; btn.textContent = "Spawning…"; status.textContent = "";
   try {
     const d = await postJson(s.ctx, "/api/spawn", {
@@ -146,17 +157,20 @@ export async function doSpawn(s) {
       task: s.q("ftask").value,           // "" = awaiting instructions (panel default)
       purpose: s.q("fpurpose").value || undefined,
     });
-    s.q("ftask").value = ""; s.q("fpurpose").value = "";
     if (myGen !== workspaceGeneration()) {
-      // workspace switched while the spawn was in flight: report, never auto-open
-      status.textContent = `Spawned ${d.instance} in the previous workspace — switch back to open its terminal.`;
+      // Workspace switched while the spawn was in flight: never auto-open.
+      // Report only if no newer spawn owns the form (its fields/status are
+      // someone else's now).
+      if (owns()) status.textContent = `Spawned ${d.instance} in the previous workspace — switch back to open its terminal.`;
       return;
     }
+    if (!owns()) return;                     // superseded — leave the form alone
+    s.q("ftask").value = ""; s.q("fpurpose").value = "";
     status.textContent = `Spawned ${d.instance}${d.launched ? " — session running" : ""}. Opening terminal…`;
     s.ctx.openTerminal(d.instance);
   } catch (e) {
-    status.textContent = `Spawn failed: ${e.message || e}`;
+    if (owns()) status.textContent = `Spawn failed: ${e.message || e}`;
   } finally {
-    btn.disabled = false; btn.textContent = "Spawn";
+    if (owns()) { btn.disabled = false; btn.textContent = "Spawn"; }
   }
 }
