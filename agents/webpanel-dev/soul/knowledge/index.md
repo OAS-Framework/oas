@@ -19,6 +19,7 @@ marketplace capability (`capabilities/oas-web/`: `bin/oas-web.mjs` server +
 * [architecture/workflow-tool-rendering.md](architecture/workflow-tool-rendering.md) - extracting workflow meta from the script source, and why per-step live progress cannot come from the transcript.
 * [architecture/multi-workspace-switcher.md](architecture/multi-workspace-switcher.md) - repeatable --dir, team-scope resolution, and the deployment-level workspace dropdown.
 * [architecture/raw-key-passthrough-and-host-guard.md](architecture/raw-key-passthrough-and-host-guard.md) - POST /api/keys is the panel's sole text-input path, sending browser keydown bytes into the logically focused pane via tmux send-keys -H, routing large or pasted payloads through load-buffer/paste-buffer, and rejecting non-loopback POST Host/Origin values.
+* [architecture/spawn-endpoint.md](architecture/spawn-endpoint.md) - POST /api/spawn treats browser-supplied agentsRoot as a selector into the server's workspace roots, while task "" intentionally spawns an awaiting-instructions instance.
 * [architecture/split-panes-and-compact-shell.md](architecture/split-panes-and-compact-shell.md) - v0.7.0 replaced the single session surface with per-pane session state in an editor-style split row, plus a persisted collapsible sidebar and 32px compact pane header.
 
 ## decisions/
@@ -29,6 +30,7 @@ marketplace capability (`capabilities/oas-web/`: `bin/oas-web.mjs` server +
 
 ## lessons/
 
+* [lessons/manifest-compat-floor-core-apis.md](lessons/manifest-compat-floor-core-apis.md) - When oas-web starts calling a new core.* helper, capabilities/oas-web/oas.json compatibility.oas must be raised to the kernel version that helper first shipped in, and the manifest-floor regression test's API map should be extended with that helper.
 * [lessons/fast-attach-cache-tail-backfill.md](lessons/fast-attach-cache-tail-backfill.md) - Attach latency is dominated by rebuilding the control-pane registry and serial tmux round trips, so keep a short registry cache, merge pane metadata queries, paint a cached or short tail first, and deep-backfill later with the requested line count in the render signature.
 * [lessons/logical-key-routing-not-dom-focus.md](lessons/logical-key-routing-not-dom-focus.md) - Binding keydown to the terminal element made typing silently die whenever a button or header click moved DOM focus while the pane still looked focused; route keys with a window listener to the logical focused pane and ignore real editable controls.
 * [lessons/multiline-send-bracketed-paste.md](lessons/multiline-send-bracketed-paste.md) - Any path that delivers text containing newlines into an agent pane must use load-buffer plus paste-buffer -p; raw send-keys/newline delivery submits each line separately or can execute pasted lines one by one.

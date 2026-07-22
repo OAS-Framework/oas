@@ -7,6 +7,8 @@
  * A zero-dependency localhost HTTP server:
  *   GET  /                          the panel UI (single HTML file)
  *   GET  /api/panel                 roster JSON (instances, git, task, tmux state)
+ *   GET  /api/agents                available agents (souls) per workspace root
+ *   POST /api/spawn                 { agent, agentsRoot, task?, purpose? } → spawn an instance
  *   GET  /api/session/<instance>?lines=n   ANSI pane capture of the live session
  *   POST /api/keys/<instance>       { data } → raw key bytes into the session (no Enter)
  *   POST /api/interrupt/<instance>  sends Ctrl-C (Escape for pi/claude prompts stays manual)
@@ -109,6 +111,62 @@ function panelData(wsId) {
       team: i.team || null,
     })),
   };
+}
+
+/** Available agents (souls) of a workspace — what `oas spawn <agent>` could
+ * start. Same kernel seams as the CLI: core.listAgents per agents root, plus
+ * capability-defined agents (packages' `agents:` souls) active in the root's
+ * context — the CLI resolves those via findCapabilityAgent. */
+function agentsData(wsId) {
+  const ws = wsId ? workspaceById(wsId) : workspaces()[0];
+  const agents = [];
+  for (const root of ws?.roots || []) {
+    const context = dirname(root); // the workspace/repo owning this agents root
+    const pushAgent = (a) => agents.push({
+      name: a.name, description: a.description || "", kind: a.kind || "persistent",
+      work: a.work || "checkout", runtime: a.runtime || "pi", model: a.model || null,
+      repo: a.repo || null, capability: a.capability || null, agentsRoot: root,
+      workspace: context, repoName: resolve(context, a.repo || ".").split("/").pop(),
+    });
+    try {
+      const local = core.listAgents(root);
+      const seen = new Set(local.map((a) => a.name));
+      for (const a of local) pushAgent(a);
+      // Capability-defined agents (kind "capability") — full soul via the same
+      // resolver the CLI's spawn fallback uses.
+      for (const c of core.listCapabilityAgents(context)) {
+        if (seen.has(c.name)) continue;
+        seen.add(c.name);
+        const soul = core.findCapabilityAgent(context, root, c.name);
+        if (soul) pushAgent(soul);
+      }
+    } catch { /* one broken root must not hide the rest */ }
+  }
+  agents.sort((a, b) => a.name.localeCompare(b.name));
+  return { workspace: ws ? { id: ws.id, name: ws.name } : null, agents };
+}
+
+/** Spawn an instance of an available agent. Default is NO TASK — the instance
+ * comes up awaiting instruction (the user talks to it through the panel). */
+function spawnAgent({ agent, agentsRoot, task, purpose }) {
+  const name = String(agent || "");
+  const root = resolve(String(agentsRoot || ""));
+  // agentsRoot must be one of the workspace roots this server was started for —
+  // never spawn into an arbitrary caller-supplied directory.
+  const known = workspaces().flatMap((w) => w.roots);
+  if (!known.some((r) => resolve(r) === root)) throw new Error(`unknown agents root "${agentsRoot}"`);
+  const def = core.findAgent(root, name)
+    // CLI parity: capability-defined agents (a package's `agents:` soul active
+    // in this context) resolve via findCapabilityAgent and home locally.
+    || core.findCapabilityAgent(dirname(root), root, name);
+  if (!def) throw new Error(`unknown agent "${name}"`);
+  const r = core.spawnInstance(root, def, {
+    purpose: purpose ? String(purpose) : undefined,
+    task: task ? String(task) : "",
+    repo: def.repo || core.defaultRepo(core.workspaceOf(root)) || undefined,
+  });
+  return { instance: r.instance, agent: r.agent, home: r.home, work: r.work,
+           branch: r.branch || null, launched: r.launched, warnings: r.warnings || [] };
 }
 
 /* Instance registry cache: findInstance() used to rebuild the whole
@@ -334,6 +392,14 @@ const server = createServer(async (req, res) => {
   try {
     if (req.method === "GET" && path === "/") return send(res, 200, UI, "text/html");
     if (req.method === "GET" && path === "/api/panel") return send(res, 200, panelData(url.searchParams.get("ws") || undefined));
+    if (req.method === "GET" && path === "/api/agents") return send(res, 200, agentsData(url.searchParams.get("ws") || undefined));
+    if (req.method === "POST" && path === "/api/spawn") {
+      const body = await readBody(req);
+      if (typeof body.agent !== "string" || !body.agent || typeof body.agentsRoot !== "string" || !body.agentsRoot)
+        return send(res, 400, { error: "body needs { agent, agentsRoot }" });
+      try { return send(res, 200, { spawned: true, ...spawnAgent(body) }); }
+      catch (e) { return send(res, 409, { error: String(e.message || e).slice(0, 300) }); }
+    }
     const m = path.match(/^\/api\/(session|keys|interrupt|jira|chat)\/([A-Za-z0-9._-]+)$/);
     if (m) {
       const inst = findInstance(m[2]);
