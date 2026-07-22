@@ -14,9 +14,10 @@ The web panel lives in `capabilities/oas-web/` and is deliberately tiny:
   A `node:http` server with **zero npm dependencies**. Endpoints:
   - `GET /` — serves `ui/panel.html` verbatim.
   - `GET /api/panel?ws=<id>` — roster JSON per workspace.
-  - `GET /api/session/<instance>?lines=n` — raw ANSI tmux `capture-pane` text.
+  - `GET /api/session/<instance>?lines=n` — raw ANSI tmux `capture-pane` text plus pane geometry, cursor state, and history depth.
   - `GET /api/chat/<instance>?limit=n` — parsed structured transcript turns.
   - `POST /api/send/<instance>` — types `{ text }` into the tmux session.
+  - `POST /api/keys` — sends browser keydown bytes into the tmux pane (see [raw key passthrough](raw-key-passthrough-and-host-guard.md)).
   - `POST /api/interrupt/<instance>` — sends Ctrl-C.
   - `GET /api/jira/<instance>` — epic + Agent Roster via `acli` when
     `capabilityMeta["oas.jira"]` is present.
@@ -46,5 +47,7 @@ deferral, revisit only if polling chafes.
 
 The server binds **127.0.0.1 only** and must stay that way: this process can
 type into your terminals. Remote use is ssh port-forward, never a public
-bind. `EADDRINUSE` is handled with a friendly message (a panel is probably
+bind. All POST endpoints also require loopback `Host` and, when present,
+loopback `Origin`, so DNS rebinding cannot turn a hostile page into terminal
+input. `EADDRINUSE` is handled with a friendly message (a panel is probably
 already running; `--port <n>` or `pkill -f "oas-web.mjs start"`).

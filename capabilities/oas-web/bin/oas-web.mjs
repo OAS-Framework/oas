@@ -9,6 +9,7 @@
  *   GET  /api/panel                 roster JSON (instances, git, task, tmux state)
  *   GET  /api/session/<instance>?lines=n   ANSI pane capture of the live session
  *   POST /api/send/<instance>       { text } → typed into the tmux session + Enter
+ *   POST /api/keys/<instance>       { data } → raw key bytes into the session (no Enter)
  *   POST /api/interrupt/<instance>  sends Ctrl-C (Escape for pi/claude prompts stays manual)
  *   GET  /api/jira/<instance>       epic + Agent Roster for instances with oas.jira meta
  *
@@ -123,9 +124,53 @@ function tmuxTarget(inst) { return `${inst.tmux.session}:${inst.tmux.window}`; }
 
 function capture(inst, lines) {
   try {
-    return execFileSync("tmux", ["capture-pane", "-p", "-e", "-J", "-t", tmuxTarget(inst), "-S", `-${Math.max(16, lines)}`],
+    // No -J: joining wrapped rows would break the row-per-line grid mapping
+    // (cursor_y is physical). Each output line is exactly one pane row.
+    return execFileSync("tmux", ["capture-pane", "-p", "-e", "-t", tmuxTarget(inst), "-S", `-${Math.max(16, lines)}`],
       { encoding: "utf8", timeout: 4000 });
   } catch { return ""; }
+}
+
+/** History depth actually available, so the client can map capture lines to
+ * screen rows deterministically (cursor row = history + cursor_y). */
+function historySize(inst) {
+  try {
+    return Number(execFileSync("tmux", ["display-message", "-p", "-t", tmuxTarget(inst), "#{history_size}"],
+      { encoding: "utf8", timeout: 4000 }).trim()) || 0;
+  } catch { return 0; }
+}
+
+/** Pane geometry + cursor so the browser terminal mirrors the tmux pane exactly.
+ * cursor x/y are 0-based within the visible pane; "visible" reflects cursor_flag
+ * and copy-mode (in copy mode the live cursor is not where typing lands). */
+function paneSize(inst) {
+  try {
+    const out = execFileSync("tmux", ["display-message", "-p", "-t", tmuxTarget(inst),
+      "#{pane_width} #{pane_height} #{cursor_x} #{cursor_y} #{cursor_flag} #{pane_in_mode}"],
+      { encoding: "utf8", timeout: 4000 }).trim().split(/\s+/).map(Number);
+    return { cols: out[0] || 80, rows: out[1] || 24, cx: out[2] || 0, cy: out[3] || 0,
+             cursor: out[4] === 1 && out[5] !== 1 };
+  } catch { return { cols: 80, rows: 24, cx: 0, cy: 0, cursor: false }; }
+}
+
+/** Raw keystroke passthrough: bytes from the browser terminal go straight into
+ * the pane via send-keys -H (hex bytes) — no key-name interpretation, no Enter. */
+function sendKeys(inst, data, paste = false) {
+  const s = String(data);
+  if (paste || s.length > 512) {
+    // Pastes (any size) and large payloads go through a tmux buffer as ONE
+    // bracketed paste — raw carriage returns via send-keys would let a shell
+    // or TUI submit/execute each line separately.
+    execFileSync("tmux", ["load-buffer", "-b", "oaswebk", "-"], { input: s.replace(/\r\n?/g, "\n"), timeout: 4000 });
+    execFileSync("tmux", ["paste-buffer", "-p", "-d", "-b", "oaswebk", "-t", tmuxTarget(inst)], { timeout: 4000 });
+    return;
+  }
+  const bytes = [...Buffer.from(s, "utf8")].map((b) => b.toString(16).padStart(2, "0"));
+  if (!bytes.length) return;
+  // chunk to keep argv small
+  for (let i = 0; i < bytes.length; i += 256) {
+    execFileSync("tmux", ["send-keys", "-t", tmuxTarget(inst), "-H", ...bytes.slice(i, i + 256)], { timeout: 4000 });
+  }
 }
 
 function sendText(inst, text) {
@@ -276,16 +321,36 @@ const readBody = (req) => new Promise((ok) => {
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, "http://localhost");
   const path = url.pathname;
+  // DNS-rebinding / CSRF guard: mutating requests must come from a loopback
+  // origin — a hostile page resolving to 127.0.0.1 must not type into terminals.
+  if (req.method === "POST") {
+    const host = String(req.headers.host || "").replace(/:\d+$/, "");
+    const okHost = (h) => h === "127.0.0.1" || h === "localhost" || h === "[::1]" || h === "::1";
+    let originOk = true;
+    if (req.headers.origin !== undefined) {
+      // "Origin: null" (sandboxed pages) and malformed origins must 403, not throw.
+      try { originOk = okHost(new URL(String(req.headers.origin)).hostname); } catch { originOk = false; }
+    }
+    if (!okHost(host) || !originOk) return send(res, 403, { error: "forbidden origin" });
+  }
   try {
     if (req.method === "GET" && path === "/") return send(res, 200, UI, "text/html");
     if (req.method === "GET" && path === "/api/panel") return send(res, 200, panelData(url.searchParams.get("ws") || undefined));
-    const m = path.match(/^\/api\/(session|send|interrupt|jira|chat)\/([A-Za-z0-9._-]+)$/);
+    const m = path.match(/^\/api\/(session|send|keys|interrupt|jira|chat)\/([A-Za-z0-9._-]+)$/);
     if (m) {
       const inst = findInstance(m[2]);
       if (!inst) return send(res, 404, { error: `unknown instance "${m[2]}"` });
       if (m[1] === "session" && req.method === "GET") {
         if (!inst.running) return send(res, 200, { running: false, text: "" });
-        return send(res, 200, { running: true, text: capture(inst, Number(url.searchParams.get("lines") || 500)) });
+        const hist = Math.min(historySize(inst), Math.max(0, Number(url.searchParams.get("lines") || 500)));
+        return send(res, 200, { running: true, size: paneSize(inst), history: hist, text: capture(inst, hist) });
+      }
+      if (m[1] === "keys" && req.method === "POST") {
+        if (!inst.running) return send(res, 409, { error: "instance is not running" });
+        const { data, paste } = await readBody(req);
+        if (typeof data !== "string" || !data.length) return send(res, 400, { error: "body needs { data }" });
+        sendKeys(inst, data, paste === true);
+        return send(res, 200, { sent: true });
       }
       if (m[1] === "send" && req.method === "POST") {
         if (!inst.running) return send(res, 409, { error: "instance is not running" });
