@@ -44,17 +44,22 @@ export function postJson(ctx, pathname, body) {
    elsewhere (e.g. a shell-level switcher can call setWorkspace too). */
 const WS_KEY = "oas.desktop.ws";
 const wsListeners = new Set();
+/* In-memory source of truth; localStorage is persistence only (absent in
+   node tests and storage-less shells). */
+let wsCurrent = (() => { try { return localStorage.getItem(WS_KEY) || ""; } catch { return ""; } })();
 export function currentWorkspace() {
-  try { return localStorage.getItem(WS_KEY) || ""; } catch { return ""; }
+  return wsCurrent;
 }
 export function setWorkspace(id) {
-  try { localStorage.setItem(WS_KEY, id || ""); } catch { /* storage-less env */ }
-  for (const fn of [...wsListeners]) { try { fn(id || ""); } catch { /* listener error must not break others */ } }
+  wsCurrent = id || "";
+  try { localStorage.setItem(WS_KEY, wsCurrent); } catch { /* storage-less env */ }
+  for (const fn of [...wsListeners]) { try { fn(wsCurrent); } catch { /* listener error must not break others */ } }
 }
 /* Adopt a server-resolved workspace id WITHOUT notifying listeners — used
    when the server maps a stale/empty selection to a real workspace. */
 export function adoptWorkspace(id) {
-  try { localStorage.setItem(WS_KEY, id || ""); } catch { /* storage-less env */ }
+  wsCurrent = id || "";
+  try { localStorage.setItem(WS_KEY, wsCurrent); } catch { /* storage-less env */ }
 }
 export function onWorkspaceChange(fn) {
   wsListeners.add(fn);
@@ -63,6 +68,17 @@ export function onWorkspaceChange(fn) {
 export function wsQuery(prefix = "?") {
   const ws = currentWorkspace();
   return ws ? `${prefix}ws=${encodeURIComponent(ws)}` : "";
+}
+
+/* Per-instance endpoint path, ALWAYS scoped to the selected workspace.
+   Same-named instances exist across workspaces; an unscoped request lets
+   the server resolve globally — an Interrupt viewed in workspace B could
+   Ctrl-C workspace A's session, and chat/jira could leak A's data. Every
+   per-instance call (interrupt, chat, jira, session, keys…) must be built
+   through here. `query` is the extra query string without a leading ?/&. */
+export function instanceApiPath(kind, instance, query = "") {
+  const q = query ? `?${query}${wsQuery("&")}` : wsQuery();
+  return `/api/${kind}/${encodeURIComponent(instance)}${q}`;
 }
 
 /* Render the workspace <select> into an element; hidden when the server

@@ -5,7 +5,7 @@
    Contract: mount(el, ctx) / unmount(). Plain ES module + DOM. */
 import {
   escapeHtml, apiJson, ensureTheme,
-  setWorkspace, onWorkspaceChange, renderWorkspaceSelect, wsQuery,
+  setWorkspace, onWorkspaceChange, renderWorkspaceSelect, wsQuery, instanceApiPath,
 } from "./common.mjs";
 
 let state = null;
@@ -87,7 +87,7 @@ async function select(s, name) {
   box.innerHTML = '<div class="loading-block"><span class="spinner"></span> Loading Jira panel…</div>';
   const myReq = ++s.req;
   let d;
-  try { d = await apiJson(s.ctx, `/api/jira/${encodeURIComponent(name)}`); }
+  try { d = await apiJson(s.ctx, instanceApiPath("jira", name)); }
   catch (e) {
     if (s.alive && myReq === s.req) box.innerHTML = `<div class="empty">Jira lookup failed: ${escapeHtml(e.message || String(e))}</div>`;
     return;

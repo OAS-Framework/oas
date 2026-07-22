@@ -8,7 +8,7 @@
 import {
   escapeHtml, miniMarkdown, apiJson, postJson, ensureTheme,
   groupInstances, currentWorkspace, setWorkspace, adoptWorkspace, onWorkspaceChange,
-  renderWorkspaceSelect, wsQuery,
+  renderWorkspaceSelect, wsQuery, instanceApiPath,
 } from "./common.mjs";
 
 let state = null;
@@ -63,7 +63,7 @@ export function mount(el, ctx) {
   s.q("termbtn").onclick = () => { if (s.sel) s.ctx.openTerminal(s.sel); };
   s.q("intbtn").onclick = async () => {
     if (!s.sel) return;
-    try { await postJson(s.ctx, `/api/interrupt/${encodeURIComponent(s.sel)}`, {}); } catch { /* idle instance */ }
+    try { await postJson(s.ctx, instanceApiPath("interrupt", s.sel), {}); } catch { /* idle instance */ }
     setTimeout(() => refreshChat(s, true), 350);
   };
   s.unsubWs = onWorkspaceChange(() => { clearSelection(s); refreshPanel(s); });
@@ -191,7 +191,7 @@ function renderHead(s, i) {
 /* ── jira (inline card at the top of the transcript when meta is present) ── */
 async function refreshJira(s, name) {
   let d;
-  try { d = await apiJson(s.ctx, `/api/jira/${encodeURIComponent(name)}`); }
+  try { d = await apiJson(s.ctx, instanceApiPath("jira", name)); }
   catch { return; }
   if (!s.alive || s.sel !== name) return;
   s.jira = d && d.enabled ? d : null;
@@ -330,7 +330,7 @@ async function refreshChat(s, scroll) {
   const forSel = s.sel;
   const myReq = ++s.chatReq;
   let d;
-  try { d = await apiJson(s.ctx, `/api/chat/${encodeURIComponent(forSel)}?limit=150`); }
+  try { d = await apiJson(s.ctx, instanceApiPath("chat", forSel, "limit=150")); }
   catch { return; } // keep the last good render on transient fetch errors
   // A newer request finished first, or the user switched instance mid-flight:
   // this payload belongs to another view — never let it paint.
