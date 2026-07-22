@@ -215,6 +215,7 @@ function snapshotPanel(wsId) {
   const id = wsId && snapshot.byWs.has(wsId) ? wsId : ids[0];
   return id ? snapshot.byWs.get(id) : null;
 }
+/* OASWEB_FINDINST_BEGIN — workspace-scoped instance lookup, extracted by tests */
 function findInstance(name, wsId) {
   if (!snapshot.byWs.size) snapshot = { at: Date.now(), byWs: collectNow() }; // cold start, once
   // With a ws scope, resolve ONLY in that workspace — same-named instances
@@ -226,6 +227,7 @@ function findInstance(name, wsId) {
   }
   return undefined;
 }
+/* OASWEB_FINDINST_END */
 
 function tmuxTarget(inst) { return `${inst.tmux.session}:${inst.tmux.window}`; }
 
@@ -451,7 +453,11 @@ function brainData(agentName, wsId) {
   try { instNames = readdirSync(instancesDir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name); } catch { /* no instances yet */ }
   for (const name of instNames.sort()) {
     const home = join(instancesDir, name);
-    const live = findInstance(name);
+    // running comes from the roster snapshot, SCOPED to the brain's resolved
+    // workspace — unscoped lookup let a same-named instance running in another
+    // workspace mark this (possibly stopped) one as running (merged-state
+    // review @f889619) and offer a terminal that can't resolve locally.
+    const live = findInstance(name, ws?.id);
     const notesDir = join(home, "notes");
     instances.push({
       instance: name, home, running: live ? !!live.running : false,

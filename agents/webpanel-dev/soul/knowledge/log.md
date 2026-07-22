@@ -1,6 +1,9 @@
 # Knowledge Log
 
 ## 2026-07-22
+* **Update**: merged the capability-agent skills and harness-origin note into [Agent brain endpoint and desktop brain view](/architecture/agent-brain-endpoint-and-view.md): capability-defined agents get package-level skills via `core.capabilitySkillDirs`, `/api/brain` tests must cover a capability agent, and the desktop brain harness must use the same-origin `dev-serve.mjs` proxy because oas-web sends no CORS headers.
+* **Update**: [oas-web architecture](/architecture/oas-web-architecture.md) now records package-level capability-agent skills in `/api/brain` and the no-CORS same-origin harness rule.
+* **Update**: [Capability manifest compatibility floor must cover core APIs](/lessons/manifest-compat-floor-core-apis.md) now includes `core.capabilitySkillDirs` as the brain endpoint's package-skill helper.
 * **Creation**: added [Agent brain endpoint and desktop brain view](/architecture/agent-brain-endpoint-and-view.md) from the brain endpoint note: `/api/brain/<agent>` resolves names through kernel agent lookup seams, returns only artifact paths, and feeds the contract-based desktop brain view.
 * **Update**: [oas-web architecture](/architecture/oas-web-architecture.md) now lists `GET /api/brain/<agent>?ws=<id>` in the server surface.
 * **Creation**: added [Security regressions must exercise behavior, not source strings](/lessons/behavioral-security-regressions.md) from the behavioral-security-regressions note: guard regressions must drive the real boundary with forged requests and a fake upstream, because source-string checks pass when the guard is inverted, unreachable, or no longer returns 403.

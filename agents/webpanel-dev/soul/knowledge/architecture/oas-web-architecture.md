@@ -17,9 +17,10 @@ The web panel lives in `capabilities/oas-web/` and is deliberately tiny:
   - `POST /api/spawn` — spawns an agent in an allowlisted workspace root,
     with `task: ""` meaning "await instructions" (see
     [spawn endpoint](spawn-endpoint.md)).
-  - `GET /api/brain/<agent>?ws=<id>` — returns soul artifact paths and
-    running-state for the desktop brain view while resolving agent names
-    through kernel lookup seams (see [agent brain endpoint](agent-brain-endpoint-and-view.md)).
+  - `GET /api/brain/<agent>?ws=<id>` — returns soul artifact paths, package-level
+    capability-agent skills, and running-state for the desktop brain view while
+    resolving agent names through kernel lookup seams (see
+    [agent brain endpoint](agent-brain-endpoint-and-view.md)).
   - `GET /api/session/<instance>?lines=n` — raw ANSI tmux `capture-pane` text plus pane geometry, cursor state, and history depth.
   - `GET /api/chat/<instance>?limit=n` — parsed structured transcript turns.
   - `GET /api/file` — guarded file reads for desktop viewers; realpaths the
@@ -90,6 +91,9 @@ loopback `Origin` when present. The Host check must run before GET handlers too
 because file-serving APIs such as `/api/file` and `/api/diff` can leak workspace
 files to a DNS-rebinding page; see
 [the all-request Host guard lesson](/lessons/loopback-host-guard-all-requests.md).
+The server sends no CORS headers; external dev harnesses cannot fetch
+its API cross-origin and should use a same-origin proxy such as
+`packages/desktop/renderer/dev-serve.mjs` for renderer work.
 Browser-provided paths are selectors or targets constrained by
 server-computed allowlists, never ambient filesystem authority: `/api/spawn`'s
 `agentsRoot` must resolve against workspace roots, and `/api/file` must realpath
