@@ -1,6 +1,6 @@
 {
   "name": "@oas-framework/pi",
-  "version": "0.17.5",
+  "version": "0.17.6",
   "description": "OAS pi runtime bridge — memory session events and pre-workspace bootstrap over the runtime-neutral @oas-framework/oas kernel",
   "keywords": [
     "pi-package",
