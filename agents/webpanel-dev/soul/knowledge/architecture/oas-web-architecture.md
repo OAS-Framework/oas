@@ -34,9 +34,12 @@ The web panel lives in `capabilities/oas-web/` and is deliberately tiny:
 # Kernel seams (all pre-existing, none owned here)
 
 - **Roster**: `lib/control-pane/model.mjs` `collectControlPane(root)` — same
-  data as the TUI (`oas pane`). The kernel is found in-tree (`../../..`) or,
-  for marketplace installs, via `oas root` (a copied package must never
-  assume it sits inside the kernel tree).
+  data as the TUI (`oas pane`). Slow collection runs in the hidden
+  `oas-web.mjs collect` child-process path; the serving process answers
+  `/api/panel` and `findInstance` from an in-memory snapshot so key/input
+  endpoints are not blocked by roster rebuilds. The kernel is found in-tree
+  (`../../..`) or, for marketplace installs, via `oas root` (a copied package
+  must never assume it sits inside the kernel tree).
 - **Session view + input**: tmux only — `capture-pane` to read and raw
   `/api/keys` delivery through `send-keys` / `paste-buffer` to write. The
   terminal's own input line is the sole input surface; do not reintroduce a
@@ -50,7 +53,10 @@ The web panel lives in `capabilities/oas-web/` and is deliberately tiny:
 
 The UI polls JSON endpoints (roster ~5s, chat 1.5s, 400ms fast loop after a
 send). No WebSockets/SSE — matches the TUI's refresh loop; deliberate
-deferral, revisit only if polling chafes.
+deferral, revisit only if polling chafes. Because the server is single-threaded,
+periodic roster refresh uses a background child-process snapshot refresh rather
+than synchronous `collectControlPane` work on request paths; see
+[the snapshot collection lesson](/lessons/snapshot-collection-off-thread.md).
 
 Session attach is staged for perceived speed: paint a cached frame immediately
 when available, fetch a short `/api/session?lines=120` tail so the pane becomes

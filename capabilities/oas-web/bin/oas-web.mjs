@@ -19,7 +19,7 @@
  * feel of sitting at the agent's terminal; identical for pi and claude runs.
  */
 import { createServer } from "node:http";
-import { execFileSync, execSync } from "node:child_process";
+import { execFile, execFileSync, execSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -46,7 +46,10 @@ const flag = (name) => {
 };
 const flagAll = (name) => args.flatMap((a, i) => (a === `--${name}` && args[i + 1] && !args[i + 1].startsWith("--") ? [args[i + 1]] : []));
 
-if (sub !== "start") {
+// "collect" is a hidden helper: the serving process spawns `oas-web.mjs
+// collect --dir ...` so the expensive synchronous roster collection runs in a
+// child and never blocks the event loop (see the snapshot refresher below).
+if (sub !== "start" && sub !== "collect") {
   console.error("usage: oas web start [--port <n>] [--dir <workspace>]... [--open]  (repeat --dir for multiple workspaces)");
   process.exit(1);
 }
@@ -59,6 +62,7 @@ const model = await import(pathToFileURL(join(FRAMEWORK_ROOT, "lib", "control-pa
  * switcher shows deployment-level entries; duplicates collapse. */
 const ctxs = (flagAll("dir").length ? flagAll("dir") : [process.cwd()]).map((d) => resolve(String(d)));
 const port = Number(flag("port") || 4820);
+const DEBUG = flag("debug") === true || process.env.OASWEB_DEBUG === "1";
 
 function workspaceEntry(ctx) {
   let team, roots = [], scope = ctx;
@@ -169,30 +173,51 @@ function spawnAgent({ agent, agentsRoot, task, purpose }) {
            branch: r.branch || null, launched: r.launched, warnings: r.warnings || [] };
 }
 
-/* Instance registry cache: findInstance() used to rebuild the whole
-   control-pane model (git status across every agent root) on EVERY request —
-   at a 500ms poll cadence that made each /api/session cost 200-300ms+ on
-   multi-root workspaces and dominated time-to-interactive on attach. The
-   roster only changes on spawn/retire, so a short TTL is safe: a fresh
-   instance shows up on the next rebuild (≤2.5s), and a retired one just
-   fails its tmux calls harmlessly until then. */
-/* OASWEB_REGCACHE_BEGIN — pure factory, extracted by tests */
-function makeRegistryCache(collect, ttlMs = 2500, now = Date.now) {
-  let at = 0, map = new Map();
-  return (name) => {
-    const t = now();
-    if (t - at > ttlMs) { map = collect(); at = t; }
-    return map.get(name);
-  };
+/* ── Non-blocking roster snapshot ──
+   collectControlPane is synchronous and expensive (git status across every
+   agent root — 200-600ms on team workspaces). Running it inside the serving
+   process froze the event loop, so a roster poll landing between two
+   keystrokes stalled /api/keys and the echo fetch — the panel felt laggy no
+   matter how fast the key path itself was. The server therefore NEVER
+   collects: a child process (`oas-web.mjs collect`) refreshes a snapshot in
+   the background every few seconds, and all requests are served from it. */
+let snapshot = { at: 0, byWs: new Map() };   // wsId -> panelData
+let collecting = false;
+function collectNow() {
+  const byWs = new Map();
+  for (const w of workspaces()) byWs.set(w.id, panelData(w.id));
+  return byWs;
 }
-/* OASWEB_REGCACHE_END */
-const findInstance = makeRegistryCache(() => {
-  const fresh = new Map();
-  for (const w of workspaces()) {
-    for (const i of panelData(w.id).instances) if (!fresh.has(i.instance)) fresh.set(i.instance, i);
+if (sub === "collect") {
+  process.stdout.write(JSON.stringify(Object.fromEntries(collectNow())));
+  process.exit(0);
+}
+function refreshSnapshot() {
+  if (collecting) return;
+  collecting = true;
+  const argv = [fileURLToPath(import.meta.url), "collect", ...ctxs.flatMap((d) => ["--dir", d])];
+  execFile(process.execPath, argv, { encoding: "utf8", timeout: 30000, maxBuffer: 16 * 1024 * 1024 }, (err, stdout) => {
+    collecting = false;
+    if (err) { if (DEBUG) console.log(`[snapshot] collect failed: ${err.message}`); return; }
+    try {
+      const parsed = JSON.parse(stdout);
+      snapshot = { at: Date.now(), byWs: new Map(Object.entries(parsed)) };
+    } catch (e) { if (DEBUG) console.log(`[snapshot] bad collect output: ${e.message}`); }
+  });
+}
+function snapshotPanel(wsId) {
+  const ids = [...snapshot.byWs.keys()];
+  const id = wsId && snapshot.byWs.has(wsId) ? wsId : ids[0];
+  return id ? snapshot.byWs.get(id) : null;
+}
+function findInstance(name) {
+  if (!snapshot.byWs.size) snapshot = { at: Date.now(), byWs: collectNow() }; // cold start, once
+  for (const d of snapshot.byWs.values()) {
+    const hit = d.instances.find((i) => i.instance === name);
+    if (hit) return hit;
   }
-  return fresh;
-});
+  return undefined;
+}
 
 function tmuxTarget(inst) { return `${inst.tmux.session}:${inst.tmux.window}`; }
 
@@ -245,6 +270,20 @@ function sendKeys(inst, data, paste = false) {
 function sendInterrupt(inst) {
   execFileSync("tmux", ["send-keys", "-t", tmuxTarget(inst), "C-c"], { timeout: 4000 });
 }
+
+/* OASWEB_KEYERR_BEGIN — safe error shaping for the /api/keys failure path,
+   extracted by tests. exec errors embed the child argv (hex-encoded
+   keystrokes) in e.message; only exit code and signal are safe to surface. */
+function keySendError(e) {
+  // execFileSync exposes normal non-zero exits as e.status; e.code carries
+  // spawn-level errno strings (ETIMEDOUT, ENOENT). Prefer status.
+  const code = e && (e.status ?? e.code) != null ? String(e.status ?? e.code) : "unknown";
+  const signal = (e && e.signal) || "none";
+  return { code, signal,
+           log: `[keys] FAILED code=${code} signal=${signal}`,
+           http: { error: `send-keys failed (code ${code}) — see the terminal directly` } };
+}
+/* OASWEB_KEYERR_END */
 
 // ---- Chat transcript: parse the runtime's session log into structured turns ----
 // pi:     ~/.pi/agent/sessions/--<home with / -> ->--/<ts>_<id>.jsonl
@@ -391,7 +430,11 @@ const server = createServer(async (req, res) => {
   }
   try {
     if (req.method === "GET" && path === "/") return send(res, 200, UI, "text/html");
-    if (req.method === "GET" && path === "/api/panel") return send(res, 200, panelData(url.searchParams.get("ws") || undefined));
+    if (req.method === "GET" && path === "/api/panel") {
+      const d = snapshotPanel(url.searchParams.get("ws") || undefined);
+      // first request before the initial snapshot lands: collect inline once
+      return send(res, 200, d || panelData(url.searchParams.get("ws") || undefined));
+    }
     if (req.method === "GET" && path === "/api/agents") return send(res, 200, agentsData(url.searchParams.get("ws") || undefined));
     if (req.method === "POST" && path === "/api/spawn") {
       const body = await readBody(req);
@@ -414,7 +457,17 @@ const server = createServer(async (req, res) => {
         if (!inst.running) return send(res, 409, { error: "instance is not running" });
         const { data, paste } = await readBody(req);
         if (typeof data !== "string" || !data.length) return send(res, 400, { error: "body needs { data }" });
-        sendKeys(inst, data, paste === true);
+        // SECURITY: never log the payload — typed text can contain secrets.
+        if (DEBUG) console.log(`[keys] inst=${inst.instance} target=${tmuxTarget(inst)} paste=${paste === true} len=${Buffer.byteLength(data, "utf8")}`);
+        try {
+          sendKeys(inst, data, paste === true);
+        } catch (e) {
+          // SECURITY: e.message embeds the child argv (hex-encoded keystrokes)
+          // — never let it reach logs or the response (keySendError shapes it).
+          const safe = keySendError(e);
+          if (DEBUG) console.log(`${safe.log} inst=${inst.instance}`);
+          return send(res, 500, safe.http);
+        }
         return send(res, 200, { sent: true });
       }
       if (m[1] === "interrupt" && req.method === "POST") {
@@ -445,3 +498,5 @@ server.listen(port, "127.0.0.1", () => {
   console.log("Bound to 127.0.0.1 only. This process can type into your agent terminals — do not expose it.");
   if (flag("open")) { try { execFileSync(process.platform === "darwin" ? "open" : "xdg-open", [addr], { stdio: "ignore" }); } catch { /* best-effort */ } }
 });
+refreshSnapshot();                       // initial roster snapshot, off-thread
+setInterval(refreshSnapshot, 3000).unref(); // keep it fresh; child skipped if one is running

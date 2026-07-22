@@ -1,6 +1,10 @@
 # Knowledge Log
 
 ## 2026-07-22
+* **Creation**: added [Keep roster collection out of the serving process](/lessons/snapshot-collection-off-thread.md) from the snapshot-collection note: synchronous `collectControlPane` work in the single-threaded server made key latency spiky, so `/api/panel` and `findInstance` serve from a background child-process snapshot.
+* **Creation**: added [Typing must force-repaint and pin the prompt row](/lessons/typing-echo-visibility.md) from the typing-echo note: keys reached tmux but echo stayed invisible until typing forced a short-tail repaint and temporary bottom snap.
+* **Update**: [oas-web architecture](/architecture/oas-web-architecture.md) now records the background child-process roster snapshot path and links to the snapshot-collection lesson.
+* **Update**: [Raw key passthrough](/architecture/raw-key-passthrough-and-host-guard.md) now records the forced tail refresh/bottom snap needed to make key echo visible.
 * **Creation**: added [Capability manifest compatibility floor must cover core APIs](/lessons/manifest-compat-floor-core-apis.md) from the manifest-compat note: `compatibility.oas` must rise when `oas.web` starts calling newer `core.*` helpers, and the regression test's API minimum-version map should be extended with the helper.
 * **Creation**: added [Spawn endpoint root allowlist and empty-task semantics](/architecture/spawn-endpoint.md) by merging the spawn endpoint notes: `agentsRoot` is a selector into server workspace roots, `task: ""` intentionally means await instructions, repo fallback mirrors the CLI, and spawn failures return 409.
 * **Update**: [oas-web architecture](/architecture/oas-web-architecture.md) now lists `POST /api/spawn` and records the path-shaped browser parameter allowlist invariant.

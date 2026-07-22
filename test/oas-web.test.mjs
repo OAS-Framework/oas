@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { spawn } from "node:child_process";
+import { spawn, execFileSync } from "node:child_process";
 import { request as httpRequest } from "node:http";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -20,22 +20,51 @@ function extractBlock(file, marker) {
   return m[1];
 }
 
-test("oas-web server: registry cache serves from cache within TTL and recollects on expiry", () => {
-  const src = extractBlock(join(CAP, "bin", "oas-web.mjs"), "REGCACHE");
-  const makeRegistryCache = new Function(src + "\nreturn makeRegistryCache;")();
-  let clock = 0, collections = 0;
-  const find = makeRegistryCache(
-    () => { collections++; return new Map([["a", { instance: "a", v: collections }]]); },
-    2500, () => clock);
-  clock = 10_000;
-  assert.equal(find("a").v, 1, "first lookup collects");
-  clock += 500; find("a"); clock += 500; find("a");
-  assert.equal(collections, 1, "lookups within TTL do not recollect");
-  assert.equal(find("missing"), undefined, "miss within TTL does not recollect");
-  assert.equal(collections, 1);
-  clock += 2600;
-  assert.equal(find("a").v, 2, "expiry refreshes the roster");
-  assert.equal(collections, 2);
+test("oas-web server: collect subcommand emits the roster snapshot JSON", () => {
+  const out = execFileSync(process.execPath, [join(CAP, "bin", "oas-web.mjs"), "collect", "--dir", ROOT],
+    { encoding: "utf8", timeout: 30000, maxBuffer: 16 * 1024 * 1024 });
+  const parsed = JSON.parse(out);
+  const ws = Object.values(parsed);
+  assert.ok(ws.length >= 1, "at least one workspace in the snapshot");
+  assert.ok(Array.isArray(ws[0].instances), "each workspace carries an instances array");
+});
+
+test("oas-web server: key-send failures never leak the payload or its hex encoding", () => {
+  const src = extractBlock(join(CAP, "bin", "oas-web.mjs"), "KEYERR");
+  const keySendError = new Function(src + "\nreturn keySendError;")();
+  const secret = "hunter2-t0ken";
+  const hex = [...Buffer.from(secret, "utf8")].map((b) => b.toString(16).padStart(2, "0")).join(" ");
+  // simulate the real execFileSync failure shape: non-zero exit → e.status,
+  // argv (hex bytes) inside message
+  const err = Object.assign(new Error(`Command failed: tmux send-keys -t s:1 -H ${hex}`),
+                            { status: 1, signal: null });
+  const safe = keySendError(err);
+  for (const [what, s] of [["log", safe.log], ["http error", JSON.stringify(safe.http)]]) {
+    assert.ok(!s.includes(secret), `${what} must not contain the plaintext payload`);
+    assert.ok(!s.includes(hex.slice(0, 8)), `${what} must not contain the hex-encoded payload`);
+    assert.ok(!s.includes("Command failed"), `${what} must not embed the child argv message`);
+  }
+  assert.ok(safe.http.error.includes("code 1"), "exit code is surfaced");
+  // timeout shape (ETIMEDOUT + signal) stays safe too
+  const t = keySendError(Object.assign(new Error(`spawnSync tmux ETIMEDOUT: -H ${hex}`), { code: "ETIMEDOUT", signal: "SIGTERM" }));
+  assert.ok(!t.log.includes(hex.slice(0, 8)) && t.log.includes("ETIMEDOUT") && t.log.includes("SIGTERM"));
+});
+
+test("oas-web echo: screen signature is depth-independent and detects real change", () => {
+  const src = extractBlock(join(CAP, "ui", "panel.html"), "SCREENSIG");
+  const screenSignature = new Function(src + "\nreturn screenSignature;")();
+  const size = { rows: 24, cols: 80, cx: 3, cy: 1, cursor: true };
+  // same visible screen, fetched with different history depths → SAME sig
+  const deep = { text: "h1\nh2\nh3\nprompt\n> \n", history: 3, size };
+  const tail = { text: "h3\nprompt\n> \n", history: 1, size };
+  assert.equal(screenSignature(deep), screenSignature(tail),
+    "tail fetch after a deep poll must not read as a screen change");
+  // the echoed character IS a change
+  const echoed = { text: "h3\nprompt\n> x\n", history: 1, size };
+  assert.notEqual(screenSignature(tail), screenSignature(echoed), "echo changes the signature");
+  // geometry changes are changes too
+  const resized = { text: "h3\nprompt\n> \n", history: 1, size: { ...size, cols: 100 } };
+  assert.notEqual(screenSignature(tail), screenSignature(resized), "resize changes the signature");
 });
 
 test("oas-web attach: tail-then-deep order, and pane switches cancel the backfill", async () => {

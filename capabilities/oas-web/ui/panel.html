@@ -677,13 +677,31 @@ async function refreshTerm(p, force, lines = 2000) {
     return;
   }
   frameCache.set(forSel, d);
+  // Render signature includes the fetch depth (tail vs deep repaint differ);
+  // screenSig is DEPTH-INDEPENDENT — just the visible screen rows + geometry
+  // — so echoBurst can tell "the terminal actually changed" apart from "we
+  // fetched a different amount of history".
   const sig = forSel + ":" + lines + ":" + d.text.length + ":" + d.text + ":" + JSON.stringify(d.size);
+  p.screenSig = forSel + ":" + screenSignature(d);
   if (sig === p.lastSig && !force) return;
   p.lastSig = sig;
   const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 60;
   box.innerHTML = `<div class="tgrid">${renderCapture(d, document.documentElement.dataset.theme === "dark")}</div><div class="keyhint">keys go to this agent</div>`;
-  if (force || nearBottom) box.scrollTop = box.scrollHeight;
+  // Typing snaps to the prompt: while snapUntil is live, every repaint pins
+  // the bottom row so your own input is visible even if you had scrolled up.
+  if (force || nearBottom || Date.now() < (p.snapUntil || 0)) box.scrollTop = box.scrollHeight;
 }
+
+/* OASWEB_SCREENSIG_BEGIN — depth-independent frame signature, extracted by
+   tests. Only the VISIBLE screen rows (after the reported history) and the
+   pane geometry participate — fetching more or less scrollback of the same
+   frame yields the same signature. */
+function screenSignature(d) {
+  const lines = d.text.replace(/\n$/, "").split("\n");
+  const start = typeof d.history === "number" ? Math.min(d.history, lines.length) : 0;
+  return JSON.stringify(d.size) + "|" + lines.slice(start).join("\n");
+}
+/* OASWEB_SCREENSIG_END */
 
 /* OASWEB_ATTACH_BEGIN — DOM-free attach sequencing, extracted by tests.
    Rung 2 (screenful tail) then rung 3 (deep backfill) — the backfill only
@@ -700,7 +718,7 @@ function attachSequence(p, name, refresh) {
 
 /* ── panes: editor-style splits, one focused pane takes input ── */
 function makePane() {
-  const p = { id: ++paneSeq, sel: null, gen: 0, lastSig: "", fastUntil: 0, keyQueue: "", keyFlush: null };
+  const p = { id: ++paneSeq, sel: null, gen: 0, lastSig: "", fastUntil: 0, snapUntil: 0, keyQueue: "", keyFlush: null };
   p.el = document.createElement("div"); p.el.className = "pane"; p.el.dataset.pane = p.id;
   p.headEl = document.createElement("div"); p.headEl.className = "phead"; p.headEl.style.display = "none";
   p.termEl = document.createElement("div"); p.termEl.className = "term";
@@ -843,12 +861,38 @@ function queueKeys(p, data) {
     p.keyQueue = ""; p.keyFlush = null;
     if (!forSel || !payload) return;
     p.fastUntil = Date.now() + 4000;
+    p.snapUntil = Date.now() + 2000;  // typing = "show me the prompt", survive poll races
     try {
       await fetch(`/api/keys/${encodeURIComponent(forSel)}`, { method: "POST",
         headers: { "content-type": "application/json" }, body: JSON.stringify({ data: payload }) });
     } catch { /* transient */ }
-    if (forSel === p.sel) refreshTerm(p, false);
-  }, 12); // coalesce fast typing into one request
+    // Typing means "I'm at the prompt": force the repaint AND the snap to the
+    // bottom row. Echo rides cheap screenful tail fetches — but one fetch
+    // right after the POST usually captures BEFORE the TUI redraws, parking
+    // the echo on the next slow poll tick. So: burst-poll the tail at short
+    // intervals until the frame actually changes (or the burst ends).
+    if (forSel === p.sel) echoBurst(p, forSel);
+  }, 4); // coalesce fast typing into one request
+}
+/* Echo burst: tail-refresh at 0/40/80/160/320ms, stopping as soon as the
+   VISIBLE SCREEN actually changes (screenSig — depth-independent, so a tail
+   fetch after a deep poll doesn't read as change) — keydown→visible echo
+   tracks the TUI redraw instead of the 150ms poll grid. Gen/sel guards
+   inside refreshTerm keep bursts from stale panes harmless; overlapping
+   bursts just coalesce. */
+function echoBurst(p, forSel) {
+  const sigBefore = p.screenSig;
+  const tries = [0, 40, 80, 160, 320];
+  const attempt = (i) => {
+    if (i >= tries.length || forSel !== p.sel) return;
+    setTimeout(async () => {
+      if (forSel !== p.sel) return;
+      await refreshTerm(p, true, 120);
+      if (p.screenSig !== sigBefore) return; // screen changed — echo painted, stop
+      attempt(i + 1);
+    }, i === 0 ? 0 : tries[i] - tries[i - 1]);
+  };
+  attempt(0);
 }
 function keyToBytes(e) {
   if (e.metaKey) return null;                 // Cmd-shortcuts stay in the browser
@@ -886,8 +930,10 @@ makePane();
 focusPane(panes[0]);
 refreshPanel();
 setInterval(refreshPanel, 4000);
-setInterval(() => panes.forEach(p => refreshTerm(p, false)), 500);
-setInterval(() => { const now = Date.now(); panes.forEach(p => { if (now < p.fastUntil) refreshTerm(p, false); }); }, 150); // tight loop after sends
+setInterval(() => panes.forEach(p => { if (Date.now() >= p.fastUntil) refreshTerm(p, false); }), 500); // fast loop owns actively-typed panes
+setInterval(() => { const now = Date.now(); panes.forEach(p => {
+  if (now < p.fastUntil) refreshTerm(p, false, 120);
+}); }, 150); // tight tail-sized loop after sends — deep scrollback returns on the 500ms poll once the window closes
 </script>
 </body>
 </html>
