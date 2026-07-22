@@ -1,6 +1,8 @@
 # Knowledge Log
 
 ## 2026-07-22
+* **Creation**: added [Fast attach needs cached instance lookup and staged terminal paint](/lessons/fast-attach-cache-tail-backfill.md) from the fast-attach note: session attach latency was dominated by repeated control-pane registry rebuilds and serial tmux metadata calls, so the panel keeps a short registry cache, fuses pane metadata lookup, and uses cached-frame → tail → deep-backfill painting.
+* **Update**: [oas-web architecture](/architecture/oas-web-architecture.md) now records the staged session attach path and the `lines` render-signature guard that prevents tail paints from suppressing deep backfills.
 * **Creation**: added [Route panel keyboard by logical pane focus, not DOM focus](/lessons/logical-key-routing-not-dom-focus.md) from the key-routing regression note: DOM focus on pane chrome or sidebar controls can silently sink terminal keys, so the panel routes keydown/paste through a global listener to the logical focused pane while excluding real editable controls.
 * **Update**: [Raw key passthrough](/architecture/raw-key-passthrough-and-host-guard.md) and [Split panes, collapsible sidebar, and compact session header](/architecture/split-panes-and-compact-shell.md) now specify logical focused-pane key routing instead of DOM-focus-bound terminal listeners.
 * **Creation**: added [Split panes, collapsible sidebar, and compact session header](/architecture/split-panes-and-compact-shell.md) from the split-pane shell note: per-pane state and pollers, focused-pane key routing, modifier-click splits, persisted sidebar collapse, and compact `.phead` headers.

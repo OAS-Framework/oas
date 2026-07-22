@@ -567,12 +567,24 @@ function renderCapture(d, dark) {
   return out.join("");
 }
 /* OASWEB_RENDERER_END */
-async function refreshTerm(p, force) {
+/* Last-good frame per session: re-attach (and pane switches) paint instantly
+   from cache while the fresh capture is fetched. Sessions keep emitting while
+   unwatched, so the cache is only a perceived-speed bridge — every paint is
+   replaced by live data as soon as a fetch lands. */
+const frameCache = new Map(); // sel -> { d, dark }
+function paintFrame(p, d) {
+  const box = p.termEl;
+  const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 60;
+  box.innerHTML = `<div class="tgrid">${renderCapture(d, document.documentElement.dataset.theme === "dark")}</div><div class="keyhint">keys go to this agent</div>`;
+  box.scrollTop = box.scrollHeight;
+  return nearBottom;
+}
+async function refreshTerm(p, force, lines = 2000) {
   if (!p || !p.sel || document.hidden) return;
   const forSel = p.sel;
   const myGen = ++p.gen;
   let d;
-  try { const r = await fetch(`/api/session/${encodeURIComponent(forSel)}?lines=2000`); d = await r.json(); }
+  try { const r = await fetch(`/api/session/${encodeURIComponent(forSel)}?lines=${lines}`); d = await r.json(); }
   catch { return; } // keep last good render on transient errors
   if (myGen !== p.gen || forSel !== p.sel || !panes.includes(p)) return; // stale/closed — never paint
   const box = p.termEl;
@@ -583,13 +595,27 @@ async function refreshTerm(p, force) {
     box.innerHTML = '<div class="empty"><span class="big">◌</span>Session is not running.<br>Start it with <code>oas attach ' + escapeHtml(forSel) + '</code> or spawn anew.</div>';
     return;
   }
-  const sig = forSel + ":" + d.text.length + ":" + d.text + ":" + JSON.stringify(d.size);
+  frameCache.set(forSel, d);
+  const sig = forSel + ":" + lines + ":" + d.text.length + ":" + d.text + ":" + JSON.stringify(d.size);
   if (sig === p.lastSig && !force) return;
   p.lastSig = sig;
   const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 60;
   box.innerHTML = `<div class="tgrid">${renderCapture(d, document.documentElement.dataset.theme === "dark")}</div><div class="keyhint">keys go to this agent</div>`;
   if (force || nearBottom) box.scrollTop = box.scrollHeight;
 }
+
+/* OASWEB_ATTACH_BEGIN — DOM-free attach sequencing, extracted by tests.
+   Rung 2 (screenful tail) then rung 3 (deep backfill) — the backfill only
+   fires if no pane switch happened meanwhile: the tail refresh itself bumps
+   p.gen once (to myGen+1), so any other bump means a newer attach owns the
+   pane. refresh(p, force, lines?) is refreshTerm (injected for tests). */
+function attachSequence(p, name, refresh) {
+  const myGen = p.gen;
+  return refresh(p, true, 120).then(() => {
+    if (p.gen === myGen + 1 && p.sel === name) return refresh(p, true);
+  });
+}
+/* OASWEB_ATTACH_END */
 
 /* ── panes: editor-style splits, one focused pane takes input ── */
 function makePane() {
@@ -617,8 +643,14 @@ function setPaneSession(p, name) {
   p.keyQueue = "";                          // never leak queued keys across a switch
   const i = panel.instances.find(x => x.instance === name);
   renderPaneHead(p, i);
-  p.termEl.innerHTML = '<div class="loading-block"><span class="spinner"></span> Attaching to session…</div>';
-  refreshTerm(p, true);
+  /* Fast attach, three rungs:
+     1. paint the cached last frame NOW (0 round-trips) if we have one;
+     2. fetch a screenful tail (cheap capture) — live and interactive fast;
+     3. backfill the deep 2000-line scrollback in the background. */
+  const cached = frameCache.get(name);
+  if (cached) paintFrame(p, cached);
+  else p.termEl.innerHTML = '<div class="loading-block"><span class="spinner"></span> Attaching to session…</div>';
+  attachSequence(p, name, refreshTerm);
   focusPane(p);
 }
 function renderPaneHead(p, i) {

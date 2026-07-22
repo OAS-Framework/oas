@@ -49,6 +49,16 @@ The UI polls JSON endpoints (roster ~5s, chat 1.5s, 400ms fast loop after a
 send). No WebSockets/SSE — matches the TUI's refresh loop; deliberate
 deferral, revisit only if polling chafes.
 
+Session attach is staged for perceived speed: paint a cached frame immediately
+when available, fetch a short `/api/session?lines=120` tail so the pane becomes
+interactive quickly, then background-backfill the deep `/api/session?lines=2000`
+scrollback. The server keeps a 2.5s instance-registry cache around
+`findInstance()` so session polls do not rebuild `collectControlPane` for every
+workspace on each request, and `paneInfo()` keeps pane size/history/cursor lookup
+to one tmux `display-message` round-trip. The requested `lines` value is part of
+the render signature so a tail paint cannot suppress the later deep backfill; see
+[the fast-attach lesson](/lessons/fast-attach-cache-tail-backfill.md).
+
 # Security invariant
 
 The server binds **127.0.0.1 only** and must stay that way: this process can
