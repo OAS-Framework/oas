@@ -1,7 +1,7 @@
 ---
 type: Concept
 title: Raw key passthrough and the POST host/origin guard
-description: POST /api/keys is the panel's sole text-input path, sending browser keydown bytes into the focused pane via tmux send-keys -H, routing large or pasted payloads through load-buffer/paste-buffer, and rejecting non-loopback POST Host/Origin values.
+description: POST /api/keys is the panel's sole text-input path, sending browser keydown bytes into the logically focused pane via tmux send-keys -H, routing large or pasted payloads through load-buffer/paste-buffer, and rejecting non-loopback POST Host/Origin values.
 tags: [oas-web, security, tmux, keys]
 timestamp: 2026-07-22
 ---
@@ -11,15 +11,21 @@ timestamp: 2026-07-22
 The terminal-faithful session view translates browser key events to bytes on the
 client, batches them briefly, and posts those bytes to `/api/keys`. This is the
 panel's sole text-input path: there is no separate chat composer and no
-`/api/send` endpoint. Selecting or clicking a session pane focuses key capture
-for that pane; keys are not captured while the sidebar filter input has focus.
+`/api/send` endpoint.
+
+Routing follows the panel's logical focused pane rather than DOM focus on a
+terminal element. A window keydown/paste listener sends to `focusedPane()` when
+`document.activeElement` is not a real editable control (`INPUT`, `TEXTAREA`,
+`SELECT`, or `contentEditable`); any mousedown inside a pane claims logical
+focus for that pane.
 
 The client mapping is:
 
 - Enter becomes `\r`, Backspace becomes `\x7f`, arrow keys become CSI `A`–`D`,
   Ctrl-letter chords become control bytes, and Alt prefixes the byte sequence
   with ESC.
-- Cmd shortcuts stay in the browser.
+- Cmd shortcuts stay in the browser; Cmd-B is the panel sidebar toggle, while
+  Ctrl-B is delivered to the session as the tmux prefix.
 - Pastes are sent with `{ paste: true }`; the server normalizes `\r\n?` to `\n`
   and delivers the whole text as one bracketed paste via `load-buffer` +
   `paste-buffer -p` — never as raw carriage returns a shell could execute
@@ -49,5 +55,7 @@ Requests failing that guard return 403. GET endpoints are unchanged.
   [Terminal-faithful session renderer](/decisions/hand-rolled-terminal-renderer.md).
 - The one-input UX decision is captured in
   [One input surface — the terminal's own input line](/decisions/terminal-input-unification.md).
+- DOM focus is too fragile for pane routing; see
+  [Route panel keyboard by logical pane focus, not DOM focus](/lessons/logical-key-routing-not-dom-focus.md).
 - Multi-line text still needs bracketed paste rather than raw per-line sends; see
   [Multi-line sends require tmux bracketed paste, not send-keys](/lessons/multiline-send-bracketed-paste.md).

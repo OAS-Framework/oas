@@ -1,6 +1,8 @@
 # Knowledge Log
 
 ## 2026-07-22
+* **Update**: skills/pr-review — added same-account approval fallback and worktree-held branch deletion recovery gotchas.
+* **Creation**: [PR merge friction — same-account approval and worktree-held branch deletion](/lessons/pr-review-same-account-and-worktree-branch-delete.md) — single-account GitHub auth blocks `gh pr review --approve`; `gh pr merge --delete-branch` can leave local branch deletion to the owning worktree.
 * **Creation**: [stewardship/](/stewardship/) section — repo-state.md (living on-main/in-flight/open-threads picture) and delivery-log.md (append-only per-PR verdicts); maintenance contract: every instance feeds it, per-PR maintainers append before retiring.
 * **Creation**: [Release bump PR failure is an org-level Actions restriction](/lessons/release-bump-pr-org-restriction.md) — `createPullRequest` failures after publish are an OAS-Framework organization Actions restriction; check npm publish state and manually create/merge the release-bump PR until an org admin changes the policy.
 * **Update**: skills/git-tag-release — added release-bump PR failure recovery and the Pi package-name removal gotcha.
