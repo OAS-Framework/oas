@@ -110,6 +110,16 @@
   .chip.dirty { color: var(--warn); }
   .chip.rt { color: var(--accent); }
 
+  /* ── Available agents (souls) — spawnable from the panel ── */
+  .soul { padding: 8px 10px 8px 12px; border-radius: 8px; margin: 1px 0; border: 1px solid transparent; }
+  .soul:hover { background: var(--surface-2); }
+  .soul .iname { font-weight: 600; font-size: 13px; display: flex; align-items: center; gap: 7px; }
+  .soul .sdesc { color: var(--muted); font-size: 12px; margin-top: 3px; }
+  .spawnbtn { margin-left: auto; flex: none; background: none; border: 1px solid var(--border); color: var(--accent);
+              border-radius: 6px; padding: 1px 9px; font: 11.5px inherit; font-weight: 600; cursor: pointer; }
+  .spawnbtn:hover { border-color: var(--accent); background: var(--sel); }
+  .spawnbtn:disabled { color: var(--faint); border-color: var(--border); cursor: default; background: none; }
+
   /* ── Main view — up to MAX_PANES side-by-side split panes, each a full
      session view (compact header + terminal); one focused pane receives
      keyboard input. ── */
@@ -212,6 +222,7 @@
 <script>
 const $ = (id) => document.getElementById(id);
 let panel = { instances: [] };
+let souls = { agents: [] };
 const MAX_PANES = 3;
 let panes = [];          // [{ id, sel, gen, lastSig, fastUntil, keyQueue, keyFlush, el, headEl, termEl }]
 let focusedId = null;    // pane id receiving keyboard input
@@ -284,14 +295,77 @@ function matches(i) {
   return [i.instance, i.agent, i.repoName, i.task, i.branch].some(v => String(v || "").toLowerCase().includes(t));
 }
 
+/* ── available agents (souls): spawn from the browser — default is NO TASK,
+   the instance comes up awaiting instruction through this panel. ── */
+function soulMatches(a) {
+  if (!filterText) return true;
+  const t = filterText.toLowerCase();
+  return [a.name, a.description, a.repoName].some(v => String(v || "").toLowerCase().includes(t));
+}
+async function spawnSoul(a, btn) {
+  let task = "";
+  if (btn.dataset.withTask) {
+    task = prompt(`Task for the new ${a.name} instance (leave empty to spawn awaiting instructions):`) ?? null;
+    if (task === null) return;
+  }
+  btn.disabled = true; btn.textContent = "spawning…";
+  try {
+    const r = await fetch("/api/spawn", { method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ agent: a.name, agentsRoot: a.agentsRoot, task }) });
+    const d = await r.json();
+    if (!r.ok || d.error) { alert(`Spawn failed: ${d.error || r.status}`); return; }
+    await refreshPanel();
+    setPaneSession(focusedPane() || makePane(), d.instance);
+  } catch (e) { alert(`Spawn failed: ${e}`); }
+  finally { btn.disabled = false; btn.textContent = btn.dataset.withTask ? "spawn +task" : "spawn"; }
+}
+function renderSouls(el) {
+  const list = souls.agents.filter(soulMatches);
+  if (!list.length) return;
+  const g = document.createElement("div");
+  const gid = "souls";
+  g.className = "group" + (closedGroups.has(gid) ? " closed" : "");
+  const h = document.createElement("div");
+  h.className = "ghead";
+  h.innerHTML = `<span class="tri">▾</span> Available agents <span class="count">${list.length}</span>`;
+  h.onclick = () => { g.classList.toggle("closed"); g.classList.contains("closed") ? closedGroups.add(gid) : closedGroups.delete(gid);
+                      localStorage.setItem("oasweb.closed", JSON.stringify([...closedGroups])); };
+  g.appendChild(h);
+  const box = document.createElement("div"); box.className = "glist";
+  for (const a of list) {
+    const d = document.createElement("div");
+    d.className = "soul";
+    d.innerHTML = `
+      <div class="iname">${escapeHtml(a.name)}
+        <button class="spawnbtn" title="Spawn an instance with no task — it awaits your instructions">spawn</button>
+        <button class="spawnbtn" data-with-task="1" title="Spawn with a task" style="margin-left:0">+task</button>
+      </div>
+      ${a.description ? `<div class="sdesc">${escapeHtml(a.description)}</div>` : ""}
+      <div class="imeta">
+        <span class="chip rt">${escapeHtml(a.runtime)}</span>
+        <span class="chip">${escapeHtml(a.work)}</span>
+        ${a.repo ? `<span class="chip">${escapeHtml(a.repoName)}</span>` : ""}
+        ${a.kind === "tmp" ? '<span class="chip">local</span>' : ""}
+      </div>`;
+    const btns = d.querySelectorAll(".spawnbtn");
+    btns[0].onclick = (e) => { e.stopPropagation(); spawnSoul(a, btns[0]); };
+    btns[1].onclick = (e) => { e.stopPropagation(); spawnSoul(a, btns[1]); };
+    box.appendChild(d);
+  }
+  g.appendChild(box);
+  el.appendChild(g);
+}
+
 function renderRoster() {
   const el = $("groups"); el.innerHTML = "";
   const visible = panel.instances.filter(matches);
   if (!panel.instances.length) {
-    el.innerHTML = '<div class="empty"><span class="big">◎</span>No instances yet.<br>Spawn one with <code>oas spawn &lt;agent&gt;</code>.</div>';
+    el.innerHTML = '<div class="empty"><span class="big">◎</span>No instances yet.<br>Spawn one below or with <code>oas spawn &lt;agent&gt;</code>.</div>';
+    renderSouls(el);
     return;
   }
-  if (!visible.length) { el.innerHTML = '<div class="empty">Nothing matches the filter.</div>'; return; }
+  if (!visible.length) { el.innerHTML = '<div class="empty">Nothing matches the filter.</div>'; renderSouls(el); return; }
   const workspaces = groupInstances(visible);
   const multiWs = workspaces.size > 1;
   for (const [wsName, repos] of workspaces) {
@@ -336,6 +410,7 @@ function renderRoster() {
     g.appendChild(list);
     el.appendChild(g);
   }
+  renderSouls(el);
 }
 
 let currentWs = localStorage.getItem("oasweb.ws") || "";
@@ -353,6 +428,10 @@ async function refreshPanel() {
   } else sel2.style.display = "none";
   $("teamline").textContent = panel.team ? `team ${panel.team.name}` : "";
   $("stamp").textContent = `${panel.running} running · ${panel.instances.length} total`;
+  try {
+    const ra = await fetch(`/api/agents${currentWs ? `?ws=${encodeURIComponent(currentWs)}` : ""}`);
+    souls = await ra.json();
+  } catch { /* keep last good list */ }
   renderRoster();
   for (const p of panes) if (p.sel) {
     const i = panel.instances.find(x => x.instance === p.sel);
