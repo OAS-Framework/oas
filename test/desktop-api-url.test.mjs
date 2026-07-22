@@ -46,6 +46,17 @@ test("allows switching to a workspace the server advertises", () => {
   assert.equal(apiUrl("/api/panel", BASE, ws, allowed).searchParams.get("ws"), ws);
 });
 
+test("pins ws on /api/brain/* like the other scoped endpoints", () => {
+  const ws = "/Users/me/oas", other = "/Users/me/lfx";
+  // no caller ws → verified id pinned
+  assert.equal(apiUrl("/api/brain/tui-dev", BASE, ws).searchParams.get("ws"), ws);
+  // unknown/stale caller ws → overwritten
+  assert.equal(apiUrl("/api/brain/tui-dev?ws=/stale/id", BASE, ws, new Set([ws, other])).searchParams.get("ws"), ws);
+  assert.equal(apiUrl("/api/brain/tui-dev?ws=/stale/id", BASE, ws).searchParams.get("ws"), ws);
+  // server-advertised caller ws → kept (workspace switching)
+  assert.equal(apiUrl(`/api/brain/tui-dev?ws=${other}`, BASE, ws, new Set([ws, other])).searchParams.get("ws"), other);
+});
+
 test("does not pin ws on unscoped endpoints and without a verified id", () => {
   assert.equal(apiUrl("/api/session/foo", BASE, "/Users/me/oas").searchParams.get("ws"), null);
   assert.equal(apiUrl("/api/panel", BASE, null).searchParams.get("ws"), null);
