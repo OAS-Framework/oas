@@ -38,9 +38,11 @@ involved. Payloads larger than 512 chars use `load-buffer` plus
 `paste-buffer -p`; hundreds of synchronous `send-keys -H` executions would
 block the single-threaded server.
 
-The key queue is tagged with the instance selected when the user typed, so a
-mid-flight instance switch does not leak queued bytes into the newly selected
-pane.
+The key queue is tagged with the instance selected when the user typed and the
+request forwards the selected workspace as `?ws=`, so a mid-flight instance
+switch or a duplicate instance name in another workspace does not leak queued
+bytes into the wrong pane. See
+[Scope instance-name endpoints by workspace ID](/lessons/workspace-scoped-instance-routing.md).
 
 After each key flush, the UI treats typing as "show me the prompt": it sets a
 short `snapUntil` window, forces a terminal refresh, and uses a small tail
@@ -72,3 +74,5 @@ The every-request Host check matters because GET APIs such as `/api/file` and
   [Typing must force-repaint and pin the prompt row](/lessons/typing-echo-visibility.md).
 - Multi-line text still needs bracketed paste rather than raw per-line sends; see
   [Multi-line sends require tmux bracketed paste, not send-keys](/lessons/multiline-send-bracketed-paste.md).
+- Same-named instances across workspaces require `?ws=` scoped lookup before key
+  delivery; see [Scope instance-name endpoints by workspace ID](/lessons/workspace-scoped-instance-routing.md).
