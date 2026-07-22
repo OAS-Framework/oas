@@ -6,6 +6,7 @@
 // The shell owns tabs/navigation and provides ctx. The full roster (with
 // chat transcript, spawn, jira) lives in the ported views — the shell chrome
 // stays a thin rail so nothing is duplicated.
+import { currentWorkspace } from "./views/common.mjs";
 
 const desk = window.oasDesktop;
 
@@ -102,12 +103,26 @@ async function openViewTab(name, title, extra = {}, key = `view:${name}`) {
 }
 
 // ── integrated terminal tab (the shell's own flagship view) ──────────────
+const pendingTerms = new Set(); // keys reserved while a roster fetch is in flight
 async function openTerminalTab(instance) {
-  const key = `term:${instance}`;
+  // Honor the views' workspace bus: an instance selected in a secondary
+  // (server-advertised) workspace must resolve against THAT roster, and a
+  // same-named instance in another workspace is a different terminal.
+  const ws = currentWorkspace();
+  const key = `term:${ws}:${instance}`;
   for (const [tid, t] of tabs) if (t.key === key) { activateTab(tid); return; }
+  if (pendingTerms.has(key)) return; // an open for this key is already in flight
+  pendingTerms.add(key);
+  try {
+    await openTerminalTabInner(instance, ws, key);
+  } finally {
+    pendingTerms.delete(key);
+  }
+}
 
-  // Resolve the tmux target from the roster.
-  const panel = await api("/api/panel");
+async function openTerminalTabInner(instance, ws, key) {
+  // Resolve the tmux target from the roster of the selected workspace.
+  const panel = await api(`/api/panel${ws ? `?ws=${encodeURIComponent(ws)}` : ""}`);
   const inst = panel.instances.find((i) => i.instance === instance);
   if (!inst) return alert(`unknown instance "${instance}"`);
   if (!inst.running || !inst.tmux?.session) return alert(`"${instance}" has no live tmux session`);
@@ -143,6 +158,7 @@ async function openTerminalTab(instance) {
     onClose: cleanup,
     onShow: () => { requestAnimationFrame(() => { try { fit.fit(); } catch {} }); },
   });
+  if (!made) { term.dispose(); return; } // lost a race to an identical tab
   made.paneEl.append(wrap);
   term.open(wrap);
   fit.fit();

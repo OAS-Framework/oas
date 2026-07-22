@@ -9,6 +9,7 @@
  */
 
 let root = null;
+import { wsQuery, onWorkspaceChange } from "./common.mjs";
 
 const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
@@ -170,6 +171,9 @@ function renderBrain(body, d, ctx) {
 
 async function json(res) { return res && typeof res.json === "function" ? res.json() : res; }
 
+let unsubWs = null;
+let gen = 0; // request generation — stale responses never paint
+
 export async function mount(el, ctx) {
   root = document.createElement("div");
   root.className = "brain";
@@ -189,35 +193,49 @@ export async function mount(el, ctx) {
   el.append(root);
 
   const status = (msg) => { body.innerHTML = `<div class="brain-status">${esc(msg)}</div>`; };
-  status("Loading agents…");
 
-  let agents = [];
-  try {
-    const d = await json(await ctx.api("/api/agents"));
-    agents = (d.agents || []).filter((a, i, arr) => arr.findIndex((x) => x.name === a.name) === i);
-  } catch (e) { status(`Failed to load agents: ${e.message || e}`); return; }
-  if (!agents.length) { status("No agents in this workspace."); return; }
-  for (const a of agents) {
-    const o = document.createElement("option");
-    o.value = a.name;
-    o.textContent = a.name;
-    sel.append(o);
-  }
-
-  const load = async (name) => {
-    const a = agents.find((x) => x.name === name);
+  const load = async (name, myGen) => {
+    const a = (loadAgents.list || []).find((x) => x.name === name);
     desc.textContent = a?.description || "";
     status(`Loading ${name}…`);
     try {
-      const d = await json(await ctx.api(`/api/brain/${encodeURIComponent(name)}`));
+      const d = await json(await ctx.api(`/api/brain/${encodeURIComponent(name)}${wsQuery()}`));
+      if (myGen !== gen || !root) return; // stale request or unmounted
       if (d.error) { status(d.error); return; }
-      if (sel.value === name && root) renderBrain(body, d, ctx); // stale-response guard
-    } catch (e) { status(`Failed to load brain: ${e.message || e}`); }
+      if (sel.value === name) renderBrain(body, d, ctx); // stale-response guard
+    } catch (e) { if (myGen === gen && root) status(`Failed to load brain: ${e.message || e}`); }
   };
-  sel.addEventListener("change", () => load(sel.value));
-  await load(sel.value);
+
+  // Workspace-aware agent loading: /api/agents is ws-scoped, and the shared
+  // workspace bus (Instances/Spawn/Jira switchers) must refresh this view.
+  async function loadAgents() {
+    const myGen = ++gen;
+    status("Loading agents…");
+    let agents = [];
+    try {
+      const d = await json(await ctx.api(`/api/agents${wsQuery()}`));
+      agents = (d.agents || []).filter((a, i, arr) => arr.findIndex((x) => x.name === a.name) === i);
+    } catch (e) { if (myGen === gen && root) status(`Failed to load agents: ${e.message || e}`); return; }
+    if (myGen !== gen || !root) return;
+    loadAgents.list = agents;
+    sel.innerHTML = "";
+    if (!agents.length) { desc.textContent = ""; status("No agents in this workspace."); return; }
+    for (const a of agents) {
+      const o = document.createElement("option");
+      o.value = a.name;
+      o.textContent = a.name;
+      sel.append(o);
+    }
+    await load(sel.value, myGen);
+  }
+
+  sel.addEventListener("change", () => load(sel.value, gen));
+  unsubWs = onWorkspaceChange(() => loadAgents());
+  await loadAgents();
 }
 
 export function unmount() {
+  gen++;
+  if (unsubWs) { unsubWs(); unsubWs = null; }
   if (root) { root.remove(); root = null; }
 }

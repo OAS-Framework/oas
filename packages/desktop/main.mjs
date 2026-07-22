@@ -15,7 +15,7 @@ import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { apiUrl } from "./api-url.mjs";
+import { apiUrl, apiInit } from "./api-url.mjs";
 
 const require = createRequire(import.meta.url);
 const pty = require("node-pty");
@@ -127,11 +127,10 @@ ipcMain.handle("api", async (e, pathname, opts) => {
   // the verified workspace on scoped endpoints unless the caller selects a
   // workspace this server actually advertises (the views' ws switcher).
   const url = apiUrl(pathname, base(), wsId, allowedWs);
-  const init = { method: opts?.method || "GET", signal: AbortSignal.timeout(20000) };
-  if (opts?.body !== undefined) {
-    init.body = JSON.stringify(opts.body);
-    init.headers = { "content-type": "application/json" };
-  }
+  // apiInit forwards pre-serialized (string) bodies and headers unchanged —
+  // views serialize once in common.mjs::postJson — and serializes object
+  // bodies itself.
+  const init = { ...apiInit(opts), signal: AbortSignal.timeout(20000) };
   const r = await fetch(url, init);
   const text = await r.text();
   let json; try { json = JSON.parse(text); } catch { json = { raw: text }; }

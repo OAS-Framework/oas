@@ -43,3 +43,26 @@ export function apiUrl(pathname, base, wsId = null, allowedWs = undefined) {
   }
   return url;
 }
+
+/**
+ * Build fetch init for a proxied api() call. Views follow the Fetch
+ * contract: common.mjs::postJson already serializes the body and sets
+ * content-type — string bodies and supplied headers must pass through
+ * UNCHANGED (double-serialization made /api/spawn parse a JSON string and
+ * reject every spawn). Object bodies (the shell's own convenience calls)
+ * are serialized here, exactly once.
+ */
+export function apiInit(opts) {
+  const init = { method: opts?.method || "GET" };
+  if (opts?.headers && typeof opts.headers === "object") init.headers = { ...opts.headers };
+  if (opts?.body !== undefined) {
+    if (typeof opts.body === "string") {
+      init.body = opts.body;
+      init.headers = { "content-type": "application/json", ...init.headers };
+    } else {
+      init.body = JSON.stringify(opts.body);
+      init.headers = { ...init.headers, "content-type": "application/json" };
+    }
+  }
+  return init;
+}
