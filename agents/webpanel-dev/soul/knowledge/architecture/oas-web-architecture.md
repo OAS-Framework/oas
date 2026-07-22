@@ -23,6 +23,13 @@ The web panel lives in `capabilities/oas-web/` and is deliberately tiny:
     [agent brain endpoint](agent-brain-endpoint-and-view.md)).
   - `GET /api/session/<instance>?lines=n` — raw ANSI tmux `capture-pane` text plus pane geometry, cursor state, and history depth.
   - `GET /api/chat/<instance>?limit=n` — parsed structured transcript turns.
+  - `GET /api/file` — guarded file reads for desktop viewers; realpaths the
+    requested path and every allowed root before containment checks (see
+    [the file guard lesson](/lessons/file-endpoint-realpath-guard.md)).
+  - `GET /api/diff` — worktree diff/stat reads for desktop viewers; derives
+    `<home>/work` rather than using `inst.work` and parses NUL-delimited git
+    rename stats (see [the work-mode lesson](/lessons/instance-work-mode-not-path.md)
+    and [the rename parsing lesson](/lessons/git-rename-stats-nul-parsing.md)).
   - `POST /api/keys` — sends browser keydown bytes into the tmux pane and is
     the panel's only text-input path (see [raw key passthrough](raw-key-passthrough-and-host-guard.md)
     and [the input-surface decision](/decisions/terminal-input-unification.md)).
@@ -43,7 +50,10 @@ The web panel lives in `capabilities/oas-web/` and is deliberately tiny:
   `/api/panel` and `findInstance` from an in-memory snapshot so key/input
   endpoints are not blocked by roster rebuilds. The kernel is found in-tree
   (`../../..`) or, for marketplace installs, via `oas root` (a copied package
-  must never assume it sits inside the kernel tree).
+  must never assume it sits inside the kernel tree). Control-pane instance
+  objects expose `work` as the work mode, not a filesystem path; endpoints that
+  need a work tree derive `<home>/work` from `inst.home` (see
+  [the work-mode lesson](/lessons/instance-work-mode-not-path.md)).
 - **Session view + input**: tmux only — `capture-pane` to read and raw
   `/api/keys` delivery through `send-keys` / `paste-buffer` to write. The
   terminal's own input line is the sole input surface; do not reintroduce a
@@ -76,12 +86,18 @@ the render signature so a tail paint cannot suppress the later deep backfill; se
 
 The server binds **127.0.0.1 only** and must stay that way: this process can
 type into your terminals. Remote use is ssh port-forward, never a public
-bind. All POST endpoints also require loopback `Host` and, when present,
-loopback `Origin`, so DNS rebinding cannot turn a hostile page into terminal
-input. The server sends no CORS headers; external dev harnesses cannot fetch
+bind. Every request requires a loopback `Host`; POST endpoints also require a
+loopback `Origin` when present. The Host check must run before GET handlers too
+because file-serving APIs such as `/api/file` and `/api/diff` can leak workspace
+files to a DNS-rebinding page; see
+[the all-request Host guard lesson](/lessons/loopback-host-guard-all-requests.md).
+The server sends no CORS headers; external dev harnesses cannot fetch
 its API cross-origin and should use a same-origin proxy such as
-`packages/desktop/renderer/dev-serve.mjs` for renderer work. Endpoints that accept path-shaped browser parameters, currently
-`/api/spawn`'s `agentsRoot`, must resolve them against server-computed workspace
-roots rather than trusting arbitrary paths. `EADDRINUSE` is handled with a
-friendly message (a panel is probably already running; `--port <n>` or
+`packages/desktop/renderer/dev-serve.mjs` for renderer work.
+Browser-provided paths are selectors or targets constrained by
+server-computed allowlists, never ambient filesystem authority: `/api/spawn`'s
+`agentsRoot` must resolve against workspace roots, and `/api/file` must realpath
+both the requested file and each allowed root before requiring exact-root or
+root-plus-separator containment. `EADDRINUSE` is handled with a friendly message
+(a panel is probably already running; `--port <n>` or
 `pkill -f "oas-web.mjs start"`).

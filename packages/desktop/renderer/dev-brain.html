@@ -16,7 +16,7 @@
 <body>
 <div id="host"></div>
 <script type="module">
-  import { mount } from "./views/brain.js";
+  import { mount } from "./views/brain.mjs";
   mount(document.getElementById("host"), {
     api: (pathname) => fetch(pathname), // same origin — dev-serve proxies /api/*
     openFile: (path) => alert("openFile → " + path),

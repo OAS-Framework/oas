@@ -1,0 +1,58 @@
+<!doctype html>
+<!--
+  Dev harness for the desktop viewer modules (no Electron needed).
+
+  Run:
+    node capabilities/oas-web/bin/oas-web.mjs start --port 4820 --dir <workspace>
+    cd packages/desktop && npx serve .   (or any static server with ESM + node_modules)
+
+  Simplest: open via a bundler-less dev server that maps bare imports, or use
+  an importmap as below (works from `python3 -m http.server` in packages/desktop).
+-->
+<html>
+<head>
+<meta charset="utf-8">
+<title>desktop views harness</title>
+<script type="importmap">
+{ "imports": {
+    "marked": "./node_modules/marked/lib/marked.esm.js",
+    "dompurify": "./node_modules/dompurify/dist/purify.es.mjs",
+    "highlight.js": "./node_modules/highlight.js/es/index.js"
+} }
+</script>
+<style>
+  body { margin: 0; font-family: -apple-system, sans-serif; }
+  #bar { padding: 8px 12px; border-bottom: 1px solid #ccc; display: flex; gap: 8px; }
+  #bar input { flex: 1; font: 13px monospace; }
+  #view { height: calc(100vh - 50px); overflow: auto; }
+</style>
+</head>
+<body>
+<div id="bar">
+  <input id="path" placeholder="/abs/path/to/file.md  — or —  instance name for diff">
+  <button id="openMd">open file</button>
+  <button id="openDiff">open diff</button>
+</div>
+<div id="view"></div>
+<script type="module">
+  import * as markdown from "./renderer/views/markdown.mjs";
+  import * as diff from "./renderer/views/diff.mjs";
+  const API = "http://127.0.0.1:4820";
+  const el = document.getElementById("view");
+  const ctx = {
+    api: (pathname) => fetch(API + pathname).then((r) => r.json()),
+    openFile: (path) => { document.getElementById("path").value = path; markdown.mount(el, { ...ctx, path }); },
+    openTerminal: (i) => alert("openTerminal(" + i + ") — shell-owned"),
+  };
+  let current = null;
+  document.getElementById("openMd").onclick = () => {
+    current?.unmount(); current = markdown;
+    markdown.mount(el, { ...ctx, path: document.getElementById("path").value });
+  };
+  document.getElementById("openDiff").onclick = () => {
+    current?.unmount(); current = diff;
+    diff.mount(el, { ...ctx, instance: document.getElementById("path").value });
+  };
+</script>
+</body>
+</html>
