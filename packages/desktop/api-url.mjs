@@ -32,8 +32,13 @@ export function apiUrl(pathname, base, wsId = null, allowedWs = undefined) {
   if (url.origin !== baseUrl.origin) {
     throw new Error("api: pathname resolved off-origin");
   }
+  // Workspace-scoped endpoints: the roster/agents/brain reads AND the whole
+  // instance-addressed family — the server resolves instance names per
+  // workspace, and same-named instances exist across workspaces. Pinning
+  // here makes an omitted ?ws= fail SAFE (verified workspace) even before
+  // views append it themselves.
   const wsScoped = url.pathname === "/api/panel" || url.pathname === "/api/agents"
-    || url.pathname.startsWith("/api/brain/") || url.pathname.startsWith("/api/diff/");
+    || /^\/api\/(brain|diff|session|keys|interrupt|jira|chat)\//.test(url.pathname);
   if (wsId && wsScoped) {
     const asked = url.searchParams.get("ws");
     // Workspace switching is a real feature on shared multi-workspace

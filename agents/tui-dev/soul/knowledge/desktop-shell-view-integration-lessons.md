@@ -1,7 +1,7 @@
 ---
 type: Lesson
 title: Desktop shell view integration lessons
-description: Ported panel views rely on key-deduped tabs, per-mount disposers for multi-tab views, context-owning picker tabs, .mjs loader naming, workspace-aware API pinning, exactly-once Fetch body serialization, and inline degradation when older shared servers lack endpoints.
+description: Ported panel views rely on key-deduped tabs, per-mount disposers for multi-tab views, context-owning picker tabs, .mjs loader naming, route-family workspace pinning, exactly-once Fetch body serialization, and inline degradation when older shared servers lack endpoints.
 tags: [desktop, view-host, integration, ipc, workspace]
 timestamp: 2026-07-22
 ---
@@ -41,12 +41,13 @@ with the [Desktop shell view-host contract and layout](desktop-shell-layout.md):
   and `/api/agents`, `brain.mjs` sends it on `/api/brain/<agent>`, and diff
   requests carry `ctx.ws` as `?ws=`. Main-process pinning should allow caller
   workspace values the connected server advertises in `workspaces[]`, while
-  still overwriting unknown ids. Keep the proxy's scoped-endpoint pin list
-  coupled to every endpoint views query with `?ws=` (currently `/api/panel`,
-  `/api/agents`, `/api/brain/*`, and `/api/diff/*`) and extend its tests in
-  the same change; otherwise a stale persisted workspace id can fall through
-  to the server's first-workspace fallback and render wrong-workspace data.
-  The observed diff fix kept `model.mjs` untouched by adding an optional
+  still overwriting unknown ids. For instance-addressed APIs resolved by
+  `findInstance(name, wsId)`, classify whole route families instead of
+  enumerating endpoints; see [Scope classification by route family, not
+  endpoint enumeration](route-family-workspace-pinning.md). Tests should cover
+  the family classifier so new endpoints fail safe instead of silently falling
+  through to the server's first-workspace fallback and rendering wrong-workspace
+  data. The observed diff fix kept `model.mjs` untouched by adding an optional
   workspace scope to oas-web `findInstance`; changes to that shared file still
   require coordinator notice.
 - Roster-derived actions must also honor the workspace bus. Terminal open must
