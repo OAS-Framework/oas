@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 
 // Importing the view modules also proves they resolve/parse as ESM with the
 // package's real deps (marked, highlight.js) — what Electron's bundler sees.
-const md = await import("../renderer/views/markdown.js");
-const dv = await import("../renderer/views/diff.js");
+const md = await import("../renderer/views/markdown.mjs");
+const dv = await import("../renderer/views/diff.mjs");
 
 test("views export the contract surface", () => {
   for (const m of [md, dv]) {

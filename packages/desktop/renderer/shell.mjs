@@ -195,9 +195,6 @@ const NAV = [
   { name: "spawn", label: "Spawn", icon: "✚", title: "Spawn" },
   { name: "brain", label: "Brain", icon: "◈", title: "Agent brain" },
   { name: "jira", label: "Jira", icon: "◫", title: "Jira" },
-  // diff.mjs is a placeholder until the viewers developer ships it; the nav
-  // entry keeps its integration mechanical.
-  { name: "diff", label: "Diff", icon: "±", title: "Diff" },
 ];
 const navEl = document.getElementById("nav");
 for (const v of NAV) {
@@ -209,6 +206,41 @@ for (const v of NAV) {
   b.querySelector(".label").textContent = v.label;
   b.addEventListener("click", () => openViewTab(v.name, v.title));
   navEl.append(b);
+}
+
+// Diff needs an instance (ctx.instance per the view contract) — the nav
+// entry opens a small shell-owned picker over the current workspace roster.
+{
+  const b = document.createElement("button");
+  b.className = "nav-item";
+  b.title = "Diff (pick an instance)";
+  b.innerHTML = `<span class="icon">±</span><span class="label">Diff</span>`;
+  b.addEventListener("click", () => openDiffPicker());
+  navEl.append(b);
+}
+
+async function openDiffPicker() {
+  const ws = currentWorkspace();
+  const made = addTab({ title: "Diff", key: "view:diff-picker" });
+  if (!made) return;
+  const el = document.createElement("div");
+  el.className = "placeholder";
+  el.innerHTML = `<h2>Diff</h2><div>pick an instance</div>`;
+  made.paneEl.append(el);
+  let panel;
+  try { panel = await api(`/api/panel${ws ? `?ws=${encodeURIComponent(ws)}` : ""}`); }
+  catch (e) { el.lastChild.textContent = `roster unavailable: ${e.message}`; return; }
+  const list = document.createElement("div");
+  list.style.cssText = "display:flex;flex-direction:column;gap:4px;max-height:60%;overflow:auto";
+  for (const i of panel.instances) {
+    const btn = document.createElement("button");
+    btn.className = "nav-item";
+    btn.textContent = `${i.instance}${i.branch ? ` · ${i.branch}` : ""}`;
+    btn.addEventListener("click", () => openViewTab("diff", `± ${i.instance}`, { instance: i.instance }, `diff:${ws}:${i.instance}`));
+    list.append(btn);
+  }
+  if (!panel.instances.length) list.textContent = "no instances";
+  el.append(list);
 }
 
 document.getElementById("ws-name").textContent = "";
