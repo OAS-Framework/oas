@@ -1,7 +1,9 @@
 <!doctype html>
-<!-- Standalone dev harness for the brain view: run the oas-web server
-     (node capabilities/oas-web/bin/oas-web.mjs start --port 4820 --dir <ws>)
-     then serve this directory (e.g. npx serve) or open via the server origin.
+<!-- Standalone dev harness for the brain view. oas-web sends no CORS headers,
+     so the page must share an origin with the API — use the bundled dev server:
+       node capabilities/oas-web/bin/oas-web.mjs start --port 4820 --dir <ws>
+       node packages/desktop/renderer/dev-serve.mjs        # http://127.0.0.1:4830
+     dev-serve proxies /api/* to the oas-web port (same-origin).
      The real host is the desktop shell; this page only fakes ctx. -->
 <html data-theme="dark">
 <head><meta charset="utf-8"><title>brain view — dev harness</title>
@@ -15,9 +17,8 @@
 <div id="host"></div>
 <script type="module">
   import { mount } from "./views/brain.js";
-  const base = "http://127.0.0.1:4820";
   mount(document.getElementById("host"), {
-    api: (pathname) => fetch(base + pathname),
+    api: (pathname) => fetch(pathname), // same origin — dev-serve proxies /api/*
     openFile: (path) => alert("openFile → " + path),
     openTerminal: (instance) => alert("openTerminal → " + instance),
   });

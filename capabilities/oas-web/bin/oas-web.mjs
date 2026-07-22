@@ -23,7 +23,7 @@
 import { createServer } from "node:http";
 import { execFile, execFileSync, execSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { homedir } from "node:os";
 
@@ -372,14 +372,18 @@ function listSkills(dir) {
   try {
     for (const e of readdirSync(dir, { withFileTypes: true })) {
       if (!e.isDirectory()) continue;
-      const p = join(dir, e.name, "SKILL.md");
-      if (!existsSync(p)) continue;
-      let meta = {};
-      try { meta = core.parseFrontmatter(readFileSync(p, "utf8")).meta || {}; } catch { /* unreadable skill */ }
-      skills.push({ name: meta.name || e.name, path: p, description: String(meta.description || "").trim() });
+      const s = skillEntry(join(dir, e.name));
+      if (s) skills.push(s);
     }
   } catch { /* no skills dir */ }
   return skills.sort((a, b) => a.name.localeCompare(b.name));
+}
+function skillEntry(skillDir) {
+  const p = join(skillDir, "SKILL.md");
+  if (!existsSync(p)) return null;
+  let meta = {};
+  try { meta = core.parseFrontmatter(readFileSync(p, "utf8")).meta || {}; } catch { /* unreadable skill */ }
+  return { name: meta.name || basename(skillDir), path: p, description: String(meta.description || "").trim() };
 }
 function mdTree(dir) {
   // all markdown files of a knowledge bundle, depth-first, absolute paths
@@ -409,6 +413,17 @@ function brainData(agentName, wsId) {
   if (!def) return null;
   // capability agents keep their canonical soul read-only in the package
   const soulDir = def._soulDir || join(def._dir, "soul");
+  // Skills: local souls carry soul/skills/; capability agents declare their
+  // skills at the package level (manifest `skills:` paths) — the soul dir
+  // itself has none, so resolve the owning capability's declared skill dirs.
+  let soulSkills = listSkills(join(soulDir, "skills"));
+  if (!soulSkills.length && def.capability) {
+    try {
+      soulSkills = core.capabilitySkillDirs(def.capability, dirname(root))
+        .map((d) => skillEntry(d)).filter(Boolean)
+        .sort((a, b) => a.name.localeCompare(b.name));
+    } catch { /* manifest unreadable — no skills */ }
+  }
   const knowledgeDir = join(soulDir, "knowledge");
   const instances = [];
   const instancesDir = join(def._dir, "instances");
@@ -431,7 +446,7 @@ function brainData(agentName, wsId) {
     agent: def.name, description: def.description || "", agentsRoot: root,
     soul: {
       agentsMd: mdIf(join(soulDir, "AGENTS.md")),
-      skills: listSkills(join(soulDir, "skills")),
+      skills: soulSkills,
       knowledge: {
         index: mdIf(join(knowledgeDir, "index.md")),
         tree: existsSync(knowledgeDir) ? mdTree(knowledgeDir) : [],

@@ -164,6 +164,7 @@ test("oas-web manifest: compatibility floor covers the core APIs the server uses
   const apiFloors = [
     ["listCapabilityAgents", "0.16.0"],
     ["findCapabilityAgent", "0.16.0"],
+    ["capabilitySkillDirs", "0.10.0"],
   ];
   const cmp = (a, b) => {
     const pa = a.split(".").map(Number), pb = b.split(".").map(Number);
@@ -291,6 +292,8 @@ test("oas-web server: POST origin guard rejects hostile/null origins without cra
 // ---- /api/brain/<agent>: soul + instance artifact map per the desktop-app contract ----
 
 test("oas-web server: /api/brain returns the contract shape with absolute paths", async () => {
+  // capability agents (reviewer) need installed capabilities — restore first (no-op when present)
+  execFileSync(process.execPath, [CLI, "install", "--dir", ROOT], { stdio: "ignore" });
   const port = 4000 + Math.floor(Math.random() * 2000);
   const proc = spawn(process.execPath, [join(CAP, "bin", "oas-web.mjs"), "start", "--port", String(port), "--dir", ROOT], { stdio: "ignore" });
   try {
@@ -331,6 +334,15 @@ test("oas-web server: /api/brain returns the contract shape with absolute paths"
     // unknown agent → 404; hostile agent name never becomes a path probe
     assert.equal((await fetch(`http://127.0.0.1:${port}/api/brain/no-such-agent`)).status, 404);
     assert.equal((await fetch(`http://127.0.0.1:${port}/api/brain/..%2F..%2Fetc`)).status, 404, "traversal-shaped names don't match the route");
+    // capability-defined agents: their skills are declared at the PACKAGE level
+    // (manifest `skills:` paths), not under the soul dir — the brain must show
+    // the canonical skill set (regression: reviewer reported soul.skills: []).
+    const rev = await (await fetch(`http://127.0.0.1:${port}/api/brain/reviewer`)).json();
+    assert.ok(rev.soul, "capability agent resolves a brain");
+    const skillNames = rev.soul.skills.map((s) => s.name);
+    assert.ok(skillNames.includes("code-review") && skillNames.includes("security-review"),
+      `capability agent carries its package skills (got: ${skillNames.join(", ")})`);
+    for (const s of rev.soul.skills) assert.ok(s.path.startsWith("/") && s.path.endsWith("SKILL.md"));
   } finally { proc.kill(); }
 });
 
