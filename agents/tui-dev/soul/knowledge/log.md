@@ -2,6 +2,10 @@
 
 ## 2026-07-22
 
+- **Update**: [desktop-shell-view-integration-lessons.md](desktop-shell-view-integration-lessons.md)
+  — replaced endpoint-by-endpoint workspace pinning guidance with route-family classification from tui-dev-desktop-shell notes.
+- **Creation**: [route-family-workspace-pinning.md](route-family-workspace-pinning.md)
+  — promoted the route-family workspace pinning lesson from tui-dev-desktop-shell notes.
 - **Update**: [async-mount-close-race.md](async-mount-close-race.md)
   — merged the reserved-key waiter follow-up from tui-dev-desktop-shell notes so fast reopens queue behind cleanup instead of being dropped.
 - **Update**: [async-mount-close-race.md](async-mount-close-race.md)

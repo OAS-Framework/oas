@@ -18,7 +18,10 @@ If the server calls a `core.*` helper newer than the manifest floor, accepted
 older kernels can fail in non-obvious ways. The observed case was
 `listCapabilityAgents` / `findCapabilityAgent`, which first shipped in kernel
 `0.16.0` while the manifest still accepted `>=0.14.0`; affected panels either
-silently missed agents or returned 409 responses wrapping a `TypeError`.
+silently missed agents or returned 409 responses wrapping a `TypeError`. The
+brain endpoint also relies on `core.capabilitySkillDirs` (kernel `0.10.0`) to
+show capability-defined agents' package-level skills instead of reporting an
+empty `soul/skills` walk.
 
 # Maintenance rule
 

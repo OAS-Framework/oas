@@ -36,7 +36,7 @@ the shell host imports views by name as `./views/<name>.mjs`:
   every per-instance request instead of letting views hand-build ambiguous
   `/api/<kind>/<name>` paths. This extends the
   [multi-workspace switcher](/architecture/multi-workspace-switcher.md) shape
-  and follows [the workspace-scoping lesson](/lessons/workspace-scoped-instance-requests.md).
+  and follows [the workspace-scoping lesson](/lessons/workspace-scoped-instance-routing.md).
 
 `theme.css` carries the panel tokens scoped under `.oas-view` so shell chrome is
 unaffected; `ensureTheme`'s fallback resolves `../theme.css` relative to the

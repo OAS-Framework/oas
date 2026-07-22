@@ -17,9 +17,10 @@ The web panel lives in `capabilities/oas-web/` and is deliberately tiny:
   - `POST /api/spawn` — spawns an agent in an allowlisted workspace root,
     with `task: ""` meaning "await instructions" (see
     [spawn endpoint](spawn-endpoint.md)).
-  - `GET /api/brain/<agent>?ws=<id>` — returns soul artifact paths and
-    running-state for the desktop brain view while resolving agent names
-    through kernel lookup seams (see [agent brain endpoint](agent-brain-endpoint-and-view.md)).
+  - `GET /api/brain/<agent>?ws=<id>` — returns soul artifact paths, package-level
+    capability-agent skills, and running-state for the desktop brain view while
+    resolving agent names through kernel lookup seams (see
+    [agent brain endpoint](agent-brain-endpoint-and-view.md)).
   - `GET /api/session/<instance>?ws=<id>&lines=n` — raw ANSI tmux `capture-pane` text plus pane geometry, cursor state, and history depth.
   - `GET /api/chat/<instance>?ws=<id>&limit=n` — parsed structured transcript turns.
   - `GET /api/file` — guarded file reads for desktop viewers; realpaths the
@@ -35,9 +36,11 @@ The web panel lives in `capabilities/oas-web/` and is deliberately tiny:
   - `POST /api/interrupt/<instance>?ws=<id>` — sends Ctrl-C.
   - `GET /api/jira/<instance>?ws=<id>` — epic + Agent Roster via `acli` when
     `capabilityMeta["oas.jira"]` is present.
-  Any endpoint that resolves an instance name must receive the selected
-  workspace id; unscoped global lookup is ambiguous when instance names collide
-  across workspaces (see [the workspace-scoping lesson](/lessons/workspace-scoped-instance-requests.md)).
+  Instance-addressed routes (`session`, `keys`, `interrupt`, `jira`, `chat`,
+  and `diff`) forward `?ws=` when the UI has a selected workspace, so
+  `findInstance(name, wsId)` resolves same-named instances strictly inside that
+  workspace — unscoped global lookup is ambiguous when instance names collide
+  across workspaces; see [the workspace-scoping lesson](/lessons/workspace-scoped-instance-routing.md).
 - `ui/panel.html` — all CSS, JS, rendering, panes, and polling loops in one
   file. No build step, no framework. Hard-refresh (Cmd-Shift-R) is the deploy.
   The current shell has an editor-style panes array, focused-pane key routing,
@@ -49,8 +52,10 @@ The web panel lives in `capabilities/oas-web/` and is deliberately tiny:
 - **Roster**: `lib/control-pane/model.mjs` `collectControlPane(root)` — same
   data as the TUI (`oas pane`). Slow collection runs in the hidden
   `oas-web.mjs collect` child-process path; the serving process answers
-  `/api/panel` and `findInstance` from an in-memory snapshot so key/input
-  endpoints are not blocked by roster rebuilds. The kernel is found in-tree
+  `/api/panel` and `findInstance(name, wsId)` from an in-memory snapshot so
+  key/input endpoints are not blocked by roster rebuilds, and scoped instance
+  lookups fail closed inside the supplied workspace instead of falling back to a
+  global first match. The kernel is found in-tree
   (`../../..`) or, for marketplace installs, via `oas root` (a copied package
   must never assume it sits inside the kernel tree). Control-pane instance
   objects expose `work` as the work mode, not a filesystem path; endpoints that
@@ -78,8 +83,9 @@ Session attach is staged for perceived speed: paint a cached frame immediately
 when available, fetch a short `/api/session?lines=120` tail so the pane becomes
 interactive quickly, then background-backfill the deep `/api/session?lines=2000`
 scrollback. The server keeps a 2.5s instance-registry cache around
-`findInstance()` so session polls do not rebuild `collectControlPane` for every
-workspace on each request, and `paneInfo()` keeps pane size/history/cursor lookup
+`findInstance(name, wsId)` so session polls do not rebuild `collectControlPane`
+for every workspace on each request, and `paneInfo()` keeps pane
+size/history/cursor lookup
 to one tmux `display-message` round-trip. The requested `lines` value is part of
 the render signature so a tail paint cannot suppress the later deep backfill; see
 [the fast-attach lesson](/lessons/fast-attach-cache-tail-backfill.md).
@@ -93,6 +99,9 @@ loopback `Origin` when present. The Host check must run before GET handlers too
 because file-serving APIs such as `/api/file` and `/api/diff` can leak workspace
 files to a DNS-rebinding page; see
 [the all-request Host guard lesson](/lessons/loopback-host-guard-all-requests.md).
+The server sends no CORS headers; external dev harnesses cannot fetch
+its API cross-origin and should use a same-origin proxy such as
+`packages/desktop/renderer/dev-serve.mjs` for renderer work.
 Browser-provided paths are selectors or targets constrained by
 server-computed allowlists, never ambient filesystem authority: `/api/spawn`'s
 `agentsRoot` must resolve against workspace roots, and `/api/file` must realpath

@@ -291,6 +291,28 @@ test("oas-web server: POST origin guard rejects hostile/null origins without cra
 
 // ---- /api/brain/<agent>: soul + instance artifact map per the desktop-app contract ----
 
+test("oas-web brain: findInstance is workspace-scoped — same-named instance elsewhere doesn't mark this one running", () => {
+  const src = extractBlock(join(CAP, "bin", "oas-web.mjs"), "FINDINST");
+  // two workspaces with a same-named instance: running in ws-b, stopped in ws-a
+  const snapshot = { byWs: new Map([
+    ["ws-a", { instances: [{ instance: "dev-1", running: false }] }],
+    ["ws-b", { instances: [{ instance: "dev-1", running: true }, { instance: "only-b", running: true }] }],
+  ]) };
+  const findInstance = new Function("snapshot", "collectNow", "Date",
+    src + "\nreturn findInstance;")(snapshot, () => snapshot.byWs, Date);
+  // scoped lookups resolve within their workspace only — the regression:
+  // /api/brain marked ws-a's stopped dev-1 as running via ws-b's twin
+  assert.equal(findInstance("dev-1", "ws-a").running, false, "ws-a's dev-1 is stopped");
+  assert.equal(findInstance("dev-1", "ws-b").running, true, "ws-b's dev-1 is running");
+  assert.equal(findInstance("only-b", "ws-a"), undefined, "scoped lookup never leaks another workspace");
+  // unscoped (legacy callers) still searches all workspaces
+  assert.equal(findInstance("only-b").running, true);
+  // the brain endpoint passes its resolved workspace id to findInstance
+  const serverSrc = readFileSync(join(CAP, "bin", "oas-web.mjs"), "utf8");
+  assert.ok(/const live = findInstance\(name, ws\?\.id\)/.test(serverSrc),
+    "brainData scopes its running lookup to the resolved workspace");
+});
+
 test("oas-web brain: capability skill paths expand leaf AND parent-tree forms; local + package merge", () => {
   const src = extractBlock(join(CAP, "bin", "oas-web.mjs"), "BRAINSKILLS");
   const { expandSkillPath, mergeSkills } = new Function("join",
