@@ -11,6 +11,55 @@ const CAP = join(ROOT, "capabilities", "oas-web");
 
 // ---- ANSI renderer (extracted from the panel's marked DOM-free block) ----
 
+// ---- key routing (extracted from the panel's marked block, DOM stubbed) ----
+function loadKeyRoute() {
+  const html = readFileSync(join(CAP, "ui", "panel.html"), "utf8");
+  const m = html.match(/\/\* OASWEB_KEYROUTE_BEGIN[^*]*\*\/([\s\S]*?)\/\* OASWEB_KEYROUTE_END \*\//);
+  assert.ok(m, "key-route block markers present in panel.html");
+  // Stub the runtime surface: capture what the window keydown handler routes.
+  const env = { activeEl: null, pane: { id: 1, sel: "inst-a", fastUntil: 0, keyQueue: "", keyFlush: null } };
+  const sandbox = {
+    handlers: {},
+    window: null,
+    document: { get activeElement() { return env.activeEl; } },
+    focusedPane: () => env.pane,
+    refreshTerm: () => {},
+    fetch: () => Promise.resolve(),
+    setTimeout: () => 1,   // hold flushes: routed bytes stay in pane.keyQueue
+  };
+  sandbox.window = { addEventListener: (type, fn) => { sandbox.handlers[type] = fn; } };
+  const src = m[1] + "\nreturn { inEditable, keyToBytes, handlers };";
+  const out = new Function(...Object.keys(sandbox), src)(...Object.values(sandbox));
+  return { ...out, env };
+}
+
+test("oas-web key routing: logical pane focus, editable exclusion, Ctrl-B to session", () => {
+  const K = loadKeyRoute();
+  const ev = (key, mods = {}) => ({ key, ctrlKey: false, altKey: false, metaKey: false, shiftKey: false,
+                                    preventDefault() { this.defaulted = true; }, ...mods });
+  // plain key routes to the focused pane regardless of DOM focus
+  K.env.activeEl = { tagName: "DIV" };            // e.g. focus sits on a button/body
+  K.handlers.keydown(ev("a"));
+  assert.equal(K.env.pane.keyQueue, "a", "printable key routed with non-editable DOM focus");
+  // Ctrl-B goes to the session (tmux prefix), not swallowed
+  K.handlers.keydown(ev("b", { ctrlKey: true }));
+  assert.equal(K.env.pane.keyQueue, "a\x02", "Ctrl-B routed to the session as 0x02");
+  // Cmd shortcuts stay in the browser
+  K.handlers.keydown(ev("b", { metaKey: true }));
+  assert.equal(K.env.pane.keyQueue, "a\x02", "Cmd-B not routed to the session");
+  // editable controls keep their keys (filter box)
+  K.env.activeEl = { tagName: "INPUT" };
+  K.handlers.keydown(ev("x"));
+  assert.equal(K.env.pane.keyQueue, "a\x02", "keys not stolen from an input");
+  K.env.activeEl = { tagName: "DIV", isContentEditable: true };
+  K.handlers.keydown(ev("x"));
+  assert.equal(K.env.pane.keyQueue, "a\x02", "keys not stolen from contentEditable");
+  // no selected session: nothing routed
+  K.env.activeEl = null; K.env.pane = { id: 2, sel: null, keyQueue: "", keyFlush: null };
+  K.handlers.keydown(ev("x"));
+  assert.equal(K.env.pane.keyQueue, "", "no session selected → no routing");
+});
+
 function loadRenderer() {
   const html = readFileSync(join(CAP, "ui", "panel.html"), "utf8");
   const m = html.match(/\/\* OASWEB_RENDERER_BEGIN \*\/([\s\S]*?)\/\* OASWEB_RENDERER_END \*\//);

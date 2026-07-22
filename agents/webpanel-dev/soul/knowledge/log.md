@@ -1,6 +1,8 @@
 # Knowledge Log
 
 ## 2026-07-22
+* **Creation**: added [Route panel keyboard by logical pane focus, not DOM focus](/lessons/logical-key-routing-not-dom-focus.md) from the key-routing regression note: DOM focus on pane chrome or sidebar controls can silently sink terminal keys, so the panel routes keydown/paste through a global listener to the logical focused pane while excluding real editable controls.
+* **Update**: [Raw key passthrough](/architecture/raw-key-passthrough-and-host-guard.md) and [Split panes, collapsible sidebar, and compact session header](/architecture/split-panes-and-compact-shell.md) now specify logical focused-pane key routing instead of DOM-focus-bound terminal listeners.
 * **Creation**: added [Split panes, collapsible sidebar, and compact session header](/architecture/split-panes-and-compact-shell.md) from the split-pane shell note: per-pane state and pollers, focused-pane key routing, modifier-click splits, persisted sidebar collapse, and compact `.phead` headers.
 * **Creation**: added [One input surface — the terminal's own input line](/decisions/terminal-input-unification.md) from the terminal-input note: no separate composer, no `/api/send`, all typing/pasting through raw `/api/keys` into the focused pane.
 * **Update**: [Raw key passthrough](/architecture/raw-key-passthrough-and-host-guard.md), [oas-web architecture](/architecture/oas-web-architecture.md), and [multi-line send lesson](/lessons/multiline-send-bracketed-paste.md) now reflect `/api/keys` as the sole input path and paste payloads as bracketed paste.
