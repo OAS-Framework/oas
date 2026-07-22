@@ -88,3 +88,17 @@ to the owning developer(s), re-merge, re-gate, re-review.
 - After merge: delete the feature and developer branches, remove any temp
   worktree (`git worktree remove`), confirm developers harvested and retire
   them, log the delivery.
+
+## Gotchas
+
+- If review flags factual errors in a developer's `notes/` or knowledge content,
+  have the developer fix the notes before running `oas okf harvest`; harvest
+  promotes notes verbatim. See [Fix doc nits in notes before the harvest
+  runs](../knowledge/lessons/fix-note-errors-before-harvest.md).
+- A docs-only follow-up PR does not require keeping the authoring developer
+  alive after the feature PR has merged and the developer's memory protocol is
+  complete. Confirm the feature PR is merged, harvest reports no pending notes,
+  local and remote branches are deleted, and the developer reports the task
+  complete; then retire the developer and shepherd the docs PR yourself. See
+  [Retire developers without holding on docs-only follow-up
+  PRs](../knowledge/lessons/retire-dev-without-docs-pr.md).
