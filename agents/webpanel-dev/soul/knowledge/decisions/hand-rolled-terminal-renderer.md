@@ -12,7 +12,9 @@ The human explicitly rejected vendoring xterm.js: "can we not make our own
 rather than using a package?" Keep the session view as a hand-rolled renderer
 in `panel.html`, not a third-party terminal emulator package.
 
-The renderer consumes the raw `tmux capture-pane -p -e -J` output directly. It
+The renderer consumes the raw `tmux capture-pane -p -e` output directly (no
+`-J`: joining physically wrapped rows would break the one-line-per-row grid
+mapping — `cursor_y` is physical). It
 regex-tokenizes ANSI, handles SGR state, emits spans, and strips escape
 sequences outside the supported display subset. The supported SGR surface
 includes reset/style toggles, 16-color foreground/background classes,
@@ -20,8 +22,8 @@ includes reset/style toggles, 16-color foreground/background classes,
 Solarized-light remap still works; 256-color and truecolor values render as
 literal `rgb()` styles.
 
-SGR state must carry across lines because tmux can emit color runs spanning
-lines when `-J` joins wrapped output.
+SGR state must carry across lines because tmux emits color runs that span
+captured lines.
 
 # Screen, scrollback, and cursor mapping
 
