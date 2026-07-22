@@ -104,7 +104,7 @@ files to a DNS-rebinding page; see
 [the all-request Host guard lesson](/lessons/loopback-host-guard-all-requests.md).
 The server sends no CORS headers; external dev harnesses cannot fetch
 its API cross-origin and should use a same-origin proxy such as
-`packages/desktop/renderer/dev-serve.mjs` for renderer work.
+`packages/desktop/renderer/harness-server.mjs` for renderer work.
 Browser-provided paths are selectors or targets constrained by
 server-computed allowlists, never ambient filesystem authority: `/api/spawn`'s
 `agentsRoot` must resolve against workspace roots, and `/api/file` must realpath

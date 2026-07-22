@@ -49,8 +49,10 @@ panel is terminal-mirror-only and no longer contains it.
 
 `oas-web` sends no CORS headers and its loopback origin guard rejects cross-port
 POSTs, so a plain static file server cannot host the harness. The desktop
-renderer `dev-serve.mjs` serves the renderer dir and proxies `/api/*` to the
+renderer `harness-server.mjs` serves the renderer dir and proxies `/api/*` to the
 `oas-web` server so harness development stays same-origin like the real shell.
+There is ONE shared harness (`harness.html`, a tab per view); standalone
+per-view harness/proxy pairs (like the retired `dev-serve.mjs`) are not kept.
 
 The proxy must apply the same loopback `Host` check before serving static files
 or proxying `/api/*`. For POSTs it must also validate the inbound `Origin`. It
