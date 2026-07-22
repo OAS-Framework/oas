@@ -171,3 +171,75 @@ test("jira guard: a deferred response from the previous workspace never paints a
     common.setWorkspace(prevWs);
   }
 });
+
+test("ws generation: deferred roster/agents responses from workspace A never paint after switching to B", async () => {
+  const common = await import(new URL("../packages/desktop/renderer/views/common.mjs", import.meta.url).href);
+  const { refresh } = await import(new URL("../packages/desktop/renderer/views/spawn.mjs", import.meta.url).href);
+  const gate = [];
+  const payload = (body) => ({ ok: true, status: 200, json: async () => body });
+  const ctx = { api: (pathname) => new Promise((ok) => gate.push({ pathname, ok })) };
+  const painted = [];
+  // renderList/renderWorkspaceSelect touch the DOM; stub the minimum and
+  // observe paints via s.souls
+  const fakeEl = () => ({ style: {}, dataset: {}, classList: { toggle() {}, add() {} }, innerHTML: "", textContent: "", title: "",
+                          appendChild() {}, querySelectorAll: () => [], addEventListener() {} });
+  const hadDoc = Object.prototype.hasOwnProperty.call(globalThis, "document");
+  if (!hadDoc) globalThis.document = { createElement: fakeEl };
+  const s = {
+    alive: true, ctx, souls: { agents: [] }, filterText: "",
+    q: () => fakeEl(),
+  };
+  const prevWs = common.currentWorkspace();
+  try {
+    common.setWorkspace("wsA");
+    const inFlightA = refresh(s);            // /api/agents + /api/panel for wsA in flight
+    assert.match(gate[0].pathname, /ws=wsA/);
+    common.setWorkspace("wsB");              // switch bumps the generation
+    const inFlightB = refresh(s);
+    assert.match(gate[2].pathname, /ws=wsB/);
+    // wsB's responses land and paint
+    gate[2].ok(payload({ agents: [{ name: "from-B" }] }));
+    gate[3].ok(payload({ workspaces: [], workspace: { id: "wsB" }, instances: [] }));
+    await inFlightB;
+    assert.equal(s.souls.agents[0].name, "from-B");
+    // wsA's STALE responses land late — they must not overwrite wsB's list
+    gate[0].ok(payload({ agents: [{ name: "from-A" }] }));
+    gate[1].ok(payload({ workspaces: [], workspace: { id: "wsA" }, instances: [] }));
+    await inFlightA;
+    assert.equal(s.souls.agents[0].name, "from-B", "stale workspace-A agents must never paint after switching to B");
+  } finally {
+    common.setWorkspace(prevWs);
+    if (!hadDoc) delete globalThis.document;
+  }
+});
+
+test("ws generation: a spawn begun in workspace A completing after a switch to B never auto-opens the terminal", async () => {
+  const common = await import(new URL("../packages/desktop/renderer/views/common.mjs", import.meta.url).href);
+  const { doSpawn } = await import(new URL("../packages/desktop/renderer/views/spawn.mjs", import.meta.url).href);
+  const opened = [];
+  let release;
+  const ctx = {
+    api: () => new Promise((ok) => { release = () => ok({ ok: true, status: 200, json: async () => ({ instance: "dev-1", launched: true }) }); }),
+    openTerminal: (name) => opened.push(name),
+  };
+  const fields = { ftask: { value: "t" }, fpurpose: { value: "" }, fspawn: { disabled: false, textContent: "" }, fstatus: { textContent: "" } };
+  const s = { ctx, selAgent: { name: "dev", agentsRoot: "/a" }, q: (cls) => fields[cls] };
+  const prevWs = common.currentWorkspace();
+  try {
+    // in-flight spawn survives a workspace switch: must NOT auto-open
+    common.setWorkspace("wsA");
+    const inFlight = doSpawn(s);
+    common.setWorkspace("wsB");              // user switches while spawning
+    release();
+    await inFlight;
+    assert.deepEqual(opened, [], "openTerminal(dev-1) with wsB current would target a same-named B instance");
+    assert.match(fields.fstatus.textContent, /previous workspace/);
+    // control: same flow without a switch DOES auto-open
+    const p2 = doSpawn(s);
+    release();
+    await p2;
+    assert.deepEqual(opened, ["dev-1"]);
+  } finally {
+    common.setWorkspace(prevWs);
+  }
+});

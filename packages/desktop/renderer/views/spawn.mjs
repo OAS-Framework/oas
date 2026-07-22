@@ -5,7 +5,7 @@
    not spawnable standalone. Contract: mount(el, ctx) / unmount(). */
 import {
   escapeHtml, apiJson, postJson, ensureTheme,
-  setWorkspace, onWorkspaceChange, renderWorkspaceSelect, wsQuery,
+  setWorkspace, onWorkspaceChange, renderWorkspaceSelect, wsQuery, workspaceGeneration,
 } from "./common.mjs";
 
 let state = null;
@@ -62,7 +62,9 @@ export function unmount() {
   state = null;
 }
 
-async function refresh(s) {
+/* Exported for the deferred cross-workspace regression. */
+export async function refresh(s) {
+  const myGen = workspaceGeneration();       // capture at dispatch
   let souls, panel;
   try {
     [souls, panel] = await Promise.all([
@@ -70,7 +72,9 @@ async function refresh(s) {
       apiJson(s.ctx, `/api/panel${wsQuery()}`),
     ]);
   } catch { return; } // keep the last good list
-  if (!s.alive) return;
+  // discard deferred responses from a previous workspace — they'd paint A's
+  // agent list over B's after a switch
+  if (!s.alive || myGen !== workspaceGeneration()) return;
   s.souls = souls;
   renderWorkspaceSelect(s.q("wssel"), panel.workspaces, panel.workspace?.id || "");
   renderList(s);
@@ -125,9 +129,14 @@ function showForm(s, a) {
   s.q("fspawn").textContent = "Spawn";
 }
 
-async function doSpawn(s) {
+/* Exported for the in-flight-spawn regression. A spawn begun in workspace A
+   that completes after a switch to B must NOT auto-open the terminal: with
+   the workspace switched, ctx.openTerminal(name) would resolve the name in
+   B — a same-named B instance would receive input meant for the new A one. */
+export async function doSpawn(s) {
   const a = s.selAgent;
   if (!a) return;
+  const myGen = workspaceGeneration();       // capture at dispatch
   const btn = s.q("fspawn"), status = s.q("fstatus");
   btn.disabled = true; btn.textContent = "Spawning…"; status.textContent = "";
   try {
@@ -137,8 +146,13 @@ async function doSpawn(s) {
       task: s.q("ftask").value,           // "" = awaiting instructions (panel default)
       purpose: s.q("fpurpose").value || undefined,
     });
-    status.textContent = `Spawned ${d.instance}${d.launched ? " — session running" : ""}. Opening terminal…`;
     s.q("ftask").value = ""; s.q("fpurpose").value = "";
+    if (myGen !== workspaceGeneration()) {
+      // workspace switched while the spawn was in flight: report, never auto-open
+      status.textContent = `Spawned ${d.instance} in the previous workspace — switch back to open its terminal.`;
+      return;
+    }
+    status.textContent = `Spawned ${d.instance}${d.launched ? " — session running" : ""}. Opening terminal…`;
     s.ctx.openTerminal(d.instance);
   } catch (e) {
     status.textContent = `Spawn failed: ${e.message || e}`;
