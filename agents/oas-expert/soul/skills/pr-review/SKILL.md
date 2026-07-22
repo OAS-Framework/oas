@@ -44,8 +44,10 @@ before its details. Does this belong in OAS, in this form?
 
 - **APPROVE + merge**: `gh pr review --approve`, merge (squash for messy
   histories, merge-commit for clean multi-dev features), delete the branch.
-  Mail the PR owner (coordinator or developer) the verdict. Record notable
-  decisions in your knowledge base; consider a release.
+  Use the operational gotchas below when GitHub account sharing or another
+  instance's worktree blocks the happy path. Mail the PR owner (coordinator or
+  developer) the verdict. Record notable decisions in your knowledge base;
+  consider a release.
 - **RETURN**: request changes with a structured comment — verdict, findings
   per gate, concrete asks. Hand it BACK to whoever owns the PR (the
   coordinator for multi-dev features, the developer otherwise): notify them
@@ -58,3 +60,17 @@ soul's stewardship picture (`soul/knowledge/stewardship/`): append the
 delivery-log entry (PR, verdict, owner, "taught us") and update repo-state's
 On main / In flight sections. If you were spawned for this one PR, do this
 BEFORE retiring — it is the last gate of the review.
+
+## Operational gotchas
+
+- **Same GitHub account as PR author**: `gh pr review --approve` can fail with
+  "Can not approve your own pull request" when the maintainer and author share
+  the `gh` account. Record the APPROVE verdict as a PR comment instead; do not
+  treat this as a failed review, and continue to merge if the gates passed.
+- **Branch held by another worktree**: `gh pr merge --delete-branch` can merge
+  successfully but fail local branch deletion when a developer instance still
+  has the branch checked out. Delete the remote with
+  `git push origin --delete <branch>` and notify the worktree owner to clean up
+  their local branch; do not switch, reset, or otherwise manage another
+  instance's worktree for them. See
+  `knowledge/lessons/pr-review-same-account-and-worktree-branch-delete.md`.

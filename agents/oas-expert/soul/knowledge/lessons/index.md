@@ -1,5 +1,6 @@
 # Lessons
 
+* [PR merge friction — same-account approval and worktree-held branch deletion](pr-review-same-account-and-worktree-branch-delete.md) - In single-account deployments, maintainer approval may need to be recorded as a PR comment, and branch deletion after merge may require deleting only the remote when another instance's worktree holds the local branch.
 * [Release bump PR failure is an org-level Actions restriction](release-bump-pr-org-restriction.md) - When tag-driven release publishing succeeds but the version-bump PR step fails with `Resource not accessible by integration`, the cause is the OAS-Framework org-level Actions restriction and the bump must be rescued manually.
 * [Multi-agent runs need exact messaging and reviewer protocols](multi-dev-run-failure-modes.md) - The first coordinator-plus-developers run showed that agents sleep-poll live aweb channels, guess CLI flags, misread unread inboxes, and lose fresh-eyes review unless injections give exact commands and reviewer lifecycle rules.
 * [Copilot-proxied models fail mid-session — plan for auth death, not just spawn-time fallback](copilot-auth-fragility.md) - Copilot-proxied model preference fallbacks resolve at spawn, so mid-session OAuth, proxy, or API-key failures can kill long-running sessions and leave panel sends unsurfaced.
