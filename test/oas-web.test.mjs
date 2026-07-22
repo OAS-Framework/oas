@@ -67,6 +67,7 @@ test("oas-web renderer: grapheme clusters — ZWJ emoji, VS16, keycaps, flags, k
   assert.equal(R.clusterWidth("🇪🇸"), 2);           // regional-indicator pair
   assert.equal(R.clusterWidth("は\u3099"), 2);      // kana + combining voicing mark (U+3099 is a Mark, not wide)
   assert.equal(R.clusterWidth("क\u094dष"), 2);      // Devanagari क्ष: two spacing bases + virama — widths sum
+  assert.equal(R.clusterWidth("👍🏽"), 2);          // emoji + skin-tone modifier collapses to one 2-cell cluster
   // cursor after the family emoji (cursor_x=2) lands on X
   const h1 = R.renderLine("👨\u200D👩\u200D👧\u200D👦X", R.freshAttr(), 2);
   assert.ok(h1.includes('<span class="cur">X</span>'), "ZWJ emoji is one 2-cell cluster");
@@ -76,6 +77,9 @@ test("oas-web renderer: grapheme clusters — ZWJ emoji, VS16, keycaps, flags, k
   // cursor after क्ष (cursor_x=2) lands on X — multi-base cluster widths sum
   const h3 = R.renderLine("क\u094dषX", R.freshAttr(), 2);
   assert.ok(h3.includes('<span class="cur">X</span>'), "multi-base Devanagari cluster is 2 cells");
+  // cursor after 👍🏽 (cursor_x=2) lands on X — modifier does not add cells
+  const h4 = R.renderLine("👍🏽X", R.freshAttr(), 2);
+  assert.ok(h4.includes('<span class="cur">X</span>'), "skin-tone emoji cluster is 2 cells");
 });
 
 // ---- HTTP origin guard regression (server must not crash on Origin: null) ----
