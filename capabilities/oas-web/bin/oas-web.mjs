@@ -8,7 +8,6 @@
  *   GET  /                          the panel UI (single HTML file)
  *   GET  /api/panel                 roster JSON (instances, git, task, tmux state)
  *   GET  /api/session/<instance>?lines=n   ANSI pane capture of the live session
- *   POST /api/send/<instance>       { text } → typed into the tmux session + Enter
  *   POST /api/keys/<instance>       { data } → raw key bytes into the session (no Enter)
  *   POST /api/interrupt/<instance>  sends Ctrl-C (Escape for pi/claude prompts stays manual)
  *   GET  /api/jira/<instance>       epic + Agent Roster for instances with oas.jira meta
@@ -173,19 +172,6 @@ function sendKeys(inst, data, paste = false) {
   }
 }
 
-function sendText(inst, text) {
-  if (text.includes("\n")) {
-    // Multi-line: bracketed paste via a tmux buffer so the TUI treats it as one
-    // pasted block (a literal \n via send-keys would submit each line).
-    execFileSync("tmux", ["load-buffer", "-b", "oasweb", "-"], { input: text, timeout: 4000 });
-    execFileSync("tmux", ["paste-buffer", "-p", "-d", "-b", "oasweb", "-t", tmuxTarget(inst)], { timeout: 4000 });
-  } else {
-    // -l = literal (no key-name interpretation), then a separate Enter.
-    execFileSync("tmux", ["send-keys", "-t", tmuxTarget(inst), "-l", text], { timeout: 4000 });
-  }
-  execFileSync("tmux", ["send-keys", "-t", tmuxTarget(inst), "Enter"], { timeout: 4000 });
-}
-
 function sendInterrupt(inst) {
   execFileSync("tmux", ["send-keys", "-t", tmuxTarget(inst), "C-c"], { timeout: 4000 });
 }
@@ -336,7 +322,7 @@ const server = createServer(async (req, res) => {
   try {
     if (req.method === "GET" && path === "/") return send(res, 200, UI, "text/html");
     if (req.method === "GET" && path === "/api/panel") return send(res, 200, panelData(url.searchParams.get("ws") || undefined));
-    const m = path.match(/^\/api\/(session|send|keys|interrupt|jira|chat)\/([A-Za-z0-9._-]+)$/);
+    const m = path.match(/^\/api\/(session|keys|interrupt|jira|chat)\/([A-Za-z0-9._-]+)$/);
     if (m) {
       const inst = findInstance(m[2]);
       if (!inst) return send(res, 404, { error: `unknown instance "${m[2]}"` });
@@ -350,13 +336,6 @@ const server = createServer(async (req, res) => {
         const { data, paste } = await readBody(req);
         if (typeof data !== "string" || !data.length) return send(res, 400, { error: "body needs { data }" });
         sendKeys(inst, data, paste === true);
-        return send(res, 200, { sent: true });
-      }
-      if (m[1] === "send" && req.method === "POST") {
-        if (!inst.running) return send(res, 409, { error: "instance is not running" });
-        const { text } = await readBody(req);
-        if (typeof text !== "string" || !text.length) return send(res, 400, { error: "body needs { text }" });
-        sendText(inst, text);
         return send(res, 200, { sent: true });
       }
       if (m[1] === "interrupt" && req.method === "POST") {
