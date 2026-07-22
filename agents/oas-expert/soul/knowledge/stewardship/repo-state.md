@@ -16,6 +16,10 @@ than letting the file grow stale.
 
 ## On main
 
+- PR #12 merged 2026-07-22: oas.web 0.7.0 — terminal-unified input (no
+  composer, no /api/send), adaptBg near-neutral truecolor-bg fold + themed
+  ::selection, compact session header, collapsible sidebar + split panes.
+
 - PR #10 merged 2026-07-22: webpanel-dev soul doc nits from the PR #8
   review fixed (renderer -J claim, paste-normalization direction).
 
@@ -27,7 +31,7 @@ than letting the file grow stale.
   (dark/solarized) with palette isolation + tmux splits, skill-load mandates
   in all injections, coordinator maintainer-merge contract.
 - Capabilities at: oas.review 1.1.3, oas.okf 1.2.2, oas.aweb 1.5.1,
-  oas.web 0.6.0 (published marketplace carries review 1.1.2 and web 0.5.0
+  oas.web 0.7.0 (published marketplace carries review 1.1.2 and web 0.5.0
   until next tag).
 
 ## In flight
@@ -37,6 +41,8 @@ than letting the file grow stale.
 ## Recent deliveries
 
 - (record PR #, one-line scope, verdict, merge/close date)
+- PR #12 oas.web 0.7.0 panel refinements: MERGED 2026-07-22 (see
+  delivery-log).
 - PR #10 webpanel-dev doc nits: MERGED 2026-07-22 (see delivery-log).
 - PR #8 oas.web 0.6.0 terminal-faithful session view: MERGED 2026-07-22
   (see delivery-log); two non-blocking doc nits returned to webpanel-dev
@@ -50,4 +56,6 @@ than letting the file grow stale.
 - Org-level GitHub Actions policy blocks CI bump-PRs — manual rescue each
   release until an org admin relaxes it.
 - Marketplace oas.review 1.1.2 vs repo 1.1.3, and oas.web 0.5.0 vs repo
-  0.6.0 — fold into next release/tag.
+  0.7.0 — fold into next release/tag.
+- webpanel-dev-1's instance worktree still holds the deleted
+  feature/panel-refinements branch locally (owner notified to clean up).

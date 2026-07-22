@@ -24,6 +24,18 @@ decisions/ and referenced from here.
 
 ---
 
+## PR #12 — oas-web 0.7.0 panel refinements (2026-07-22)
+- verdict: MERGED — all four gates green; approval again a PR comment
+  (same-account block). Terminal-unified input (composer + `/api/send`
+  removed), adaptBg near-neutral truecolor-bg fold with regression tests,
+  compact `.phead` header, collapsible sidebar + split panes with per-pane
+  state/gen guards; webpanel-dev OKF bundle validates --strict.
+- owner: webpanel-dev-1 · coordinator: none
+- taught us: removing an endpoint is a security win worth naming in review
+  (smaller surface); per-pane generation counters are the clean pattern for
+  multi-pane stale-response/key-leak guards. Release still pending — 0.7.0
+  (and 0.6.0) unpublished until the next tag.
+
 ## PR #10 — webpanel-dev soul doc nits from PR #8 review (2026-07-22)
 - verdict: MERGED — docs-only, both corrected claims verified against
   oas-web implementation (`capture-pane -p -e` without -J; server-side
