@@ -1,7 +1,7 @@
 ---
 type: Concept
 title: Raw key passthrough and the POST host/origin guard
-description: POST /api/keys sends browser keydown bytes into the pane via tmux send-keys -H, routes large payloads through load-buffer/paste-buffer, and rejects non-loopback POST Host/Origin values to prevent DNS-rebinding terminal injection.
+description: POST /api/keys is the panel's sole text-input path, sending browser keydown bytes into the focused pane via tmux send-keys -H, routing large or pasted payloads through load-buffer/paste-buffer, and rejecting non-loopback POST Host/Origin values.
 tags: [oas-web, security, tmux, keys]
 timestamp: 2026-07-22
 ---
@@ -9,7 +9,12 @@ timestamp: 2026-07-22
 # Key byte path
 
 The terminal-faithful session view translates browser key events to bytes on the
-client, batches them briefly, and posts those bytes to `/api/keys`:
+client, batches them briefly, and posts those bytes to `/api/keys`. This is the
+panel's sole text-input path: there is no separate chat composer and no
+`/api/send` endpoint. Selecting or clicking a session pane focuses key capture
+for that pane; keys are not captured while the sidebar filter input has focus.
+
+The client mapping is:
 
 - Enter becomes `\r`, Backspace becomes `\x7f`, arrow keys become CSI `A`–`D`,
   Ctrl-letter chords become control bytes, and Alt prefixes the byte sequence
@@ -42,5 +47,7 @@ Requests failing that guard return 403. GET endpoints are unchanged.
 
 - The hand-rolled renderer and screen mapping are captured in
   [Terminal-faithful session renderer](/decisions/hand-rolled-terminal-renderer.md).
-- Multi-line composer sends use bracketed paste for a different path; see
+- The one-input UX decision is captured in
+  [One input surface — the terminal's own input line](/decisions/terminal-input-unification.md).
+- Multi-line text still needs bracketed paste rather than raw per-line sends; see
   [Multi-line sends require tmux bracketed paste, not send-keys](/lessons/multiline-send-bracketed-paste.md).

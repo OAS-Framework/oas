@@ -15,7 +15,7 @@ function loadRenderer() {
   const html = readFileSync(join(CAP, "ui", "panel.html"), "utf8");
   const m = html.match(/\/\* OASWEB_RENDERER_BEGIN \*\/([\s\S]*?)\/\* OASWEB_RENDERER_END \*\//);
   assert.ok(m, "renderer block markers present in panel.html");
-  const src = m[1] + "\nreturn { renderCapture, renderLine, freshAttr, cellWidth, clusterWidth };";
+  const src = m[1] + "\nreturn { renderCapture, renderLine, freshAttr, cellWidth, clusterWidth, adaptBg };";
   const escapeHtml = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   return new Function("escapeHtml", src)(escapeHtml);
 }
@@ -37,6 +37,23 @@ test("oas-web renderer: cursor lands at cursor_y within the screen even when tmu
   const rows = html.split('class="trow"');
   assert.ok(!rows[4].includes('class="cur"'), "no cursor on the first screen row");
   assert.ok(rows[5].includes('<span class="cur">h</span>'), "cursor on 'h' of '> hi'");
+});
+
+test("oas-web renderer: adaptBg folds near-default neutral backgrounds, keeps saturated highlights", () => {
+  // near-neutral pale runs (pi's default-ish bg) fold on light, kept on dark
+  assert.equal(R.adaptBg("rgb(232,240,232)", false), null, "pale neutral folds on light");
+  assert.equal(R.adaptBg("rgb(238,238,238)", false), null, "near-white folds on light");
+  assert.equal(R.adaptBg("rgb(232,240,232)", true), "rgb(232,240,232)", "pale run kept on dark");
+  // near-neutral near-black folds on dark, kept on light
+  assert.equal(R.adaptBg("rgb(10,13,18)", true), null, "near-black folds on dark");
+  assert.equal(R.adaptBg("rgb(10,13,18)", false), "rgb(10,13,18)", "near-black kept on light");
+  // saturated colors always pass through, regardless of luminance
+  assert.equal(R.adaptBg("rgb(0,0,255)", true), "rgb(0,0,255)", "saturated blue kept on dark");
+  assert.equal(R.adaptBg("rgb(255,255,0)", false), "rgb(255,255,0)", "saturated yellow kept on light");
+  assert.equal(R.adaptBg("rgb(220,50,47)", false), "rgb(220,50,47)", "saturated red kept");
+  // mid-luminance neutral highlights pass through
+  assert.equal(R.adaptBg("rgb(128,128,128)", true), "rgb(128,128,128)");
+  assert.equal(R.adaptBg("rgb(128,128,128)", false), "rgb(128,128,128)");
 });
 
 test("oas-web renderer: SGR colors, colon-form 256-color, and escaping", () => {

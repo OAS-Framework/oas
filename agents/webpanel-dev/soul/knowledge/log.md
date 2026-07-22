@@ -1,6 +1,10 @@
 # Knowledge Log
 
 ## 2026-07-22
+* **Creation**: added [Split panes, collapsible sidebar, and compact session header](/architecture/split-panes-and-compact-shell.md) from the split-pane shell note: per-pane state and pollers, focused-pane key routing, modifier-click splits, persisted sidebar collapse, and compact `.phead` headers.
+* **Creation**: added [One input surface — the terminal's own input line](/decisions/terminal-input-unification.md) from the terminal-input note: no separate composer, no `/api/send`, all typing/pasting through raw `/api/keys` into the focused pane.
+* **Update**: [Raw key passthrough](/architecture/raw-key-passthrough-and-host-guard.md), [oas-web architecture](/architecture/oas-web-architecture.md), and [multi-line send lesson](/lessons/multiline-send-bracketed-paste.md) now reflect `/api/keys` as the sole input path and paste payloads as bracketed paste.
+* **Update**: [Color adaptation](/architecture/color-adaptation.md) now captures truecolor background suppression for near-default SGR backgrounds on light/dark themes and the themed `::selection` token.
 * **Creation**: added [Raw key passthrough and the POST host/origin guard](/architecture/raw-key-passthrough-and-host-guard.md) from the key endpoint note: `/api/keys`, raw tmux hex send, large-payload paste path, instance-tagged queues, and loopback POST guard.
 * **Creation**: added [Terminal-faithful session renderer](/decisions/hand-rolled-terminal-renderer.md) by merging the terminal-fidelity implementation and renderer-approach notes: no xterm.js/package, SGR parser shape, screen/cursor mapping, and renderer test hook.
 * **Update**: [oas-web architecture](/architecture/oas-web-architecture.md) now lists `/api/keys`, session geometry/cursor/history fields, and the loopback POST Host/Origin guard.

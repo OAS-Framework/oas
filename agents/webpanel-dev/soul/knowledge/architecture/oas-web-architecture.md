@@ -3,7 +3,7 @@ type: Concept
 title: oas-web architecture — zero-dependency localhost server plus single-file UI
 description: The oas.web capability is a two-file system — bin/oas-web.mjs (a zero-dependency node:http server on 127.0.0.1) and ui/panel.html (a single self-contained HTML/CSS/JS page) — that reuses the kernel's control-pane model and tmux as its only seams to the agents.
 tags: [oas-web, architecture, capability, http, tmux]
-timestamp: 2026-07-21
+timestamp: 2026-07-22
 ---
 
 # Shape
@@ -16,13 +16,17 @@ The web panel lives in `capabilities/oas-web/` and is deliberately tiny:
   - `GET /api/panel?ws=<id>` — roster JSON per workspace.
   - `GET /api/session/<instance>?lines=n` — raw ANSI tmux `capture-pane` text plus pane geometry, cursor state, and history depth.
   - `GET /api/chat/<instance>?limit=n` — parsed structured transcript turns.
-  - `POST /api/send/<instance>` — types `{ text }` into the tmux session.
-  - `POST /api/keys` — sends browser keydown bytes into the tmux pane (see [raw key passthrough](raw-key-passthrough-and-host-guard.md)).
+  - `POST /api/keys` — sends browser keydown bytes into the tmux pane and is
+    the panel's only text-input path (see [raw key passthrough](raw-key-passthrough-and-host-guard.md)
+    and [the input-surface decision](/decisions/terminal-input-unification.md)).
   - `POST /api/interrupt/<instance>` — sends Ctrl-C.
   - `GET /api/jira/<instance>` — epic + Agent Roster via `acli` when
     `capabilityMeta["oas.jira"]` is present.
-- `ui/panel.html` (~620 lines) — all CSS, JS, rendering, polling loops in one
+- `ui/panel.html` — all CSS, JS, rendering, panes, and polling loops in one
   file. No build step, no framework. Hard-refresh (Cmd-Shift-R) is the deploy.
+  The current shell has an editor-style panes array, focused-pane key routing,
+  a collapsible sidebar, and compact per-pane headers (see
+  [split panes and compact shell](split-panes-and-compact-shell.md)).
 
 # Kernel seams (all pre-existing, none owned here)
 
@@ -30,8 +34,10 @@ The web panel lives in `capabilities/oas-web/` and is deliberately tiny:
   data as the TUI (`oas pane`). The kernel is found in-tree (`../../..`) or,
   for marketplace installs, via `oas root` (a copied package must never
   assume it sits inside the kernel tree).
-- **Session view + input**: tmux only — `capture-pane -p -e -J` to read,
-  `send-keys` / `paste-buffer` to write. tmux is the runtime-agnostic seam:
+- **Session view + input**: tmux only — `capture-pane` to read and raw
+  `/api/keys` delivery through `send-keys` / `paste-buffer` to write. The
+  terminal's own input line is the sole input surface; do not reintroduce a
+  separate composer or `/api/send` path. tmux is the runtime-agnostic seam:
   identical for pi and claude sessions.
 - **Chat view**: the runtime's own session JSONL logs (see
   [transcript-data-sources](transcript-data-sources.md)) — read-only, no

@@ -1,9 +1,9 @@
 ---
 type: Concept
-title: Color adaptation — adaptRgb luminance folding and solarized-light ANSI remap
-description: Captured terminal colors are authored for dark backgrounds, so the panel's light theme remaps the 16 standard ANSI colors to the real Solarized palette and folds too-bright 24-bit colors down to a readable lightness ceiling while preserving hue.
+title: Color adaptation — foreground folding, background suppression, and solarized-light ANSI remap
+description: Captured terminal colors are authored for dark backgrounds, so the panel's light theme remaps standard ANSI colors, folds too-bright 24-bit foregrounds down to a readable lightness ceiling, and suppresses near-default truecolor backgrounds that look like accidental highlights.
 tags: [oas-web, ansi, adaptRgb, solarized, theming, color]
-timestamp: 2026-07-21
+timestamp: 2026-07-22
 ---
 
 # The problem
@@ -13,7 +13,7 @@ small ANSI(SGR)→HTML converter. Those colors are authored for dark
 terminals; on the light theme's solarized paper (`#fdf6e3`), bright
 true-color text (e.g. pi's status lines) vanishes into the cream background.
 
-# Two mechanisms (panel.html)
+# Three mechanisms (panel.html)
 
 1. **16-color remap**: in light mode the standard ANSI classes map to the
    actual Solarized palette (red `#dc322f`, green `#859900`, blue `#268bd2`,
@@ -38,10 +38,21 @@ theme passes colors through untouched. (The intent is a readable band in
 theme pulls bright ones down; if a too-dark-on-dark case ever shows up, the
 symmetric raise belongs in the same function.)
 
+3. **24-bit background suppression** — `adaptBg(css, dark)`: pi's TUI can emit
+   subtle near-default truecolor backgrounds such as `48;2;232;240;232`.
+   On the solarized-light paper these render as pale lavender/green blocks
+   that look like accidental text selection. Compute relative luminance for
+   raw `rgb()` backgrounds and return `null` (inherit the theme background)
+   when the color is near the default surface: `lum < 0.16` on dark or
+   `lum > 0.86` on light. Mid-luminance backgrounds still pass through so
+   genuine highlights remain visible.
+
 # Related invariants
 
 - Theme toggling re-renders the session immediately so adapted colors apply
   without waiting for the next poll.
+- Explicit `::selection` colors should use a per-theme `--term-sel` token;
+  otherwise browser default-blue selection clashes with themed terminal surfaces.
 - Contrast was held to WCAG AA on the paper surfaces (body ink 9.9:1, muted
   `#657b83` 4.9:1) — keep that bar when touching theme tokens.
 - The light chrome is deliberately "slightly solarised": base3 `#fdf6e3`

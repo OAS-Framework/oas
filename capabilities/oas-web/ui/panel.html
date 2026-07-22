@@ -22,7 +22,7 @@
     --sel: #1f6feb26;       /* selected wash */
     --term-bg: #0a0d12;     /* session surface follows the theme */
     --term-fg: #e6edf3;
-    --term-sel: #264f78;
+    --term-sel: #264f78; /* used by #term ::selection */
     --shadow: 0 1px 3px rgb(0 0 0 / .4);
   }
   [data-theme="light"] {
@@ -42,7 +42,7 @@
     --sel: #1f6fb21f;
     --term-bg: #fdf6e3;     /* solarized-light session surface */
     --term-fg: #586e75;
-    --term-sel: #d3c9a8;
+    --term-sel: #d3c9a8; /* used by #term ::selection */
     --shadow: 0 1px 3px rgb(88 110 117 / .14);
   }
 
@@ -52,17 +52,17 @@
          -webkit-font-smoothing: antialiased; }
 
   /* ── Header ── */
-  header { padding: 0 20px; height: 52px; border-bottom: 1px solid var(--border); display: flex; align-items: center;
-           gap: 14px; background: var(--surface); flex: none; }
-  header h1 { font-size: 14px; margin: 0; font-weight: 650; letter-spacing: .01em; }
+  header { padding: 0 16px; height: 40px; border-bottom: 1px solid var(--border); display: flex; align-items: center;
+           gap: 12px; background: var(--surface); flex: none; }
+  header h1 { font-size: 13px; margin: 0; font-weight: 650; letter-spacing: .01em; }
   header h1 .logo { color: var(--accent); }
   .hmeta { color: var(--muted); font-size: 12px; }
   .spacer { flex: 1; }
   .iconbtn { background: none; border: 1px solid var(--border); color: var(--muted); border-radius: 8px;
-             width: 32px; height: 32px; cursor: pointer; font-size: 15px; line-height: 1; }
+             width: 28px; height: 28px; cursor: pointer; font-size: 14px; line-height: 1; }
   .iconbtn:hover { color: var(--fg); border-color: var(--faint); }
   #wssel { background: var(--surface-2); color: var(--fg); border: 1px solid var(--border); border-radius: 8px;
-           padding: 5px 10px; font: 12.5px inherit; font-weight: 600; cursor: pointer; outline: none; }
+           padding: 3px 8px; font: 12px inherit; font-weight: 600; cursor: pointer; outline: none; }
   #wssel:hover, #wssel:focus { border-color: var(--accent); }
 
   main { flex: 1; display: flex; min-height: 0; }
@@ -70,6 +70,7 @@
   /* ── Sidebar / roster ── */
   #side { width: 340px; min-width: 280px; max-width: 420px; border-right: 1px solid var(--border);
           background: var(--surface); display: flex; flex-direction: column; }
+  #side.collapsed { display: none; }
   #filterbar { padding: 12px 12px 8px; display: flex; gap: 8px; }
   #filter { flex: 1; background: var(--bg); border: 1px solid var(--border); color: var(--fg);
             border-radius: 8px; padding: 7px 11px; font-size: 13px; outline: none; }
@@ -109,40 +110,46 @@
   .chip.dirty { color: var(--warn); }
   .chip.rt { color: var(--accent); }
 
-  /* ── Main view ── */
+  /* ── Main view — up to MAX_PANES side-by-side split panes, each a full
+     session view (compact header + terminal); one focused pane receives
+     keyboard input. ── */
   #view { flex: 1; display: flex; flex-direction: column; min-width: 0; background: var(--bg); }
-  #vhead { padding: 12px 20px; border-bottom: 1px solid var(--border); background: var(--surface); display: none; }
-  #vhead .row1 { display: flex; align-items: center; gap: 10px; }
-  #vhead .title { font-weight: 650; font-size: 15px; }
-  #vhead .badge { font-size: 11px; padding: 2px 9px; border-radius: 999px; font-weight: 600; }
+  #panes { flex: 1; display: flex; min-height: 0; }
+  .pane { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; border-left: 1px solid var(--border); }
+  .pane:first-child { border-left: none; }
+  .pane.focused .phead { box-shadow: inset 0 2px 0 var(--accent); }
+  .phead { padding: 0 12px; height: 32px; border-bottom: 1px solid var(--border); background: var(--surface);
+           display: flex; align-items: center; gap: 8px; font-size: 12.5px; overflow: hidden; }
+  .phead .title { font-weight: 650; font-size: 13px; flex: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .phead .meta { color: var(--muted); font-size: 11.5px; font-weight: 500; flex: 1; min-width: 0;
+                 overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .phead .meta b { color: var(--fg); font-weight: 550; }
+  .phead .actions { margin-left: auto; flex: none; display: flex; gap: 6px; }
+  .phead .pbtn { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 13px;
+                 border-radius: 5px; padding: 2px 6px; }
+  .phead .pbtn:hover { color: var(--fg); background: var(--surface-2); }
+  .badge { font-size: 10px; padding: 1px 7px; border-radius: 999px; font-weight: 600; flex: none; }
   .badge.on { background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); }
   .badge.off { background: var(--chip-bg); color: var(--muted); }
-  #vhead .row2 { color: var(--muted); font-size: 12.5px; margin-top: 4px; display: flex; gap: 16px; flex-wrap: wrap; }
-  #vhead .row2 b { color: var(--fg); font-weight: 550; }
-  #vhead .actions { margin-left: auto; display: flex; gap: 8px; }
-  button.act { background: var(--surface); color: var(--fg); border: 1px solid var(--border); border-radius: 8px;
-               padding: 6px 13px; cursor: pointer; font-size: 12.5px; font-weight: 550; }
-  button.act:hover { border-color: var(--accent); color: var(--accent); }
-  button.act.danger:hover { border-color: var(--danger); color: var(--danger); }
 
   /* ── Terminal view — a faithful mirror of the tmux pane: the raw ANSI
      capture rendered as a monospace grid (scrollback + live screen), with
      the real cursor. No transcript reconstruction — what tmux shows is
      what you see. ── */
-  #term { flex: 1; overflow: auto; padding: 14px 18px; outline: none; position: relative;
+  .term { flex: 1; overflow: auto; padding: 14px 18px; outline: none; position: relative;
           background: var(--term-bg); color: var(--term-fg);
           font: 12.5px/1.35 "SF Mono", ui-monospace, SFMono-Regular, Menlo, monospace; }
-  #term.focused { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 55%, transparent); }
-  #tgrid { white-space: pre; width: max-content; min-width: 100%; }
-  #tgrid .trow { min-height: 1.35em; }
-  #tgrid .cur { background: var(--term-fg); color: var(--term-bg); }
-  #term .scrollmark { border-bottom: 1px dashed color-mix(in srgb, var(--term-fg) 25%, transparent);
+  .term.focused { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 55%, transparent); }
+  .tgrid { white-space: pre; width: max-content; min-width: 100%; }
+  .tgrid .trow { min-height: 1.35em; }
+  .tgrid .cur { background: var(--term-fg); color: var(--term-bg); }
+  .term .scrollmark { border-bottom: 1px dashed color-mix(in srgb, var(--term-fg) 25%, transparent);
                       margin: 4px 0 6px; }
-  #keyhint { position: sticky; bottom: 0; float: right; margin: 0 0 0 auto; pointer-events: none;
+  .keyhint { position: sticky; bottom: 0; float: right; margin: 0 0 0 auto; pointer-events: none;
              font: 10.5px -apple-system, sans-serif; color: var(--term-bg);
              background: color-mix(in srgb, var(--accent) 85%, var(--term-fg));
              border-radius: 6px; padding: 2px 9px; opacity: 0; transition: opacity .15s; }
-  #term.focused #keyhint { opacity: .92; }
+  .term.focused .keyhint { opacity: .92; }
 
   /* ── Loading states ── */
   @keyframes spin { to { transform: rotate(360deg); } }
@@ -153,31 +160,6 @@
   .loading-block { display: flex; align-items: center; gap: 10px; justify-content: center;
                    padding: 48px 0; color: color-mix(in srgb, var(--term-fg) 60%, transparent);
                    font: 13px -apple-system, sans-serif; }
-
-  #composer { border-top: 1px solid var(--border); background: var(--surface); padding: 12px 18px;
-              display: none; gap: 10px; align-items: flex-end; }
-  #msgwrap { flex: 1; position: relative; }
-  #msg { width: 100%; background: var(--bg); color: var(--fg); border: 1px solid var(--border);
-         border-radius: 18px; padding: 11px 46px 11px 16px;
-         font: 13.5px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-         outline: none; resize: none; overflow-y: auto;
-         min-height: 44px; max-height: 176px; box-sizing: border-box; display: block;
-         transition: max-height .18s ease, min-height .18s ease; }
-  #msg:focus { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 15%, transparent); }
-  #msg::placeholder { color: var(--faint); }
-  /* Ctrl-E expanded editor — a taller, calmer writing surface (not fullscreen) */
-  #composer.expanded #msg { min-height: 220px; max-height: 46vh; border-radius: 12px;
-         font: 13px/1.55 "SF Mono", ui-monospace, SFMono-Regular, Menlo, monospace; }
-  #msghint { position: absolute; right: 14px; bottom: 7px; font-size: 10px; color: var(--faint);
-             pointer-events: none; user-select: none; }
-  #composer.expanded #msghint { display: none; }
-  #expandbtn { position: absolute; right: 10px; top: 8px; background: none; border: none; cursor: pointer;
-               color: var(--faint); font-size: 13px; padding: 2px 4px; border-radius: 5px; }
-  #expandbtn:hover { color: var(--fg); background: var(--surface-2); }
-  #sendbtn { background: var(--accent); color: var(--accent-fg); border: none; border-radius: 50%;
-             width: 40px; height: 40px; cursor: pointer; font-size: 16px; font-weight: 600; flex: none;
-             display: inline-flex; align-items: center; justify-content: center; margin-bottom: 2px; }
-  #sendbtn:hover { filter: brightness(1.1); }
 
   .empty { color: var(--muted); text-align: center; padding: 60px 30px; font-size: 13.5px;
            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; white-space: normal; }
@@ -200,11 +182,17 @@
   [data-theme="light"] .b94{background:#1f6fb2}[data-theme="light"] .b95{background:#b02e6d}[data-theme="light"] .b96{background:#1f8a82}[data-theme="light"] .b97{background:#37424a}
   /* reverse-video with default colors: swap the terminal fg/bg tokens */
   .fdef{color:var(--term-bg)}.bdef{background:var(--term-fg)}
+  /* Text selection: theme-aware everywhere; the terminal surface uses its
+     dedicated --term-sel token (app-wide rule first so the terminal-specific
+     one wins by source order + specificity). */
+  ::selection { background: color-mix(in srgb, var(--accent) 30%, var(--bg)); color: var(--fg); }
+  .term ::selection, .term::selection { background: var(--term-sel); color: inherit; }
   .ab{font-weight:700}.ad{opacity:.65}.ai{font-style:italic}.au{text-decoration:underline}
 </style>
 </head>
 <body>
 <header>
+  <button class="iconbtn" id="sidebtn" title="Toggle sidebar (Ctrl+B)">☰</button>
   <h1><span class="logo">●</span> oas agents</h1>
   <select id="wssel" style="display:none"></select>
   <span class="hmeta" id="teamline"></span>
@@ -218,31 +206,17 @@
     <div id="groups"></div>
   </div>
   <div id="view">
-    <div id="vhead">
-      <div class="row1">
-        <span class="title" id="vtitle"></span>
-        <span class="badge" id="vbadge"></span>
-        <span class="actions">
-          <button class="act danger" id="intbtn" title="Send Ctrl-C to the session">Interrupt</button>
-        </span>
-      </div>
-      <div class="row2" id="vinfo"></div>
-    </div>
-    <div id="term" tabindex="0"><div class="empty"><span class="big">⌥</span>Select an instance to sit at its terminal.<br>Click the terminal to type directly into the agent's session.</div></div>
-    <div id="composer">
-      <div id="msgwrap">
-        <textarea id="msg" rows="1" placeholder="Message the agent — Enter sends, Shift+Enter new line, Ctrl+E expand" autocomplete="off"></textarea>
-        <button id="expandbtn" title="Expand editor (Ctrl+E)">⤢</button>
-        <span id="msghint">⇧↵ newline · ^E expand</span>
-      </div>
-      <button id="sendbtn" title="Send">↑</button>
-    </div>
+    <div id="panes"></div>
   </div>
 </main>
 <script>
 const $ = (id) => document.getElementById(id);
 let panel = { instances: [] };
-let sel = null;
+const MAX_PANES = 3;
+let panes = [];          // [{ id, sel, gen, lastSig, fastUntil, keyQueue, keyFlush, el, headEl, termEl }]
+let focusedId = null;    // pane id receiving keyboard input
+let paneSeq = 0;
+const focusedPane = () => panes.find(p => p.id === focusedId) || panes[0];
 let filterText = "";
 const closedGroups = new Set(JSON.parse(localStorage.getItem("oasweb.closed") || "[]"));
 
@@ -254,7 +228,26 @@ $("themebtn").onclick = () => {
   const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
   document.documentElement.dataset.theme = next;
   localStorage.setItem("oasweb.theme", next);
+  // adaptBg's fold depends on the theme: invalidate every pane's render
+  // signature and repaint so cached captures re-render for the new theme.
+  panes.forEach((p) => { p.lastSig = ""; if (p.sel) refreshTerm(p, true); });
 };
+
+/* ── sidebar collapse — persisted, Ctrl/Cmd-B toggles (except while a
+   terminal pane has focus: Ctrl-B is the tmux prefix). ── */
+const sideEl = $("side");
+if (localStorage.getItem("oasweb.side") === "closed") sideEl.classList.add("collapsed");
+function toggleSide() {
+  sideEl.classList.toggle("collapsed");
+  localStorage.setItem("oasweb.side", sideEl.classList.contains("collapsed") ? "closed" : "open");
+}
+$("sidebtn").onclick = toggleSide;
+window.addEventListener("keydown", (e) => {
+  if (e.key === "b" && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey) {
+    if (document.activeElement && document.activeElement.classList.contains("term")) return;
+    e.preventDefault(); toggleSide();
+  }
+});
 
 /* ── grouping: workspace → repo → instances (children indented under parents) ── */
 function groupInstances(list) {
@@ -322,7 +315,7 @@ function renderRoster() {
       if (multiRepo) { const rh = document.createElement("div"); rh.className = "rhead"; rh.textContent = rName; rbox.appendChild(rh); }
       for (const i of items) {
         const d = document.createElement("div");
-        d.className = "inst" + (sel === i.instance ? " sel" : "") + (i.running ? "" : " idle") + (i.depth ? " child" : "");
+        d.className = "inst" + (panes.some(p => p.sel === i.instance) ? " sel" : "") + (i.running ? "" : " idle") + (i.depth ? " child" : "");
         d.innerHTML = `
           <div class="iname"><span class="dot ${i.running ? "on" : ""}"></span>${i.instance}</div>
           <div class="itask">${(i.task || "").slice(0, 100)}</div>
@@ -331,7 +324,11 @@ function renderRoster() {
             <span class="chip">${i.work}${i.branch ? " · " + i.branch : ""}</span>
             ${i.git && i.git.dirty ? `<span class="chip dirty">±${i.git.dirty}</span>` : ""}
           </div>`;
-        d.onclick = () => select(i.instance);
+        d.onclick = (e) => {
+          if (e.altKey || e.metaKey || e.ctrlKey) addSplit(i.instance);   // modifier-click: new split
+          else setPaneSession(focusedPane() || makePane(), i.instance);   // plain click: replace focused pane
+        };
+        d.title = "Click: open here · Alt/Cmd-click: open in split";
         rbox.appendChild(d);
       }
       list.appendChild(rbox);
@@ -357,13 +354,17 @@ async function refreshPanel() {
   $("teamline").textContent = panel.team ? `team ${panel.team.name}` : "";
   $("stamp").textContent = `${panel.running} running · ${panel.instances.length} total`;
   renderRoster();
+  for (const p of panes) if (p.sel) {
+    const i = panel.instances.find(x => x.instance === p.sel);
+    const b = p.headEl.querySelector(".badge");
+    if (i && b) { b.textContent = i.running ? "running" : "idle"; b.className = "badge " + (i.running ? "on" : "off"); }
+  }
 }
 $("wssel").addEventListener("change", (e) => {
   currentWs = e.target.value;
   localStorage.setItem("oasweb.ws", currentWs);
-  sel = null; lastTermSig = "";
-  $("vhead").style.display = "none"; $("composer").style.display = "none";
-  $("term").innerHTML = '<div class="empty"><span class="big">⌥</span>Select an instance to sit at its terminal.</div>';
+  while (panes.length > 1) closePane(panes[panes.length - 1]);
+  closePane(panes[0]);   // clears the last pane to its empty state
   refreshPanel();
 });
 
@@ -429,14 +430,35 @@ function applySgr(attr, params) {
     // anything else: ignore gracefully
   }
 }
-function spanFor(text, attr) {
+/* Fold raw rgb() backgrounds that are near the theme's own default terminal
+   background: a TUI painting its near-default background (near-black on dark,
+   near-white on light) would otherwise render as an opaque highlight-like
+   run. Only NEAR-NEUTRAL colors fold — the channel spread (max−min) must be
+   small — so genuine saturated highlights (blue, yellow, …) always pass
+   through regardless of luminance. Pure — the theme flag is a parameter so
+   node tests can drive it without a DOM. */
+function adaptBg(css, dark) {
+  const m = /rgb\((\d+),(\d+),(\d+)\)/.exec(css);
+  if (!m) return css;
+  const r = +m[1], g = +m[2], b = +m[3];
+  const spread = Math.max(r, g, b) - Math.min(r, g, b);
+  if (spread > 32) return css; // saturated: a real highlight, keep it
+  const lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+  if (dark && lum < 0.16) return null;
+  if (!dark && lum > 0.86) return null;
+  return css;
+}
+function spanFor(text, attr, dark) {
   let fg = attr.fg, bg = attr.bg;
   if (attr.reverse) { const t = fg; fg = bg || "def"; bg = t || "def"; }
   const cls = [], style = [];
   if (fg === "def") cls.push("fdef");
   else if (fg) { if (fg.cls != null) cls.push("a" + fg.cls); else style.push("color:" + fg.css); }
   if (bg === "def") cls.push("bdef");
-  else if (bg) { if (bg.cls != null) cls.push("b" + bg.cls); else style.push("background:" + bg.css); }
+  else if (bg) {
+    if (bg.cls != null) cls.push("b" + bg.cls);
+    else { const bgCss = adaptBg(bg.css, dark); if (bgCss) style.push("background:" + bgCss); }
+  }
   if (attr.bold) cls.push("ab");
   if (attr.dim) cls.push("ad");
   if (attr.italic) cls.push("ai");
@@ -486,7 +508,7 @@ const SEG = typeof Intl !== "undefined" && Intl.Segmenter ? new Intl.Segmenter(u
 function graphemes(text) {
   return SEG ? [...SEG.segment(text)].map((s) => s.segment) : [...text];
 }
-function renderLine(line, attr, cursorCol) {
+function renderLine(line, attr, cursorCol, dark) {
   let html = "", col = 0, last = 0;
   ANSI_RE.lastIndex = 0;
   const emit = (text) => {
@@ -494,7 +516,7 @@ function renderLine(line, attr, cursorCol) {
     // Walk grapheme clusters counting terminal cells so the cursor lands on
     // the right glyph even with CJK/emoji (2 cells), combining marks (0), or
     // ZWJ emoji sequences (one 2-cell cluster).
-    if (cursorCol == null) { html += spanFor(text, attr); for (const g of graphemes(text)) col += clusterWidth(g); return; }
+    if (cursorCol == null) { html += spanFor(text, attr, dark); for (const g of graphemes(text)) col += clusterWidth(g); return; }
     let before = "", at = "", after = "";
     for (const g of graphemes(text)) {
       const w = clusterWidth(g);
@@ -504,11 +526,11 @@ function renderLine(line, attr, cursorCol) {
       col += w;
     }
     if (at) {
-      html += spanFor(before, attr);
+      html += spanFor(before, attr, dark);
       html += `<span class="cur">${escapeHtml(at)}</span>`;
-      html += spanFor(after, attr);
+      html += spanFor(after, attr, dark);
       cursorCol = null; // consumed
-    } else html += spanFor(text, attr);
+    } else html += spanFor(text, attr, dark);
   };
   let m;
   while ((m = ANSI_RE.exec(line))) {
@@ -524,7 +546,7 @@ function renderLine(line, attr, cursorCol) {
   }
   return html;
 }
-function renderCapture(d) {
+function renderCapture(d, dark) {
   let lines = d.text.replace(/\n$/, "").split("\n");
   const rows = d.size?.rows || 24;
   // The visible screen starts after the history lines the server reported —
@@ -538,121 +560,169 @@ function renderCapture(d) {
   for (let i = 0; i < lines.length; i++) {
     const isScreen = i >= screenStart;
     const cursorCol = (d.size?.cursor && isScreen && (i - screenStart) === d.size.cy) ? d.size.cx : null;
-    out.push(`<div class="trow">${renderLine(lines[i], attr, cursorCol) || "&nbsp;"}</div>`);
+    out.push(`<div class="trow">${renderLine(lines[i], attr, cursorCol, dark) || "&nbsp;"}</div>`);
     if (i === screenStart - 1) out.push('<div class="scrollmark"></div>');
   }
   return out.join("");
 }
 /* OASWEB_RENDERER_END */
-let lastTermSig = "";
-let termReq = 0;
-let fastPollUntil = 0;
-async function refreshTerm(force) {
-  if (!sel || document.hidden) return;
-  const forSel = sel;
-  const myReq = ++termReq;
+async function refreshTerm(p, force) {
+  if (!p || !p.sel || document.hidden) return;
+  const forSel = p.sel;
+  const myGen = ++p.gen;
   let d;
   try { const r = await fetch(`/api/session/${encodeURIComponent(forSel)}?lines=2000`); d = await r.json(); }
   catch { return; } // keep last good render on transient errors
-  if (myReq !== termReq || forSel !== sel) return; // stale response — never paint
-  const box = $("term");
+  if (myGen !== p.gen || forSel !== p.sel || !panes.includes(p)) return; // stale/closed — never paint
+  const box = p.termEl;
   if (!d.running) {
     const sig = forSel + ":idle";
-    if (sig === lastTermSig && !force) return;
-    lastTermSig = sig;
+    if (sig === p.lastSig && !force) return;
+    p.lastSig = sig;
     box.innerHTML = '<div class="empty"><span class="big">◌</span>Session is not running.<br>Start it with <code>oas attach ' + escapeHtml(forSel) + '</code> or spawn anew.</div>';
     return;
   }
   const sig = forSel + ":" + d.text.length + ":" + d.text + ":" + JSON.stringify(d.size);
-  if (sig === lastTermSig && !force) return;
-  lastTermSig = sig;
+  if (sig === p.lastSig && !force) return;
+  p.lastSig = sig;
   const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 60;
   const hadFocus = box.classList.contains("focused");
-  box.innerHTML = `<div id="tgrid">${renderCapture(d)}</div><div id="keyhint">keys go to the agent · click outside to release</div>`;
+  box.innerHTML = `<div class="tgrid">${renderCapture(d, document.documentElement.dataset.theme === "dark")}</div><div class="keyhint">keys go to the agent · click outside to release</div>`;
   if (force || nearBottom) box.scrollTop = box.scrollHeight;
   if (hadFocus) box.classList.add("focused");
 }
 
-function select(name) {
-  sel = name;
-  const i = panel.instances.find(x => x.instance === name);
-  $("vhead").style.display = "block";
-  $("composer").style.display = "flex";
-  $("vtitle").textContent = name;
-  $("vbadge").textContent = i.running ? "running" : "idle";
-  $("vbadge").className = "badge " + (i.running ? "on" : "off");
-  $("vinfo").innerHTML = [
-    `soul <b>${i.agent}</b>`,
-    `repo <b>${i.repoName}</b>${i.branch ? ` @ <b>${i.branch}</b>` : ""}`,
-    `mode <b>${i.work}</b>`,
-    `runtime <b>${i.runtime}</b>${i.model ? ` (${i.model})` : ""}`,
-    i.next ? `next: ${i.next.slice(0, 110)}` : "",
-  ].filter(Boolean).map(x => `<span>${x}</span>`).join("");
+/* ── panes: editor-style splits, one focused pane takes input ── */
+function makePane() {
+  const p = { id: ++paneSeq, sel: null, gen: 0, lastSig: "", fastUntil: 0, keyQueue: "", keyFlush: null };
+  p.el = document.createElement("div"); p.el.className = "pane"; p.el.dataset.pane = p.id;
+  p.headEl = document.createElement("div"); p.headEl.className = "phead"; p.headEl.style.display = "none";
+  p.termEl = document.createElement("div"); p.termEl.className = "term"; p.termEl.tabIndex = 0;
+  p.termEl.innerHTML = '<div class="empty"><span class="big">⌥</span>Select an instance to sit at its terminal.<br>Everything you type goes straight into the agent\'s session — the terminal input line is the composer.</div>';
+  p.el.append(p.headEl, p.termEl);
+  wirePaneEvents(p);
+  $("panes").appendChild(p.el);
+  panes.push(p);
+  return p;
+}
+function focusPane(p) {
+  focusedId = p.id;
+  for (const q of panes) q.el.classList.toggle("focused", q.id === focusedId);
   renderRoster();
-  lastTermSig = "";
-  termReq++; // invalidate any in-flight fetch for the previous instance
-  $("term").innerHTML = '<div class="loading-block"><span class="spinner"></span> Attaching to session…</div>';
-  refreshTerm(true);
-  $("msg").focus();
+}
+function setPaneSession(p, name) {
+  p.sel = name; p.lastSig = ""; p.gen++;   // invalidate in-flight fetches for this pane
+  p.keyQueue = "";                          // never leak queued keys across a switch
+  const i = panel.instances.find(x => x.instance === name);
+  renderPaneHead(p, i);
+  p.termEl.innerHTML = '<div class="loading-block"><span class="spinner"></span> Attaching to session…</div>';
+  refreshTerm(p, true);
+  focusPane(p);
+  p.termEl.focus();
+}
+function renderPaneHead(p, i) {
+  p.headEl.style.display = "flex";
+  const metaParts = i ? [
+    `<b>${escapeHtml(i.agent)}</b>`,
+    `<b>${escapeHtml(i.repoName)}</b>${i.branch ? ` @ <b>${escapeHtml(i.branch)}</b>` : ""}`,
+    `${escapeHtml(i.work || "")}`,
+    `${escapeHtml(i.runtime || "")}${i.model ? ` (${escapeHtml(i.model)})` : ""}`,
+  ].filter(s => s).join(" · ") : "";
+  const tip = i ? [
+    `soul ${i.agent}`,
+    `repo ${i.repoName}${i.branch ? " @ " + i.branch : ""}`,
+    i.work ? `mode ${i.work}` : "",
+    `runtime ${i.runtime}${i.model ? " (" + i.model + ")" : ""}`,
+    i.next ? `next: ${i.next}` : "",
+  ].filter(Boolean).join("\n") : "";
+  p.headEl.innerHTML = `
+    <span class="title">${escapeHtml(p.sel)}</span>
+    <span class="badge ${i && i.running ? "on" : "off"}">${i && i.running ? "running" : "idle"}</span>
+    <span class="meta" title="${escapeHtml(tip)}">${metaParts}</span>
+    <span class="actions">
+      <button class="pbtn split" title="Split (open another session beside this one)">⫽</button>
+      <button class="pbtn int" title="Send Ctrl-C">✕C</button>
+      <button class="pbtn close" title="Close pane">✕</button>
+    </span>
+  `;
+  p.headEl.querySelector(".split").onclick = (e) => { e.stopPropagation(); addSplit(null); };
+  p.headEl.querySelector(".int").onclick = async (e) => {
+    e.stopPropagation();
+    if (p.sel) { await fetch(`/api/interrupt/${encodeURIComponent(p.sel)}`, { method: "POST" }); setTimeout(() => refreshTerm(p, true), 350); }
+  };
+  p.headEl.querySelector(".close").onclick = (e) => { e.stopPropagation(); closePane(p); };
+  p.headEl.onclick = () => focusPane(p);
+}
+function addSplit(name) {
+  if (panes.length >= MAX_PANES) {
+    const last = panes[panes.length - 1];
+    focusPane(last);
+    if (name) setPaneSession(last, name);
+    return;
+  }
+  const p = makePane();
+  focusPane(p);
+  if (name) setPaneSession(p, name);
+}
+function closePane(p) {
+  if (panes.length === 1) { // last pane: just clear it, don't remove
+    p.sel = null; p.gen++; p.lastSig = ""; p.headEl.style.display = "none";
+    p.termEl.innerHTML = '<div class="empty"><span class="big">⌥</span>Select an instance to sit at its terminal.<br>Everything you type goes straight into the agent\'s session — the terminal input line is the composer.</div>';
+    renderRoster();
+    return;
+  }
+  p.gen++; p.el.remove();
+  panes = panes.filter(q => q.id !== p.id);
+  if (focusedId === p.id) focusPane(panes[panes.length - 1]);
+  renderRoster();
 }
 
-/* ── composer: message + Enter via /api/send (kept — the comfortable way to
-   talk to the agent); the terminal itself takes raw keys when focused. ── */
-async function sendMsg() {
-  const input = $("msg"); const text = input.value;
-  if (!sel || !text.trim()) return;
-  input.value = "";
-  $("composer").classList.remove("expanded");
-  autosize();
-  fastPollUntil = Date.now() + 15000; // tight polling right after a send
-  await fetch(`/api/send/${sel}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text }) });
-  refreshTerm(true);
-}
-$("sendbtn").onclick = sendMsg;
-
-const msgEl = $("msg");
-function autosize() {
-  msgEl.style.height = "auto";
-  msgEl.style.height = Math.min(msgEl.scrollHeight, $("composer").classList.contains("expanded") ? window.innerHeight * .46 : 176) + "px";
-}
-function toggleExpand() {
-  $("composer").classList.toggle("expanded");
-  autosize(); msgEl.focus();
-}
-msgEl.addEventListener("input", autosize);
-msgEl.addEventListener("keydown", (e) => {
-  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMsg(); return; }
-  if (e.key === "e" && e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); toggleExpand(); return; }
-  if (e.key === "Escape" && $("composer").classList.contains("expanded")) { e.preventDefault(); toggleExpand(); }
-});
-$("expandbtn").onclick = toggleExpand;
-$("intbtn").onclick = async () => { if (sel) { await fetch(`/api/interrupt/${sel}`, { method: "POST" }); setTimeout(() => refreshTerm(true), 350); } };
 $("filter").addEventListener("input", (e) => { filterText = e.target.value; renderRoster(); });
 
-/* ── direct keyboard passthrough: click the terminal, type into the agent.
+/* ── direct keyboard passthrough: click a terminal pane, type into the agent.
    Keydown → bytes → POST /api/keys. Browser/Cmd shortcuts pass through. ── */
-const termEl = $("term");
-termEl.addEventListener("mousedown", () => { if (sel) setTimeout(() => termEl.focus(), 0); });
-termEl.addEventListener("focus", () => termEl.classList.add("focused"));
-termEl.addEventListener("blur", () => termEl.classList.remove("focused"));
-
-let keyQueue = "";
-let keyQueueFor = null; // instance the queued keys were typed at
-let keyFlush = null;
-function queueKeys(data) {
-  if (keyQueueFor !== sel) { keyQueue = ""; keyQueueFor = sel; } // never leak keys across a switch
-  keyQueue += data;
-  if (keyFlush) return;
-  keyFlush = setTimeout(async () => {
-    const payload = keyQueue, forSel = keyQueueFor;
-    keyQueue = ""; keyFlush = null;
-    if (!forSel || forSel !== sel || !payload) return;
-    fastPollUntil = Date.now() + 4000;
+function wirePaneEvents(p) {
+  const t = p.termEl;
+  t.addEventListener("mousedown", () => { focusPane(p); if (p.sel) setTimeout(() => t.focus(), 0); });
+  t.addEventListener("focus", () => { t.classList.add("focused"); focusPane(p); });
+  t.addEventListener("blur", () => t.classList.remove("focused"));
+  t.addEventListener("keydown", (e) => {
+    if (!p.sel || document.activeElement !== t) return;
+    const bytes = keyToBytes(e);
+    if (bytes == null) return; // let the browser handle it
+    e.preventDefault();
+    queueKeys(p, bytes);
+  });
+  t.addEventListener("paste", (e) => {
+    if (!p.sel || document.activeElement !== t) return;
+    const text = e.clipboardData?.getData("text");
+    if (!text) return;
+    e.preventDefault();
+    // Pastes never ride the key path: the server routes { paste: true } through
+    // tmux load-buffer/paste-buffer -p so multiline text is ONE bracketed paste,
+    // not a series of carriage returns a shell would execute line by line.
+    const forSel = p.sel;
+    p.fastUntil = Date.now() + 4000;
+    fetch(`/api/keys/${encodeURIComponent(forSel)}`, { method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ data: text, paste: true }) })
+      .then(() => { if (forSel === p.sel) refreshTerm(p, false); })
+      .catch(() => { /* transient */ });
+  });
+}
+function queueKeys(p, data) {
+  p.keyQueue += data;
+  if (p.keyFlush) return;
+  p.keyFlush = setTimeout(async () => {
+    const payload = p.keyQueue, forSel = p.sel;
+    p.keyQueue = ""; p.keyFlush = null;
+    if (!forSel || !payload) return;
+    p.fastUntil = Date.now() + 4000;
     try {
       await fetch(`/api/keys/${encodeURIComponent(forSel)}`, { method: "POST",
         headers: { "content-type": "application/json" }, body: JSON.stringify({ data: payload }) });
     } catch { /* transient */ }
-    refreshTerm(false);
+    if (forSel === p.sel) refreshTerm(p, false);
   }, 12); // coalesce fast typing into one request
 }
 function keyToBytes(e) {
@@ -685,34 +755,13 @@ function keyToBytes(e) {
   if (k.length === 1) return e.altKey ? "\x1b" + k : k; // printable (alt = ESC prefix)
   return null; // Shift, F-keys, media keys… let them be
 }
-termEl.addEventListener("keydown", (e) => {
-  if (!sel || document.activeElement !== termEl) return;
-  const bytes = keyToBytes(e);
-  if (bytes == null) return; // let the browser handle it
-  e.preventDefault();
-  queueKeys(bytes);
-});
-termEl.addEventListener("paste", (e) => {
-  if (!sel || document.activeElement !== termEl) return;
-  const text = e.clipboardData?.getData("text");
-  if (!text) return;
-  e.preventDefault();
-  // Pastes never ride the key path: the server routes { paste: true } through
-  // tmux load-buffer/paste-buffer -p so multiline text is ONE bracketed paste,
-  // not a series of carriage returns a shell would execute line by line.
-  const forSel = sel;
-  fastPollUntil = Date.now() + 4000;
-  fetch(`/api/keys/${encodeURIComponent(forSel)}`, { method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ data: text, paste: true }) })
-    .then(() => { if (forSel === sel) refreshTerm(false); })
-    .catch(() => { /* transient */ });
-});
 
+makePane();
+focusPane(panes[0]);
 refreshPanel();
 setInterval(refreshPanel, 4000);
-setInterval(() => refreshTerm(false), 500);
-setInterval(() => { if (Date.now() < fastPollUntil) refreshTerm(false); }, 150); // tight loop after sends
+setInterval(() => panes.forEach(p => refreshTerm(p, false)), 500);
+setInterval(() => { const now = Date.now(); panes.forEach(p => { if (now < p.fastUntil) refreshTerm(p, false); }); }, 150); // tight loop after sends
 </script>
 </body>
 </html>
