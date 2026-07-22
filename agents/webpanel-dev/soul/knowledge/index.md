@@ -29,6 +29,7 @@ marketplace capability (`capabilities/oas-web/`: `bin/oas-web.mjs` server +
 
 ## lessons/
 
+* [lessons/fast-attach-cache-tail-backfill.md](lessons/fast-attach-cache-tail-backfill.md) - Attach latency is dominated by rebuilding the control-pane registry and serial tmux round trips, so keep a short registry cache, merge pane metadata queries, paint a cached or short tail first, and deep-backfill later with the requested line count in the render signature.
 * [lessons/logical-key-routing-not-dom-focus.md](lessons/logical-key-routing-not-dom-focus.md) - Binding keydown to the terminal element made typing silently die whenever a button or header click moved DOM focus while the pane still looked focused; route keys with a window listener to the logical focused pane and ignore real editable controls.
 * [lessons/multiline-send-bracketed-paste.md](lessons/multiline-send-bracketed-paste.md) - Any path that delivers text containing newlines into an agent pane must use load-buffer plus paste-buffer -p; raw send-keys/newline delivery submits each line separately or can execute pasted lines one by one.
 * [lessons/stale-response-race.md](lessons/stale-response-race.md) - the chatReq request-generation, selection-pinning, and cache-isolation guards against transcript cross-bleed.
