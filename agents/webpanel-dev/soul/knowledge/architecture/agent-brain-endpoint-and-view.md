@@ -22,3 +22,4 @@ A brain endpoint shape test that selects only a persistent/local agent can pass 
 
 - [oas-web architecture](/architecture/oas-web-architecture.md) lists the endpoint in the server surface.
 - [Scope snapshot lookups to the caller's workspace](/lessons/workspace-scoped-snapshot-lookups.md) records the running-state scoping trap.
+- [Contract-test the shared desktop renderer harness against shipped views](/lessons/shared-renderer-harness-enumeration-test.md) records the shared-harness tab enumeration rule.

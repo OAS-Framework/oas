@@ -51,8 +51,12 @@ panel is terminal-mirror-only and no longer contains it.
 POSTs, so a plain static file server cannot host the harness. The desktop
 renderer `harness-server.mjs` serves the renderer dir and proxies `/api/*` to the
 `oas-web` server so harness development stays same-origin like the real shell.
-There is ONE shared harness (`harness.html`, a tab per view); standalone
-per-view harness/proxy pairs (like the retired `dev-serve.mjs`) are not kept.
+There is ONE shared harness (`harness.html`, a `data-view` tab per view). A
+contract test enumerates shipped `views/*.mjs` modules that export `mount` and
+asserts a tab exists for each, while also asserting no standalone `dev-*`
+harness/proxy files reappear. Standalone per-view harness/proxy pairs (like the
+retired `dev-serve.mjs`) are not kept; see the [shared harness enumeration test
+lesson](/lessons/shared-renderer-harness-enumeration-test.md).
 
 The proxy must apply the same loopback `Host` check before serving static files
 or proxying `/api/*`. For POSTs it must also validate the inbound `Origin`. It
