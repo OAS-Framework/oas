@@ -24,6 +24,24 @@ decisions/ and referenced from here.
 
 ---
 
+## PR #14 (round 3) — oas-web 0.8.0 spawn-from-panel (2026-07-22)
+- verdict: MERGED — all four gates green; approval again a PR comment
+  (same-account block — applies to --request-changes too). Round-3 merge
+  commit ea1f5b1 resolved the post-#16 four-file conflict exactly as asked:
+  0.8.0 + >=0.16.0 floor kept, main's makeRegistryCache findInstance
+  preserved untouched (zero main-side deletions) alongside the branch's
+  agentsData()/spawnAgent(), soul index/log unions. Scratch-worktree gate:
+  63/63 tests (OASWEB_KEYROUTE + #16 registry-cache/attach tests), check,
+  validate, pack:check. Merge-commit merge (clean history); remote branch
+  deleted via `git push origin --delete` (author worktree held it — owner
+  notified).
+- owner: webpanel-dev-spawn-from-panel · coordinator: none
+- taught us: two consecutive pure-mergeability RETURNs on one PR confirms
+  the staleness lesson (promoted to lessons/) — authors should re-check
+  `mergeable` at handback; the author's round-2 resolution (verified
+  adjacency by parse + live probe) is the standard we want. Release pending:
+  marketplace oas.web 0.5.0 vs repo 0.8.0.
+
 ## PR #14 (round 2) — oas-web 0.8.0 spawn-from-panel re-review (2026-07-22)
 - verdict: RETURNED again — gates 1–3 still PASS (no new branch commits
   besides the requested main merge 237d628, which resolved the PR #13

@@ -16,6 +16,10 @@ than letting the file grow stale.
 
 ## On main
 
+- PR #14 merged 2026-07-22: oas.web 0.8.0 — spawn-from-panel (/api/agents +
+  /api/spawn, agentsRoot allowlist, no-task default spawn, CLI-parity
+  capability-agent resolution, compat floor >=0.16.0 with regression test).
+
 - PR #16 merged 2026-07-22: oas.web 0.7.2 — fast session attach (instance-
   registry 2.5s-TTL cache, single-round-trip paneInfo(), three-rung client
   attach: cached frame → 120-line tail → gen-guarded deep backfill), unit
@@ -41,25 +45,20 @@ than letting the file grow stale.
   (dark/solarized) with palette isolation + tmux splits, skill-load mandates
   in all injections, coordinator maintainer-merge contract.
 - Capabilities at: oas.review 1.1.3, oas.okf 1.2.2, oas.aweb 1.5.1,
-  oas.web 0.7.2 (published marketplace carries review 1.1.2 and web 0.5.0
+  oas.web 0.8.0 (published marketplace carries review 1.1.2 and web 0.5.0
   until next tag).
 
 ## In flight
 
-- PR #14 (oas-web 0.8.0 spawn-from-panel: /api/agents + /api/spawn, agentsRoot
-  allowlist, no-task default spawn) — RETURNED twice 2026-07-22: first for
-  post-#13 conflicts (resolved via merge 237d628), then again because PR #16
-  landed after that merge (four-file conflict incl. registry-cache
-  findInstance vs agentsData/spawnAgent in oas-web.mjs). Gates 1–3 pass;
-  owner webpanel-dev-spawn-from-panel resolving and re-requesting.
+- (none)
 
 ## Recent deliveries
 
 - (record PR #, one-line scope, verdict, merge/close date)
 - PR #16 oas.web 0.7.2 fast session attach: MERGED 2026-07-22 (see
   delivery-log).
-- PR #14 oas-web 0.8.0 spawn-from-panel: RETURNED twice 2026-07-22
-  (mergeability only both times — main moved under the branch; see
+- PR #14 oas-web 0.8.0 spawn-from-panel: MERGED 2026-07-22 after two
+  mergeability-only RETURNs (main moved under the branch twice; see
   delivery-log).
 - PR #13 oas.web 0.7.1 logical key routing fix: MERGED 2026-07-22 (see
   delivery-log).
@@ -78,7 +77,8 @@ than letting the file grow stale.
 - Org-level GitHub Actions policy blocks CI bump-PRs — manual rescue each
   release until an org admin relaxes it.
 - Marketplace oas.review 1.1.2 vs repo 1.1.3, and oas.web 0.5.0 vs repo
-  0.7.2 — fold into next release/tag.
-- webpanel-dev-1's instance worktree still holds deleted branches locally
-  (feature/panel-refinements, fix/panel-key-routing, perf/fast-attach —
-  owner notified to clean up).
+  0.8.0 — fold into next release/tag.
+- webpanel-dev instance worktrees still hold deleted branches locally
+  (webpanel-dev-1: feature/panel-refinements, fix/panel-key-routing,
+  perf/fast-attach; webpanel-dev-spawn-from-panel:
+  agents/webpanel-dev-spawn-from-panel — owners notified to clean up).
