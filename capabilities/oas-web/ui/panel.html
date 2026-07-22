@@ -243,8 +243,9 @@ function toggleSide() {
 }
 $("sidebtn").onclick = toggleSide;
 window.addEventListener("keydown", (e) => {
-  if (e.key === "b" && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey) {
-    if (document.activeElement && document.activeElement.classList.contains("term")) return;
+  if (e.key === "b" && e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+    // Cmd-B always toggles the sidebar; Ctrl-B is the tmux prefix and belongs
+    // to the focused session (the window key router below sends it there).
     e.preventDefault(); toggleSide();
   }
 });
@@ -586,10 +587,8 @@ async function refreshTerm(p, force) {
   if (sig === p.lastSig && !force) return;
   p.lastSig = sig;
   const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 60;
-  const hadFocus = box.classList.contains("focused");
-  box.innerHTML = `<div class="tgrid">${renderCapture(d, document.documentElement.dataset.theme === "dark")}</div><div class="keyhint">keys go to the agent · click outside to release</div>`;
+  box.innerHTML = `<div class="tgrid">${renderCapture(d, document.documentElement.dataset.theme === "dark")}</div><div class="keyhint">keys go to this agent</div>`;
   if (force || nearBottom) box.scrollTop = box.scrollHeight;
-  if (hadFocus) box.classList.add("focused");
 }
 
 /* ── panes: editor-style splits, one focused pane takes input ── */
@@ -597,7 +596,7 @@ function makePane() {
   const p = { id: ++paneSeq, sel: null, gen: 0, lastSig: "", fastUntil: 0, keyQueue: "", keyFlush: null };
   p.el = document.createElement("div"); p.el.className = "pane"; p.el.dataset.pane = p.id;
   p.headEl = document.createElement("div"); p.headEl.className = "phead"; p.headEl.style.display = "none";
-  p.termEl = document.createElement("div"); p.termEl.className = "term"; p.termEl.tabIndex = 0;
+  p.termEl = document.createElement("div"); p.termEl.className = "term";
   p.termEl.innerHTML = '<div class="empty"><span class="big">⌥</span>Select an instance to sit at its terminal.<br>Everything you type goes straight into the agent\'s session — the terminal input line is the composer.</div>';
   p.el.append(p.headEl, p.termEl);
   wirePaneEvents(p);
@@ -607,7 +606,10 @@ function makePane() {
 }
 function focusPane(p) {
   focusedId = p.id;
-  for (const q of panes) q.el.classList.toggle("focused", q.id === focusedId);
+  for (const q of panes) {
+    q.el.classList.toggle("focused", q.id === focusedId);
+    q.termEl.classList.toggle("focused", q.id === focusedId && !!q.sel);
+  }
   renderRoster();
 }
 function setPaneSession(p, name) {
@@ -618,7 +620,6 @@ function setPaneSession(p, name) {
   p.termEl.innerHTML = '<div class="loading-block"><span class="spinner"></span> Attaching to session…</div>';
   refreshTerm(p, true);
   focusPane(p);
-  p.termEl.focus();
 }
 function renderPaneHead(p, i) {
   p.headEl.style.display = "flex";
@@ -681,35 +682,44 @@ $("filter").addEventListener("input", (e) => { filterText = e.target.value; rend
 
 /* ── direct keyboard passthrough: click a terminal pane, type into the agent.
    Keydown → bytes → POST /api/keys. Browser/Cmd shortcuts pass through. ── */
+/* Keyboard routing is LOGICAL, not DOM-focus-bound: keys go to the focused
+   pane whenever the user is not typing in a real editable control. Binding
+   keydown to the term element proved fragile — clicking the pane header, the
+   sidebar toggle, or a split button moved DOM focus and silently swallowed
+   all typing while the pane still looked focused (0.7.0 regression). */
 function wirePaneEvents(p) {
-  const t = p.termEl;
-  t.addEventListener("mousedown", () => { focusPane(p); if (p.sel) setTimeout(() => t.focus(), 0); });
-  t.addEventListener("focus", () => { t.classList.add("focused"); focusPane(p); });
-  t.addEventListener("blur", () => t.classList.remove("focused"));
-  t.addEventListener("keydown", (e) => {
-    if (!p.sel || document.activeElement !== t) return;
-    const bytes = keyToBytes(e);
-    if (bytes == null) return; // let the browser handle it
-    e.preventDefault();
-    queueKeys(p, bytes);
-  });
-  t.addEventListener("paste", (e) => {
-    if (!p.sel || document.activeElement !== t) return;
-    const text = e.clipboardData?.getData("text");
-    if (!text) return;
-    e.preventDefault();
-    // Pastes never ride the key path: the server routes { paste: true } through
-    // tmux load-buffer/paste-buffer -p so multiline text is ONE bracketed paste,
-    // not a series of carriage returns a shell would execute line by line.
-    const forSel = p.sel;
-    p.fastUntil = Date.now() + 4000;
-    fetch(`/api/keys/${encodeURIComponent(forSel)}`, { method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ data: text, paste: true }) })
-      .then(() => { if (forSel === p.sel) refreshTerm(p, false); })
-      .catch(() => { /* transient */ });
-  });
+  // any click inside the pane (header included) claims keyboard input for it
+  p.el.addEventListener("mousedown", () => focusPane(p));
 }
+const inEditable = (el) => !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" ||
+                                    el.tagName === "SELECT" || el.isContentEditable);
+window.addEventListener("keydown", (e) => {
+  if (inEditable(document.activeElement)) return;   // filter box etc. keep their keys
+  const p = focusedPane();
+  if (!p || !p.sel) return;
+  const bytes = keyToBytes(e);
+  if (bytes == null) return; // browser/Cmd shortcuts pass through
+  e.preventDefault();
+  queueKeys(p, bytes);
+});
+window.addEventListener("paste", (e) => {
+  if (inEditable(document.activeElement)) return;
+  const p = focusedPane();
+  if (!p || !p.sel) return;
+  const text = e.clipboardData?.getData("text");
+  if (!text) return;
+  e.preventDefault();
+  // Pastes never ride the key path: the server routes { paste: true } through
+  // tmux load-buffer/paste-buffer -p so multiline text is ONE bracketed paste,
+  // not a series of carriage returns a shell would execute line by line.
+  const forSel = p.sel;
+  p.fastUntil = Date.now() + 4000;
+  fetch(`/api/keys/${encodeURIComponent(forSel)}`, { method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ data: text, paste: true }) })
+    .then(() => { if (forSel === p.sel) refreshTerm(p, false); })
+    .catch(() => { /* transient */ });
+});
 function queueKeys(p, data) {
   p.keyQueue += data;
   if (p.keyFlush) return;
