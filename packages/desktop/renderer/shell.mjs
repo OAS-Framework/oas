@@ -7,6 +7,7 @@
 // chat transcript, spawn, jira) lives in the ported views — the shell chrome
 // stays a thin rail so nothing is duplicated.
 import { currentWorkspace } from "./views/common.mjs";
+import { createViewLifecycle } from "./view-lifecycle.mjs";
 
 const desk = window.oasDesktop;
 
@@ -89,26 +90,22 @@ async function openViewTab(name, title, extra = {}, key = `view:${name}`) {
     if (made) made.paneEl.innerHTML = `<div class="placeholder"><h2>${name}</h2><div>view module failed to load: ${e.message}</div></div>`;
     return;
   }
+  const life = createViewLifecycle(mod, (e) => console.error(e));
   const made = addTab({
     title,
     key,
-    // Filled after mount: prefer the disposer mount() returns (per-mount
-    // cleanup — supports several tabs of one module); fall back to the
-    // module-level unmount() for views that keep the original contract.
-    onClose: () => {
-      try {
-        if (typeof made.dispose === "function") made.dispose();
-        else mod.unmount?.();
-      } catch (e) { console.error(e); }
-    },
+    // Close is safe at any time — including while the async mount is still
+    // pending: the lifecycle defers cleanup until mount settles and then
+    // runs THAT mount's disposer (never the module-wide unmount mid-flight,
+    // which would clear every open mount of the module).
+    onClose: () => life.close(),
   });
   if (!made) return; // existing tab activated
   const el = document.createElement("div");
   el.style.height = "100%";
   made.paneEl.append(el);
   try {
-    const r = await mod.mount(el, { ...ctx, ...extra });
-    if (typeof r === "function") made.dispose = r;
+    await life.mounted(el, { ...ctx, ...extra });
   }
   catch (e) { el.innerHTML = `<div class="placeholder"><h2>${name}</h2><div>mount failed: ${e.message}</div></div>`; }
 }
