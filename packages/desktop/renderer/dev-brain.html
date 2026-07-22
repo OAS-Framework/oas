@@ -1,0 +1,26 @@
+<!doctype html>
+<!-- Standalone dev harness for the brain view: run the oas-web server
+     (node capabilities/oas-web/bin/oas-web.mjs start --port 4820 --dir <ws>)
+     then serve this directory (e.g. npx serve) or open via the server origin.
+     The real host is the desktop shell; this page only fakes ctx. -->
+<html data-theme="dark">
+<head><meta charset="utf-8"><title>brain view — dev harness</title>
+<style>
+  :root, [data-theme="dark"] { --bg:#0e1116; --surface:#161b22; --surface-2:#1c2129; --border:#2d333c;
+    --fg:#e6edf3; --muted:#9aa4b2; --faint:#6e7681; --accent:#4493f8; --ok:#3fb950;
+    --sel:#1f6feb26; --shadow:0 1px 3px rgb(0 0 0 / .4); }
+  html, body, #host { height: 100%; margin: 0; background: var(--bg); }
+</style></head>
+<body>
+<div id="host"></div>
+<script type="module">
+  import { mount } from "./views/brain.js";
+  const base = "http://127.0.0.1:4820";
+  mount(document.getElementById("host"), {
+    api: (pathname) => fetch(base + pathname),
+    openFile: (path) => alert("openFile → " + path),
+    openTerminal: (instance) => alert("openTerminal → " + instance),
+  });
+</script>
+</body>
+</html>

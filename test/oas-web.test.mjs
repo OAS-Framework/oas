@@ -288,6 +288,52 @@ test("oas-web server: POST origin guard rejects hostile/null origins without cra
   } finally { proc.kill(); }
 });
 
+// ---- /api/brain/<agent>: soul + instance artifact map per the desktop-app contract ----
+
+test("oas-web server: /api/brain returns the contract shape with absolute paths", async () => {
+  const port = 4000 + Math.floor(Math.random() * 2000);
+  const proc = spawn(process.execPath, [join(CAP, "bin", "oas-web.mjs"), "start", "--port", String(port), "--dir", ROOT], { stdio: "ignore" });
+  try {
+    let up = false;
+    for (let i = 0; i < 40 && !up; i++) {
+      await new Promise((r) => setTimeout(r, 100));
+      try { await fetch(`http://127.0.0.1:${port}/api/panel`); up = true; } catch { /* retry */ }
+    }
+    assert.ok(up, "server came up");
+    // pick a real agent from /api/agents (persistent souls have a soul/ dir)
+    const agents = (await (await fetch(`http://127.0.0.1:${port}/api/agents`)).json()).agents;
+    const target = agents.find((a) => a.kind === "persistent") || agents[0];
+    assert.ok(target, "an agent exists to inspect");
+    const d = await (await fetch(`http://127.0.0.1:${port}/api/brain/${target.name}`)).json();
+    assert.equal(d.agent, target.name);
+    assert.equal(typeof d.description, "string");
+    assert.ok(d.agentsRoot.startsWith("/"), "agentsRoot is absolute");
+    // soul block: AGENTS.md path, skills [{name,path,description}], knowledge {index,tree}
+    assert.ok(d.soul && typeof d.soul === "object", "soul block present");
+    if (d.soul.agentsMd) assert.ok(d.soul.agentsMd.startsWith("/") && d.soul.agentsMd.endsWith("AGENTS.md"));
+    assert.ok(Array.isArray(d.soul.skills));
+    for (const s of d.soul.skills) {
+      assert.ok(s.name && s.path.startsWith("/") && s.path.endsWith("SKILL.md"), "skill has name + absolute SKILL.md path");
+      assert.equal(typeof s.description, "string");
+    }
+    assert.ok(d.soul.knowledge && Array.isArray(d.soul.knowledge.tree));
+    for (const p of d.soul.knowledge.tree) assert.ok(p.startsWith("/") && p.endsWith(".md"), "knowledge tree entries are absolute .md paths");
+    if (d.soul.knowledge.index) assert.ok(d.soul.knowledge.tree.includes(d.soul.knowledge.index), "index is part of the tree");
+    // instances block
+    assert.ok(Array.isArray(d.instances));
+    for (const i of d.instances) {
+      assert.ok(i.instance && i.home.startsWith("/"), "instance has name + absolute home");
+      assert.equal(typeof i.running, "boolean");
+      assert.ok(Array.isArray(i.skills) && Array.isArray(i.notes));
+      for (const k of ["agentsMd", "state", "task"]) if (i[k] !== null) assert.ok(i[k].startsWith(i.home), `${k} lives under the instance home`);
+      for (const n of i.notes) assert.ok(n.startsWith(i.home) && n.endsWith(".md"));
+    }
+    // unknown agent → 404; hostile agent name never becomes a path probe
+    assert.equal((await fetch(`http://127.0.0.1:${port}/api/brain/no-such-agent`)).status, 404);
+    assert.equal((await fetch(`http://127.0.0.1:${port}/api/brain/..%2F..%2Fetc`)).status, 404, "traversal-shaped names don't match the route");
+  } finally { proc.kill(); }
+});
+
 // ---- /api/agents + /api/spawn: roster of spawnable souls incl. capability agents ----
 
 test("oas-web server: /api/agents lists persistent AND capability-defined agents; /api/spawn validates", async () => {
