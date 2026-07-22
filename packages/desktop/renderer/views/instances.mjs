@@ -8,7 +8,7 @@
 import {
   escapeHtml, miniMarkdown, apiJson, postJson, ensureTheme,
   groupInstances, currentWorkspace, setWorkspace, adoptWorkspace, onWorkspaceChange,
-  renderWorkspaceSelect, wsQuery, instanceApiPath,
+  renderWorkspaceSelect, wsQuery, instanceApiPath, workspaceGeneration,
 } from "./common.mjs";
 
 let state = null;
@@ -91,10 +91,12 @@ function matches(s, i) {
 }
 
 async function refreshPanel(s) {
+  const myGen = workspaceGeneration();       // capture at dispatch
   let panel;
   try { panel = await apiJson(s.ctx, `/api/panel${wsQuery()}`); }
   catch { return; } // keep last good roster on transient errors
-  if (!s.alive) return;
+  // discard deferred roster responses from a previous workspace
+  if (!s.alive || myGen !== workspaceGeneration()) return;
   s.panel = panel;
   if (panel.workspace && panel.workspace.id !== currentWorkspace()) {
     // server resolved our (possibly stale) ws to a real one — adopt it silently

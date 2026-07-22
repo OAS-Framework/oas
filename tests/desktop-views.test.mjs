@@ -171,3 +171,145 @@ test("jira guard: a deferred response from the previous workspace never paints a
     common.setWorkspace(prevWs);
   }
 });
+
+test("ws generation: deferred roster/agents responses from workspace A never paint after switching to B", async () => {
+  const common = await import(new URL("../packages/desktop/renderer/views/common.mjs", import.meta.url).href);
+  const { refresh } = await import(new URL("../packages/desktop/renderer/views/spawn.mjs", import.meta.url).href);
+  const gate = [];
+  const payload = (body) => ({ ok: true, status: 200, json: async () => body });
+  const ctx = { api: (pathname) => new Promise((ok) => gate.push({ pathname, ok })) };
+  const painted = [];
+  // renderList/renderWorkspaceSelect touch the DOM; stub the minimum and
+  // observe paints via s.souls
+  const fakeEl = () => ({ style: {}, dataset: {}, classList: { toggle() {}, add() {} }, innerHTML: "", textContent: "", title: "",
+                          appendChild() {}, querySelectorAll: () => [], addEventListener() {} });
+  const hadDoc = Object.prototype.hasOwnProperty.call(globalThis, "document");
+  if (!hadDoc) globalThis.document = { createElement: fakeEl };
+  const s = {
+    alive: true, ctx, souls: { agents: [] }, filterText: "",
+    q: () => fakeEl(),
+  };
+  const prevWs = common.currentWorkspace();
+  try {
+    common.setWorkspace("wsA");
+    const inFlightA = refresh(s);            // /api/agents + /api/panel for wsA in flight
+    assert.match(gate[0].pathname, /ws=wsA/);
+    common.setWorkspace("wsB");              // switch bumps the generation
+    const inFlightB = refresh(s);
+    assert.match(gate[2].pathname, /ws=wsB/);
+    // wsB's responses land and paint
+    gate[2].ok(payload({ agents: [{ name: "from-B" }] }));
+    gate[3].ok(payload({ workspaces: [], workspace: { id: "wsB" }, instances: [] }));
+    await inFlightB;
+    assert.equal(s.souls.agents[0].name, "from-B");
+    // wsA's STALE responses land late — they must not overwrite wsB's list
+    gate[0].ok(payload({ agents: [{ name: "from-A" }] }));
+    gate[1].ok(payload({ workspaces: [], workspace: { id: "wsA" }, instances: [] }));
+    await inFlightA;
+    assert.equal(s.souls.agents[0].name, "from-B", "stale workspace-A agents must never paint after switching to B");
+  } finally {
+    common.setWorkspace(prevWs);
+    if (!hadDoc) delete globalThis.document;
+  }
+});
+
+test("ws generation: a spawn begun in workspace A completing after a switch to B never auto-opens the terminal", async () => {
+  const common = await import(new URL("../packages/desktop/renderer/views/common.mjs", import.meta.url).href);
+  const { doSpawn } = await import(new URL("../packages/desktop/renderer/views/spawn.mjs", import.meta.url).href);
+  const opened = [];
+  let release;
+  const ctx = {
+    api: () => new Promise((ok) => { release = () => ok({ ok: true, status: 200, json: async () => ({ instance: "dev-1", launched: true }) }); }),
+    openTerminal: (name) => opened.push(name),
+  };
+  const fields = { ftask: { value: "t" }, fpurpose: { value: "" }, fspawn: { disabled: false, textContent: "" }, fstatus: { textContent: "" } };
+  const s = { ctx, selAgent: { name: "dev", agentsRoot: "/a" }, q: (cls) => fields[cls], spawnOp: 0 };
+  const prevWs = common.currentWorkspace();
+  try {
+    // in-flight spawn survives a workspace switch: must NOT auto-open
+    common.setWorkspace("wsA");
+    const inFlight = doSpawn(s);
+    common.setWorkspace("wsB");              // user switches while spawning
+    release();
+    await inFlight;
+    assert.deepEqual(opened, [], "openTerminal(dev-1) with wsB current would target a same-named B instance");
+    assert.match(fields.fstatus.textContent, /previous workspace/);
+    // control: same flow without a switch DOES auto-open
+    const p2 = doSpawn(s);
+    release();
+    await p2;
+    assert.deepEqual(opened, ["dev-1"]);
+  } finally {
+    common.setWorkspace(prevWs);
+  }
+});
+
+test("spawn op token: a stale workspace-A spawn completing during an in-flight B spawn never touches B's form", async () => {
+  const common = await import(new URL("../packages/desktop/renderer/views/common.mjs", import.meta.url).href);
+  const { doSpawn } = await import(new URL("../packages/desktop/renderer/views/spawn.mjs", import.meta.url).href);
+  const opened = [];
+  const releases = [];
+  const respond = (instance) => ({ ok: true, status: 200, json: async () => ({ instance, launched: true }) });
+  const ctx = {
+    api: () => new Promise((ok) => releases.push(ok)),
+    openTerminal: (name) => opened.push(name),
+  };
+  const fields = { ftask: { value: "task-A" }, fpurpose: { value: "" }, fspawn: { disabled: false, textContent: "" }, fstatus: { textContent: "" } };
+  const s = { ctx, selAgent: { name: "dev", agentsRoot: "/a" }, q: (cls) => fields[cls], spawnOp: 0 };
+  const prevWs = common.currentWorkspace();
+  try {
+    // spawn 1 dispatched in wsA
+    common.setWorkspace("wsA");
+    const spawnA = doSpawn(s);
+    // user switches to wsB, fills the SAME form for a B agent, spawns again
+    common.setWorkspace("wsB");
+    fields.ftask.value = "task-B"; fields.fstatus.textContent = "";
+    s.selAgent = { name: "dev-b", agentsRoot: "/b" };
+    const spawnB = doSpawn(s);
+    assert.equal(fields.fspawn.disabled, true, "B's spawn is in flight — button disabled");
+    // A's STALE completion lands while B is still in flight
+    releases[0](respond("inst-A"));
+    await spawnA;
+    assert.equal(fields.ftask.value, "task-B", "stale A completion must not clear B's task field");
+    assert.equal(fields.fstatus.textContent, "", "stale A completion must not overwrite B's status");
+    assert.equal(fields.fspawn.disabled, true, "stale A completion must not re-enable the button mid-B-spawn (duplicate-spawn hazard)");
+    assert.deepEqual(opened, [], "stale A completion must not open a terminal");
+    // B completes normally: owns the form, clears it, auto-opens
+    releases[1](respond("inst-B"));
+    await spawnB;
+    assert.equal(fields.ftask.value, "");
+    assert.match(fields.fstatus.textContent, /Spawned inst-B/);
+    assert.equal(fields.fspawn.disabled, false);
+    assert.deepEqual(opened, ["inst-B"]);
+  } finally {
+    common.setWorkspace(prevWs);
+  }
+});
+
+test("spawn op token: a stale spawn ERROR never overwrites the active spawn's status or button", async () => {
+  const common = await import(new URL("../packages/desktop/renderer/views/common.mjs", import.meta.url).href);
+  const { doSpawn } = await import(new URL("../packages/desktop/renderer/views/spawn.mjs", import.meta.url).href);
+  const releases = [];
+  const ctx = {
+    api: () => new Promise((ok, err) => releases.push({ ok, err })),
+    openTerminal: () => {},
+  };
+  const fields = { ftask: { value: "" }, fpurpose: { value: "" }, fspawn: { disabled: false, textContent: "" }, fstatus: { textContent: "" } };
+  const s = { ctx, selAgent: { name: "dev", agentsRoot: "/a" }, q: (cls) => fields[cls], spawnOp: 0 };
+  const prevWs = common.currentWorkspace();
+  try {
+    common.setWorkspace("wsA");
+    const spawn1 = doSpawn(s);
+    const spawn2 = doSpawn(s);             // supersedes spawn1 on the same form
+    releases[0].err(new Error("boom"));    // spawn1 fails LATE
+    await spawn1;
+    assert.equal(fields.fstatus.textContent, "", "stale error must not paint over the active spawn's status");
+    assert.equal(fields.fspawn.disabled, true, "stale error's finally must not re-enable the in-flight button");
+    releases[1].ok({ ok: true, status: 200, json: async () => ({ instance: "inst-2", launched: false }) });
+    await spawn2;
+    assert.match(fields.fstatus.textContent, /Spawned inst-2/);
+    assert.equal(fields.fspawn.disabled, false);
+  } finally {
+    common.setWorkspace(prevWs);
+  }
+});
