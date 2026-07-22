@@ -1,7 +1,7 @@
 ---
 type: Lesson
 title: Desktop shell view integration lessons
-description: Ported panel views rely on singleton modules, key-deduped tabs, .mjs loader naming, workspace-aware API pinning, exactly-once Fetch body serialization, and inline degradation when older shared servers lack endpoints.
+description: Ported panel views rely on singleton modules, key-deduped tabs, context-owning picker tabs, .mjs loader naming, workspace-aware API pinning, exactly-once Fetch body serialization, and inline degradation when older shared servers lack endpoints.
 tags: [desktop, view-host, integration, ipc, workspace]
 timestamp: 2026-07-22
 ---
@@ -20,6 +20,9 @@ with the [Desktop shell view-host contract and layout](desktop-shell-layout.md):
   orphan terminal can be disposed instead of crashing.
 - Shell chrome stays slimmed to a nav rail; `instances.mjs` is the roster and
   calls `ctx.openTerminal` for the handoff to the shell's terminal.
+- Views requiring per-tab context that the nav rail does not have, such as a
+  diff tab needing `ctx.instance`, should get a small shell-owned picker tab
+  rather than a bare nav entry.
 - The desktop host loads `views/<name>.mjs`; `brain` arrived as `brain.js` and
   had to be renamed, with references fixed in `dev-brain.html` and the header
   comment. It needs no extra `ctx` fields because it has its own agent selector.
