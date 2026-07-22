@@ -2,6 +2,8 @@
 
 ## 2026-07-22
 
+- **Update**: [async-mount-close-race.md](async-mount-close-race.md)
+  — merged lifecycle fulfillment tracking and dedup-key reservation follow-on races from tui-dev-desktop-shell notes.
 - **Creation**: [async-mount-close-race.md](async-mount-close-race.md)
   — promoted the async close-during-mount cleanup race lesson from tui-dev-desktop-shell notes.
 - **Update**: [view-mount-disposer-contract.md](view-mount-disposer-contract.md)
