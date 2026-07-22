@@ -1,5 +1,9 @@
 # Knowledge Log
 
+## 2026-07-22
+* **Creation**: [Release bump PR failure is an org-level Actions restriction](/lessons/release-bump-pr-org-restriction.md) — `createPullRequest` failures after publish are an OAS-Framework organization Actions restriction; check npm publish state and manually create/merge the release-bump PR until an org admin changes the policy.
+* **Update**: skills/git-tag-release — added release-bump PR failure recovery and the Pi package-name removal gotcha.
+
 ## 2026-07-21
 * **Creation**: skills/retrofit-aweb-identity — added the live-instance aweb identity retrofit procedure, including replaying the oas-aweb spawn hook, cleaning `undefined`, and persisting retire metadata.
 * **Creation**: skills/capability-source-reinstall — added the local capability source reinstall procedure and gotchas about path installs, trust, hoisted manifest paths, and version bumps.

@@ -8,8 +8,8 @@ description: How to ship a release of the oas-framework packages via the tag-dri
 Releases are **tag-driven**: pushing a tag `vX.Y.Z` (on a commit reachable
 from `main`) triggers `.github/workflows/release.yml`, which bumps both
 packages to X.Y.Z, syntax-checks all shipped `.mjs`, sanity-checks the
-tarballs, publishes `@oas-framework/oas` and `@oas-framework/pi` to npm, and
-pushes a `release: vX.Y.Z [skip ci]` version-bump commit back to main.
+tarballs, publishes `@oas-framework/oas` and `@oas-framework/pi` to npm, then
+creates and merges a `release: vX.Y.Z` version-bump PR back to main.
 
 ## Procedure
 
@@ -41,7 +41,9 @@ pushes a `release: vX.Y.Z [skip ci]` version-bump commit back to main.
    ```
 5. Watch CI: `gh run list --limit 2`; on failure
    `gh run view <id> --log-failed`.
-6. Confirm publish: `npm view @oas-framework/oas version` (and `/pi`).
+6. Confirm publish: `npm view @oas-framework/oas version` (and `/pi`). If the
+   later version-bump PR step fails, treat the npm publish as already done and
+   follow the manual bump-PR rescue below instead of retagging.
 
 ## Verify the deployment (mandatory)
 
@@ -70,6 +72,11 @@ entries that are directory symlinks as sufficient: Pi 0.80.6 did not descend
 through those entries during recursive skill discovery, so the runtime probe is
 what proves the materialized resource shape works.
 
+Pi install cleanup gotcha: after installing a new `@oas-framework/pi` version,
+`pi remove npm:@oas-framework/pi@OLD` removes all settings entries for that
+package name, not just the old spec. Reinstall the new version after any
+remove.
+
 ## If the run failed
 
 - **"Version not changed"**: you bumped package.json locally. Revert the
@@ -90,5 +97,20 @@ what proves the materialized resource shape works.
   tag is still safe; repo renames do not matter because npm authority is
   token/account/package-scoped. See
   `knowledge/lessons/npm-eotp-in-tag-release.md`.
+- **Version-bump PR creation fails with `GraphQL: Resource not accessible by
+  integration (createPullRequest)`**: check `npm view @oas-framework/oas
+  version` first. Publishing completed before this step, so do not retag for
+  the bump-PR failure alone. The repo-level "Allow GitHub Actions to create
+  and approve pull requests" toggle is locked by the OAS-Framework org policy
+  (repo API returns 409 "disabled by the organization"; changing it requires
+  org admin + `admin:org`). Until an org admin relaxes the policy, create and
+  merge the release-bump PR manually:
+  ```bash
+  gh pr create --base main --head release-bump/vX.Y.Z \
+    --title "release: vX.Y.Z version bump" --body "..."
+  gh pr merge release-bump/vX.Y.Z --squash --delete-branch
+  git pull
+  ```
+  See `knowledge/lessons/release-bump-pr-org-restriction.md`.
 - **Publish succeeded for one package only**: cut a new patch release;
   npm versions are immutable.
