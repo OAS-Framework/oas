@@ -1,6 +1,7 @@
 # Knowledge Log
 
 ## 2026-07-22
+* **Update**: [Sanitize and normalize markdown anchors before innerHTML](/lessons/sanitize-marked-markdown-before-innerhtml.md) now records the reviewer-caught raw-HTML anchor hole: DOMPurify allowlisting is not enough; every surviving anchor needs post-sanitize normalization for local file actions, URL scheme allowlisting, and forced `_blank` plus `noreferrer noopener` on external links.
 * **Creation**: added [Loopback Host guard must cover GET file-serving APIs too](/lessons/loopback-host-guard-all-requests.md) from the get-apis-need-host-guard note: Host validation belongs at the top of the handler for every request; POSTs keep the Origin guard; regression coverage sends raw GETs with `Host: attacker.example` against `/api/file`, `/api/diff`, and `/api/panel`.
 * **Creation**: added [Lstat untrusted worktree entries before reading](/lessons/untrusted-worktree-entries-lstat-before-reading.md) from the get-apis-need-host-guard note: desktop viewers must render symlinks via `readlink` and skip FIFOs/devices instead of reading untrusted untracked entries directly.
 * **Creation**: added [Sanitize marked markdown before innerHTML](/lessons/sanitize-marked-markdown-before-innerhtml.md) from the get-apis-need-host-guard note: `marked` preserves raw HTML, so untrusted markdown needs DOMPurify plus an `http`/`https`/`mailto` scheme allowlist before `innerHTML`.
