@@ -2,6 +2,8 @@
 
 ## 2026-07-22
 
+- **Creation**: [url-resolution-ssrf-footgun.md](url-resolution-ssrf-footgun.md)
+  — promoted the WHATWG URL resolution SSRF lesson from tui-dev-desktop-shell notes.
 - **Creation**: [desktop-shell-hardening-review-lessons.md](desktop-shell-hardening-review-lessons.md)
   — promoted desktop shell security/workspace-selection/toolchain audit review findings from tui-dev-desktop-shell notes.
 - **Creation**: [desktop-shell-layout.md](desktop-shell-layout.md)
