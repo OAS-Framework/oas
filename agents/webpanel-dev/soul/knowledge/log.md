@@ -1,6 +1,8 @@
 # Knowledge Log
 
 ## 2026-07-22
+* **Creation**: added [Harness proxy must guard origins, not launder them](/lessons/harness-proxy-origin-guard.md) from the harness proxy origin guard note: a dev proxy in front of `oas-web` must enforce the loopback `Host`/`Origin` guard at its own boundary and forward the browser's real `Origin` rather than laundering it to a trusted loopback value.
+* **Fix**: [Desktop renderer views port of the panel](/architecture/desktop-renderer-views-port.md) now records `.mjs` view module names, harness-masked CSS/API seams, and the corrected harness proxy pattern: guard `Host`/`Origin` at the proxy boundary, forward the real `Origin`, and rewrite only `Host` for upstream routing.
 * **Creation**: added [Desktop renderer views port of the panel](/architecture/desktop-renderer-views-port.md) from the desktop views port note: the browser panel maps to `packages/desktop/renderer/views/` mount/unmount modules, delegates live terminals to the shell, and uses a same-origin harness proxy for development.
 * **Creation**: added [Keep roster collection out of the serving process](/lessons/snapshot-collection-off-thread.md) from the snapshot-collection note: synchronous `collectControlPane` work in the single-threaded server made key latency spiky, so `/api/panel` and `findInstance` serve from a background child-process snapshot.
 * **Creation**: added [Typing must force-repaint and pin the prompt row](/lessons/typing-echo-visibility.md) from the typing-echo note: keys reached tmux but echo stayed invisible until typing forced a short-tail repaint and temporary bottom snap.

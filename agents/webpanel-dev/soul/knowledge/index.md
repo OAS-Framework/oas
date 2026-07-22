@@ -31,6 +31,7 @@ marketplace capability (`capabilities/oas-web/`: `bin/oas-web.mjs` server +
 
 ## lessons/
 
+* [lessons/harness-proxy-origin-guard.md](lessons/harness-proxy-origin-guard.md) - A dev proxy in front of oas-web must enforce the loopback Host/Origin guard at its own boundary and forward the browser's real Origin rather than rewriting it to a trusted loopback value.
 * [lessons/manifest-compat-floor-core-apis.md](lessons/manifest-compat-floor-core-apis.md) - When oas-web starts calling a new core.* helper, capabilities/oas-web/oas.json compatibility.oas must be raised to the kernel version that helper first shipped in, and the manifest-floor regression test's API map should be extended with that helper.
 * [lessons/fast-attach-cache-tail-backfill.md](lessons/fast-attach-cache-tail-backfill.md) - Attach latency is dominated by rebuilding the control-pane registry and serial tmux round trips, so keep a short registry cache, merge pane metadata queries, paint a cached or short tail first, and deep-backfill later with the requested line count in the render signature.
 * [lessons/logical-key-routing-not-dom-focus.md](lessons/logical-key-routing-not-dom-focus.md) - Binding keydown to the terminal element made typing silently die whenever a button or header click moved DOM focus while the pane still looked focused; route keys with a window listener to the logical focused pane and ignore real editable controls.
