@@ -50,7 +50,9 @@ export function parseUnifiedDiff(diff) {
     if (!hunk) continue; // meta lines (index, ---/+++, mode)
     if (line.startsWith("+")) hunk.lines.push({ kind: "+", text: line.slice(1), oldNo: null, newNo: newNo++ });
     else if (line.startsWith("-")) hunk.lines.push({ kind: "-", text: line.slice(1), oldNo: oldNo++, newNo: null });
-    else if (line.startsWith(" ") || line === "") hunk.lines.push({ kind: " ", text: line.slice(1), oldNo: oldNo++, newNo: newNo++ });
+    // only a literal leading space is context — the trailing "" from splitting
+    // a newline-terminated diff is NOT a line, and "\\ No newline..." is skipped
+    else if (line.startsWith(" ")) hunk.lines.push({ kind: " ", text: line.slice(1), oldNo: oldNo++, newNo: newNo++ });
     // "\ No newline at end of file" and other markers are skipped
   }
   return files;
@@ -106,10 +108,11 @@ function fileSection(doc, f, stat, sideBySide) {
     if (sideBySide) {
       html += `<tr class="hunk"><td colspan="4">${escapeHtml(h.header)}</td></tr>`;
       for (const r of pairForSideBySide(h.lines)) {
-        const cell = (l, cls) => l
-          ? `<td class="no">${l.oldNo ?? l.newNo ?? ""}</td><td class="code ${l.kind === "+" ? "cell-add" : l.kind === "-" ? "cell-del" : ""}">${hl(l.text, lang)}</td>`
+        // left column shows OLD line numbers, right column NEW line numbers
+        const cell = (l, side) => l
+          ? `<td class="no">${(side === "L" ? l.oldNo : l.newNo) ?? ""}</td><td class="code ${l.kind === "+" ? "cell-add" : l.kind === "-" ? "cell-del" : ""}">${hl(l.text, lang)}</td>`
           : `<td class="no"></td><td class="code"></td>`;
-        html += `<tr>${cell(r.left)}${cell(r.right)}</tr>`;
+        html += `<tr>${cell(r.left, "L")}${cell(r.right, "R")}</tr>`;
       }
     } else {
       html += `<tr class="hunk"><td colspan="3">${escapeHtml(h.header)}</td></tr>`;

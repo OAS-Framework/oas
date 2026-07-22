@@ -13,6 +13,7 @@
  */
 import { Marked } from "marked";
 import hljs from "highlight.js";
+import DOMPurify from "dompurify";
 
 const EXT_LANG = {
   mjs: "javascript", cjs: "javascript", js: "javascript", jsx: "javascript",
@@ -46,7 +47,25 @@ export function resolveRelative(fromPath, href) {
   return "/" + out.filter(Boolean).join("/");
 }
 
+const SAFE_EXTERNAL = new Set(["http:", "https:", "mailto:"]);
 const isExternal = (href) => /^[a-z][a-z0-9+.-]*:/i.test(href) || href.startsWith("//");
+/** Active schemes (javascript:, data:, vbscript:, …) are NOT links we honor. */
+export function externalHref(href) {
+  try { return SAFE_EXTERNAL.has(new URL(href, "https://x.invalid").protocol) ? href : null; }
+  catch { return null; }
+}
+
+/** SECURITY: repository markdown is untrusted — marked preserves raw HTML, so
+ * everything we insert goes through DOMPurify. data-open-file survives via an
+ * explicit attribute allowance; targets/rel are re-forced after sanitize. */
+export function sanitizeHtml(html, doc) {
+  const purify = typeof DOMPurify === "function" ? DOMPurify(doc.defaultView) : DOMPurify;
+  return purify.sanitize(html, {
+    ADD_ATTR: ["data-open-file", "target"],
+    FORBID_TAGS: ["style", "form", "input", "button"],
+    ALLOWED_URI_REGEXP: /^(?:https?|mailto):|^#$/i,
+  });
+}
 
 function makeMarked(filePath) {
   const marked = new Marked({
@@ -59,7 +78,12 @@ function makeMarked(filePath) {
       link({ href, title, tokens }) {
         const label = this.parser.parseInline(tokens);
         const t = title ? ` title="${escapeHtml(title)}"` : "";
-        if (isExternal(href)) return `<a href="${escapeHtml(href)}"${t} target="_blank" rel="noreferrer">${label}</a>`;
+        if (isExternal(href)) {
+          const safe = externalHref(href);
+          // active/unknown schemes (javascript:, data:) render as plain text
+          if (!safe) return label;
+          return `<a href="${escapeHtml(safe)}"${t} target="_blank" rel="noreferrer noopener">${label}</a>`;
+        }
         // relative link: strip fragment, resolve against the open file's dir,
         // and route through ctx.openFile (wired via a delegated click handler)
         const clean = href.split("#")[0];
@@ -116,8 +140,9 @@ export async function mount(el, ctx) {
     return;
   }
   const meta = `<div class="mdv-meta">${escapeHtml(file.path)} · ${file.size} bytes</div>`;
+  const doc = el.ownerDocument;
   if (file.markdown) {
-    root.innerHTML = meta + makeMarked(file.path).parse(file.content);
+    root.innerHTML = meta + sanitizeHtml(makeMarked(file.path).parse(file.content), doc);
   } else {
     // plain/code file: read-only highlighted view
     const lang = EXT_LANG[(file.name.split(".").pop() || "").toLowerCase()];

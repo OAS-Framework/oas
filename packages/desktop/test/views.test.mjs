@@ -60,3 +60,35 @@ test("diff: pairForSideBySide aligns delete/add runs row-by-row", () => {
   assert.equal(rows[1].left.text, "b1"); assert.equal(rows[1].right.text, "c1");
   assert.equal(rows[2].left.text, "b2"); assert.equal(rows[2].right, null);
 });
+
+test("markdown: active link schemes are rejected, safe ones allowed", () => {
+  assert.equal(md.externalHref("javascript:alert(1)"), null);
+  assert.equal(md.externalHref("data:text/html,x"), null);
+  assert.equal(md.externalHref("vbscript:x"), null);
+  assert.equal(md.externalHref("https://example.com"), "https://example.com");
+  assert.equal(md.externalHref("mailto:a@b.c"), "mailto:a@b.c");
+});
+
+test("diff: newline-terminated diff does not fabricate a trailing context line", () => {
+  const diff = [
+    "diff --git a/f b/f",
+    "@@ -1,1 +1,1 @@",
+    "-a",
+    "+b",
+    "", // split artifact of the trailing newline
+  ].join("\n");
+  const lines = dv.parseUnifiedDiff(diff)[0].hunks[0].lines;
+  assert.deepEqual(lines.map((l) => l.kind), ["-", "+"], "no fabricated context row");
+});
+
+test("diff: context rows keep distinct old/new numbers when offsets differ", () => {
+  const diff = [
+    "diff --git a/f b/f",
+    "@@ -10,2 +20,2 @@",
+    " ctx",
+    "+add",
+  ].join("\n");
+  const lines = dv.parseUnifiedDiff(diff)[0].hunks[0].lines;
+  assert.equal(lines[0].oldNo, 10);
+  assert.equal(lines[0].newNo, 20, "right side of a context row must use newNo");
+});

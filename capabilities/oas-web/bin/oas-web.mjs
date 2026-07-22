@@ -23,7 +23,7 @@
  */
 import { createServer } from "node:http";
 import { execFile, execFileSync, execSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync, statSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync, realpathSync, lstatSync, readlinkSync } from "node:fs";
 import { basename, dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { homedir } from "node:os";
@@ -463,6 +463,38 @@ function git(cwd, argv) {
   return execFileSync("git", ["-C", cwd, ...argv], { encoding: "utf8", timeout: 15000, maxBuffer: 32 * 1024 * 1024 });
 }
 
+/* OASWEB_DIFFSTAT_BEGIN — -z diff stat parsing, extracted by tests. Rename
+   records carry explicit old NUL new fields — never parse the human
+   "dir/{old => new}" form; both maps key by the NEW path. numstat -z rename
+   records are "adds\tdels\t" followed by old NUL new as separate fields. */
+function parseDiffStats(numstatZ, nameStatusZ) {
+  const statusOf = new Map();
+  {
+    const f = String(nameStatusZ).split("\0");
+    for (let i = 0; i < f.length - 1; ) {
+      const st = f[i++][0];
+      if (!st) continue;
+      const a = f[i++];
+      const b = st === "R" || st === "C" ? f[i++] : a; // rename/copy: old, new
+      statusOf.set(b, st);
+    }
+  }
+  const files = [];
+  {
+    const f = String(numstatZ).split("\0");
+    for (let i = 0; i < f.length - 1; ) {
+      const c = f[i++].split("\t");
+      if (c.length < 3) continue;
+      const path = c[2] !== "" ? c[2] : (i++, f[i++]); // rename: skip old, take new
+      files.push({ path, status: statusOf.get(path) || "M",
+                   additions: c[0] === "-" ? null : Number(c[0]),
+                   deletions: c[1] === "-" ? null : Number(c[1]) });
+    }
+  }
+  return files;
+}
+/* OASWEB_DIFFSTAT_END */
+
 /** Git diff of an instance's work tree: unified diff + per-file stats.
  * staged=1 diffs the index (--cached); default diffs the work tree and
  * includes untracked files as added (intent-to-add view via numstat merge). */
@@ -474,24 +506,9 @@ function diffData(inst, staged) {
   let branch = null;
   try { branch = git(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]).trim(); } catch { return { error: "not a git repository", code: 409 }; }
   const mode = staged ? ["--cached"] : [];
-  const numstat = git(cwd, ["diff", ...mode, "--numstat", "-M"]);
-  const nameStatus = git(cwd, ["diff", ...mode, "--name-status", "-M"]);
-  const statusOf = new Map();
-  for (const line of nameStatus.split("\n")) {
-    const c = line.split("\t");
-    if (c.length < 2) continue;
-    // renames: "R100\told\tnew" — key by the new path
-    statusOf.set(c[c.length - 1], c[0][0]);
-  }
-  const files = [];
-  for (const line of numstat.split("\n")) {
-    const c = line.split("\t");
-    if (c.length < 3) continue;
-    const path = c[c.length - 1];
-    files.push({ path, status: statusOf.get(path) || "M",
-                 additions: c[0] === "-" ? null : Number(c[0]),
-                 deletions: c[1] === "-" ? null : Number(c[1]) });
-  }
+  const files = parseDiffStats(
+    git(cwd, ["diff", ...mode, "--numstat", "-M", "-z"]),
+    git(cwd, ["diff", ...mode, "--name-status", "-M", "-z"]));
   let diff = git(cwd, ["diff", ...mode, "-M"]);
   if (!staged) {
     // untracked files: show as additions so new work is visible in the viewer
@@ -499,9 +516,18 @@ function diffData(inst, staged) {
     for (const path of untracked) {
       let text;
       try {
-        const buf = readFileSync(join(cwd, path));
-        if (buf.includes(0) || buf.length > FILE_MAX_BYTES) { files.push({ path, status: "A", additions: null, deletions: null }); continue; }
-        text = buf.toString("utf8");
+        // SECURITY: lstat first — an untrusted worktree can plant a symlink to
+        // ~/.ssh keys (leak) or a FIFO/device (server hang); only regular files
+        // are read, and symlinks render as their link text.
+        const full = join(cwd, path);
+        const st = lstatSync(full);
+        if (st.isSymbolicLink()) { text = readlinkSync(full); }
+        else if (!st.isFile()) { files.push({ path, status: "A", additions: null, deletions: null }); continue; }
+        else {
+          const buf = readFileSync(full);
+          if (buf.includes(0) || buf.length > FILE_MAX_BYTES) { files.push({ path, status: "A", additions: null, deletions: null }); continue; }
+          text = buf.toString("utf8");
+        }
       } catch { continue; }
       const lines = text.length ? text.replace(/\n$/, "").split("\n") : [];
       files.push({ path, status: "A", additions: lines.length, deletions: 0 });
@@ -526,17 +552,20 @@ const readBody = (req) => new Promise((ok) => {
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, "http://localhost");
   const path = url.pathname;
-  // DNS-rebinding / CSRF guard: mutating requests must come from a loopback
-  // origin — a hostile page resolving to 127.0.0.1 must not type into terminals.
+  // DNS-rebinding guard: EVERY request must carry a loopback Host — a hostile
+  // page rebinding its hostname to 127.0.0.1 must neither type into terminals
+  // (POST) nor read workspace files via the GET APIs (/api/file, /api/diff).
+  const host = String(req.headers.host || "").replace(/:\d+$/, "");
+  const okHost = (h) => h === "127.0.0.1" || h === "localhost" || h === "[::1]" || h === "::1";
+  if (!okHost(host)) return send(res, 403, { error: "forbidden origin" });
+  // CSRF guard: mutating requests must also come from a loopback origin.
   if (req.method === "POST") {
-    const host = String(req.headers.host || "").replace(/:\d+$/, "");
-    const okHost = (h) => h === "127.0.0.1" || h === "localhost" || h === "[::1]" || h === "::1";
     let originOk = true;
     if (req.headers.origin !== undefined) {
       // "Origin: null" (sandboxed pages) and malformed origins must 403, not throw.
       try { originOk = okHost(new URL(String(req.headers.origin)).hostname); } catch { originOk = false; }
     }
-    if (!okHost(host) || !originOk) return send(res, 403, { error: "forbidden origin" });
+    if (!originOk) return send(res, 403, { error: "forbidden origin" });
   }
   try {
     if (req.method === "GET" && path === "/") return send(res, 200, UI, "text/html");

@@ -395,3 +395,41 @@ test("oas-web server: /api/file serves guarded text files with markdown flag; /a
     assert.equal((await get("/api/diff/no-such-instance")).status, 404, "diff for unknown instance is 404");
   } finally { proc.kill(); }
 });
+
+test("oas-web server: hostile Host header is rejected on GET file/diff APIs (DNS rebinding)", async () => {
+  const port = 4000 + Math.floor(Math.random() * 2000);
+  const proc = spawn(process.execPath, [join(CAP, "bin", "oas-web.mjs"), "start", "--port", String(port), "--dir", ROOT], { stdio: "ignore" });
+  try {
+    let up = false;
+    for (let i = 0; i < 40 && !up; i++) {
+      await new Promise((r) => setTimeout(r, 100));
+      try { await fetch(`http://127.0.0.1:${port}/api/panel`); up = true; } catch { /* retry */ }
+    }
+    assert.ok(up, "server came up");
+    const rawGet = (path) => new Promise((resolve, reject) => {
+      const rq = httpRequest({ host: "127.0.0.1", port, path, method: "GET",
+        headers: { host: "attacker.example" } }, (rs) => resolve(rs.statusCode));
+      rq.on("error", reject); rq.end();
+    });
+    assert.equal(await rawGet(`/api/file?path=${encodeURIComponent(join(ROOT, "README.md"))}`), 403, "rebinding host cannot read files");
+    assert.equal(await rawGet("/api/diff/x"), 403, "rebinding host cannot read diffs");
+    assert.equal(await rawGet("/api/panel"), 403, "rebinding host cannot enumerate roots");
+    assert.equal((await fetch(`http://127.0.0.1:${port}/api/panel`)).status, 200, "loopback host still serves");
+  } finally { proc.kill(); }
+});
+
+test("oas-web diff stats: -z rename records key by the new path with R status", () => {
+  const src = extractBlock(join(CAP, "bin", "oas-web.mjs"), "DIFFSTAT");
+  const parseDiffStats = new Function(`${src}; return parseDiffStats;`)();
+  // rename dir/old.js -> dir/new name.js (space: -z handles unusual names), plus a modify
+  const numstat = "3\t1\t\0dir/old.js\0dir/new name.js\0" + "5\t2\tplain.js\0";
+  const nameStatus = "R100\0dir/old.js\0dir/new name.js\0" + "M\0plain.js\0";
+  const files = parseDiffStats(numstat, nameStatus);
+  assert.equal(files.length, 2);
+  const ren = files.find((f) => f.status === "R");
+  assert.ok(ren, "rename detected");
+  assert.equal(ren.path, "dir/new name.js", "keyed by the NEW path");
+  assert.equal(ren.additions, 3); assert.equal(ren.deletions, 1);
+  const mod = files.find((f) => f.path === "plain.js");
+  assert.equal(mod.status, "M"); assert.equal(mod.additions, 5);
+});

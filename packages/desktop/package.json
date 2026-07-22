@@ -5,6 +5,7 @@
   "description": "OAS desktop app (Electron) — renderer views and shell. Not part of the published kernel package.",
   "type": "module",
   "dependencies": {
+    "dompurify": "^3.4.12",
     "highlight.js": "^11.11.1",
     "marked": "^16.4.2"
   }
