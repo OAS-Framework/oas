@@ -15,7 +15,10 @@ client, batches them briefly, and posts those bytes to `/api/keys`:
   Ctrl-letter chords become control bytes, and Alt prefixes the byte sequence
   with ESC.
 - Cmd shortcuts stay in the browser.
-- Paste normalizes `\n` to `\r`.
+- Pastes are sent with `{ paste: true }`; the server normalizes `\r\n?` to `\n`
+  and delivers the whole text as one bracketed paste via `load-buffer` +
+  `paste-buffer -p` — never as raw carriage returns a shell could execute
+  line by line.
 - Batches are coalesced for about 12ms before POSTing.
 
 The server writes the byte stream with `tmux send-keys -H <hex...>` so tmux
