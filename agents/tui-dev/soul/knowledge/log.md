@@ -2,6 +2,8 @@
 
 ## 2026-07-22
 
+- **Update**: [async-mount-close-race.md](async-mount-close-race.md)
+  — merged the terminal pty close-during-pending-open lifecycle lesson from tui-dev-desktop-shell notes, including late pty release and silent closed-tab rejection handling.
 - **Update**: [desktop-shell-view-integration-lessons.md](desktop-shell-view-integration-lessons.md)
   — replaced endpoint-by-endpoint workspace pinning guidance with route-family classification from tui-dev-desktop-shell notes.
 - **Creation**: [route-family-workspace-pinning.md](route-family-workspace-pinning.md)

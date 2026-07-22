@@ -1,8 +1,8 @@
 ---
 type: Lesson
-title: Async tab lifecycle cleanup must track fulfillment and awaitable key reservations
-description: When a desktop tab closes during async mount, cleanup must wait for settle, fall back to module unmount only after a fulfilled legacy mount, and make dedup-key reservations awaitable so fast reopens queue behind cleanup.
-tags: [desktop, view-host, async, race, lifecycle, queueing]
+title: Async resource lifecycles must handle close during pending acquisition
+description: When a desktop owner can close during async mount or terminal open, lifecycle state must track closed/settled/fulfilled, release late materialized resources immediately, and keep dedup-key reservations awaitable until cleanup completes.
+tags: [desktop, view-host, async, race, lifecycle, queueing, pty]
 timestamp: 2026-07-22
 ---
 
@@ -41,11 +41,24 @@ The lifecycle is DOM-free so deferred-promise unit tests can drive the races
 deterministically: close-mid-mount, legacy view, mount error, and two lifecycles
 of one module with a mid-flight close.
 
+The same disease appeared again in terminal tabs: `cleanup()` checked
+`ptyId !== null` while `termOpen()` was still awaiting, so closing during the
+pending open leaked an invisible attached tmux client until app shutdown when
+the id arrived after the tab died. The terminal fix mirrors the view lifecycle
+with `createTermLifecycle`: a late pty materialization on an already-closed tab
+immediately calls `closePty(id)` and skips data/exit handler wiring; rejection
+after close is silent; rejection while live shows the error banner; `forget()`
+covers session-ended cases where main already dropped the pty; and closePty
+failures are absorbed so UI teardown still completes. This is the cleanup side
+of the [direct tmux attach terminal contract](desktop-terminal-direct-attach.md).
+
 General rules:
 
 - Whenever cleanup depends on a value produced by an in-flight async operation,
   closing must wait for settle. Checking "is the cleanup value there yet?" at
-  close time is the race, not the fix.
+  close time is the race, not the fix; if the value materializes after close,
+  release it immediately in the acquisition continuation before exposing it to
+  the dead owner.
 - Every async fallback path needs a state bit for what actually happened. A
   rejected mount and a fulfilled legacy mount both lack a disposer, but only
   the fulfilled legacy mount may use module-wide fallback cleanup.
