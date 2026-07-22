@@ -604,6 +604,19 @@ async function refreshTerm(p, force, lines = 2000) {
   if (force || nearBottom) box.scrollTop = box.scrollHeight;
 }
 
+/* OASWEB_ATTACH_BEGIN — DOM-free attach sequencing, extracted by tests.
+   Rung 2 (screenful tail) then rung 3 (deep backfill) — the backfill only
+   fires if no pane switch happened meanwhile: the tail refresh itself bumps
+   p.gen once (to myGen+1), so any other bump means a newer attach owns the
+   pane. refresh(p, force, lines?) is refreshTerm (injected for tests). */
+function attachSequence(p, name, refresh) {
+  const myGen = p.gen;
+  return refresh(p, true, 120).then(() => {
+    if (p.gen === myGen + 1 && p.sel === name) return refresh(p, true);
+  });
+}
+/* OASWEB_ATTACH_END */
+
 /* ── panes: editor-style splits, one focused pane takes input ── */
 function makePane() {
   const p = { id: ++paneSeq, sel: null, gen: 0, lastSig: "", fastUntil: 0, keyQueue: "", keyFlush: null };
@@ -637,8 +650,7 @@ function setPaneSession(p, name) {
   const cached = frameCache.get(name);
   if (cached) paintFrame(p, cached);
   else p.termEl.innerHTML = '<div class="loading-block"><span class="spinner"></span> Attaching to session…</div>';
-  const myGen = p.gen;
-  refreshTerm(p, true, 120).then(() => { if (p.gen === myGen + 1 && p.sel === name) refreshTerm(p, true); });
+  attachSequence(p, name, refreshTerm);
   focusPane(p);
 }
 function renderPaneHead(p, i) {

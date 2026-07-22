@@ -11,6 +11,55 @@ const CAP = join(ROOT, "capabilities", "oas-web");
 
 // ---- ANSI renderer (extracted from the panel's marked DOM-free block) ----
 
+// ---- registry cache + attach sequencing (extracted marked blocks) ----
+function extractBlock(file, marker) {
+  const src = readFileSync(file, "utf8");
+  const re = new RegExp(`\\/\\* OASWEB_${marker}_BEGIN[^*]*\\*\\/([\\s\\S]*?)\\/\\* OASWEB_${marker}_END \\*\\/`);
+  const m = src.match(re);
+  assert.ok(m, marker + " block markers present");
+  return m[1];
+}
+
+test("oas-web server: registry cache serves from cache within TTL and recollects on expiry", () => {
+  const src = extractBlock(join(CAP, "bin", "oas-web.mjs"), "REGCACHE");
+  const makeRegistryCache = new Function(src + "\nreturn makeRegistryCache;")();
+  let clock = 0, collections = 0;
+  const find = makeRegistryCache(
+    () => { collections++; return new Map([["a", { instance: "a", v: collections }]]); },
+    2500, () => clock);
+  clock = 10_000;
+  assert.equal(find("a").v, 1, "first lookup collects");
+  clock += 500; find("a"); clock += 500; find("a");
+  assert.equal(collections, 1, "lookups within TTL do not recollect");
+  assert.equal(find("missing"), undefined, "miss within TTL does not recollect");
+  assert.equal(collections, 1);
+  clock += 2600;
+  assert.equal(find("a").v, 2, "expiry refreshes the roster");
+  assert.equal(collections, 2);
+});
+
+test("oas-web attach: tail-then-deep order, and pane switches cancel the backfill", async () => {
+  const src = extractBlock(join(CAP, "ui", "panel.html"), "ATTACH");
+  const attachSequence = new Function(src + "\nreturn attachSequence;")();
+  // normal attach: tail (120) first, deep (default lines) second
+  const calls = [];
+  const p = { gen: 1, sel: "a" };
+  const refresh = (pane, force, lines) => { calls.push(lines ?? "deep"); pane.gen++; return Promise.resolve(); };
+  await attachSequence(p, "a", refresh);
+  assert.deepEqual(calls, [120, "deep"], "screenful tail first, deep backfill second");
+  // a pane switch (extra gen bump) during the tail fetch cancels the backfill
+  const calls2 = [];
+  const q = { gen: 1, sel: "a" };
+  const refresh2 = (pane, force, lines) => {
+    calls2.push(lines ?? "deep");
+    pane.gen++;
+    if (calls2.length === 1) { pane.gen++; pane.sel = "b"; } // switched mid-flight
+    return Promise.resolve();
+  };
+  await attachSequence(q, "a", refresh2);
+  assert.deepEqual(calls2, [120], "backfill cancelled after a pane switch");
+});
+
 // ---- key routing (extracted from the panel's marked block, DOM stubbed) ----
 function loadKeyRoute() {
   const html = readFileSync(join(CAP, "ui", "panel.html"), "utf8");

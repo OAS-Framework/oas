@@ -118,19 +118,23 @@ function panelData(wsId) {
    roster only changes on spawn/retire, so a short TTL is safe: a fresh
    instance shows up on the next rebuild (≤2.5s), and a retired one just
    fails its tmux calls harmlessly until then. */
-let instCacheAt = 0;
-let instCache = new Map();
-function findInstance(name) {
-  const now = Date.now();
-  if (now - instCacheAt > 2500) {
-    const fresh = new Map();
-    for (const w of workspaces()) {
-      for (const i of panelData(w.id).instances) if (!fresh.has(i.instance)) fresh.set(i.instance, i);
-    }
-    instCache = fresh; instCacheAt = now;
-  }
-  return instCache.get(name);
+/* OASWEB_REGCACHE_BEGIN — pure factory, extracted by tests */
+function makeRegistryCache(collect, ttlMs = 2500, now = Date.now) {
+  let at = 0, map = new Map();
+  return (name) => {
+    const t = now();
+    if (t - at > ttlMs) { map = collect(); at = t; }
+    return map.get(name);
+  };
 }
+/* OASWEB_REGCACHE_END */
+const findInstance = makeRegistryCache(() => {
+  const fresh = new Map();
+  for (const w of workspaces()) {
+    for (const i of panelData(w.id).instances) if (!fresh.has(i.instance)) fresh.set(i.instance, i);
+  }
+  return fresh;
+});
 
 function tmuxTarget(inst) { return `${inst.tmux.session}:${inst.tmux.window}`; }
 
