@@ -124,7 +124,9 @@ function tmuxTarget(inst) { return `${inst.tmux.session}:${inst.tmux.window}`; }
 
 function capture(inst, lines) {
   try {
-    return execFileSync("tmux", ["capture-pane", "-p", "-e", "-J", "-t", tmuxTarget(inst), "-S", `-${Math.max(16, lines)}`],
+    // No -J: joining wrapped rows would break the row-per-line grid mapping
+    // (cursor_y is physical). Each output line is exactly one pane row.
+    return execFileSync("tmux", ["capture-pane", "-p", "-e", "-t", tmuxTarget(inst), "-S", `-${Math.max(16, lines)}`],
       { encoding: "utf8", timeout: 4000 });
   } catch { return ""; }
 }
@@ -153,12 +155,13 @@ function paneSize(inst) {
 
 /** Raw keystroke passthrough: bytes from the browser terminal go straight into
  * the pane via send-keys -H (hex bytes) — no key-name interpretation, no Enter. */
-function sendKeys(inst, data) {
+function sendKeys(inst, data, paste = false) {
   const s = String(data);
-  if (s.length > 512) {
-    // Large payloads (pastes) go through a tmux buffer as one bracketed paste —
-    // hundreds of send-keys execs would block this single-threaded server.
-    execFileSync("tmux", ["load-buffer", "-b", "oaswebk", "-"], { input: s.replace(/\r/g, "\n"), timeout: 4000 });
+  if (paste || s.length > 512) {
+    // Pastes (any size) and large payloads go through a tmux buffer as ONE
+    // bracketed paste — raw carriage returns via send-keys would let a shell
+    // or TUI submit/execute each line separately.
+    execFileSync("tmux", ["load-buffer", "-b", "oaswebk", "-"], { input: s.replace(/\r\n?/g, "\n"), timeout: 4000 });
     execFileSync("tmux", ["paste-buffer", "-p", "-d", "-b", "oaswebk", "-t", tmuxTarget(inst)], { timeout: 4000 });
     return;
   }
@@ -322,9 +325,13 @@ const server = createServer(async (req, res) => {
   // origin — a hostile page resolving to 127.0.0.1 must not type into terminals.
   if (req.method === "POST") {
     const host = String(req.headers.host || "").replace(/:\d+$/, "");
-    const origin = req.headers.origin ? new URL(req.headers.origin).hostname : null;
     const okHost = (h) => h === "127.0.0.1" || h === "localhost" || h === "[::1]" || h === "::1";
-    if (!okHost(host) || (origin && !okHost(origin))) return send(res, 403, { error: "forbidden origin" });
+    let originOk = true;
+    if (req.headers.origin !== undefined) {
+      // "Origin: null" (sandboxed pages) and malformed origins must 403, not throw.
+      try { originOk = okHost(new URL(String(req.headers.origin)).hostname); } catch { originOk = false; }
+    }
+    if (!okHost(host) || !originOk) return send(res, 403, { error: "forbidden origin" });
   }
   try {
     if (req.method === "GET" && path === "/") return send(res, 200, UI, "text/html");
@@ -340,9 +347,9 @@ const server = createServer(async (req, res) => {
       }
       if (m[1] === "keys" && req.method === "POST") {
         if (!inst.running) return send(res, 409, { error: "instance is not running" });
-        const { data } = await readBody(req);
+        const { data, paste } = await readBody(req);
         if (typeof data !== "string" || !data.length) return send(res, 400, { error: "body needs { data }" });
-        sendKeys(inst, data);
+        sendKeys(inst, data, paste === true);
         return send(res, 200, { sent: true });
       }
       if (m[1] === "send" && req.method === "POST") {

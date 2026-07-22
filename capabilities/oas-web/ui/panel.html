@@ -377,6 +377,9 @@ $("wssel").addEventListener("change", (e) => {
 function escapeHtml(s) { return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
 
 /* xterm 256-color palette entries 16-255 (0-15 map to the themed classes). */
+/* ── ANSI renderer (pure — kept DOM-free between the RENDERER markers so the
+   test suite can extract and exercise it in node) ── */
+/* OASWEB_RENDERER_BEGIN */
 function color256(n) {
   if (n < 16) return null; // caller uses classes for the base 16
   if (n < 232) {
@@ -445,18 +448,46 @@ function spanFor(text, attr) {
 /* One capture line → { html, cells } where cells is the char list (for cursor
    placement). SGR state carries across lines, as tmux emits it. */
 const ANSI_RE = /\x1b\[([0-9;:]*)m|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-9;?]*[A-Za-ln-z]|\x1b[^[\]]/g;
+/* Terminal cell width per code point (wcwidth-lite): combining marks and zero-
+   width joiners occupy 0 columns; East Asian wide/fullwidth ranges and emoji
+   occupy 2; everything else 1. tmux's cursor_x counts cells, not JS chars. */
+function cellWidth(cp) {
+  if (cp === 0x200b || cp === 0x200c || cp === 0x200d || cp === 0xfeff) return 0;
+  if ((cp >= 0x0300 && cp <= 0x036f) || (cp >= 0x1ab0 && cp <= 0x1aff) ||
+      (cp >= 0x1dc0 && cp <= 0x1dff) || (cp >= 0x20d0 && cp <= 0x20ff) ||
+      (cp >= 0xfe00 && cp <= 0xfe0f) || (cp >= 0xfe20 && cp <= 0xfe2f)) return 0;
+  if ((cp >= 0x1100 && cp <= 0x115f) || (cp >= 0x2e80 && cp <= 0x303e) ||
+      (cp >= 0x3041 && cp <= 0x33ff) || (cp >= 0x3400 && cp <= 0x4dbf) ||
+      (cp >= 0x4e00 && cp <= 0x9fff) || (cp >= 0xa000 && cp <= 0xa4cf) ||
+      (cp >= 0xac00 && cp <= 0xd7a3) || (cp >= 0xf900 && cp <= 0xfaff) ||
+      (cp >= 0xfe30 && cp <= 0xfe4f) || (cp >= 0xff00 && cp <= 0xff60) ||
+      (cp >= 0xffe0 && cp <= 0xffe6) || (cp >= 0x1f300 && cp <= 0x1faff) ||
+      (cp >= 0x20000 && cp <= 0x3fffd)) return 2;
+  return 1;
+}
 function renderLine(line, attr, cursorCol) {
   let html = "", col = 0, last = 0;
   ANSI_RE.lastIndex = 0;
   const emit = (text) => {
     if (!text) return;
-    if (cursorCol != null && col <= cursorCol && cursorCol < col + text.length) {
-      const k = cursorCol - col;
-      html += spanFor(text.slice(0, k), attr);
-      html += `<span class="cur">${escapeHtml(text[k])}</span>`;
-      html += spanFor(text.slice(k + 1), attr);
+    // Walk code points counting terminal cells so the cursor lands on the
+    // right glyph even with CJK/emoji (width 2) or combining marks (width 0).
+    if (cursorCol == null) { html += spanFor(text, attr); for (const ch of text) col += cellWidth(ch.codePointAt(0)); return; }
+    let before = "", at = "", after = "";
+    for (const ch of text) {
+      const w = cellWidth(ch.codePointAt(0));
+      if (at) { if (w === 0 && !after) at += ch; else after += ch; } // combining marks stay on the cursor glyph
+      else if (col + Math.max(w, 1) <= cursorCol || (w === 0 && col <= cursorCol)) before += ch;
+      else if (col <= cursorCol && cursorCol < col + Math.max(w, 1)) at = ch;
+      else before += ch; // cursor before this text (shouldn't happen)
+      col += w;
+    }
+    if (at) {
+      html += spanFor(before, attr);
+      html += `<span class="cur">${escapeHtml(at)}</span>`;
+      html += spanFor(after, attr);
+      cursorCol = null; // consumed
     } else html += spanFor(text, attr);
-    col += text.length;
   };
   let m;
   while ((m = ANSI_RE.exec(line))) {
@@ -491,8 +522,7 @@ function renderCapture(d) {
   }
   return out.join("");
 }
-
-/* ── session polling ── */
+/* OASWEB_RENDERER_END */
 let lastTermSig = "";
 let termReq = 0;
 let fastPollUntil = 0;
@@ -644,7 +674,18 @@ termEl.addEventListener("keydown", (e) => {
 termEl.addEventListener("paste", (e) => {
   if (!sel || document.activeElement !== termEl) return;
   const text = e.clipboardData?.getData("text");
-  if (text) { e.preventDefault(); queueKeys(text.replace(/\r?\n/g, "\r")); }
+  if (!text) return;
+  e.preventDefault();
+  // Pastes never ride the key path: the server routes { paste: true } through
+  // tmux load-buffer/paste-buffer -p so multiline text is ONE bracketed paste,
+  // not a series of carriage returns a shell would execute line by line.
+  const forSel = sel;
+  fastPollUntil = Date.now() + 4000;
+  fetch(`/api/keys/${encodeURIComponent(forSel)}`, { method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ data: text, paste: true }) })
+    .then(() => { if (forSel === sel) refreshTerm(false); })
+    .catch(() => { /* transient */ });
 });
 
 refreshPanel();
