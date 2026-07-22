@@ -1,9 +1,11 @@
-// OAS desktop — renderer shell: sidebar roster + agents, tabbed view host.
+// OAS desktop — renderer shell: nav rail + tabbed view host.
 //
 // View contract (binding, from the desktop-app contract): each view is an ES
 // module in ./views/ exporting mount(el, ctx) / unmount(), where
 //   ctx = { api(pathname, opts), openFile(path), openTerminal(instance) }
-// The shell owns tabs/navigation and provides ctx.
+// The shell owns tabs/navigation and provides ctx. The full roster (with
+// chat transcript, spawn, jira) lives in the ported views — the shell chrome
+// stays a thin rail so nothing is duplicated.
 
 const desk = window.oasDesktop;
 
@@ -16,18 +18,24 @@ async function api(pathname, opts) {
 
 const ctx = {
   api,
-  openFile: (path) => openViewTab("markdown", `file: ${String(path).split("/").pop()}`, { path }),
+  openFile: (path) => openViewTab("markdown", `≡ ${String(path).split("/").pop()}`, { path }, `file:${path}`),
   openTerminal: (instance) => openTerminalTab(instance),
 };
 
 // ── tabs ──────────────────────────────────────────────────────────────────
 const tabbar = document.getElementById("tabbar");
 const tabhost = document.getElementById("tabhost");
-const tabs = new Map(); // id -> { tabEl, paneEl, view, title, onClose, onShow }
+const tabs = new Map(); // id -> { tabEl, paneEl, title, key, onClose, onShow }
 let nextTabId = 1;
 let activeTab = null;
 
-function addTab({ title, onClose, onShow }) {
+/** key: optional dedup key — activating an existing tab instead of opening a
+ * twin. View modules keep module-level state (they are singletons by design),
+ * so one tab per view/file is also a correctness requirement. */
+function addTab({ title, key, onClose, onShow }) {
+  if (key) {
+    for (const [tid, t] of tabs) if (t.key === key) { activateTab(tid); return null; }
+  }
   const id = nextTabId++;
   const tabEl = document.createElement("div");
   tabEl.className = "tab";
@@ -43,7 +51,7 @@ function addTab({ title, onClose, onShow }) {
   tabhost.append(paneEl);
   tabEl.addEventListener("click", (e) => { if (e.target !== close) activateTab(id); });
   close.addEventListener("click", () => closeTab(id));
-  tabs.set(id, { tabEl, paneEl, title, onClose, onShow });
+  tabs.set(id, { tabEl, paneEl, title, key, onClose, onShow });
   activateTab(id);
   return { id, paneEl };
 }
@@ -72,27 +80,32 @@ function closeTab(id) {
 }
 
 // ── view host: load ./views/<name>.mjs, mount into a tab ─────────────────
-async function openViewTab(name, title, extra = {}) {
+async function openViewTab(name, title, extra = {}, key = `view:${name}`) {
   let mod;
   try { mod = await import(`./views/${name}.mjs`); }
   catch (e) {
-    const { paneEl } = addTab({ title: `${title} (missing)` });
-    paneEl.innerHTML = `<div class="placeholder"><h2>${name}</h2><div>view module failed to load: ${e.message}</div></div>`;
+    const made = addTab({ title: `${title} (missing)`, key });
+    if (made) made.paneEl.innerHTML = `<div class="placeholder"><h2>${name}</h2><div>view module failed to load: ${e.message}</div></div>`;
     return;
   }
-  const { paneEl } = addTab({
+  const made = addTab({
     title,
+    key,
     onClose: () => { try { mod.unmount?.(); } catch (e) { console.error(e); } },
   });
+  if (!made) return; // existing tab activated
   const el = document.createElement("div");
   el.style.height = "100%";
-  paneEl.append(el);
+  made.paneEl.append(el);
   try { await mod.mount(el, { ...ctx, ...extra }); }
   catch (e) { el.innerHTML = `<div class="placeholder"><h2>${name}</h2><div>mount failed: ${e.message}</div></div>`; }
 }
 
 // ── integrated terminal tab (the shell's own flagship view) ──────────────
 async function openTerminalTab(instance) {
+  const key = `term:${instance}`;
+  for (const [tid, t] of tabs) if (t.key === key) { activateTab(tid); return; }
+
   // Resolve the tmux target from the roster.
   const panel = await api("/api/panel");
   const inst = panel.instances.find((i) => i.instance === instance);
@@ -124,12 +137,13 @@ async function openTerminalTab(instance) {
     term.dispose();
   };
 
-  const { paneEl } = addTab({
+  const made = addTab({
     title: `⌗ ${instance}`,
+    key,
     onClose: cleanup,
     onShow: () => { requestAnimationFrame(() => { try { fit.fit(); } catch {} }); },
   });
-  paneEl.append(wrap);
+  made.paneEl.append(wrap);
   term.open(wrap);
   fit.fit();
 
@@ -152,73 +166,39 @@ async function openTerminalTab(instance) {
   term.onResize(({ cols, rows }) => { if (ptyId !== null) desk.termResize(ptyId, cols, rows); });
 
   ro = new ResizeObserver(() => {
-    if (!paneEl.classList.contains("active")) return;
+    if (!made.paneEl.classList.contains("active")) return;
     try { fit.fit(); } catch { /* zero-size while hidden */ }
   });
   ro.observe(wrap);
   term.focus();
 }
 
-// ── sidebar: roster + agents ──────────────────────────────────────────────
-const rosterEl = document.getElementById("roster");
-const agentsEl = document.getElementById("agents");
-const wsNameEl = document.getElementById("ws-name");
-let selectedInstance = null;
-
-function instItem(i) {
-  const el = document.createElement("div");
-  el.className = "side-item" + (i.instance === selectedInstance ? " selected" : "");
-  el.innerHTML = `
-    <div class="name"><span class="dot${i.running ? " running" : ""}"></span><span></span></div>
-    <div class="meta"></div>
-    <div class="actions"></div>`;
-  el.querySelector(".name span:last-child").textContent = i.instance;
-  el.querySelector(".meta").textContent = [i.agent, i.branch].filter(Boolean).join(" · ");
-  const actions = el.querySelector(".actions");
-  for (const [label, fn] of [
-    ["Terminal", () => ctx.openTerminal(i.instance)],
-    ["Brain", () => openViewTab("brain", `brain: ${i.agent}`, { agent: i.agent, instance: i.instance, agentsRoot: i.agentsRoot })],
-    ["Diff", () => openViewTab("diff", `diff: ${i.instance}`, { instance: i.instance })],
-    ["Chat", () => openViewTab("chat", `chat: ${i.instance}`, { instance: i.instance })],
-  ]) {
-    const b = document.createElement("button");
-    b.textContent = label;
-    b.addEventListener("click", (e) => { e.stopPropagation(); fn(); });
-    actions.append(b);
-  }
-  el.addEventListener("click", () => { selectedInstance = i.instance; refreshRoster(); });
-  return el;
+// ── nav rail ──────────────────────────────────────────────────────────────
+const NAV = [
+  { name: "instances", label: "Instances", icon: "◉", title: "Instances" },
+  { name: "spawn", label: "Spawn", icon: "✚", title: "Spawn" },
+  { name: "brain", label: "Brain", icon: "◈", title: "Agent brain" },
+  { name: "jira", label: "Jira", icon: "◫", title: "Jira" },
+  // diff.mjs is a placeholder until the viewers developer ships it; the nav
+  // entry keeps its integration mechanical.
+  { name: "diff", label: "Diff", icon: "±", title: "Diff" },
+];
+const navEl = document.getElementById("nav");
+for (const v of NAV) {
+  const b = document.createElement("button");
+  b.className = "nav-item";
+  b.title = v.title;
+  b.innerHTML = `<span class="icon"></span><span class="label"></span>`;
+  b.querySelector(".icon").textContent = v.icon;
+  b.querySelector(".label").textContent = v.label;
+  b.addEventListener("click", () => openViewTab(v.name, v.title));
+  navEl.append(b);
 }
 
-let lastPanelJson = "";
-async function refreshRoster() {
-  let panel;
-  try { panel = await api("/api/panel"); }
-  catch (e) { rosterEl.innerHTML = `<div class="side-empty">server unreachable: ${e.message}</div>`; return; }
-  wsNameEl.textContent = panel.workspace?.name ? `· ${panel.workspace.name}` : "";
-  const json = JSON.stringify(panel.instances) + selectedInstance;
-  if (json === lastPanelJson) return; // avoid pointless DOM churn on poll
-  lastPanelJson = json;
-  rosterEl.replaceChildren(...(panel.instances.length
-    ? panel.instances.map(instItem)
-    : [Object.assign(document.createElement("div"), { className: "side-empty", textContent: "no instances" })]));
-}
+document.getElementById("ws-name").textContent = "";
+api("/api/panel").then((p) => {
+  document.getElementById("ws-name").textContent = p.workspace?.name ? `· ${p.workspace.name}` : "";
+}).catch(() => {});
 
-async function refreshAgents() {
-  let data;
-  try { data = await api("/api/agents"); } catch { return; }
-  agentsEl.replaceChildren(...data.agents.map((a) => {
-    const el = document.createElement("div");
-    el.className = "side-item";
-    el.innerHTML = `<div class="name"><span></span></div><div class="meta"></div>`;
-    el.querySelector(".name span").textContent = a.name;
-    el.querySelector(".meta").textContent = a.description;
-    el.title = a.description;
-    return el;
-  }));
-}
-
-refreshRoster();
-refreshAgents();
-setInterval(refreshRoster, 3000);
-setInterval(refreshAgents, 30000);
+// Home view.
+openViewTab("instances", "Instances");

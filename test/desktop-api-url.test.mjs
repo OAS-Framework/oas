@@ -27,12 +27,23 @@ test("rejects off-origin resolution: protocol-relative and backslash forms", () 
   }
 });
 
-test("pins the verified workspace on scoped endpoints, overwriting caller ws", () => {
+test("pins the verified workspace on scoped endpoints, overwriting unknown ws", () => {
   const ws = "/Users/me/oas";
   assert.equal(apiUrl("/api/panel", BASE, ws).searchParams.get("ws"), ws);
-  // caller-supplied ws must be overwritten, not respected
+  // caller-supplied ws NOT advertised by the server must be overwritten
   assert.equal(apiUrl("/api/panel?ws=/Users/me/other", BASE, ws).searchParams.get("ws"), ws);
   assert.equal(apiUrl("/api/agents?ws=/Users/me/other", BASE, ws).searchParams.get("ws"), ws);
+  // ...even with an allowed set that does not contain it
+  assert.equal(apiUrl("/api/panel?ws=/Users/me/other", BASE, ws, new Set([ws])).searchParams.get("ws"), ws);
+});
+
+test("allows switching to a workspace the server advertises", () => {
+  const ws = "/Users/me/oas", other = "/Users/me/lfx";
+  const allowed = new Set([ws, other]);
+  assert.equal(apiUrl(`/api/panel?ws=${other}`, BASE, ws, allowed).searchParams.get("ws"), other);
+  assert.equal(apiUrl(`/api/agents?ws=${other}`, BASE, ws, allowed).searchParams.get("ws"), other);
+  // no caller ws → verified id still pinned
+  assert.equal(apiUrl("/api/panel", BASE, ws, allowed).searchParams.get("ws"), ws);
 });
 
 test("does not pin ws on unscoped endpoints and without a verified id", () => {

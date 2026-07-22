@@ -36,13 +36,16 @@ const WORKSPACE = resolve(argDir || process.env.OAS_DESKTOP_DIR || REPO_ROOT);
 // ---- oas-web server management ----------------------------------------
 let serverChild = null; // set only when WE spawned it
 let wsId = null;        // verified workspace id on the server we use
+let allowedWs = new Set(); // workspace ids the connected server advertises
 
 async function panelWorkspaces() {
   try {
     const r = await fetch(`${base()}/api/panel`, { signal: AbortSignal.timeout(1500) });
     if (!r.ok) return null;
     const d = await r.json();
-    return d.workspaces || [];
+    const list = d.workspaces || [];
+    allowedWs = new Set(list.map((w) => w.id));
+    return list;
   } catch { return null; }
 }
 
@@ -120,9 +123,10 @@ function guard(e) { if (!trustedFrame(e)) throw new Error("forbidden: untrusted 
 // The renderer never talks to the network directly; ctx.api() lands here.
 ipcMain.handle("api", async (e, pathname, opts) => {
   guard(e);
-  // apiUrl rejects off-origin resolution (e.g. "//attacker/x") and
-  // force-pins the verified workspace on scoped endpoints.
-  const url = apiUrl(pathname, base(), wsId);
+  // apiUrl rejects off-origin resolution (e.g. "//attacker/x"), and pins
+  // the verified workspace on scoped endpoints unless the caller selects a
+  // workspace this server actually advertises (the views' ws switcher).
+  const url = apiUrl(pathname, base(), wsId, allowedWs);
   const init = { method: opts?.method || "GET", signal: AbortSignal.timeout(20000) };
   if (opts?.body !== undefined) {
     init.body = JSON.stringify(opts.body);

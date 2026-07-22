@@ -29,9 +29,11 @@ Flags/env:
   hosts and always survive.
 - `preload.cjs` — contextBridge surface (`window.oasDesktop`); renderer runs
   with contextIsolation on, nodeIntegration off.
-- `renderer/shell.mjs` — sidebar roster (polls `/api/panel`), agents list,
-  tabbed view host, integrated terminal tabs.
+- `renderer/shell.mjs` — nav rail, tabbed view host (singleton tabs per
+  view/terminal/file), integrated terminal tabs.
 - `renderer/views/*.mjs` — feature views per the shared contract:
   `mount(el, ctx)` / `unmount()`, `ctx = { api, openFile, openTerminal }`.
-  brain / markdown / diff / chat ship as placeholders here; their owning
-  developers replace them.
+  instances (roster + chat transcript + jira card), spawn, jira, and brain
+  are real (webpanel-dev ports); markdown / diff are placeholders their
+  owning developer replaces. `views/common.mjs` carries shared helpers and
+  the workspace bus; `theme.css` the shared design tokens.

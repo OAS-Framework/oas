@@ -14,14 +14,16 @@
  *
  * @param {string} pathname  must start with "/" and stay on `base`'s origin
  * @param {string} base      the oas-web server origin, e.g. http://127.0.0.1:4820
- * @param {string|null} wsId verified workspace id — force-pinned onto
- *                           workspace-scoped endpoints (a caller-supplied
- *                           ?ws= must not select another workspace on a
- *                           shared server)
+ * @param {string|null} wsId verified workspace id — pinned onto
+ *                           workspace-scoped endpoints unless the caller
+ *                           selects a workspace the server itself advertises
+ * @param {Set<string>} [allowedWs] workspace ids the connected server
+ *                           advertises (from /api/panel `workspaces[]`); a
+ *                           caller ?ws= outside this set is overwritten
  * @returns {URL}
  * @throws  on off-origin or malformed input
  */
-export function apiUrl(pathname, base, wsId = null) {
+export function apiUrl(pathname, base, wsId = null, allowedWs = undefined) {
   if (typeof pathname !== "string" || !pathname.startsWith("/")) {
     throw new Error("api: pathname must start with /");
   }
@@ -31,7 +33,13 @@ export function apiUrl(pathname, base, wsId = null) {
     throw new Error("api: pathname resolved off-origin");
   }
   if (wsId && (url.pathname === "/api/panel" || url.pathname === "/api/agents")) {
-    url.searchParams.set("ws", wsId); // overwrite, never trust a caller's ws
+    const asked = url.searchParams.get("ws");
+    // Workspace switching is a real feature on shared multi-workspace
+    // servers — but only to workspaces the server actually advertises;
+    // anything else is overwritten with the verified id.
+    if (!asked || !(allowedWs instanceof Set) || !allowedWs.has(asked)) {
+      url.searchParams.set("ws", wsId);
+    }
   }
   return url;
 }
