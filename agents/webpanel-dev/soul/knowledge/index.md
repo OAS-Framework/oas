@@ -20,7 +20,7 @@ marketplace capability (`capabilities/oas-web/`: `bin/oas-web.mjs` server +
 * [architecture/multi-workspace-switcher.md](architecture/multi-workspace-switcher.md) - repeatable --dir, team-scope resolution, and the deployment-level workspace dropdown.
 * [architecture/raw-key-passthrough-and-host-guard.md](architecture/raw-key-passthrough-and-host-guard.md) - POST /api/keys is the panel's sole text-input path, sending browser keydown bytes into the logically focused pane via tmux send-keys -H, routing large or pasted payloads through load-buffer/paste-buffer, forcing a short-tail repaint so echo is visible, and rejecting non-loopback POST Host/Origin values.
 * [architecture/spawn-endpoint.md](architecture/spawn-endpoint.md) - POST /api/spawn treats browser-supplied agentsRoot as a selector into the server's workspace roots, while task "" intentionally spawns an awaiting-instructions instance.
-* [architecture/agent-brain-endpoint-and-view.md](architecture/agent-brain-endpoint-and-view.md) - GET /api/brain resolves agent names through kernel agent lookup seams, returns only artifact paths, and feeds the desktop renderer's contract-based brain view.
+* [architecture/agent-brain-endpoint-and-view.md](architecture/agent-brain-endpoint-and-view.md) - GET /api/brain resolves agent names through kernel lookup seams, includes package-level skills for capability agents, returns only artifact paths, and feeds the desktop renderer's contract-based brain view.
 * [architecture/split-panes-and-compact-shell.md](architecture/split-panes-and-compact-shell.md) - v0.7.0 replaced the single session surface with per-pane session state in an editor-style split row, plus a persisted collapsible sidebar and 32px compact pane header.
 
 ## decisions/

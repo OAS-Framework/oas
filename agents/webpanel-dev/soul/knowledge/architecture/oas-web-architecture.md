@@ -17,9 +17,10 @@ The web panel lives in `capabilities/oas-web/` and is deliberately tiny:
   - `POST /api/spawn` — spawns an agent in an allowlisted workspace root,
     with `task: ""` meaning "await instructions" (see
     [spawn endpoint](spawn-endpoint.md)).
-  - `GET /api/brain/<agent>?ws=<id>` — returns soul artifact paths and
-    running-state for the desktop brain view while resolving agent names
-    through kernel lookup seams (see [agent brain endpoint](agent-brain-endpoint-and-view.md)).
+  - `GET /api/brain/<agent>?ws=<id>` — returns soul artifact paths, package-level
+    capability-agent skills, and running-state for the desktop brain view while
+    resolving agent names through kernel lookup seams (see
+    [agent brain endpoint](agent-brain-endpoint-and-view.md)).
   - `GET /api/session/<instance>?lines=n` — raw ANSI tmux `capture-pane` text plus pane geometry, cursor state, and history depth.
   - `GET /api/chat/<instance>?limit=n` — parsed structured transcript turns.
   - `POST /api/keys` — sends browser keydown bytes into the tmux pane and is
@@ -77,7 +78,9 @@ The server binds **127.0.0.1 only** and must stay that way: this process can
 type into your terminals. Remote use is ssh port-forward, never a public
 bind. All POST endpoints also require loopback `Host` and, when present,
 loopback `Origin`, so DNS rebinding cannot turn a hostile page into terminal
-input. Endpoints that accept path-shaped browser parameters, currently
+input. The server sends no CORS headers; external dev harnesses cannot fetch
+its API cross-origin and should use a same-origin proxy such as
+`packages/desktop/renderer/dev-serve.mjs` for renderer work. Endpoints that accept path-shaped browser parameters, currently
 `/api/spawn`'s `agentsRoot`, must resolve them against server-computed workspace
 roots rather than trusting arbitrary paths. `EADDRINUSE` is handled with a
 friendly message (a panel is probably already running; `--port <n>` or
