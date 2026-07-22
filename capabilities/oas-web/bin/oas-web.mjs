@@ -169,13 +169,30 @@ function spawnAgent({ agent, agentsRoot, task, purpose }) {
            branch: r.branch || null, launched: r.launched, warnings: r.warnings || [] };
 }
 
-function findInstance(name) {
-  for (const w of workspaces()) {
-    const hit = panelData(w.id).instances.find((i) => i.instance === name);
-    if (hit) return hit;
-  }
-  return undefined;
+/* Instance registry cache: findInstance() used to rebuild the whole
+   control-pane model (git status across every agent root) on EVERY request —
+   at a 500ms poll cadence that made each /api/session cost 200-300ms+ on
+   multi-root workspaces and dominated time-to-interactive on attach. The
+   roster only changes on spawn/retire, so a short TTL is safe: a fresh
+   instance shows up on the next rebuild (≤2.5s), and a retired one just
+   fails its tmux calls harmlessly until then. */
+/* OASWEB_REGCACHE_BEGIN — pure factory, extracted by tests */
+function makeRegistryCache(collect, ttlMs = 2500, now = Date.now) {
+  let at = 0, map = new Map();
+  return (name) => {
+    const t = now();
+    if (t - at > ttlMs) { map = collect(); at = t; }
+    return map.get(name);
+  };
 }
+/* OASWEB_REGCACHE_END */
+const findInstance = makeRegistryCache(() => {
+  const fresh = new Map();
+  for (const w of workspaces()) {
+    for (const i of panelData(w.id).instances) if (!fresh.has(i.instance)) fresh.set(i.instance, i);
+  }
+  return fresh;
+});
 
 function tmuxTarget(inst) { return `${inst.tmux.session}:${inst.tmux.window}`; }
 
@@ -188,26 +205,21 @@ function capture(inst, lines) {
   } catch { return ""; }
 }
 
-/** History depth actually available, so the client can map capture lines to
- * screen rows deterministically (cursor row = history + cursor_y). */
-function historySize(inst) {
-  try {
-    return Number(execFileSync("tmux", ["display-message", "-p", "-t", tmuxTarget(inst), "#{history_size}"],
-      { encoding: "utf8", timeout: 4000 }).trim()) || 0;
-  } catch { return 0; }
-}
-
-/** Pane geometry + cursor so the browser terminal mirrors the tmux pane exactly.
- * cursor x/y are 0-based within the visible pane; "visible" reflects cursor_flag
- * and copy-mode (in copy mode the live cursor is not where typing lands). */
-function paneSize(inst) {
+/** Pane geometry + cursor + history depth in ONE tmux round-trip (these were
+ * two display-message calls — attach latency is round-trip-bound).
+ * cursor x/y are 0-based within the visible pane; "visible" reflects
+ * cursor_flag and copy-mode (in copy mode the live cursor is not where
+ * typing lands). history_size lets the client map capture lines to screen
+ * rows deterministically (cursor row = history + cursor_y). */
+function paneInfo(inst) {
   try {
     const out = execFileSync("tmux", ["display-message", "-p", "-t", tmuxTarget(inst),
-      "#{pane_width} #{pane_height} #{cursor_x} #{cursor_y} #{cursor_flag} #{pane_in_mode}"],
+      "#{pane_width} #{pane_height} #{cursor_x} #{cursor_y} #{cursor_flag} #{pane_in_mode} #{history_size}"],
       { encoding: "utf8", timeout: 4000 }).trim().split(/\s+/).map(Number);
-    return { cols: out[0] || 80, rows: out[1] || 24, cx: out[2] || 0, cy: out[3] || 0,
-             cursor: out[4] === 1 && out[5] !== 1 };
-  } catch { return { cols: 80, rows: 24, cx: 0, cy: 0, cursor: false }; }
+    return { size: { cols: out[0] || 80, rows: out[1] || 24, cx: out[2] || 0, cy: out[3] || 0,
+                     cursor: out[4] === 1 && out[5] !== 1 },
+             history: out[6] || 0 };
+  } catch { return { size: { cols: 80, rows: 24, cx: 0, cy: 0, cursor: false }, history: 0 }; }
 }
 
 /** Raw keystroke passthrough: bytes from the browser terminal go straight into
@@ -394,8 +406,9 @@ const server = createServer(async (req, res) => {
       if (!inst) return send(res, 404, { error: `unknown instance "${m[2]}"` });
       if (m[1] === "session" && req.method === "GET") {
         if (!inst.running) return send(res, 200, { running: false, text: "" });
-        const hist = Math.min(historySize(inst), Math.max(0, Number(url.searchParams.get("lines") || 500)));
-        return send(res, 200, { running: true, size: paneSize(inst), history: hist, text: capture(inst, hist) });
+        const info = paneInfo(inst);
+        const hist = Math.min(info.history, Math.max(0, Number(url.searchParams.get("lines") || 500)));
+        return send(res, 200, { running: true, size: info.size, history: hist, text: capture(inst, hist) });
       }
       if (m[1] === "keys" && req.method === "POST") {
         if (!inst.running) return send(res, 409, { error: "instance is not running" });

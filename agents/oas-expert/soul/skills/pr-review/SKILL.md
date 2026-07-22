@@ -22,8 +22,11 @@ before its details. Does this belong in OAS, in this form?
   bounce even when the code is good.
 
 **2. Correctness.** Fetch and verify — never trust green checkmarks blind:
-- `gh pr checkout <n>` into a scratch worktree; run the full gate:
-  `npm test`, `npm run check`, `npm run validate`, `npm run pack:check`.
+- `gh pr checkout <n>` into a scratch worktree. Before judging failures, run
+  `npm install` there so validation can load devDependencies, and make sure
+  oas-web tests whose server `--dir` is the scratch worktree can see the
+  deployment's `.agents/capabilities/installed/` directory. Then run the full
+  gate: `npm test`, `npm run check`, `npm run validate`, `npm run pack:check`.
 - Read the diff completely. For kernel changes, check every consumer
   (adapter, capabilities, panel/TUI) for the changed surface.
 - Tests: do new behaviors carry tests that would fail on regression?
@@ -63,6 +66,13 @@ BEFORE retiring — it is the last gate of the review.
 
 ## Operational gotchas
 
+- **Bare scratch worktree false failures**: `npm run validate` needs installed
+  devDependencies (for example `ajv`), and the oas-web `/api/agents` test needs
+  the deployment's `.agents/capabilities/installed/` under the server `--dir`
+  root so capability-defined agents such as `oas.review`'s `reviewer` are
+  listed. Copy `installed/` into the worktree's `.agents/capabilities/`, or run
+  the test from the deployment root. See
+  `knowledge/lessons/scratch-worktree-pr-gate-environment.md`.
 - **Same GitHub account as PR author**: `gh pr review --approve` can fail with
   "Can not approve your own pull request" when the maintainer and author share
   the `gh` account. Record the APPROVE verdict as a PR comment instead; do not
