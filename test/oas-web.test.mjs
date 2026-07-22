@@ -27,8 +27,10 @@ const R = loadRenderer();
 
 test("oas-web manifest: compatibility floor covers the core APIs the server uses", () => {
   const manifest = JSON.parse(readFileSync(join(CAP, "oas.json"), "utf8"));
-  const floor = /([\d.]+)/.exec(manifest.compatibility?.oas || "")?.[1];
-  assert.ok(floor, "manifest declares a compatibility floor");
+  // anchor the accepted syntax: only ">=x.y.z" is a meaningful floor here —
+  // a looser parse would let an inverted/unknown range (e.g. "<=0.16.0") pass.
+  const floor = /^>=(\d+\.\d+\.\d+)$/.exec(manifest.compatibility?.oas || "")?.[1];
+  assert.ok(floor, "manifest declares a '>=x.y.z' compatibility floor");
   const src = readFileSync(join(CAP, "bin", "oas-web.mjs"), "utf8");
   // core API → kernel version it first shipped in
   const apiFloors = [
