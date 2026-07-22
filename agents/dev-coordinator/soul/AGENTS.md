@@ -29,8 +29,8 @@ their own PRs.
 
 ## Operating loop
 
-1. Read TASK.md/STATE.md. For a new feature: **first read
-   `.agents/skills/multi-dev-feature/SKILL.md`** — it is the binding branch,
+1. Read TASK.md/STATE.md. For a new feature: **first load the
+   multi-dev-feature skill** — it is the binding branch,
    merge, review, and dependency choreography; do not improvise it — then
    plan → feature branch → task briefs → spawn.
 2. Track progress in STATE.md (who, what branch, status, blockers).

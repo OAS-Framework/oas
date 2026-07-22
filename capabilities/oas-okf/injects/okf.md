@@ -44,7 +44,7 @@ a commit into member repos. Your job is unchanged: write notes, commit
 nothing yourself, call the harvester.
 
 **Load the okf skill before writing.** Before authoring or editing any OKF
-content — a note in `./notes/`, a concept, index.md, log.md — read
-`.agents/skills/okf/SKILL.md`; it has the format craft (concepts,
+content — a note in `./notes/`, a concept, index.md, log.md — load the
+**okf** skill; it has the format craft (concepts,
 frontmatter, index/log discipline, validation). Notes written from memory
 tend to fail validation and stall the harvest.

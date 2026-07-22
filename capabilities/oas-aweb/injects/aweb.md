@@ -6,12 +6,13 @@ aweb identity — alias = your instance name — on your deployment's team (see
 
 **Load the skills at the right moments — do not work from memory:**
 
-- **Before your first `aw mail`/`aw chat` of a session**, read the
-  **aweb-messaging** skill (in `.agents/skills/aweb-messaging/`). It is the
+- **Before your first `aw mail`/`aw chat` of a session**, load the
+  **aweb-messaging** skill. It is the
   playbook for sending, replying, and chat etiquette.
 - **When an aweb channel event awakens you**, read the injected event
-  metadata first, then the **aweb-messaging** skill's "Read the event first"
-  section before responding — continue the existing conversation, never
+  metadata first, then load the **aweb-messaging** skill ("Read the event
+  first" section) before responding — continue the existing conversation,
+  never
   start a new thread when a `message_id`/`conversation_id` is provided.
 - For team/roster/certificate questions, load **aweb-team-membership**; for
   identity/key questions, load **aweb-identity**.

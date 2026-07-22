@@ -9,14 +9,14 @@
     },
     "oas.review": {
       "source": "path:/Users/pepe-reyero/oas/capabilities/oas-review",
-      "version": "1.1.1",
-      "integrity": "sha256-da4e13e01e20fec2ed00e249cd72106a52471ec086b578bc4fe36271907f17f7",
+      "version": "1.1.2",
+      "integrity": "sha256-fa71e9046c976abf8bda42a03e8ad6447b84751848a40268329d4f6316e491a5",
       "trustedExecutables": true
     },
     "oas.okf": {
       "source": "path:/Users/pepe-reyero/oas/capabilities/oas-okf",
-      "version": "1.2.1",
-      "integrity": "sha256-282d494b4e2b21098aedd403263930f595febf31aa8bfd924190425931502688",
+      "version": "1.2.2",
+      "integrity": "sha256-bb6ec2102645b3dc8ed76b6a460327adaaf12f2b5ec9d7d66c6ab327f7bf0c7e",
       "trustedExecutables": true
     }
   }
