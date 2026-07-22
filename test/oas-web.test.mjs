@@ -119,6 +119,34 @@ function loadRenderer() {
 }
 const R = loadRenderer();
 
+// ---- manifest/API compatibility: the declared kernel floor must cover the
+// core APIs the server calls (regression guard: calling a helper newer than
+// the compatibility floor would silently break on accepted kernel versions).
+
+test("oas-web manifest: compatibility floor covers the core APIs the server uses", () => {
+  const manifest = JSON.parse(readFileSync(join(CAP, "oas.json"), "utf8"));
+  // anchor the accepted syntax: only ">=x.y.z" is a meaningful floor here —
+  // a looser parse would let an inverted/unknown range (e.g. "<=0.16.0") pass.
+  const floor = /^>=(\d+\.\d+\.\d+)$/.exec(manifest.compatibility?.oas || "")?.[1];
+  assert.ok(floor, "manifest declares a '>=x.y.z' compatibility floor");
+  const src = readFileSync(join(CAP, "bin", "oas-web.mjs"), "utf8");
+  // core API → kernel version it first shipped in
+  const apiFloors = [
+    ["listCapabilityAgents", "0.16.0"],
+    ["findCapabilityAgent", "0.16.0"],
+  ];
+  const cmp = (a, b) => {
+    const pa = a.split(".").map(Number), pb = b.split(".").map(Number);
+    for (let i = 0; i < 3; i++) { if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) - (pb[i] || 0); }
+    return 0;
+  };
+  for (const [api, minV] of apiFloors) {
+    if (!src.includes(`core.${api}`)) continue;
+    assert.ok(cmp(floor, minV) >= 0,
+      `server calls core.${api} (needs oas >=${minV}) but manifest floor is >=${floor}`);
+  }
+});
+
 test("oas-web renderer: each capture line is one row; history maps the screen start", () => {
   const d = { text: "h1\nh2\nscreen1\nscreen2\n", history: 2, size: { rows: 5, cols: 20, cx: 0, cy: 0, cursor: false } };
   const html = R.renderCapture(d);
@@ -227,5 +255,45 @@ test("oas-web server: POST origin guard rejects hostile/null origins without cra
     assert.equal(ok.status, 404, "loopback origin passes the guard (unknown instance)");
     // server survived the malformed origin
     assert.equal((await fetch(`http://127.0.0.1:${port}/api/panel`)).status, 200);
+  } finally { proc.kill(); }
+});
+
+// ---- /api/agents + /api/spawn: roster of spawnable souls incl. capability agents ----
+
+test("oas-web server: /api/agents lists persistent AND capability-defined agents; /api/spawn validates", async () => {
+  const port = 4000 + Math.floor(Math.random() * 2000);
+  const proc = spawn(process.execPath, [join(CAP, "bin", "oas-web.mjs"), "start", "--port", String(port), "--dir", ROOT], { stdio: "ignore" });
+  try {
+    let up = false;
+    for (let i = 0; i < 40 && !up; i++) {
+      await new Promise((r) => setTimeout(r, 100));
+      try { await fetch(`http://127.0.0.1:${port}/api/panel`); up = true; } catch { /* retry */ }
+    }
+    assert.ok(up, "server came up");
+    const d = await (await fetch(`http://127.0.0.1:${port}/api/agents`)).json();
+    assert.ok(Array.isArray(d.agents) && d.agents.length, "agents listed");
+    for (const a of d.agents) {
+      assert.ok(a.name && a.agentsRoot, "each agent has name and agentsRoot");
+      assert.ok(["persistent", "tmp", "capability"].includes(a.kind), `known kind (${a.kind})`);
+    }
+    // capability-defined agents (e.g. oas.review's reviewer) must appear — the
+    // CLI can spawn them via findCapabilityAgent, so the panel must offer them.
+    const reviewer = d.agents.find((a) => a.name === "reviewer");
+    assert.ok(reviewer, "capability-defined 'reviewer' is listed");
+    assert.equal(reviewer.kind, "capability");
+    assert.equal(reviewer.capability, "oas.review");
+    // /api/spawn input validation (no real spawn: bad root / unknown agent / bad body)
+    const post = (body) => fetch(`http://127.0.0.1:${port}/api/spawn`, { method: "POST",
+      headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    assert.equal((await post({})).status, 400, "missing fields → 400");
+    assert.equal((await post({ agent: "reviewer", agentsRoot: "/tmp" })).status, 409, "foreign agentsRoot rejected");
+    const root = d.agents[0].agentsRoot;
+    assert.equal((await post({ agent: "no-such-agent", agentsRoot: root })).status, 409, "unknown agent rejected");
+    // capability agent RESOLVES through the spawn path (attached mode fails on
+    // workDir, proving findCapabilityAgent found the soul — not "unknown agent")
+    const r = await post({ agent: "reviewer", agentsRoot: root });
+    assert.equal(r.status, 409);
+    const err = (await r.json()).error;
+    assert.ok(!/unknown agent/.test(err), `reviewer resolves via findCapabilityAgent (got: ${err})`);
   } finally { proc.kill(); }
 });
