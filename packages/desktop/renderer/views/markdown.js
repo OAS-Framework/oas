@@ -67,7 +67,7 @@ export function sanitizeHtml(html, doc) {
     RETURN_DOM_FRAGMENT: true,
     ADD_ATTR: ["data-open-file"],
     FORBID_TAGS: ["style", "form", "input", "button"],
-    ALLOWED_URI_REGEXP: /^(?:https?|mailto):|^#$/i,
+    ALLOWED_URI_REGEXP: /^(?:https?|mailto):|^#/i,
   });
   for (const a of frag.querySelectorAll("a")) {
     if (a.hasAttribute("data-open-file")) {
@@ -76,7 +76,10 @@ export function sanitizeHtml(html, doc) {
       a.removeAttribute("rel");
       continue;
     }
-    const safe = externalHref(a.getAttribute("href") || "");
+    const href = a.getAttribute("href") || "";
+    // plain fragment links are local/neutral — never external, never _blank
+    if (href.startsWith("#")) { a.removeAttribute("target"); a.removeAttribute("rel"); continue; }
+    const safe = externalHref(href);
     if (!safe) { // unsafe/relative raw-HTML anchor: neutralize to plain text
       a.replaceWith(...a.childNodes);
       continue;

@@ -120,4 +120,10 @@ test("markdown: sanitizeHtml strips scripts/handlers and normalizes every anchor
   }
   assert.ok(div.textContent.includes("js") && !out.includes('href="javascript:'), "js: anchor neutralized to text");
   assert.ok(div.textContent.includes("raw-rel"), "raw relative anchor neutralized to text");
+  // plain fragment links stay local — never rewritten to target=_blank
+  const frag = doc.createElement("div");
+  frag.innerHTML = md.sanitizeHtml('<a href="#section">frag</a>', doc);
+  const fa = frag.querySelector("a");
+  assert.ok(fa, "fragment anchor survives");
+  assert.equal(fa.getAttribute("target"), null, "fragment link is not externalized");
 });
