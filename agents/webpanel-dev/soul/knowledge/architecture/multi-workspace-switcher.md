@@ -1,7 +1,7 @@
 ---
 type: Concept
 title: Multi-workspace support — repeatable --dir and the workspace switcher
-description: The server accepts a repeatable --dir flag whose contexts each resolve to their team/deployment scope (duplicates collapse), the UI shows a workspace dropdown only when more than one workspace is watched, and instance-name APIs pass ?ws= so same-named instances resolve inside the selected workspace.
+description: The server accepts a repeatable --dir flag whose contexts each resolve to their team/deployment scope (duplicates collapse), the UI shows a workspace dropdown only when more than one workspace is watched, and instance-name APIs pass ?ws= end to end so same-named instances resolve inside the selected workspace.
 tags: [oas-web, workspace, multi-workspace, roster, team]
 timestamp: 2026-07-22
 ---
@@ -19,7 +19,8 @@ timestamp: 2026-07-22
 - `findInstance(name, wsId)` reads the workspace snapshot. With a `wsId`, it
   searches only that workspace; an unknown workspace or missing instance returns
   no match (404 at the route), with no fallback to another workspace. Without a
-  `wsId`, the legacy first-match-across-all-workspaces lookup remains.
+  `wsId`, the legacy first-match-across-all-workspaces lookup remains — which
+  is ambiguous when names collide, so scoped callers must always send `?ws=`.
 - Instance-name routes (`session`, `keys`, `interrupt`, `jira`, `chat`, and
   `diff`) forward the selected workspace as `?ws=` so same-named instances do
   not cross wires. `/api/file` intentionally stays cross-workspace because it is
@@ -32,9 +33,11 @@ timestamp: 2026-07-22
   more than one workspace (single-workspace setups stay clean). Entries show
   `name · team`. Selection persists across reloads.
 - Switching swaps the roster and clears the session pane/caches (this
-  intersects the stale-response guards). Instance-addressed calls include the
-  selected workspace id as `?ws=` so the server can resolve duplicate instance
-  names safely.
+  intersects the stale-response guards).
+- The selected workspace is routing state, not just display state: shared view
+  helpers (e.g. the desktop views' `instanceApiPath`) append `?ws=<id>` to
+  interrupt, chat, Jira, session, and key requests instead of hand-building
+  per-instance paths, so the server can resolve duplicate instance names safely.
 
 # Mental model
 

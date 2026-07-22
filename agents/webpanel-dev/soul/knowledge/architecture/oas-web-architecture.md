@@ -21,8 +21,8 @@ The web panel lives in `capabilities/oas-web/` and is deliberately tiny:
     capability-agent skills, and running-state for the desktop brain view while
     resolving agent names through kernel lookup seams (see
     [agent brain endpoint](agent-brain-endpoint-and-view.md)).
-  - `GET /api/session/<instance>?lines=n` — raw ANSI tmux `capture-pane` text plus pane geometry, cursor state, and history depth.
-  - `GET /api/chat/<instance>?limit=n` — parsed structured transcript turns.
+  - `GET /api/session/<instance>?ws=<id>&lines=n` — raw ANSI tmux `capture-pane` text plus pane geometry, cursor state, and history depth.
+  - `GET /api/chat/<instance>?ws=<id>&limit=n` — parsed structured transcript turns.
   - `GET /api/file` — guarded file reads for desktop viewers; realpaths the
     requested path and every allowed root before containment checks (see
     [the file guard lesson](/lessons/file-endpoint-realpath-guard.md)).
@@ -30,16 +30,17 @@ The web panel lives in `capabilities/oas-web/` and is deliberately tiny:
     `<home>/work` rather than using `inst.work` and parses NUL-delimited git
     rename stats (see [the work-mode lesson](/lessons/instance-work-mode-not-path.md)
     and [the rename parsing lesson](/lessons/git-rename-stats-nul-parsing.md)).
-  - `POST /api/keys` — sends browser keydown bytes into the tmux pane and is
+  - `POST /api/keys?ws=<id>` — sends browser keydown bytes into the tmux pane and is
     the panel's only text-input path (see [raw key passthrough](raw-key-passthrough-and-host-guard.md)
     and [the input-surface decision](/decisions/terminal-input-unification.md)).
-  - `POST /api/interrupt/<instance>` — sends Ctrl-C.
-  - `GET /api/jira/<instance>` — epic + Agent Roster via `acli` when
+  - `POST /api/interrupt/<instance>?ws=<id>` — sends Ctrl-C.
+  - `GET /api/jira/<instance>?ws=<id>` — epic + Agent Roster via `acli` when
     `capabilityMeta["oas.jira"]` is present.
   Instance-addressed routes (`session`, `keys`, `interrupt`, `jira`, `chat`,
   and `diff`) forward `?ws=` when the UI has a selected workspace, so
   `findInstance(name, wsId)` resolves same-named instances strictly inside that
-  workspace; see [the workspace-scoping lesson](/lessons/workspace-scoped-instance-routing.md).
+  workspace — unscoped global lookup is ambiguous when instance names collide
+  across workspaces; see [the workspace-scoping lesson](/lessons/workspace-scoped-instance-routing.md).
 - `ui/panel.html` — all CSS, JS, rendering, panes, and polling loops in one
   file. No build step, no framework. Hard-refresh (Cmd-Shift-R) is the deploy.
   The current shell has an editor-style panes array, focused-pane key routing,

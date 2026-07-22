@@ -8,7 +8,7 @@
 import {
   escapeHtml, miniMarkdown, apiJson, postJson, ensureTheme,
   groupInstances, currentWorkspace, setWorkspace, adoptWorkspace, onWorkspaceChange,
-  renderWorkspaceSelect, wsQuery,
+  renderWorkspaceSelect, wsQuery, instanceApiPath,
 } from "./common.mjs";
 
 let state = null;
@@ -24,6 +24,7 @@ export function mount(el, ctx) {
     pendingSends: [],
     fastPollUntil: 0,
     chatReq: 0,               // request generation — stale responses never paint
+    jiraReq: 0,               // jira generation — bumped on every selection/clear/ws switch
     lastChatSig: "",
     lastChatData: null,
     openTools: new Set(),
@@ -63,7 +64,7 @@ export function mount(el, ctx) {
   s.q("termbtn").onclick = () => { if (s.sel) s.ctx.openTerminal(s.sel); };
   s.q("intbtn").onclick = async () => {
     if (!s.sel) return;
-    try { await postJson(s.ctx, `/api/interrupt/${encodeURIComponent(s.sel)}`, {}); } catch { /* idle instance */ }
+    try { await postJson(s.ctx, instanceApiPath("interrupt", s.sel), {}); } catch { /* idle instance */ }
     setTimeout(() => refreshChat(s, true), 350);
   };
   s.unsubWs = onWorkspaceChange(() => { clearSelection(s); refreshPanel(s); });
@@ -152,7 +153,7 @@ function renderRoster(s) {
 /* ── selection + detail head ── */
 function clearSelection(s) {
   s.sel = null; s.lastChatSig = ""; s.lastChatData = null; s.jira = null;
-  s.pendingSends.length = 0; s.chatReq++;
+  s.pendingSends.length = 0; s.chatReq++; s.jiraReq++;
   s.q("vhead").style.display = "none";
   s.q("chat").innerHTML = '<div class="empty"><span class="big">⌥</span>Select an instance to follow its session.</div>';
 }
@@ -164,6 +165,7 @@ function select(s, name) {
   renderRoster(s);
   s.lastChatSig = ""; s.lastChatData = null; s.jira = null;
   s.chatReq++;                       // invalidate in-flight fetches for the old instance
+  s.jiraReq++;
   s.pendingSends.length = 0;
   s.q("chat").innerHTML = '<div class="loading-block"><span class="spinner"></span> Loading session…</div>';
   refreshChat(s, true);
@@ -188,12 +190,19 @@ function renderHead(s, i) {
   ].filter(Boolean).map((x) => `<span>${x}</span>`).join("");
 }
 
-/* ── jira (inline card at the top of the transcript when meta is present) ── */
-async function refreshJira(s, name) {
+/* ── jira (inline card at the top of the transcript when meta is present) ──
+   Exported for the deferred-response regression: the guard must check the
+   REQUEST GENERATION, not just the instance name — with the same instance
+   name in two workspaces, "fetch in B → switch to A → reselect same name →
+   B's response lands" passes a name-only check and paints B's data in A. */
+export async function refreshJira(s, name) {
+  const myReq = s.jiraReq;           // capture BEFORE the await
   let d;
-  try { d = await apiJson(s.ctx, `/api/jira/${encodeURIComponent(name)}`); }
+  try { d = await apiJson(s.ctx, instanceApiPath("jira", name)); }
   catch { return; }
-  if (!s.alive || s.sel !== name) return;
+  // stale if: view unmounted, selection changed, or ANY newer selection/clear/
+  // workspace switch happened while this response was in flight (jiraReq).
+  if (!s.alive || s.sel !== name || myReq !== s.jiraReq) return;
   s.jira = d && d.enabled ? d : null;
   s.lastChatSig = "";                 // repaint transcript with the jira card
   if (s.lastChatData) renderChat(s, s.lastChatData, false);
@@ -330,7 +339,7 @@ async function refreshChat(s, scroll) {
   const forSel = s.sel;
   const myReq = ++s.chatReq;
   let d;
-  try { d = await apiJson(s.ctx, `/api/chat/${encodeURIComponent(forSel)}?limit=150`); }
+  try { d = await apiJson(s.ctx, instanceApiPath("chat", forSel, "limit=150")); }
   catch { return; } // keep the last good render on transient fetch errors
   // A newer request finished first, or the user switched instance mid-flight:
   // this payload belongs to another view — never let it paint.
