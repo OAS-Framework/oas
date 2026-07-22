@@ -1,6 +1,8 @@
 # Knowledge Log
 
 ## 2026-07-22
+* **Creation**: added [Per-instance API calls must be workspace-scoped](/lessons/workspace-scoped-instance-requests.md) from the ws-scoped-instance-requests note: views must append the selected `?ws=` to per-instance endpoints because names collide across workspaces and unscoped lookup can hit or read the wrong instance.
+* **Update**: [multi-workspace switcher](/architecture/multi-workspace-switcher.md), [oas-web architecture](/architecture/oas-web-architecture.md), and [desktop renderer views port](/architecture/desktop-renderer-views-port.md) now record that selected workspace is routing state for per-instance requests, not just roster/UI state.
 * **Creation**: added [Agent brain endpoint and desktop brain view](/architecture/agent-brain-endpoint-and-view.md) from the brain endpoint note: `/api/brain/<agent>` resolves names through kernel agent lookup seams, returns only artifact paths, and feeds the contract-based desktop brain view.
 * **Update**: [oas-web architecture](/architecture/oas-web-architecture.md) now lists `GET /api/brain/<agent>?ws=<id>` in the server surface.
 * **Creation**: added [Security regressions must exercise behavior, not source strings](/lessons/behavioral-security-regressions.md) from the behavioral-security-regressions note: guard regressions must drive the real boundary with forged requests and a fake upstream, because source-string checks pass when the guard is inverted, unreachable, or no longer returns 403.

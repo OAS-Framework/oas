@@ -1,9 +1,9 @@
 ---
 type: Concept
 title: Multi-workspace support — repeatable --dir and the workspace switcher
-description: The server accepts a repeatable --dir flag whose contexts each resolve to their team/deployment scope (duplicates collapse), and the UI shows a workspace dropdown only when more than one workspace is watched, while instance-addressed endpoints resolve names across all watched workspaces.
+description: The server accepts a repeatable --dir flag whose contexts each resolve to their team/deployment scope (duplicates collapse), and the UI shows a workspace dropdown only when more than one workspace is watched, while instance-addressed endpoints must carry the selected workspace because instance names are workspace-local.
 tags: [oas-web, workspace, multi-workspace, roster, team]
-timestamp: 2026-07-21
+timestamp: 2026-07-22
 ---
 
 # Server side (oas-web.mjs)
@@ -16,9 +16,12 @@ timestamp: 2026-07-21
 - `panelData(wsId)` aggregates `collectControlPane(root)` over the selected
   workspace's roots; a broken root is swallowed (one bad root must not hide
   the rest). Running instances sort first.
-- `findInstance(name)` searches **all** workspaces — so
-  `/api/chat|send|session/<name>` works regardless of which workspace the UI
-  currently displays.
+- `findInstance(name, wsId)` is the safe path for instance-addressed endpoints:
+  with `wsId` it searches only that workspace and strict-misses unknown
+  workspaces. The unscoped `findInstance(name)` fallback searches all
+  workspaces and is ambiguous when names collide, so view code must include
+  `?ws=<id>` on per-instance requests; see
+  [the workspace-scoping lesson](/lessons/workspace-scoped-instance-requests.md).
 
 # UI side (panel.html)
 
@@ -27,6 +30,9 @@ timestamp: 2026-07-21
   `name · team`. Selection persists across reloads.
 - Switching swaps the roster and clears the session pane/caches (this
   intersects the stale-response guards).
+- The selected workspace is routing state, not just display state: shared view
+  helpers should append `?ws=<id>` to interrupt, chat, Jira, session, and key
+  requests instead of hand-building per-instance paths.
 
 # Mental model
 
