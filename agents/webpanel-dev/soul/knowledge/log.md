@@ -1,6 +1,8 @@
 # Knowledge Log
 
 ## 2026-07-22
+* **Creation**: added [Spawn endpoint root allowlist and empty-task semantics](/architecture/spawn-endpoint.md) by merging the spawn endpoint notes: `agentsRoot` is a selector into server workspace roots, `task: ""` intentionally means await instructions, repo fallback mirrors the CLI, and spawn failures return 409.
+* **Update**: [oas-web architecture](/architecture/oas-web-architecture.md) now lists `POST /api/spawn` and records the path-shaped browser parameter allowlist invariant.
 * **Creation**: added [Split panes, collapsible sidebar, and compact session header](/architecture/split-panes-and-compact-shell.md) from the split-pane shell note: per-pane state and pollers, focused-pane key routing, modifier-click splits, persisted sidebar collapse, and compact `.phead` headers.
 * **Creation**: added [One input surface — the terminal's own input line](/decisions/terminal-input-unification.md) from the terminal-input note: no separate composer, no `/api/send`, all typing/pasting through raw `/api/keys` into the focused pane.
 * **Update**: [Raw key passthrough](/architecture/raw-key-passthrough-and-host-guard.md), [oas-web architecture](/architecture/oas-web-architecture.md), and [multi-line send lesson](/lessons/multiline-send-bracketed-paste.md) now reflect `/api/keys` as the sole input path and paste payloads as bracketed paste.
