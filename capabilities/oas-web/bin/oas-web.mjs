@@ -271,6 +271,18 @@ function sendInterrupt(inst) {
   execFileSync("tmux", ["send-keys", "-t", tmuxTarget(inst), "C-c"], { timeout: 4000 });
 }
 
+/* OASWEB_KEYERR_BEGIN — safe error shaping for the /api/keys failure path,
+   extracted by tests. exec errors embed the child argv (hex-encoded
+   keystrokes) in e.message; only exit code and signal are safe to surface. */
+function keySendError(e) {
+  const code = e && e.code !== undefined ? String(e.code) : "unknown";
+  const signal = (e && e.signal) || "none";
+  return { code, signal,
+           log: `[keys] FAILED code=${code} signal=${signal}`,
+           http: { error: `send-keys failed (code ${code}) — see the terminal directly` } };
+}
+/* OASWEB_KEYERR_END */
+
 // ---- Chat transcript: parse the runtime's session log into structured turns ----
 // pi:     ~/.pi/agent/sessions/--<home with / -> ->--/<ts>_<id>.jsonl
 // claude: ~/.claude*/projects/<cwd with / -> ->/<uuid>.jsonl
@@ -448,8 +460,11 @@ const server = createServer(async (req, res) => {
         try {
           sendKeys(inst, data, paste === true);
         } catch (e) {
-          if (DEBUG) console.log(`[keys] FAILED: ${e.message}`);
-          return send(res, 500, { error: `send-keys failed: ${String(e.message).slice(0, 200)}` });
+          // SECURITY: e.message embeds the child argv (hex-encoded keystrokes)
+          // — never let it reach logs or the response (keySendError shapes it).
+          const safe = keySendError(e);
+          if (DEBUG) console.log(`${safe.log} inst=${inst.instance}`);
+          return send(res, 500, safe.http);
         }
         return send(res, 200, { sent: true });
       }

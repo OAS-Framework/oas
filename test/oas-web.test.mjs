@@ -29,6 +29,26 @@ test("oas-web server: collect subcommand emits the roster snapshot JSON", () => 
   assert.ok(Array.isArray(ws[0].instances), "each workspace carries an instances array");
 });
 
+test("oas-web server: key-send failures never leak the payload or its hex encoding", () => {
+  const src = extractBlock(join(CAP, "bin", "oas-web.mjs"), "KEYERR");
+  const keySendError = new Function(src + "\nreturn keySendError;")();
+  const secret = "hunter2-t0ken";
+  const hex = [...Buffer.from(secret, "utf8")].map((b) => b.toString(16).padStart(2, "0")).join(" ");
+  // simulate the real execFileSync failure shape: argv (hex bytes) inside message
+  const err = Object.assign(new Error(`Command failed: tmux send-keys -t s:1 -H ${hex}`),
+                            { code: 1, signal: null });
+  const safe = keySendError(err);
+  for (const [what, s] of [["log", safe.log], ["http error", JSON.stringify(safe.http)]]) {
+    assert.ok(!s.includes(secret), `${what} must not contain the plaintext payload`);
+    assert.ok(!s.includes(hex.slice(0, 8)), `${what} must not contain the hex-encoded payload`);
+    assert.ok(!s.includes("Command failed"), `${what} must not embed the child argv message`);
+  }
+  assert.ok(safe.http.error.includes("code 1"), "exit code is surfaced");
+  // timeout shape (ETIMEDOUT + signal) stays safe too
+  const t = keySendError(Object.assign(new Error(`spawnSync tmux ETIMEDOUT: -H ${hex}`), { code: "ETIMEDOUT", signal: "SIGTERM" }));
+  assert.ok(!t.log.includes(hex.slice(0, 8)) && t.log.includes("ETIMEDOUT") && t.log.includes("SIGTERM"));
+});
+
 test("oas-web echo: screen signature is depth-independent and detects real change", () => {
   const src = extractBlock(join(CAP, "ui", "panel.html"), "SCREENSIG");
   const screenSignature = new Function(src + "\nreturn screenSignature;")();
