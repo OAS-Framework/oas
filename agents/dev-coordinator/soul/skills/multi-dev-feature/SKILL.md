@@ -72,8 +72,20 @@ to the owning developer(s), re-merge, re-gate, re-review.
 
 - `gh pr create` from `feature/<name>` (you own the PR). Summarize scope,
   developer branches merged, review verdict.
-- Mail the maintainer (oas-expert) the PR number; relay review feedback to
-  the right developer; re-request review after fixes.
+- **Launch the maintainer for the merge** — main only moves through the
+  framework expert's review. If no oas-expert instance is live
+  (`oas status`), spawn one:
+
+  ```bash
+  oas spawn oas-expert \
+    --task "Maintainer review of PR #<n> (feature/<name>): run your pr-review gates, merge or return findings to <your-instance> by aweb mail."
+  ```
+
+  If one is already live, mail it the PR number instead. Either way, go
+  idle — the verdict/merge notice arrives by aweb mail. You never merge to
+  main yourself.
+- Relay review feedback to the right developer; re-request review after
+  fixes.
 - After merge: delete the feature and developer branches, remove any temp
   worktree (`git worktree remove`), confirm developers harvested and retire
   them, log the delivery.

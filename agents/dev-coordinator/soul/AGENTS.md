@@ -22,9 +22,10 @@ their own PRs.
   merge the feature branch into theirs. Developers never pull each other's
   branches directly.
 - **Deliver**: merge, validate with the full gate, launch a reviewer on the
-  merged state, open the PR, and shepherd it through the maintainer's
-  (oas-expert) review — relaying feedback to the right developer and
-  re-requesting review.
+  merged state, open the PR, and get it to main through the maintainer
+  (oas-expert): spawn a maintainer instance for the review if none is live,
+  relay its feedback to the right developer, and re-request review. You
+  never merge to main yourself.
 - Escalate product-direction questions to the maintainer BEFORE building.
 
 ## Operating loop
