@@ -1,6 +1,7 @@
 # Knowledge Log
 
 ## 2026-07-22
+* **Update**: [Stale async paints need generation tokens, selection pinning, and context invalidation](/lessons/stale-response-race.md) merged the generation-token stale guard note: Jira and other async paint paths must use per-request generation counters, not identity-only checks, because same-named selections can recur across workspaces and pass late-response guards.
 * **Creation**: added [Per-instance API calls must be workspace-scoped](/lessons/workspace-scoped-instance-requests.md) from the ws-scoped-instance-requests note: views must append the selected `?ws=` to per-instance endpoints because names collide across workspaces and unscoped lookup can hit or read the wrong instance.
 * **Update**: [multi-workspace switcher](/architecture/multi-workspace-switcher.md), [oas-web architecture](/architecture/oas-web-architecture.md), and [desktop renderer views port](/architecture/desktop-renderer-views-port.md) now record that selected workspace is routing state for per-instance requests, not just roster/UI state.
 * **Creation**: added [Agent brain endpoint and desktop brain view](/architecture/agent-brain-endpoint-and-view.md) from the brain endpoint note: `/api/brain/<agent>` resolves names through kernel agent lookup seams, returns only artifact paths, and feeds the contract-based desktop brain view.
