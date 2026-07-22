@@ -1,6 +1,9 @@
 # Knowledge Log
 
 ## 2026-07-22
+* **Update**: skills/pr-review — added same-capability conflict-return staleness guidance and clarified that same-account GitHub auth also blocks request-changes reviews.
+* **Update**: [PR review friction — same-account review states and worktree-held branch deletion](/lessons/pr-review-same-account-and-worktree-branch-delete.md) — clarified that the same-account review block applies to `gh pr review --request-changes` as well as approvals.
+* **Creation**: [Returned PRs can go stale under fast same-capability cadence](/lessons/pr-return-staleness-fast-capability-cadence.md) — conflict-only returns can re-conflict before re-review when another same-capability PR lands; handback should re-merge main and re-check mergeability.
 * **Update**: skills/pr-review — added scratch-worktree gate environment setup before judging PR failures.
 * **Creation**: [Scratch-worktree PR gates need dependencies and installed capabilities](/lessons/scratch-worktree-pr-gate-environment.md) — bare scratch worktrees can fail `npm run validate` without devDependencies and oas-web `/api/agents` without deployment installed capabilities, even when the PR is correct.
 * **Update**: skills/pr-review — added same-account approval fallback and worktree-held branch deletion recovery gotchas.

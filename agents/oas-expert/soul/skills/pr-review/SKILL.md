@@ -73,10 +73,17 @@ BEFORE retiring — it is the last gate of the review.
   listed. Copy `installed/` into the worktree's `.agents/capabilities/`, or run
   the test from the deployment root. See
   `knowledge/lessons/scratch-worktree-pr-gate-environment.md`.
-- **Same GitHub account as PR author**: `gh pr review --approve` can fail with
-  "Can not approve your own pull request" when the maintainer and author share
-  the `gh` account. Record the APPROVE verdict as a PR comment instead; do not
-  treat this as a failed review, and continue to merge if the gates passed.
+- **Conflict-only returns can re-conflict quickly**: when several PRs touch the
+  same capability in one day, a branch returned only for merge conflicts can go
+  stale again before re-review. Tell the author to re-merge `origin/main` and
+  check `gh pr view <n> --json mergeable` immediately before handback; consider
+  sequencing or fast-tracking re-review for same-capability stacks. See
+  `knowledge/lessons/pr-return-staleness-fast-capability-cadence.md`.
+- **Same GitHub account as PR author**: `gh pr review --approve` and
+  `gh pr review --request-changes` can fail with the same-account GitHub block
+  when the maintainer and author share the `gh` account. Record the APPROVE or
+  RETURN verdict as a structured PR comment instead; for APPROVE, do not treat
+  this as a failed review and continue to merge if the gates passed.
 - **Branch held by another worktree**: `gh pr merge --delete-branch` can merge
   successfully but fail local branch deletion when a developer instance still
   has the branch checked out. Delete the remote with
