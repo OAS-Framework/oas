@@ -15,8 +15,8 @@
     },
     "oas.review": {
       "source": "path:/Users/pepe-reyero/oas/capabilities/oas-review",
-      "version": "1.1.4",
-      "integrity": "sha256-1b74b664dbea91006d6aecc9073af57d2c78d2d6e4fc376a5ffb06e810741f7b",
+      "version": "1.1.5",
+      "integrity": "sha256-4292b4ed95d09a8813c50231d0a01d43ba9b02f1d497a6e3f72428a40414b680",
       "trustedExecutables": true
     }
   }

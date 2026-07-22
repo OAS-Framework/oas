@@ -78,13 +78,19 @@ to the owning developer(s), re-merge, re-gate, re-review.
 
   ```bash
   oas spawn oas-expert --purpose "pr<n>" \
-    --task "Maintainer review of PR #<n> (feature/<name>): run your pr-review gates, merge or return findings to <your-instance> by aweb mail, record the delivery in your stewardship knowledge, then retire yourself."
+    --task "Maintainer review of PR #<n> (feature/<name>): run your pr-review gates. You own this PR to its terminal outcome — on RETURN stay alive and idle for my fixed-mail, re-review, repeat; on merge/close record the delivery in your stewardship knowledge and retire yourself. Report verdicts to <your-instance> by aweb mail."
   ```
 
   Go idle — the verdict/merge notice arrives by aweb mail. You never merge
   to main yourself.
-- Relay review feedback to the right developer; re-request review after
-  fixes.
+- **The maintainer instance persists across RETURN rounds**: relay its
+  findings to the right developer, collect the fixes onto the feature
+  branch, then mail the SAME maintainer (reply on its thread) to re-review
+  — never spawn a second maintainer for the same PR.
+- **Reviewers are the opposite — one per commit, then gone**: a post-commit
+  or merged-state reviewer mails its verdict and retires. Re-reviewing a
+  fix means spawning a NEW reviewer on the new commit
+  (`--purpose <new-short-sha>`); never wait on or mail a retired reviewer.
 - After merge: delete the feature and developer branches, remove any temp
   worktree (`git worktree remove`), confirm developers harvested and retire
   them, log the delivery.

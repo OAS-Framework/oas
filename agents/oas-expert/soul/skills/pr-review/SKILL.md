@@ -55,6 +55,13 @@ before its details. Does this belong in OAS, in this form?
   per gate, concrete asks. Hand it BACK to whoever owns the PR (the
   coordinator for multi-dev features, the developer otherwise): notify them
   via messaging or their task. Never fix their branch yourself.
+  **Then STAY ALIVE — you own this PR until it merges or closes.** Go idle;
+  the owner mails you when fixes are pushed. On their "fixed" mail, re-run
+  the affected gates on the new commits (full gate if the diff moved
+  substantially) and merge or return again. You do not re-review from
+  scratch: your prior findings and gate results are your working state
+  (keep them in STATE.md). Retire only after the terminal outcome — merged,
+  closed, or the human pulls you off.
 - **ESCALATE**: direction conflicts you cannot resolve from recorded
   decisions go to the human with your recommendation.
 

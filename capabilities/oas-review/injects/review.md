@@ -33,10 +33,19 @@ oas spawn reviewer --work attached --work-dir "$PWD/work" \
 
   ```bash
   oas spawn oas-expert --purpose "pr<n>" \
-    --task "Maintainer review of PR #<n>: run your pr-review gates, merge or return findings to <your-instance> by aweb mail, record the delivery in your stewardship knowledge, then retire yourself."
+    --task "Maintainer review of PR #<n>: run your pr-review gates. You own this PR to its terminal outcome — on RETURN stay alive and idle for my fixed-mail, re-review, repeat; on merge/close record the delivery in your stewardship knowledge and retire yourself. Report verdicts to <your-instance> by aweb mail."
   ```
 
-  Go idle for the verdict. You never merge to main yourself.
+  Go idle for the verdict. **The maintainer instance stays alive across
+  RETURN rounds** — when you push fixes, mail the SAME maintainer (reply on
+  its thread); do not spawn another for this PR. You never merge to main
+  yourself.
+
+  **Reviewers are the opposite: one per commit, then gone.** The post-commit
+  reviewer reviews its one diff, mails its verdict, and retires — it no
+  longer exists when you fix its findings. To re-review a fix, spawn a NEW
+  reviewer on the fix commit (`--purpose <new-short-sha>`); never mail a
+  retired reviewer or expect it to follow up.
 - **Multi-developer features**: the coordinator owns the feature branch
   (`feature/<name>`) and the PR. Branch `<you>/<name>` **from the feature
   branch**, push your branch, and tell the coordinator when it is ready —
