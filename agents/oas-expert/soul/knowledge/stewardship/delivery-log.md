@@ -24,6 +24,26 @@ decisions/ and referenced from here.
 
 ---
 
+## PR #16 — oas-web 0.7.2 fast session attach: registry cache, single tmux round-trip, three-rung paint (2026-07-22)
+- verdict: MERGED — all four gates green; approval again a PR comment
+  (same-account block). Measured root cause was `findInstance()` rebuilding
+  the whole control-pane model per `/api/session` request; fixed with a pure
+  injectable 2.5s-TTL registry cache (`makeRegistryCache`), `paneSize` +
+  `historySize` merged into one tmux `display-message` round-trip
+  (`paneInfo`), and a three-rung client attach (cached-frame paint → 120-line
+  tail → gen-guarded 2000-line backfill; `lines` in the render signature so
+  the tail never suppresses the deep paint). Reviewer nits addressed in
+  1555f2b via extracted marked blocks (OASWEB_REGCACHE, OASWEB_ATTACH) with
+  unit tests. Full gate green in scratch worktree: 61/61, check, validate,
+  pack:check. Remote branch deleted with `git push origin --delete` (author
+  worktree held it locally — owner notified).
+- owner: webpanel-dev-1 · coordinator: none
+- taught us: round-trip count, not payload size, dominated attach latency —
+  merging tmux queries and caching a rarely-changing roster beat any render
+  optimization; the marked-block extraction pattern now covers server-side
+  factories too (new Function over the extracted block), not just browser
+  code. Release still pending: marketplace oas.web 0.5.0 vs repo 0.7.2.
+
 ## PR #14 — oas-web 0.8.0 spawn-from-panel: /api/agents + /api/spawn (2026-07-22)
 - verdict: RETURNED — gates 1–3 (direction, correctness, security) PASS; gate 4
   (mergeability) FAIL: branch forked before PR #13 and conflicts with main in
