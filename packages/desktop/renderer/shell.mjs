@@ -28,15 +28,20 @@ const ctx = {
 const tabbar = document.getElementById("tabbar");
 const tabhost = document.getElementById("tabhost");
 const tabs = new Map(); // id -> { tabEl, paneEl, title, key, onClose, onShow }
+const reservedKeys = new Set(); // keys of closed tabs whose async cleanup is still running
 let nextTabId = 1;
 let activeTab = null;
 
 /** key: optional dedup key — activating an existing tab instead of opening a
  * twin. View modules keep module-level state (they are singletons by design),
- * so one tab per view/file is also a correctness requirement. */
+ * so one tab per view/file is also a correctness requirement. A key stays
+ * reserved while a closed tab's DEFERRED cleanup is pending — reopening
+ * before the stale lifecycle's module-wide unmount ran would let it tear
+ * down the new mount. */
 function addTab({ title, key, onClose, onShow }) {
   if (key) {
     for (const [tid, t] of tabs) if (t.key === key) { activateTab(tid); return null; }
+    if (reservedKeys.has(key)) return null; // closing tab's cleanup still pending
   }
   const id = nextTabId++;
   const tabEl = document.createElement("div");
@@ -70,7 +75,16 @@ function activateTab(id) {
 function closeTab(id) {
   const t = tabs.get(id);
   if (!t) return;
-  try { t.onClose?.(); } catch (e) { console.error(e); }
+  // onClose may return a promise (deferred cleanup while a mount is pending);
+  // reserve the key until it resolves so a reopen can't be torn down by the
+  // stale lifecycle's cleanup.
+  try {
+    const r = t.onClose?.();
+    if (r && typeof r.then === "function" && t.key) {
+      reservedKeys.add(t.key);
+      r.catch((e) => console.error(e)).finally(() => reservedKeys.delete(t.key));
+    }
+  } catch (e) { console.error(e); }
   t.tabEl.remove();
   t.paneEl.remove();
   tabs.delete(id);
