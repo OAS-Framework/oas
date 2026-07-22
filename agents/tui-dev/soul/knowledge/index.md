@@ -3,6 +3,13 @@
 Starter knowledge for the Terminal Control Pane developer
 (`lib/control-pane/model.mjs` + `tui.mjs`, `oas pane`).
 
+## Desktop shell
+
+* [Desktop shell view-host contract and layout](desktop-shell-layout.md) — Where things live in packages/desktop and how feature views integrate — mount(el, ctx)/unmount() ES modules in renderer/views/, ctx = { api, openFile, openTerminal } provided by the shell.
+* [Electron desktop shell hardening review lessons](desktop-shell-hardening-review-lessons.md) — First desktop shell review findings to preserve: block same-window navigation and foreign-frame IPC, verify oas-web serves the requested workspace, and audit Electron/toolchain dev dependencies at scaffold time.
+* [WHATWG URL resolution is an SSRF footgun in privileged proxies](url-resolution-ssrf-footgun.md) — new URL(path, base) resolves protocol-relative ("//host/x") and backslash ("/\\host/x") inputs to a different origin, so a privileged fetch proxy must check url.origin against the base origin, not just require a leading slash.
+* [Desktop terminal is a direct tmux attach via node-pty](desktop-terminal-direct-attach.md) — The desktop app's integrated terminal spawns node-pty running `tmux attach-session -t <session>:<window>` and pipes bytes over IPC to xterm.js — no capture-pane polling, no send-keys, no WebSocket bridge; closing the tab kills the pty only.
+
 ## Architecture
 
 * [Model/TUI split and shared data layer](architecture-model-tui-split.md) — the runtime-neutral model vs the ANSI frontend, and why model.mjs changes must be coordinated with the oas.web panel.
@@ -19,4 +26,5 @@ Starter knowledge for the Terminal Control Pane developer
 ## Verification and decisions
 
 * [Testing with pure functions and fake snapshots](testing-pure-functions-fake-snapshots.md) — how to verify the pane headless: parser tests, renderFrame against hand-built snapshots.
+* [Verifying an Electron app headlessly via CDP and ELECTRON_RUN_AS_NODE](electron-headless-verification.md) — How to drive and verify an Electron shell without a human at the GUI — remote-debugging-port + CDP Runtime.evaluate for the renderer, ELECTRON_RUN_AS_NODE for native-module (node-pty) checks under the Electron ABI.
 * [Control Pane decisions (reference)](reference-control-pane-decisions.md) — pointers to the binding decisions in the oas-expert soul (standalone read-only TUI, v3 cards, visual language, web pane).

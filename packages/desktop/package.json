@@ -1,0 +1,21 @@
+{
+  "name": "@oas-framework/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "OAS desktop app — Electron shell, integrated tmux terminal, and view host for the agent control panel.",
+  "type": "module",
+  "main": "main.mjs",
+  "scripts": {
+    "start": "electron .",
+    "rebuild": "electron-rebuild -f -w node-pty"
+  },
+  "dependencies": {
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/xterm": "^5.5.0",
+    "node-pty": "^1.0.0"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^4.2.0",
+    "electron": "^43.2.0"
+  }
+}
