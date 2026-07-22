@@ -3,7 +3,13 @@
 <!-- oas desktop — renderer view harness.
      Develops the views against a running oas-web server without the Electron
      shell: it supplies the contract ctx = { api, openFile, openTerminal }
-     with stub openFile/openTerminal, plus tab chrome and a theme toggle.
+     with a stub openTerminal (openFile routes into the markdown view), plus
+     tab chrome and a theme toggle. Bare imports resolve via the importmap:
+     highlight.js through the esbuild vendor bundle (its es/ entry is a
+     browser-incompatible dual-package shim — run `npm install` in
+     packages/desktop first, postinstall builds renderer/vendor/), marked and
+     dompurify straight from node_modules (browser-ready single-file ESM,
+     served by harness-server's /node_modules route).
 
      Usage:
        node capabilities/oas-web/bin/oas-web.mjs start --port 4821 --dir <ws>
@@ -15,6 +21,13 @@
 <title>oas desktop — view harness</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="stylesheet" href="./theme.css" data-oas-theme>
+<script type="importmap">
+{ "imports": {
+    "marked": "/node_modules/marked/lib/marked.esm.js",
+    "dompurify": "/node_modules/dompurify/dist/purify.es.mjs",
+    "highlight.js": "./vendor/highlight.mjs"
+} }
+</script>
 <style>
   body { margin: 0; height: 100vh; display: flex; flex-direction: column;
          background: var(--bg); color: var(--fg);
@@ -35,6 +48,8 @@
   <button class="tab" data-view="instances">Instances</button>
   <button class="tab" data-view="spawn">Spawn</button>
   <button class="tab" data-view="jira">Jira</button>
+  <button class="tab" data-view="markdown">Markdown</button>
+  <button class="tab" data-view="diff">Diff</button>
   <span class="spacer"></span>
   <span class="note" id="note"></span>
   <button class="tab" id="themebtn" title="Toggle light/dark">◐</button>
@@ -42,7 +57,7 @@
 <div id="host"></div>
 <script type="module">
   const API = new URLSearchParams(location.search).get("api") || ""; // "" = same-origin (harness-server proxy)
-  document.getElementById("note").textContent = `api ${API || "same-origin"} · openTerminal/openFile are stubs`;
+  document.getElementById("note").textContent = `api ${API || "same-origin"} · openTerminal is a stub`;
 
   const savedTheme = localStorage.getItem("oas.desktop.theme");
   const sysDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
@@ -54,19 +69,33 @@
   };
 
   /* contract ctx — the shell provides the real one; the harness stubs the
-     cross-view hooks and points api() at the oas-web server. */
+     cross-view hooks and points api() at the oas-web server. openFile routes
+     into the markdown view (its real cross-view behavior); openTerminal stays
+     a stub (shell-owned terminal). */
   const ctx = {
     api: (pathname, opts) => fetch(API + pathname, opts),
-    openFile: (path) => alert(`ctx.openFile (shell hook)\n${path}`),
+    openFile: (path) => show("markdown", { path }),
     openTerminal: (instance) => alert(`ctx.openTerminal (shell hook, tui-dev's view)\n${instance}`),
   };
 
   const host = document.getElementById("host");
   let current = null;
-  async function show(name) {
+  async function show(name, extra) {
+    // markdown needs a file path, diff an instance name — prompt when the
+    // tab is clicked directly (openFile passes the path in `extra`)
+    if (name === "markdown" && !extra) {
+      const path = prompt("Absolute path of the file to open:");
+      if (!path) return;
+      extra = { path };
+    }
+    if (name === "diff" && !extra) {
+      const instance = prompt("Instance name to diff:");
+      if (!instance) return;
+      extra = { instance };
+    }
     if (current) { current.mod.unmount(); current = null; }
     const mod = await import(`./views/${name}.mjs`);
-    mod.mount(host, ctx);
+    mod.mount(host, { ...ctx, ...extra });
     current = { name, mod };
     for (const b of document.querySelectorAll(".tab[data-view]"))
       b.classList.toggle("active", b.dataset.view === name);

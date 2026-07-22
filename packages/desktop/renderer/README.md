@@ -30,7 +30,9 @@ light, WCAG AA); views style themselves against tokens only, scoped under
 
 ## Developing without the shell
 
-`harness.html` supplies a stub `ctx` and tab chrome; `harness-server.mjs`
+`harness.html` supplies a stub `ctx` and tab chrome for ALL views — including
+the Markdown and Diff tabs (they prompt for a file path / instance name;
+`ctx.openFile` routes into the markdown view); `harness-server.mjs`
 serves it and proxies `/api/*` to a running oas-web server (same-origin, so
 GETs and guarded POSTs both work exactly as in the real shell):
 
