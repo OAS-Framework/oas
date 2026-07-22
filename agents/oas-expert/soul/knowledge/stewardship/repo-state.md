@@ -47,17 +47,20 @@ than letting the file grow stale.
 ## In flight
 
 - PR #14 (oas-web 0.8.0 spawn-from-panel: /api/agents + /api/spawn, agentsRoot
-  allowlist, no-task default spawn) — RETURNED 2026-07-22 for merge conflicts
-  with main (post-#13 fork); gates 1–3 pass, owner
-  webpanel-dev-spawn-from-panel resolving and re-requesting.
+  allowlist, no-task default spawn) — RETURNED twice 2026-07-22: first for
+  post-#13 conflicts (resolved via merge 237d628), then again because PR #16
+  landed after that merge (four-file conflict incl. registry-cache
+  findInstance vs agentsData/spawnAgent in oas-web.mjs). Gates 1–3 pass;
+  owner webpanel-dev-spawn-from-panel resolving and re-requesting.
 
 ## Recent deliveries
 
 - (record PR #, one-line scope, verdict, merge/close date)
 - PR #16 oas.web 0.7.2 fast session attach: MERGED 2026-07-22 (see
   delivery-log).
-- PR #14 oas-web 0.8.0 spawn-from-panel: RETURNED 2026-07-22 (mergeability
-  only — conflicts with main; see delivery-log).
+- PR #14 oas-web 0.8.0 spawn-from-panel: RETURNED twice 2026-07-22
+  (mergeability only both times — main moved under the branch; see
+  delivery-log).
 - PR #13 oas.web 0.7.1 logical key routing fix: MERGED 2026-07-22 (see
   delivery-log).
 - PR #12 oas.web 0.7.0 panel refinements: MERGED 2026-07-22 (see

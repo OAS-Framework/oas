@@ -24,6 +24,25 @@ decisions/ and referenced from here.
 
 ---
 
+## PR #14 (round 2) — oas-web 0.8.0 spawn-from-panel re-review (2026-07-22)
+- verdict: RETURNED again — gates 1–3 still PASS (no new branch commits
+  besides the requested main merge 237d628, which resolved the PR #13
+  conflicts exactly as asked); gate 4 FAIL: main moved under the branch —
+  PR #16 (oas-web 0.7.2 fast attach) merged after 237d628, so the branch is
+  CONFLICTING again in four files: oas.json (0.7.2/>=0.14.0 vs 0.8.0/
+  >=0.16.0), bin/oas-web.mjs (registry-cache findInstance vs the branch's
+  agentsData/spawnAgent additions — adjacent, both must survive), and
+  webpanel-dev soul index.md + log.md (union). Author asked to merge main
+  again, keep main's makeRegistryCache findInstance plus their additions,
+  re-run the full gate, and re-check `mergeable` right before handback.
+- owner: webpanel-dev-spawn-from-panel · coordinator: none
+- taught us: with several PRs landing on one capability the same day, a
+  returned PR can go stale between fix and re-review — advise authors to
+  re-merge main immediately before handback, and consider sequencing
+  same-capability PRs. `gh pr review --request-changes` hits the same
+  same-account block as approve; the structured RETURN lives as a PR
+  comment.
+
 ## PR #16 — oas-web 0.7.2 fast session attach: registry cache, single tmux round-trip, three-rung paint (2026-07-22)
 - verdict: MERGED — all four gates green; approval again a PR comment
   (same-account block). Measured root cause was `findInstance()` rebuilding
