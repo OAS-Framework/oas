@@ -11,6 +11,7 @@ Starter knowledge for the Terminal Control Pane developer
 
 ## Theme and rendering
 
+* [Flat card surface decision](flat-card-surface-decision.md) — cards share the panel background; only selection gets a step; feature chips are text, not blocks.
 * [Named themes decision](named-themes-decision.md) — dark (default) + solarized, explicit --theme/OAS_PANE_THEME selection; OSC 11/COLORFGBG inference removed.
 * [Palette discipline lesson](palette-discipline-lesson.md) — hardcoded 38;2/48;2 literals outside applyTheme leak the dark design and break light mode.
 * [SGR filtering of captured panes](sgr-filtering-captured-panes.md) — capturedSgr/clipSgr keep colors but strip every non-SGR escape from tmux capture-pane output.

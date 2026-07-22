@@ -27,10 +27,18 @@ export OAS_PANE_THEME=solarized  # your default (--theme still wins)
 | `↑` / `↓`, `j` / `k` | Select an instance |
 | `g` / `G` | Jump to first / last |
 | `Page Up` / `Page Down` | Move by a page |
+| `Space` | Zoom — full-screen live view of the selected session |
 | `Enter` | Switch directly to the selected running tmux window |
+| `s` / `S` | Open the selected session in a tmux split beside / below the pane |
 | `t` (`p` also works) | Toggle the native-color session preview and selected-agent details |
 | `r` | Refresh immediately |
 | `q` / `Ctrl-C` | Close Control Pane |
+
+Splits require the pane itself to run inside tmux (e.g. from a window of the
+`pi-agents` session): `s` opens the selected instance's live window in a
+pane beside the Control Pane, `S` below it — the pane keeps updating while
+you watch or drive the session in the split. The split is a grouped tmux
+session, so closing it (C-d or your tmux prefix) leaves the agent untouched.
 
 Mouse selection and wheel navigation are enabled in terminals that support
 SGR mouse events. On wide terminals the live hierarchy is the primary view and

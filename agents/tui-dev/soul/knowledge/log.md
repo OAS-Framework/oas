@@ -1,5 +1,13 @@
 # Knowledge Log
 
+## 2026-07-22
+
+- **Creation**: [flat-card-surface-decision.md](flat-card-surface-decision.md)
+  — per-card background fills removed in both themes after maintainer
+  feedback; selection-only highlight; feature chip became violet text.
+  palette-discipline lesson still applies (no hardcoded 38;2 outside
+  applyTheme).
+
 ## 2026-07-21
 
 - **Removed**: theme-inference-osc11.md — superseded by
