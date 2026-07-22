@@ -53,4 +53,8 @@ before its details. Does this belong in OAS, in this form?
 - **ESCALATE**: direction conflicts you cannot resolve from recorded
   decisions go to the human with your recommendation.
 
-Log every verdict (PR, verdict, one-line why) in your log.md.
+Log every verdict (PR, verdict, one-line why) in your log.md. Then feed the
+soul's stewardship picture (`soul/knowledge/stewardship/`): append the
+delivery-log entry (PR, verdict, owner, "taught us") and update repo-state's
+On main / In flight sections. If you were spawned for this one PR, do this
+BEFORE retiring — it is the last gate of the review.

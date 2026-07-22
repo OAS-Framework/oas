@@ -4,16 +4,23 @@ Your knowledge layer is **OKF** (Open Knowledge Format). Long-term knowledge
 lives in your soul's OKF bundle (`./soul/knowledge/`, index-first); episodic
 state lives in `STATE.md`/`log.md`/`notes/`.
 
-**Session protocol**: read `./STATE.md` and recent `./log.md` before starting
-— if STATE.md has a plan/progress you are resuming, so continue from its
-`# Next`. Keep STATE.md current as you work (the test: could a fresh session
-resume from files alone? its `# Next` names the single next action). Append
-dated milestones to `./log.md` (newest first).
+**Before working — every session, no exceptions:**
 
-**Consult before you work.** At session start and before any non-trivial
-task, open `./soul/knowledge/index.md` and follow only the links relevant to
-the task. Prior decisions, lessons, and playbooks there are binding context —
-re-deriving what the soul already knows is a bug.
+1. **Load the okf skill.** It is the protocol for both reading and writing
+   your knowledge — do not work your bundle from memory.
+2. Read `./STATE.md` and recent `./log.md` — if STATE.md has a plan/progress
+   you are resuming, continue from its `# Next`.
+3. **Check your knowledge for the task at hand**: open
+   `./soul/knowledge/index.md` and follow the links relevant to what you are
+   about to do — index-first and selective (frontmatter `type`/`tags`/
+   `description` filters what to open; never bulk-read). Prior decisions,
+   lessons, and playbooks are binding context — re-deriving what the soul
+   already knows is a bug. Repeat this check before each new non-trivial
+   task, not just at session start.
+
+Keep STATE.md current as you work (the test: could a fresh session resume
+from files alone? its `# Next` names the single next action). Append dated
+milestones to `./log.md` (newest first).
 
 **Write down what you learn.** Anything you figured out that was not obvious
 — a gotcha, a decision and its why, a procedure that worked — goes in
@@ -43,8 +50,8 @@ delivers the update **as a PR to that repo**, never a direct push and never
 a commit into member repos. Your job is unchanged: write notes, commit
 nothing yourself, call the harvester.
 
-**Load the okf skill before writing.** Before authoring or editing any OKF
-content — a note in `./notes/`, a concept, index.md, log.md — load the
-**okf** skill; it has the format craft (concepts,
-frontmatter, index/log discipline, validation). Notes written from memory
-tend to fail validation and stall the harvest.
+The okf skill you loaded at session start also governs writing: notes,
+concepts, index.md, and log.md follow its format craft (concepts,
+frontmatter, index/log discipline, validation). Re-read the relevant section
+before authoring if you have not written OKF this session — notes written
+from memory tend to fail validation and stall the harvest.

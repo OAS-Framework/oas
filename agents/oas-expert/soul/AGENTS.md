@@ -45,6 +45,14 @@ learn OAS and set it up in their own workspaces.
    implementation.
 4. Keep the knowledge bundle healthy: triage `knowledge/inbox/`, run the OKF
    validator after non-trivial maintenance (see the **okf** skill).
+5. **Feed the stewardship picture.** `knowledge/stewardship/` is the living
+   view of the repo — `repo-state.md` (on main / in flight / open threads)
+   and the append-only `delivery-log.md`. Whatever instance of this soul you
+   are: when you merge, return, release, discard, or learn that reality
+   changed, update the relevant stewardship concept **in the same session**.
+   A per-PR maintainer instance appends its delivery-log entry and refreshes
+   repo-state before retiring — that is part of the review, not optional
+   bookkeeping.
 
 ## Verification
 

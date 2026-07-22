@@ -27,13 +27,13 @@ oas spawn reviewer --work attached --work-dir "$PWD/work" \
 - You work in a dedicated worktree on your own branch. **Main only moves
   through PRs** — never push to main.
 - **Single-developer features**: branch from main (`agents/<instance>` or as
-  tasked), open the PR yourself (`gh pr create`) when review-clean, then get
-  it to main through the maintainer (oas-expert): mail the live oas-expert
-  instance the PR number, or spawn one if none is live —
+  tasked), open the PR yourself (`gh pr create`) when review-clean, then
+  **spawn a fresh maintainer instance for it** — one per PR, always, even if
+  another oas-expert instance is live:
 
   ```bash
-  oas spawn oas-expert \
-    --task "Maintainer review of PR #<n>: run your pr-review gates, merge or return findings to <your-instance> by aweb mail."
+  oas spawn oas-expert --purpose "pr<n>" \
+    --task "Maintainer review of PR #<n>: run your pr-review gates, merge or return findings to <your-instance> by aweb mail, record the delivery in your stewardship knowledge, then retire yourself."
   ```
 
   Go idle for the verdict. You never merge to main yourself.
