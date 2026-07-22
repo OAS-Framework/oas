@@ -2,6 +2,8 @@
 
 ## 2026-07-22
 
+- **Creation**: [pkill-scoping-discipline.md](pkill-scoping-discipline.md)
+  — promoted the live desktop testing process-kill scoping discipline lesson from tui-dev-desktop-shell notes.
 - **Creation**: [electron-renderer-native-esm-dependencies.md](electron-renderer-native-esm-dependencies.md)
   — promoted the importmap/CSP hash/highlight.js dual-package lesson from tui-dev-desktop-shell notes.
 - **Update**: [desktop-shell-view-integration-lessons.md](desktop-shell-view-integration-lessons.md)
