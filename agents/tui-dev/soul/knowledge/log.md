@@ -2,6 +2,12 @@
 
 ## 2026-07-22
 
+- **Creation**: [view-mount-disposer-contract.md](view-mount-disposer-contract.md)
+  — promoted the backward-compatible `mount(el, ctx)` per-mount disposer contract from tui-dev-desktop-shell notes.
+- **Update**: [desktop-shell-layout.md](desktop-shell-layout.md)
+  — documented the view-host disposer return contract in the desktop shell layout reference.
+- **Update**: [desktop-shell-view-integration-lessons.md](desktop-shell-view-integration-lessons.md)
+  — merged the multi-mount markdown/diff disposer lesson and diff workspace-scoping fixes from tui-dev-desktop-shell notes.
 - **Creation**: [pkill-scoping-discipline.md](pkill-scoping-discipline.md)
   — promoted the live desktop testing process-kill scoping discipline lesson from tui-dev-desktop-shell notes.
 - **Creation**: [electron-renderer-native-esm-dependencies.md](electron-renderer-native-esm-dependencies.md)

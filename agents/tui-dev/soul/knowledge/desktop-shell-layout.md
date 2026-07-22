@@ -1,7 +1,7 @@
 ---
 type: Playbook
 title: Desktop shell view-host contract and layout
-description: Where things live in packages/desktop and how feature views integrate — mount(el, ctx)/unmount() ES modules in renderer/views/, ctx = { api, openFile, openTerminal } provided by the shell.
+description: Where things live in packages/desktop and how feature views integrate — mount(el, ctx) may return a disposer, unmount() remains the module-level fallback, and ctx = { api, openFile, openTerminal } is provided by the shell.
 tags: [desktop, electron, view-host, contract]
 timestamp: 2026-07-22
 ---
@@ -16,10 +16,14 @@ timestamp: 2026-07-22
 - `renderer/shell.mjs` — sidebar roster (3s `/api/panel` poll with
   JSON-diff to skip DOM churn), agents list, tab bar, view host.
 - `renderer/views/{brain,markdown,diff,chat}.mjs` — placeholders other
-  developers replace; contract: `export mount(el, ctx)` / `unmount()`,
-  `ctx = { api(pathname, opts), openFile(path), openTerminal(instance) }`,
-  plus per-tab extras spread into ctx (brain gets `agent`, `instance`,
-  `agentsRoot`; diff/chat get `instance`; markdown gets `path`).
+  developers replace; contract: `export mount(el, ctx)` / `unmount()`.
+  `mount()` may return a per-mount disposer; the tab host prefers that
+  disposer at close, while module-level `unmount()` remains the fallback and
+  all-mounts cleanup hook. See [View contract extension — mount() may return a
+  per-mount disposer](view-mount-disposer-contract.md). `ctx = { api(pathname,
+  opts), openFile(path), openTerminal(instance) }`, plus per-tab extras spread
+  into ctx (brain gets `agent`, `instance`, `agentsRoot`; diff/chat get
+  `instance`; markdown gets `path`).
 
 Any change to the ctx/view contract must be mailed to dev-coordinator-1
 BEFORE landing — four developers build against it.
