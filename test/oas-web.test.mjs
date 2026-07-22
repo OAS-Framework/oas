@@ -34,9 +34,10 @@ test("oas-web server: key-send failures never leak the payload or its hex encodi
   const keySendError = new Function(src + "\nreturn keySendError;")();
   const secret = "hunter2-t0ken";
   const hex = [...Buffer.from(secret, "utf8")].map((b) => b.toString(16).padStart(2, "0")).join(" ");
-  // simulate the real execFileSync failure shape: argv (hex bytes) inside message
+  // simulate the real execFileSync failure shape: non-zero exit → e.status,
+  // argv (hex bytes) inside message
   const err = Object.assign(new Error(`Command failed: tmux send-keys -t s:1 -H ${hex}`),
-                            { code: 1, signal: null });
+                            { status: 1, signal: null });
   const safe = keySendError(err);
   for (const [what, s] of [["log", safe.log], ["http error", JSON.stringify(safe.http)]]) {
     assert.ok(!s.includes(secret), `${what} must not contain the plaintext payload`);

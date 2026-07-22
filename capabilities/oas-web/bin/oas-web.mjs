@@ -275,7 +275,9 @@ function sendInterrupt(inst) {
    extracted by tests. exec errors embed the child argv (hex-encoded
    keystrokes) in e.message; only exit code and signal are safe to surface. */
 function keySendError(e) {
-  const code = e && e.code !== undefined ? String(e.code) : "unknown";
+  // execFileSync exposes normal non-zero exits as e.status; e.code carries
+  // spawn-level errno strings (ETIMEDOUT, ENOENT). Prefer status.
+  const code = e && (e.status ?? e.code) != null ? String(e.status ?? e.code) : "unknown";
   const signal = (e && e.signal) || "none";
   return { code, signal,
            log: `[keys] FAILED code=${code} signal=${signal}`,
