@@ -15,6 +15,7 @@ import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { apiUrl } from "./api-url.mjs";
 
 const require = createRequire(import.meta.url);
 const pty = require("node-pty");
@@ -119,12 +120,9 @@ function guard(e) { if (!trustedFrame(e)) throw new Error("forbidden: untrusted 
 // The renderer never talks to the network directly; ctx.api() lands here.
 ipcMain.handle("api", async (e, pathname, opts) => {
   guard(e);
-  if (typeof pathname !== "string" || !pathname.startsWith("/")) throw new Error("api: pathname must start with /");
-  const url = new URL(pathname, base());
-  // pin roster/agents queries to the verified workspace on shared servers
-  if (wsId && !url.searchParams.has("ws") && (url.pathname === "/api/panel" || url.pathname === "/api/agents")) {
-    url.searchParams.set("ws", wsId);
-  }
+  // apiUrl rejects off-origin resolution (e.g. "//attacker/x") and
+  // force-pins the verified workspace on scoped endpoints.
+  const url = apiUrl(pathname, base(), wsId);
   const init = { method: opts?.method || "GET", signal: AbortSignal.timeout(20000) };
   if (opts?.body !== undefined) {
     init.body = JSON.stringify(opts.body);
