@@ -18,8 +18,8 @@ The web panel lives in `capabilities/oas-web/` and is deliberately tiny:
     with `task: ""` meaning "await instructions" (see
     [spawn endpoint](spawn-endpoint.md)).
   - `GET /api/brain/<agent>?ws=<id>` — returns soul artifact paths, package-level
-    capability-agent skills, and running-state for the desktop brain view while
-    resolving agent names through kernel lookup seams (see
+    capability-agent skills, and workspace-scoped running-state for the desktop
+    brain view while resolving agent names through kernel lookup seams (see
     [agent brain endpoint](agent-brain-endpoint-and-view.md)).
   - `GET /api/session/<instance>?ws=<id>&lines=n` — raw ANSI tmux `capture-pane` text plus pane geometry, cursor state, and history depth.
   - `GET /api/chat/<instance>?ws=<id>&limit=n` — parsed structured transcript turns.
@@ -55,7 +55,10 @@ The web panel lives in `capabilities/oas-web/` and is deliberately tiny:
   `/api/panel` and `findInstance(name, wsId)` from an in-memory snapshot so
   key/input endpoints are not blocked by roster rebuilds, and scoped instance
   lookups fail closed inside the supplied workspace instead of falling back to a
-  global first match. The kernel is found in-tree
+  global first match. Callers that have resolved a workspace must pass that
+  workspace id so same-named instances in other workspaces do not leak into
+  running-state or terminal decisions (see
+  [the scoped snapshot lookup lesson](/lessons/workspace-scoped-snapshot-lookups.md)). The kernel is found in-tree
   (`../../..`) or, for marketplace installs, via `oas root` (a copied package
   must never assume it sits inside the kernel tree). Control-pane instance
   objects expose `work` as the work mode, not a filesystem path; endpoints that
@@ -101,7 +104,7 @@ files to a DNS-rebinding page; see
 [the all-request Host guard lesson](/lessons/loopback-host-guard-all-requests.md).
 The server sends no CORS headers; external dev harnesses cannot fetch
 its API cross-origin and should use a same-origin proxy such as
-`packages/desktop/renderer/dev-serve.mjs` for renderer work.
+`packages/desktop/renderer/harness-server.mjs` for renderer work.
 Browser-provided paths are selectors or targets constrained by
 server-computed allowlists, never ambient filesystem authority: `/api/spawn`'s
 `agentsRoot` must resolve against workspace roots, and `/api/file` must realpath

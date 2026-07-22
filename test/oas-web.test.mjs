@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { spawn, execFileSync } from "node:child_process";
 import { request as httpRequest } from "node:http";
 import { join, dirname } from "node:path";
@@ -332,20 +332,24 @@ test("oas-web brain: capability skill paths expand leaf AND parent-tree forms; l
   assert.equal(merged.find((s) => s.name === "dup").path, "/soul/skills/dup/SKILL.md", "local soul wins duplicates");
 });
 
-test("desktop dev-serve: non-loopback Host is rejected before static serving or the /api proxy", () => {
-  const file = join(ROOT, "packages", "desktop", "renderer", "dev-serve.mjs");
-  const src = readFileSync(file, "utf8");
-  const m = src.match(/\/\* DEVSERVE_HOSTGUARD_BEGIN[^*]*\*\/([\s\S]*?)\/\* DEVSERVE_HOSTGUARD_END \*\//);
-  assert.ok(m, "host-guard block markers present in dev-serve.mjs");
-  const loopbackHost = new Function(m[1] + "\nreturn loopbackHost;")();
-  for (const ok of ["127.0.0.1", "127.0.0.1:4830", "localhost:4830", "LOCALHOST", "[::1]:4830", "::1"])
-    assert.ok(loopbackHost(ok), `${ok} passes`);
-  for (const bad of ["attacker.example", "attacker.example:54830", "evil.127.0.0.1", "127.0.0.1.evil.com", "", undefined])
-    assert.ok(!loopbackHost(bad), `${bad} is rejected`);
-  // and the guard runs before any routing: it is the first statement of the handler
-  assert.ok(/createServer\(\(req, res\) => \{\s*\/\/[^\n]*\n[^\n]*\n[^\n]*\n\s*if \(!loopbackHost\(req\.headers\.host\)\)/.test(src),
-    "host guard is the handler's first check");
+test("desktop harness: every shipped view has a tab in the shared harness", () => {
+  // README claims a single shared harness for ALL views — enforce it: each
+  // views/*.mjs exporting the view contract (mount) must be reachable from a
+  // harness.html tab (regression: Brain shipped with a standalone harness).
+  const rendererDir = join(ROOT, "packages", "desktop", "renderer");
+  const viewsDir = join(rendererDir, "views");
+  const views = readdirSync(viewsDir).filter((f) => f.endsWith(".mjs"))
+    .filter((f) => /export (async )?function mount\(/.test(readFileSync(join(viewsDir, f), "utf8")))
+    .map((f) => f.replace(/\.mjs$/, ""));
+  assert.ok(views.length >= 5, `shipped views found (got: ${views.join(", ")})`);
+  const harness = readFileSync(join(rendererDir, "harness.html"), "utf8");
+  for (const v of views)
+    assert.ok(harness.includes(`data-view="${v}"`), `harness.html has a tab for the "${v}" view`);
+  // and no stray standalone harnesses reappear next to the shared one
+  const strays = readdirSync(rendererDir).filter((f) => /^dev-.*\.(html|mjs)$/.test(f));
+  assert.deepEqual(strays, [], "no standalone dev-* harness files alongside the shared harness");
 });
+
 
 test("oas-web server: /api/brain returns the contract shape with absolute paths", async () => {
   // capability agents (reviewer) need installed capabilities — restore first (no-op when present)
