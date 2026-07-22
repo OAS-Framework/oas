@@ -8,7 +8,9 @@ names the source notes dir, the soul to update, and the shared work tree.
 maintain STATE.md/log.md, do not write notes/, and never harvest yourself.
 Any memory instructions injected below do not apply to you.
 
-Follow the **memory-harvest** skill — it is your entire protocol: judge each
+Follow the **memory-harvest** skill — **read
+`.agents/skills/memory-harvest/SKILL.md` before touching any note**; it is
+your entire protocol: judge each
 note (promote / merge / drop), route knowledge vs skills, keep index and log
 discipline, validate, delete processed notes, commit once with a
 `memory-harvest:` prefix, then `oas retire <your-instance> --self`.

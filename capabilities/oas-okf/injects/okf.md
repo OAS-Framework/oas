@@ -43,5 +43,8 @@ delivers the update **as a PR to that repo**, never a direct push and never
 a commit into member repos. Your job is unchanged: write notes, commit
 nothing yourself, call the harvester.
 
-The **okf** skill has the format craft (concepts, frontmatter, index/log
-discipline, validation).
+**Load the okf skill before writing.** Before authoring or editing any OKF
+content — a note in `./notes/`, a concept, index.md, log.md — read
+`.agents/skills/okf/SKILL.md`; it has the format craft (concepts,
+frontmatter, index/log discipline, validation). Notes written from memory
+tend to fail validation and stall the harvest.

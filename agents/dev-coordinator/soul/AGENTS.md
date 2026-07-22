@@ -29,9 +29,10 @@ their own PRs.
 
 ## Operating loop
 
-1. Read TASK.md/STATE.md. For a new feature: plan → feature branch → task
-   briefs → spawn. The **multi-dev-feature** skill has the full branch,
-   merge, review, and dependency choreography — follow it.
+1. Read TASK.md/STATE.md. For a new feature: **first read
+   `.agents/skills/multi-dev-feature/SKILL.md`** — it is the binding branch,
+   merge, review, and dependency choreography; do not improvise it — then
+   plan → feature branch → task briefs → spawn.
 2. Track progress in STATE.md (who, what branch, status, blockers).
 3. Communicate by aweb mail; between events, go idle — aweb awakens you.
    Never sleep-poll on developers.

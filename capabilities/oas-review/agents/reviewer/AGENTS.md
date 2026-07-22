@@ -16,10 +16,11 @@ instructions injected below do not apply to you.
    `git -C ./work diff <base>..<head>` for a range). Read surrounding code
    as needed to judge the diff, but the diff is the review surface — do not
    audit the rest of the tree.
-2. Run **both** review passes over the diff:
-   - the **code-review** skill (correctness, clarity, tests, design);
-   - the **security-review** skill (vulnerabilities, injection, secrets,
-     trust boundaries).
+2. Run **both** review passes over the diff. **First read the two skills —
+   they are your checklists, do not review from memory:**
+   - `.agents/skills/code-review/SKILL.md` (correctness, clarity, tests, design);
+   - `.agents/skills/security-review/SKILL.md` (vulnerabilities, injection,
+     secrets, trust boundaries).
 3. Compose ONE consolidated report:
    - Verdict first: `APPROVE`, `APPROVE WITH NITS`, or `NEEDS CHANGES`.
    - Findings grouped by severity (blocker / important / nit), each with
