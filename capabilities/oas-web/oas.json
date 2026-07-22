@@ -1,9 +1,11 @@
 {
   "capability": "oas.web",
   "command": "web",
-  "version": "0.9.2",
-  "compatibility": { "oas": ">=0.16.0" },
-  "description": "Local web control panel: live instance roster, terminal-faithful ANSI session mirror (hand-rolled renderer, no deps), and direct keyboard passthrough (single terminal input path) for pi and claude sessions; agent roster with spawn-from-browser (default: no task, awaiting instructions); Jira epic/roster panel when oas.jira is active.",
+  "version": "0.9.3",
+  "compatibility": {
+    "oas": ">=0.16.0"
+  },
+  "description": "Local web control panel: live instance roster, terminal-faithful ANSI session mirror (hand-rolled renderer, no deps), and direct keyboard passthrough (single terminal input path) for pi and claude sessions; agent roster with spawn-from-browser (default: no task, awaiting instructions); Jira epic/roster panel when oas.jira is active; agent-brain (/api/brain), guarded file (/api/file), and git-diff (/api/diff) endpoints for the desktop app.",
   "requires": [
     {
       "command": "tmux",

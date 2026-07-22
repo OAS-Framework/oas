@@ -12,10 +12,14 @@
   "dependencies": {
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/xterm": "^5.5.0",
+    "dompurify": "^3.4.12",
+    "highlight.js": "^11.11.1",
+    "marked": "^16.4.2",
     "node-pty": "^1.0.0"
   },
   "devDependencies": {
     "@electron/rebuild": "^4.2.0",
-    "electron": "^43.2.0"
+    "electron": "^43.2.0",
+    "jsdom": "^29.1.1"
   }
 }
