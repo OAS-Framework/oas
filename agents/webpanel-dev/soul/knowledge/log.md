@@ -1,6 +1,12 @@
 # Knowledge Log
 
 ## 2026-07-22
+* **Creation**: added [Loopback Host guard must cover GET file-serving APIs too](/lessons/loopback-host-guard-all-requests.md) from the get-apis-need-host-guard note: Host validation belongs at the top of the handler for every request; POSTs keep the Origin guard; regression coverage sends raw GETs with `Host: attacker.example` against `/api/file`, `/api/diff`, and `/api/panel`.
+* **Creation**: added [Lstat untrusted worktree entries before reading](/lessons/untrusted-worktree-entries-lstat-before-reading.md) from the get-apis-need-host-guard note: desktop viewers must render symlinks via `readlink` and skip FIFOs/devices instead of reading untrusted untracked entries directly.
+* **Creation**: added [Sanitize marked markdown before innerHTML](/lessons/sanitize-marked-markdown-before-innerhtml.md) from the get-apis-need-host-guard note: `marked` preserves raw HTML, so untrusted markdown needs DOMPurify plus an `http`/`https`/`mailto` scheme allowlist before `innerHTML`.
+* **Creation**: added [Parse git rename stats from NUL-delimited porcelain, not human summaries](/lessons/git-rename-stats-nul-parsing.md) from the get-apis-need-host-guard note: diff viewers should parse `--numstat -z` / `--name-status -z` explicit old-NUL-new fields, never the human `dir/{old => new}` form.
+* **Update**: [Raw key passthrough and the loopback Host/Origin guards](/architecture/raw-key-passthrough-and-host-guard.md) now supersedes the POST-only Host wording with the every-request Host guard plus POST Origin guard.
+* **Update**: [oas-web architecture](/architecture/oas-web-architecture.md) now lists `/api/diff` and records that GET file-serving APIs need the same loopback Host guard as POST endpoints.
 * **Creation**: added [Guard file-serving paths by realpathing requests and roots](/lessons/file-endpoint-realpath-guard.md) from the api-file-path-guard note: `/api/file` realpaths the requested path and all allowed roots, then requires exact-root or root-plus-separator containment to block dotdot, symlink, and sibling-prefix escapes.
 * **Creation**: added [Instance work is a mode, not a filesystem path](/lessons/instance-work-mode-not-path.md) from the inst-work-is-mode-not-path note: control-pane `inst.work` is the work mode string, so endpoints derive the actual tree as `<home>/work`.
 * **Update**: [oas-web architecture](/architecture/oas-web-architecture.md) now lists `/api/file`, records the realpath-based file-serving guard, and links the control-pane work-mode path gotcha.

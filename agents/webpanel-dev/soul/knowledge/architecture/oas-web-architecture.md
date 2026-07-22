@@ -22,6 +22,10 @@ The web panel lives in `capabilities/oas-web/` and is deliberately tiny:
   - `GET /api/file` — guarded file reads for desktop viewers; realpaths the
     requested path and every allowed root before containment checks (see
     [the file guard lesson](/lessons/file-endpoint-realpath-guard.md)).
+  - `GET /api/diff` — worktree diff/stat reads for desktop viewers; derives
+    `<home>/work` rather than using `inst.work` and parses NUL-delimited git
+    rename stats (see [the work-mode lesson](/lessons/instance-work-mode-not-path.md)
+    and [the rename parsing lesson](/lessons/git-rename-stats-nul-parsing.md)).
   - `POST /api/keys` — sends browser keydown bytes into the tmux pane and is
     the panel's only text-input path (see [raw key passthrough](raw-key-passthrough-and-host-guard.md)
     and [the input-surface decision](/decisions/terminal-input-unification.md)).
@@ -78,9 +82,12 @@ the render signature so a tail paint cannot suppress the later deep backfill; se
 
 The server binds **127.0.0.1 only** and must stay that way: this process can
 type into your terminals. Remote use is ssh port-forward, never a public
-bind. All POST endpoints also require loopback `Host` and, when present,
-loopback `Origin`, so DNS rebinding cannot turn a hostile page into terminal
-input. Browser-provided paths are selectors or targets constrained by
+bind. Every request requires a loopback `Host`; POST endpoints also require a
+loopback `Origin` when present. The Host check must run before GET handlers too
+because file-serving APIs such as `/api/file` and `/api/diff` can leak workspace
+files to a DNS-rebinding page; see
+[the all-request Host guard lesson](/lessons/loopback-host-guard-all-requests.md).
+Browser-provided paths are selectors or targets constrained by
 server-computed allowlists, never ambient filesystem authority: `/api/spawn`'s
 `agentsRoot` must resolve against workspace roots, and `/api/file` must realpath
 both the requested file and each allowed root before requiring exact-root or
