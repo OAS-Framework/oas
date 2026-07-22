@@ -72,8 +72,8 @@ to the owning developer(s), re-merge, re-gate, re-review.
 
 - `gh pr create` from `feature/<name>` (you own the PR). Summarize scope,
   developer branches merged, review verdict.
-- **Launch the maintainer for the merge** — main only moves through the
-  framework expert's review. If no oas-expert instance is live
+- **Launch the framework expert (oas-expert) for the merge** — main only
+  moves through its maintainer review. If no oas-expert instance is live
   (`oas status`), spawn one:
 
   ```bash
