@@ -369,7 +369,7 @@ $("wssel").addEventListener("change", (e) => {
 
 /* ══════════════════════════════════════════════════════════════════════════
    Terminal renderer — hand-rolled ANSI/SGR → HTML. The server ships the raw
-   tmux capture (capture-pane -p -e -J): plain lines with SGR runs. We parse
+   tmux capture (capture-pane -p -e): plain lines with SGR runs. We parse
    SGR only; every other escape sequence is stripped. Each capture line is one
    grid row (no rewrap — tmux already wrapped at the pane width), so what the
    pane shows is exactly what renders.
@@ -448,14 +448,15 @@ function spanFor(text, attr) {
 /* One capture line → { html, cells } where cells is the char list (for cursor
    placement). SGR state carries across lines, as tmux emits it. */
 const ANSI_RE = /\x1b\[([0-9;:]*)m|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-9;?]*[A-Za-ln-z]|\x1b[^[\]]/g;
-/* Terminal cell width per code point (wcwidth-lite): combining marks and zero-
-   width joiners occupy 0 columns; East Asian wide/fullwidth ranges and emoji
-   occupy 2; everything else 1. tmux's cursor_x counts cells, not JS chars. */
+/* Terminal cell width, tmux-compatible, computed per displayed grapheme
+   cluster (Intl.Segmenter): Unicode marks and ZW chars occupy 0 columns; a
+   cluster with VS16/keycap/ZWJ (emoji presentation) or a regional-indicator
+   pair occupies 2; East Asian wide/fullwidth base chars occupy 2; else 1.
+   tmux's cursor_x counts cells, not JS chars. */
+const MARK_RE = /\p{M}/u;
 function cellWidth(cp) {
   if (cp === 0x200b || cp === 0x200c || cp === 0x200d || cp === 0xfeff) return 0;
-  if ((cp >= 0x0300 && cp <= 0x036f) || (cp >= 0x1ab0 && cp <= 0x1aff) ||
-      (cp >= 0x1dc0 && cp <= 0x1dff) || (cp >= 0x20d0 && cp <= 0x20ff) ||
-      (cp >= 0xfe00 && cp <= 0xfe0f) || (cp >= 0xfe20 && cp <= 0xfe2f)) return 0;
+  if (MARK_RE.test(String.fromCodePoint(cp))) return 0;
   if ((cp >= 0x1100 && cp <= 0x115f) || (cp >= 0x2e80 && cp <= 0x303e) ||
       (cp >= 0x3041 && cp <= 0x33ff) || (cp >= 0x3400 && cp <= 0x4dbf) ||
       (cp >= 0x4e00 && cp <= 0x9fff) || (cp >= 0xa000 && cp <= 0xa4cf) ||
@@ -465,21 +466,37 @@ function cellWidth(cp) {
       (cp >= 0x20000 && cp <= 0x3fffd)) return 2;
   return 1;
 }
+function clusterWidth(cluster) {
+  // Emoji presentation: VS16, keycap, ZWJ sequences, regional-indicator pairs
+  if (/\u{FE0F}|\u{20E3}|\u{200D}/u.test(cluster)) return 2;
+  const first = cluster.codePointAt(0);
+  if (first >= 0x1f1e6 && first <= 0x1f1ff) return 2; // flags
+  // Base char width; trailing marks in the cluster add nothing.
+  for (const ch of cluster) {
+    const w = cellWidth(ch.codePointAt(0));
+    if (w > 0) return w;
+  }
+  return 0; // pure marks/ZW cluster
+}
+const SEG = typeof Intl !== "undefined" && Intl.Segmenter ? new Intl.Segmenter(undefined, { granularity: "grapheme" }) : null;
+function graphemes(text) {
+  return SEG ? [...SEG.segment(text)].map((s) => s.segment) : [...text];
+}
 function renderLine(line, attr, cursorCol) {
   let html = "", col = 0, last = 0;
   ANSI_RE.lastIndex = 0;
   const emit = (text) => {
     if (!text) return;
-    // Walk code points counting terminal cells so the cursor lands on the
-    // right glyph even with CJK/emoji (width 2) or combining marks (width 0).
-    if (cursorCol == null) { html += spanFor(text, attr); for (const ch of text) col += cellWidth(ch.codePointAt(0)); return; }
+    // Walk grapheme clusters counting terminal cells so the cursor lands on
+    // the right glyph even with CJK/emoji (2 cells), combining marks (0), or
+    // ZWJ emoji sequences (one 2-cell cluster).
+    if (cursorCol == null) { html += spanFor(text, attr); for (const g of graphemes(text)) col += clusterWidth(g); return; }
     let before = "", at = "", after = "";
-    for (const ch of text) {
-      const w = cellWidth(ch.codePointAt(0));
-      if (at) { if (w === 0 && !after) at += ch; else after += ch; } // combining marks stay on the cursor glyph
-      else if (col + Math.max(w, 1) <= cursorCol || (w === 0 && col <= cursorCol)) before += ch;
-      else if (col <= cursorCol && cursorCol < col + Math.max(w, 1)) at = ch;
-      else before += ch; // cursor before this text (shouldn't happen)
+    for (const g of graphemes(text)) {
+      const w = clusterWidth(g);
+      if (at) after += g;
+      else if (col + Math.max(w, 1) <= cursorCol || (w === 0 && col <= cursorCol)) before += g;
+      else at = g;
       col += w;
     }
     if (at) {

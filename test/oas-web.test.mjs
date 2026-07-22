@@ -15,7 +15,7 @@ function loadRenderer() {
   const html = readFileSync(join(CAP, "ui", "panel.html"), "utf8");
   const m = html.match(/\/\* OASWEB_RENDERER_BEGIN \*\/([\s\S]*?)\/\* OASWEB_RENDERER_END \*\//);
   assert.ok(m, "renderer block markers present in panel.html");
-  const src = m[1] + "\nreturn { renderCapture, renderLine, freshAttr, cellWidth };";
+  const src = m[1] + "\nreturn { renderCapture, renderLine, freshAttr, cellWidth, clusterWidth };";
   const escapeHtml = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   return new Function("escapeHtml", src)(escapeHtml);
 }
@@ -57,6 +57,21 @@ test("oas-web renderer: cursor column counts terminal cells (CJK wide, combining
   // combining char stays attached, cursor at col 1 of "e\u0301x" is 'x'
   const html2 = R.renderLine("e\u0301x", R.freshAttr(), 1);
   assert.ok(html2.includes('<span class="cur">x</span>'));
+});
+
+test("oas-web renderer: grapheme clusters — ZWJ emoji, VS16, keycaps, flags, kana voicing marks", () => {
+  // tmux counts the whole ZWJ family emoji as one 2-cell cluster
+  assert.equal(R.clusterWidth("👨\u200D👩\u200D👧\u200D👦"), 2);
+  assert.equal(R.clusterWidth("❤\uFE0F"), 2);      // VS16 emoji presentation
+  assert.equal(R.clusterWidth("1\uFE0F\u20E3"), 2); // keycap
+  assert.equal(R.clusterWidth("🇪🇸"), 2);           // regional-indicator pair
+  assert.equal(R.clusterWidth("は\u3099"), 2);      // kana + combining voicing mark (U+3099 is a Mark, not wide)
+  // cursor after the family emoji (cursor_x=2) lands on X
+  const h1 = R.renderLine("👨\u200D👩\u200D👧\u200D👦X", R.freshAttr(), 2);
+  assert.ok(h1.includes('<span class="cur">X</span>'), "ZWJ emoji is one 2-cell cluster");
+  // cursor after ば (cursor_x=2) lands on X
+  const h2 = R.renderLine("は\u3099X", R.freshAttr(), 2);
+  assert.ok(h2.includes('<span class="cur">X</span>'), "voiced kana cluster is 2 cells");
 });
 
 // ---- HTTP origin guard regression (server must not crash on Origin: null) ----
