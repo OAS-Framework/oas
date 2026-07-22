@@ -1,6 +1,7 @@
 # Knowledge Log
 
 ## 2026-07-22
+* **Creation**: added [Desktop renderer views port of the panel](/architecture/desktop-renderer-views-port.md) from the desktop views port note: the browser panel maps to `packages/desktop/renderer/views/` mount/unmount modules, delegates live terminals to the shell, and uses a same-origin harness proxy for development.
 * **Creation**: added [Keep roster collection out of the serving process](/lessons/snapshot-collection-off-thread.md) from the snapshot-collection note: synchronous `collectControlPane` work in the single-threaded server made key latency spiky, so `/api/panel` and `findInstance` serve from a background child-process snapshot.
 * **Creation**: added [Typing must force-repaint and pin the prompt row](/lessons/typing-echo-visibility.md) from the typing-echo note: keys reached tmux but echo stayed invisible until typing forced a short-tail repaint and temporary bottom snap.
 * **Update**: [oas-web architecture](/architecture/oas-web-architecture.md) now records the background child-process roster snapshot path and links to the snapshot-collection lesson.
