@@ -7,6 +7,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+const CLI = join(ROOT, "bin", "oas.mjs");
 const CAP = join(ROOT, "capabilities", "oas-web");
 
 // ---- ANSI renderer (extracted from the panel's marked DOM-free block) ----
@@ -290,6 +291,10 @@ test("oas-web server: POST origin guard rejects hostile/null origins without cra
 // ---- /api/agents + /api/spawn: roster of spawnable souls incl. capability agents ----
 
 test("oas-web server: /api/agents lists persistent AND capability-defined agents; /api/spawn validates", async () => {
+  // CI runs from a bare checkout where .agents/capabilities/installed/ is
+  // gitignored — restore locked capabilities first (no-op when present) so
+  // capability-defined agents (oas.review's reviewer) can resolve.
+  execFileSync(process.execPath, [CLI, "install", "--dir", ROOT], { stdio: "ignore" });
   const port = 4000 + Math.floor(Math.random() * 2000);
   const proc = spawn(process.execPath, [join(CAP, "bin", "oas-web.mjs"), "start", "--port", String(port), "--dir", ROOT], { stdio: "ignore" });
   try {
