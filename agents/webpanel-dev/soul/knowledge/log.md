@@ -1,6 +1,7 @@
 # Knowledge Log
 
 ## 2026-07-22
+* **Creation**: added [Capability manifest compatibility floor must cover core APIs](/lessons/manifest-compat-floor-core-apis.md) from the manifest-compat note: `compatibility.oas` must rise when `oas.web` starts calling newer `core.*` helpers, and the regression test's API minimum-version map should be extended with the helper.
 * **Creation**: added [Spawn endpoint root allowlist and empty-task semantics](/architecture/spawn-endpoint.md) by merging the spawn endpoint notes: `agentsRoot` is a selector into server workspace roots, `task: ""` intentionally means await instructions, repo fallback mirrors the CLI, and spawn failures return 409.
 * **Update**: [oas-web architecture](/architecture/oas-web-architecture.md) now lists `POST /api/spawn` and records the path-shaped browser parameter allowlist invariant.
 * **Creation**: added [Split panes, collapsible sidebar, and compact session header](/architecture/split-panes-and-compact-shell.md) from the split-pane shell note: per-pane state and pollers, focused-pane key routing, modifier-click splits, persisted sidebar collapse, and compact `.phead` headers.

@@ -30,6 +30,7 @@ marketplace capability (`capabilities/oas-web/`: `bin/oas-web.mjs` server +
 
 ## lessons/
 
+* [lessons/manifest-compat-floor-core-apis.md](lessons/manifest-compat-floor-core-apis.md) - When oas-web starts calling a new core.* helper, capabilities/oas-web/oas.json compatibility.oas must be raised to the kernel version that helper first shipped in, and the manifest-floor regression test's API map should be extended with that helper.
 * [lessons/multiline-send-bracketed-paste.md](lessons/multiline-send-bracketed-paste.md) - Any path that delivers text containing newlines into an agent pane must use load-buffer plus paste-buffer -p; raw send-keys/newline delivery submits each line separately or can execute pasted lines one by one.
 * [lessons/stale-response-race.md](lessons/stale-response-race.md) - the chatReq request-generation, selection-pinning, and cache-isolation guards against transcript cross-bleed.
 
