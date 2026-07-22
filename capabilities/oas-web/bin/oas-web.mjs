@@ -114,20 +114,31 @@ function panelData(wsId) {
 }
 
 /** Available agents (souls) of a workspace — what `oas spawn <agent>` could
- * start. Same kernel seam as the CLI (core.listAgents), per agents root. */
+ * start. Same kernel seams as the CLI: core.listAgents per agents root, plus
+ * capability-defined agents (packages' `agents:` souls) active in the root's
+ * context — the CLI resolves those via findCapabilityAgent. */
 function agentsData(wsId) {
   const ws = wsId ? workspaceById(wsId) : workspaces()[0];
   const agents = [];
   for (const root of ws?.roots || []) {
+    const context = dirname(root); // the workspace/repo owning this agents root
+    const pushAgent = (a) => agents.push({
+      name: a.name, description: a.description || "", kind: a.kind || "persistent",
+      work: a.work || "checkout", runtime: a.runtime || "pi", model: a.model || null,
+      repo: a.repo || null, capability: a.capability || null, agentsRoot: root,
+      workspace: context, repoName: resolve(context, a.repo || ".").split("/").pop(),
+    });
     try {
-      for (const a of core.listAgents(root)) {
-        agents.push({
-          name: a.name, description: a.description || "", kind: a.kind || "persistent",
-          work: a.work || "checkout", runtime: a.runtime || "pi", model: a.model || null,
-          repo: a.repo || null, agentsRoot: root,
-          workspace: dirname(root),
-          repoName: resolve(dirname(root), a.repo || ".").split("/").pop(),
-        });
+      const local = core.listAgents(root);
+      const seen = new Set(local.map((a) => a.name));
+      for (const a of local) pushAgent(a);
+      // Capability-defined agents (kind "capability") — full soul via the same
+      // resolver the CLI's spawn fallback uses.
+      for (const c of core.listCapabilityAgents(context)) {
+        if (seen.has(c.name)) continue;
+        seen.add(c.name);
+        const soul = core.findCapabilityAgent(context, root, c.name);
+        if (soul) pushAgent(soul);
       }
     } catch { /* one broken root must not hide the rest */ }
   }
@@ -144,7 +155,10 @@ function spawnAgent({ agent, agentsRoot, task, purpose }) {
   // never spawn into an arbitrary caller-supplied directory.
   const known = workspaces().flatMap((w) => w.roots);
   if (!known.some((r) => resolve(r) === root)) throw new Error(`unknown agents root "${agentsRoot}"`);
-  const def = core.findAgent(root, name);
+  const def = core.findAgent(root, name)
+    // CLI parity: capability-defined agents (a package's `agents:` soul active
+    // in this context) resolve via findCapabilityAgent and home locally.
+    || core.findCapabilityAgent(dirname(root), root, name);
   if (!def) throw new Error(`unknown agent "${name}"`);
   const r = core.spawnInstance(root, def, {
     purpose: purpose ? String(purpose) : undefined,

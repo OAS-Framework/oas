@@ -336,10 +336,12 @@ function renderSouls(el) {
   for (const a of list) {
     const d = document.createElement("div");
     d.className = "soul";
+    // attached-mode agents need an owner's work tree — not spawnable standalone
+    const attached = a.work === "attached";
     d.innerHTML = `
       <div class="iname">${escapeHtml(a.name)}
-        <button class="spawnbtn" title="Spawn an instance with no task — it awaits your instructions">spawn</button>
-        <button class="spawnbtn" data-with-task="1" title="Spawn with a task" style="margin-left:0">+task</button>
+        <button class="spawnbtn" ${attached ? 'disabled title="Attached-mode agent — needs an owning instance\u2019s work tree; spawn from that instance"' : 'title="Spawn an instance with no task — it awaits your instructions"'}>spawn</button>
+        <button class="spawnbtn" data-with-task="1" ${attached ? "disabled" : ""} title="Spawn with a task" style="margin-left:0">+task</button>
       </div>
       ${a.description ? `<div class="sdesc">${escapeHtml(a.description)}</div>` : ""}
       <div class="imeta">

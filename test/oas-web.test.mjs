@@ -131,3 +131,43 @@ test("oas-web server: POST origin guard rejects hostile/null origins without cra
     assert.equal((await fetch(`http://127.0.0.1:${port}/api/panel`)).status, 200);
   } finally { proc.kill(); }
 });
+
+// ---- /api/agents + /api/spawn: roster of spawnable souls incl. capability agents ----
+
+test("oas-web server: /api/agents lists persistent AND capability-defined agents; /api/spawn validates", async () => {
+  const port = 4000 + Math.floor(Math.random() * 2000);
+  const proc = spawn(process.execPath, [join(CAP, "bin", "oas-web.mjs"), "start", "--port", String(port), "--dir", ROOT], { stdio: "ignore" });
+  try {
+    let up = false;
+    for (let i = 0; i < 40 && !up; i++) {
+      await new Promise((r) => setTimeout(r, 100));
+      try { await fetch(`http://127.0.0.1:${port}/api/panel`); up = true; } catch { /* retry */ }
+    }
+    assert.ok(up, "server came up");
+    const d = await (await fetch(`http://127.0.0.1:${port}/api/agents`)).json();
+    assert.ok(Array.isArray(d.agents) && d.agents.length, "agents listed");
+    for (const a of d.agents) {
+      assert.ok(a.name && a.agentsRoot, "each agent has name and agentsRoot");
+      assert.ok(["persistent", "tmp", "capability"].includes(a.kind), `known kind (${a.kind})`);
+    }
+    // capability-defined agents (e.g. oas.review's reviewer) must appear — the
+    // CLI can spawn them via findCapabilityAgent, so the panel must offer them.
+    const reviewer = d.agents.find((a) => a.name === "reviewer");
+    assert.ok(reviewer, "capability-defined 'reviewer' is listed");
+    assert.equal(reviewer.kind, "capability");
+    assert.equal(reviewer.capability, "oas.review");
+    // /api/spawn input validation (no real spawn: bad root / unknown agent / bad body)
+    const post = (body) => fetch(`http://127.0.0.1:${port}/api/spawn`, { method: "POST",
+      headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    assert.equal((await post({})).status, 400, "missing fields → 400");
+    assert.equal((await post({ agent: "reviewer", agentsRoot: "/tmp" })).status, 409, "foreign agentsRoot rejected");
+    const root = d.agents[0].agentsRoot;
+    assert.equal((await post({ agent: "no-such-agent", agentsRoot: root })).status, 409, "unknown agent rejected");
+    // capability agent RESOLVES through the spawn path (attached mode fails on
+    // workDir, proving findCapabilityAgent found the soul — not "unknown agent")
+    const r = await post({ agent: "reviewer", agentsRoot: root });
+    assert.equal(r.status, 409);
+    const err = (await r.json()).error;
+    assert.ok(!/unknown agent/.test(err), `reviewer resolves via findCapabilityAgent (got: ${err})`);
+  } finally { proc.kill(); }
+});
