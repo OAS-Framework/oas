@@ -15,7 +15,7 @@
     "node-pty": "^1.0.0"
   },
   "devDependencies": {
-    "@electron/rebuild": "^3.6.0",
-    "electron": "^33.0.0"
+    "@electron/rebuild": "^4.2.0",
+    "electron": "^43.2.0"
   }
 }
