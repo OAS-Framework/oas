@@ -8,6 +8,7 @@
 // stays a thin rail so nothing is duplicated.
 import { currentWorkspace } from "./views/common.mjs";
 import { createViewLifecycle } from "./view-lifecycle.mjs";
+import { reserveKey, whenKeyFree } from "./tab-keys.mjs";
 
 const desk = window.oasDesktop;
 
@@ -28,20 +29,18 @@ const ctx = {
 const tabbar = document.getElementById("tabbar");
 const tabhost = document.getElementById("tabhost");
 const tabs = new Map(); // id -> { tabEl, paneEl, title, key, onClose, onShow }
-const reservedKeys = new Set(); // keys of closed tabs whose async cleanup is still running
 let nextTabId = 1;
 let activeTab = null;
 
 /** key: optional dedup key — activating an existing tab instead of opening a
  * twin. View modules keep module-level state (they are singletons by design),
- * so one tab per view/file is also a correctness requirement. A key stays
- * reserved while a closed tab's DEFERRED cleanup is pending — reopening
- * before the stale lifecycle's module-wide unmount ran would let it tear
- * down the new mount. */
+ * so one tab per view/file is also a correctness requirement. Callers of a
+ * KEYED open must `await whenKeyFree(key)` first: a reopen during a closed
+ * tab's deferred cleanup queues behind it instead of being dropped or torn
+ * down by the stale lifecycle. */
 function addTab({ title, key, onClose, onShow }) {
   if (key) {
     for (const [tid, t] of tabs) if (t.key === key) { activateTab(tid); return null; }
-    if (reservedKeys.has(key)) return null; // closing tab's cleanup still pending
   }
   const id = nextTabId++;
   const tabEl = document.createElement("div");
@@ -76,14 +75,11 @@ function closeTab(id) {
   const t = tabs.get(id);
   if (!t) return;
   // onClose may return a promise (deferred cleanup while a mount is pending);
-  // reserve the key until it resolves so a reopen can't be torn down by the
-  // stale lifecycle's cleanup.
+  // reserve the key until it resolves — reopen requests queue behind it via
+  // whenKeyFree() instead of mounting under the stale lifecycle.
   try {
     const r = t.onClose?.();
-    if (r && typeof r.then === "function" && t.key) {
-      reservedKeys.add(t.key);
-      r.catch((e) => console.error(e)).finally(() => reservedKeys.delete(t.key));
-    }
+    if (r && typeof r.then === "function" && t.key) reserveKey(t.key, r);
   } catch (e) { console.error(e); }
   t.tabEl.remove();
   t.paneEl.remove();
@@ -97,6 +93,8 @@ function closeTab(id) {
 
 // ── view host: load ./views/<name>.mjs, mount into a tab ─────────────────
 async function openViewTab(name, title, extra = {}, key = `view:${name}`) {
+  // A reopen during a closed tab's deferred cleanup queues here — never dropped.
+  await whenKeyFree(key);
   let mod;
   try { mod = await import(`./views/${name}.mjs`); }
   catch (e) {
@@ -132,6 +130,7 @@ async function openTerminalTab(instance) {
   // same-named instance in another workspace is a different terminal.
   const ws = currentWorkspace();
   const key = `term:${ws}:${instance}`;
+  await whenKeyFree(key);
   for (const [tid, t] of tabs) if (t.key === key) { activateTab(tid); return; }
   if (pendingTerms.has(key)) return; // an open for this key is already in flight
   pendingTerms.add(key);
