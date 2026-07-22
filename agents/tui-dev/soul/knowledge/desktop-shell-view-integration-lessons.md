@@ -29,9 +29,14 @@ with the [Desktop shell view-host contract and layout](desktop-shell-layout.md):
   If the server says the body needs an object while the caller clearly sent the
   fields, suspect double serialization.
 - For workspace switching, `common.mjs` sends explicit `?ws=` on `/api/panel`
-  and `/api/agents`. Main-process pinning should allow caller workspace values
-  the connected server advertises in `workspaces[]`, while still overwriting
-  unknown ids.
+  and `/api/agents`, and `brain.mjs` sends it on `/api/brain/<agent>`.
+  Main-process pinning should allow caller workspace values the connected
+  server advertises in `workspaces[]`, while still overwriting unknown ids.
+  Keep the proxy's scoped-endpoint pin list coupled to every endpoint views
+  query with `?ws=` (currently `/api/panel`, `/api/agents`, and
+  `/api/brain/*`) and extend its tests in the same change; otherwise a stale
+  persisted workspace id can fall through to the server's first-workspace
+  fallback and render wrong-workspace data.
 - Roster-derived actions must also honor the workspace bus. Terminal open must
   read `currentWorkspace()`, query `/api/panel?ws=...`, and include the
   workspace in the terminal dedup key so a secondary advertised workspace does
