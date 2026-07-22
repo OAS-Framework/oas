@@ -1,6 +1,7 @@
 # Knowledge Log
 
 ## 2026-07-22
+* **Creation**: added [Security regressions must exercise behavior, not source strings](/lessons/behavioral-security-regressions.md) from the behavioral-security-regressions note: guard regressions must drive the real boundary with forged requests and a fake upstream, because source-string checks pass when the guard is inverted, unreachable, or no longer returns 403.
 * **Creation**: added [Harness proxy must guard origins, not launder them](/lessons/harness-proxy-origin-guard.md) from the harness proxy origin guard note: a dev proxy in front of `oas-web` must enforce the loopback `Host`/`Origin` guard at its own boundary and forward the browser's real `Origin` rather than laundering it to a trusted loopback value.
 * **Fix**: [Desktop renderer views port of the panel](/architecture/desktop-renderer-views-port.md) now records `.mjs` view module names, harness-masked CSS/API seams, and the corrected harness proxy pattern: guard `Host`/`Origin` at the proxy boundary, forward the real `Origin`, and rewrite only `Host` for upstream routing.
 * **Creation**: added [Desktop renderer views port of the panel](/architecture/desktop-renderer-views-port.md) from the desktop views port note: the browser panel maps to `packages/desktop/renderer/views/` mount/unmount modules, delegates live terminals to the shell, and uses a same-origin harness proxy for development.
