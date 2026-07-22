@@ -24,6 +24,23 @@ decisions/ and referenced from here.
 
 ---
 
+## PR #13 — oas-web 0.7.1 'cannot type' fix: logical pane key routing (2026-07-22)
+- verdict: MERGED — all four gates green; approval again a PR comment
+  (same-account block). Root-caused 0.7.0 regression: keydown bound to the
+  term element and gated on DOM focus silently dropped keys after any
+  header/toggle click. Fix routes via a window-level listener to the
+  logically focused pane, excluding real editable controls; Cmd-B toggles
+  sidebar, Ctrl-B always reaches the session (tmux prefix). New
+  OASWEB_KEYROUTE marked block + node regression test (59/59); no change to
+  /api/keys or the loopback POST guard; webpanel-dev OKF bundle --strict
+  clean, new lesson concept recorded.
+- owner: webpanel-dev-1 · coordinator: none
+- taught us: DOM focus is too fragile a routing key for pane UIs — logical
+  focus state plus an editable-control exclusion is the robust model; the
+  marked-block extraction pattern (from PR #8) generalized cleanly to key
+  routing. Remote branch deletion needed `git push origin --delete` because
+  the author's worktree held the local branch.
+
 ## PR #12 — oas-web 0.7.0 panel refinements (2026-07-22)
 - verdict: MERGED — all four gates green; approval again a PR comment
   (same-account block). Terminal-unified input (composer + `/api/send`
