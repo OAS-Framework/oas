@@ -24,6 +24,25 @@ decisions/ and referenced from here.
 
 ---
 
+## PR #17 — oas-web 0.8.1 typing visibility + latency (echo snap+burst, off-thread roster snapshot) (2026-07-22)
+- verdict: MERGED — all four gates green. Direction: right layer; the
+  server-never-collects child-process snapshot is the correct fix for the
+  single-threaded event loop; human-confirmed-on-dev-port process endorsed.
+  Correctness: scratch-worktree gate 65/65 tests + check/validate/pack:check;
+  OKF strict pass on the webpanel-dev bundle (two new lessons promoted).
+  Security: /api/keys --debug logs metadata+byte-count only; keySendError
+  shapes exec failures (exit status/signal only — e.message embeds hex-encoded
+  keystrokes in argv) with a leak regression test. Approval recorded as PR
+  comment (same-account block); merge-commit merge; remote branch deleted via
+  `git push origin --delete` (webpanel-dev-1 worktree held it — owner notified).
+- owner: webpanel-dev-1 · coordinator: none
+- taught us: branch CI is red from a PRE-EXISTING environment gap — the
+  /api/agents test expects the capability-defined 'reviewer' agent, but CI's
+  bare checkout lacks .agents/capabilities/installed/; also failed on the
+  PR #14 branch. Needs a CI fix or test guard (open thread). Also: on a
+  single-threaded server, audit periodic exec*Sync handlers before tuning
+  the hot path — tail latency, not median, was the felt lag.
+
 ## PR #14 (round 3) — oas-web 0.8.0 spawn-from-panel (2026-07-22)
 - verdict: MERGED — all four gates green; approval again a PR comment
   (same-account block — applies to --request-changes too). Round-3 merge
