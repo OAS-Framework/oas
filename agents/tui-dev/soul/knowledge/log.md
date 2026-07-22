@@ -2,6 +2,12 @@
 
 ## 2026-07-22
 
+- **Update**: [desktop-shell-view-integration-lessons.md](desktop-shell-view-integration-lessons.md)
+  — merged the `/api/brain` workspace-pinning endpoint coupling lesson from tui-dev-desktop-shell notes.
+- **Update**: [desktop-shell-view-integration-lessons.md](desktop-shell-view-integration-lessons.md)
+  — merged fetch-body serialization, workspace-scoped terminal open, and async tab-dedup race lessons from tui-dev-desktop-shell notes.
+- **Creation**: [desktop-shell-view-integration-lessons.md](desktop-shell-view-integration-lessons.md)
+  — promoted desktop shell ported-view integration lessons from tui-dev-desktop-shell notes.
 - **Creation**: [url-resolution-ssrf-footgun.md](url-resolution-ssrf-footgun.md)
   — promoted the WHATWG URL resolution SSRF lesson from tui-dev-desktop-shell notes.
 - **Creation**: [desktop-shell-hardening-review-lessons.md](desktop-shell-hardening-review-lessons.md)

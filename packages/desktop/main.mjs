@@ -15,7 +15,7 @@ import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { apiUrl } from "./api-url.mjs";
+import { apiUrl, apiInit } from "./api-url.mjs";
 
 const require = createRequire(import.meta.url);
 const pty = require("node-pty");
@@ -36,13 +36,16 @@ const WORKSPACE = resolve(argDir || process.env.OAS_DESKTOP_DIR || REPO_ROOT);
 // ---- oas-web server management ----------------------------------------
 let serverChild = null; // set only when WE spawned it
 let wsId = null;        // verified workspace id on the server we use
+let allowedWs = new Set(); // workspace ids the connected server advertises
 
 async function panelWorkspaces() {
   try {
     const r = await fetch(`${base()}/api/panel`, { signal: AbortSignal.timeout(1500) });
     if (!r.ok) return null;
     const d = await r.json();
-    return d.workspaces || [];
+    const list = d.workspaces || [];
+    allowedWs = new Set(list.map((w) => w.id));
+    return list;
   } catch { return null; }
 }
 
@@ -120,14 +123,14 @@ function guard(e) { if (!trustedFrame(e)) throw new Error("forbidden: untrusted 
 // The renderer never talks to the network directly; ctx.api() lands here.
 ipcMain.handle("api", async (e, pathname, opts) => {
   guard(e);
-  // apiUrl rejects off-origin resolution (e.g. "//attacker/x") and
-  // force-pins the verified workspace on scoped endpoints.
-  const url = apiUrl(pathname, base(), wsId);
-  const init = { method: opts?.method || "GET", signal: AbortSignal.timeout(20000) };
-  if (opts?.body !== undefined) {
-    init.body = JSON.stringify(opts.body);
-    init.headers = { "content-type": "application/json" };
-  }
+  // apiUrl rejects off-origin resolution (e.g. "//attacker/x"), and pins
+  // the verified workspace on scoped endpoints unless the caller selects a
+  // workspace this server actually advertises (the views' ws switcher).
+  const url = apiUrl(pathname, base(), wsId, allowedWs);
+  // apiInit forwards pre-serialized (string) bodies and headers unchanged —
+  // views serialize once in common.mjs::postJson — and serializes object
+  // bodies itself.
+  const init = { ...apiInit(opts), signal: AbortSignal.timeout(20000) };
   const r = await fetch(url, init);
   const text = await r.text();
   let json; try { json = JSON.parse(text); } catch { json = { raw: text }; }
