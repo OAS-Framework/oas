@@ -443,7 +443,8 @@ const server = createServer(async (req, res) => {
         if (!inst.running) return send(res, 409, { error: "instance is not running" });
         const { data, paste } = await readBody(req);
         if (typeof data !== "string" || !data.length) return send(res, 400, { error: "body needs { data }" });
-        if (DEBUG) console.log(`[keys] inst=${inst.instance} target=${tmuxTarget(inst)} paste=${paste === true} bytes=${JSON.stringify(data)}`);
+        // SECURITY: never log the payload — typed text can contain secrets.
+        if (DEBUG) console.log(`[keys] inst=${inst.instance} target=${tmuxTarget(inst)} paste=${paste === true} len=${Buffer.byteLength(data, "utf8")}`);
         try {
           sendKeys(inst, data, paste === true);
         } catch (e) {

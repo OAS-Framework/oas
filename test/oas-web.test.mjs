@@ -29,6 +29,23 @@ test("oas-web server: collect subcommand emits the roster snapshot JSON", () => 
   assert.ok(Array.isArray(ws[0].instances), "each workspace carries an instances array");
 });
 
+test("oas-web echo: screen signature is depth-independent and detects real change", () => {
+  const src = extractBlock(join(CAP, "ui", "panel.html"), "SCREENSIG");
+  const screenSignature = new Function(src + "\nreturn screenSignature;")();
+  const size = { rows: 24, cols: 80, cx: 3, cy: 1, cursor: true };
+  // same visible screen, fetched with different history depths → SAME sig
+  const deep = { text: "h1\nh2\nh3\nprompt\n> \n", history: 3, size };
+  const tail = { text: "h3\nprompt\n> \n", history: 1, size };
+  assert.equal(screenSignature(deep), screenSignature(tail),
+    "tail fetch after a deep poll must not read as a screen change");
+  // the echoed character IS a change
+  const echoed = { text: "h3\nprompt\n> x\n", history: 1, size };
+  assert.notEqual(screenSignature(tail), screenSignature(echoed), "echo changes the signature");
+  // geometry changes are changes too
+  const resized = { text: "h3\nprompt\n> \n", history: 1, size: { ...size, cols: 100 } };
+  assert.notEqual(screenSignature(tail), screenSignature(resized), "resize changes the signature");
+});
+
 test("oas-web attach: tail-then-deep order, and pane switches cancel the backfill", async () => {
   const src = extractBlock(join(CAP, "ui", "panel.html"), "ATTACH");
   const attachSequence = new Function(src + "\nreturn attachSequence;")();
