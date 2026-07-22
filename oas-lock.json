@@ -7,16 +7,16 @@
       "integrity": "sha256-ca809bee6fbec832f8e3137ca87549d6f642b9c03ab073184865bb4da54e2252",
       "trustedExecutables": true
     },
-    "oas.okf": {
-      "source": "path:/Users/pepe-reyero/oas/capabilities/oas-okf",
-      "version": "1.3.0",
-      "integrity": "sha256-7b220e3357db078eb8eb0d65e766a38406f137ab6972e1e57a5e33eb9ad84ca9",
-      "trustedExecutables": true
-    },
     "oas.review": {
-      "source": "path:/Users/pepe-reyero/oas/capabilities/oas-review",
+      "source": "marketplace:oas.review@1.1.5",
       "version": "1.1.5",
       "integrity": "sha256-4292b4ed95d09a8813c50231d0a01d43ba9b02f1d497a6e3f72428a40414b680",
+      "trustedExecutables": true
+    },
+    "oas.okf": {
+      "source": "marketplace:oas.okf@1.3.0",
+      "version": "1.3.0",
+      "integrity": "sha256-7b220e3357db078eb8eb0d65e766a38406f137ab6972e1e57a5e33eb9ad84ca9",
       "trustedExecutables": true
     }
   }
