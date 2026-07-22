@@ -137,3 +137,37 @@ test("per-instance requests are workspace-scoped: same-named instance in two wor
     upstream.close();
   }
 });
+
+test("jira guard: a deferred response from the previous workspace never paints after a switch + same-name reselect", async () => {
+  const common = await import(new URL("../packages/desktop/renderer/views/common.mjs", import.meta.url).href);
+  const { refreshJira } = await import(new URL("../packages/desktop/renderer/views/instances.mjs", import.meta.url).href);
+  // ctx.api resolves on demand so the test controls response ORDER exactly.
+  const gate = [];
+  const ctx = { api: (pathname) => new Promise((ok) => gate.push({ pathname, ok })) };
+  const payload = (ws) => ({ ok: true, status: 200, json: async () => ({ enabled: true, label: `from-${ws}` }) });
+  const s = { alive: true, sel: "dev-1", jiraReq: 0, jira: null, lastChatSig: "x", lastChatData: null, ctx };
+  const prevWs = common.currentWorkspace();
+  try {
+    // 1. viewing wsB: jira fetch for dev-1 goes out (in flight)
+    common.setWorkspace("wsB");
+    const inFlightB = refreshJira(s, "dev-1");
+    assert.match(gate[0].pathname, /ws=wsB/);
+    // 2. user switches to wsA and reselects the SAME instance name — the view
+    //    bumps jiraReq (clearSelection/select do this) and refetches
+    common.setWorkspace("wsA");
+    s.jiraReq++;
+    const inFlightA = refreshJira(s, "dev-1");
+    assert.match(gate[1].pathname, /ws=wsA/);
+    // 3. wsA's response lands first and paints
+    gate[1].ok(payload("wsA"));
+    await inFlightA;
+    assert.equal(s.jira.label, "from-wsA");
+    // 4. wsB's STALE response finally lands — name matches (dev-1 === dev-1),
+    //    but the generation token must reject it
+    gate[0].ok(payload("wsB"));
+    await inFlightB;
+    assert.equal(s.jira.label, "from-wsA", "stale cross-workspace jira response must never paint");
+  } finally {
+    common.setWorkspace(prevWs);
+  }
+});
