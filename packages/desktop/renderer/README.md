@@ -8,18 +8,18 @@ No frameworks, no dependencies; data comes from the existing oas-web HTTP API.
 
 ## Views (`views/`)
 
-- **instances.js** — roster + instance detail: pi-style chat transcript
+- **instances.mjs** — roster + instance detail: pi-style chat transcript
   (`GET /api/chat/<instance>`), task/state/git/workspace summary, interrupt,
   inline Jira card when the instance carries `oas.jira` meta. The live
   terminal is NOT here — the "Open terminal" action calls
   `ctx.openTerminal(instance)` (the shell's terminal view owns interaction).
-- **spawn.js** — available agents (`GET /api/agents`) with spawn-from-app
+- **spawn.mjs** — available agents (`GET /api/agents`) with spawn-from-app
   (`POST /api/spawn`), purpose/task fields. Panel defaults hold: empty task
   spawns an instance awaiting instructions; attached-mode agents are not
   spawnable standalone.
-- **jira.js** — epic + Agent Roster panel per Jira-linked instance
+- **jira.mjs** — epic + Agent Roster panel per Jira-linked instance
   (`GET /api/jira/<instance>`).
-- **common.js** — shared helpers: escaping, mini-markdown, ctx.api JSON
+- **common.mjs** — shared helpers: escaping, mini-markdown, ctx.api JSON
   wrappers, roster grouping, and workspace switching (`?ws=`) — the selected
   workspace is shared across views via `setWorkspace`/`onWorkspaceChange`
   (persisted in localStorage), so a shell-level switcher can drive it too.

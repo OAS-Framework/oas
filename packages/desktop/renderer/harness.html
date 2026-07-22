@@ -65,7 +65,7 @@
   let current = null;
   async function show(name) {
     if (current) { current.mod.unmount(); current = null; }
-    const mod = await import(`./views/${name}.js`);
+    const mod = await import(`./views/${name}.mjs`);
     mod.mount(host, ctx);
     current = { name, mod };
     for (const b of document.querySelectorAll(".tab[data-view]"))

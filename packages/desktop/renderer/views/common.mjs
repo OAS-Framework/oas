@@ -17,10 +17,13 @@ export function miniMarkdown(s) {
 }
 
 /* Fetch JSON via the shell's ctx.api — one seam so a base-URL change (remote
-   panel, port) never touches the views. Throws on HTTP errors with the
-   server's error message when it sends one. */
+   panel, port) never touches the views. Tolerates BOTH ctx.api shapes:
+   a Fetch Response (harness: ctx.api = (p, o) => fetch(base + p, o)) and a
+   shell that resolves already-parsed JSON (throwing on non-2xx itself).
+   Throws with the server's error message when it sends one. */
 export async function apiJson(ctx, pathname, opts) {
   const r = await ctx.api(pathname, opts);
+  if (!r || typeof r.json !== "function") return r; // shell returned parsed data
   let d;
   try { d = await r.json(); } catch { d = {}; }
   if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
@@ -79,7 +82,7 @@ export function ensureTheme(doc = document) {
   if (doc.querySelector('link[data-oas-theme], style[data-oas-theme]')) return;
   const link = doc.createElement("link");
   link.rel = "stylesheet";
-  link.href = new URL("./theme.css", import.meta.url).href;
+  link.href = new URL("../theme.css", import.meta.url).href; // views/ → renderer/theme.css
   link.dataset.oasTheme = "1";
   doc.head.appendChild(link);
 }

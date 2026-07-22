@@ -6,7 +6,7 @@
 import {
   escapeHtml, apiJson, ensureTheme,
   setWorkspace, onWorkspaceChange, renderWorkspaceSelect, wsQuery,
-} from "./common.js";
+} from "./common.mjs";
 
 let state = null;
 

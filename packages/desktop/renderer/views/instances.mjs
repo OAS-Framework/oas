@@ -9,7 +9,7 @@ import {
   escapeHtml, miniMarkdown, apiJson, postJson, ensureTheme,
   groupInstances, currentWorkspace, setWorkspace, adoptWorkspace, onWorkspaceChange,
   renderWorkspaceSelect, wsQuery,
-} from "./common.js";
+} from "./common.mjs";
 
 let state = null;
 
