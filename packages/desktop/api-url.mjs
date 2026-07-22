@@ -33,7 +33,7 @@ export function apiUrl(pathname, base, wsId = null, allowedWs = undefined) {
     throw new Error("api: pathname resolved off-origin");
   }
   const wsScoped = url.pathname === "/api/panel" || url.pathname === "/api/agents"
-    || url.pathname.startsWith("/api/brain/");
+    || url.pathname.startsWith("/api/brain/") || url.pathname.startsWith("/api/diff/");
   if (wsId && wsScoped) {
     const asked = url.searchParams.get("ws");
     // Workspace switching is a real feature on shared multi-workspace

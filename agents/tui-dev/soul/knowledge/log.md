@@ -2,6 +2,26 @@
 
 ## 2026-07-22
 
+- **Update**: [async-mount-close-race.md](async-mount-close-race.md)
+  — merged the reserved-key waiter follow-up from tui-dev-desktop-shell notes so fast reopens queue behind cleanup instead of being dropped.
+- **Update**: [async-mount-close-race.md](async-mount-close-race.md)
+  — merged lifecycle fulfillment tracking and dedup-key reservation follow-on races from tui-dev-desktop-shell notes.
+- **Creation**: [async-mount-close-race.md](async-mount-close-race.md)
+  — promoted the async close-during-mount cleanup race lesson from tui-dev-desktop-shell notes.
+- **Update**: [view-mount-disposer-contract.md](view-mount-disposer-contract.md)
+  — linked the async mount close race to the per-mount disposer contract.
+- **Creation**: [view-mount-disposer-contract.md](view-mount-disposer-contract.md)
+  — promoted the backward-compatible `mount(el, ctx)` per-mount disposer contract from tui-dev-desktop-shell notes.
+- **Update**: [desktop-shell-layout.md](desktop-shell-layout.md)
+  — documented the view-host disposer return contract in the desktop shell layout reference.
+- **Update**: [desktop-shell-view-integration-lessons.md](desktop-shell-view-integration-lessons.md)
+  — merged the multi-mount markdown/diff disposer lesson and diff workspace-scoping fixes from tui-dev-desktop-shell notes.
+- **Creation**: [pkill-scoping-discipline.md](pkill-scoping-discipline.md)
+  — promoted the live desktop testing process-kill scoping discipline lesson from tui-dev-desktop-shell notes.
+- **Creation**: [electron-renderer-native-esm-dependencies.md](electron-renderer-native-esm-dependencies.md)
+  — promoted the importmap/CSP hash/highlight.js dual-package lesson from tui-dev-desktop-shell notes.
+- **Update**: [desktop-shell-view-integration-lessons.md](desktop-shell-view-integration-lessons.md)
+  — merged the shell-owned picker-tab rule for views that need per-tab context from tui-dev-desktop-shell notes.
 - **Update**: [desktop-shell-view-integration-lessons.md](desktop-shell-view-integration-lessons.md)
   — merged the `/api/brain` workspace-pinning endpoint coupling lesson from tui-dev-desktop-shell notes.
 - **Update**: [desktop-shell-view-integration-lessons.md](desktop-shell-view-integration-lessons.md)

@@ -215,8 +215,11 @@ function snapshotPanel(wsId) {
   const id = wsId && snapshot.byWs.has(wsId) ? wsId : ids[0];
   return id ? snapshot.byWs.get(id) : null;
 }
-function findInstance(name) {
+function findInstance(name, wsId) {
   if (!snapshot.byWs.size) snapshot = { at: Date.now(), byWs: collectNow() }; // cold start, once
+  // With a ws scope, resolve ONLY in that workspace — same-named instances
+  // exist across workspaces and "first match anywhere" picks the wrong one.
+  if (wsId) return snapshot.byWs.get(wsId)?.instances.find((i) => i.instance === name);
   for (const d of snapshot.byWs.values()) {
     const hit = d.instances.find((i) => i.instance === name);
     if (hit) return hit;
@@ -712,7 +715,7 @@ const server = createServer(async (req, res) => {
     }
     const m = path.match(/^\/api\/(session|keys|interrupt|jira|chat|diff)\/([A-Za-z0-9._-]+)$/);
     if (m) {
-      const inst = findInstance(m[2]);
+      const inst = findInstance(m[2], url.searchParams.get("ws") || undefined);
       if (!inst) return send(res, 404, { error: `unknown instance "${m[2]}"` });
       if (m[1] === "session" && req.method === "GET") {
         if (!inst.running) return send(res, 200, { running: false, text: "" });

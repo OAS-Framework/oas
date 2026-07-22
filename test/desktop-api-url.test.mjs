@@ -55,6 +55,10 @@ test("pins ws on /api/brain/* like the other scoped endpoints", () => {
   assert.equal(apiUrl("/api/brain/tui-dev?ws=/stale/id", BASE, ws).searchParams.get("ws"), ws);
   // server-advertised caller ws → kept (workspace switching)
   assert.equal(apiUrl(`/api/brain/tui-dev?ws=${other}`, BASE, ws, new Set([ws, other])).searchParams.get("ws"), other);
+  // /api/diff/* follows the same policy
+  assert.equal(apiUrl("/api/diff/inst-a", BASE, ws).searchParams.get("ws"), ws);
+  assert.equal(apiUrl("/api/diff/inst-a?ws=/stale", BASE, ws).searchParams.get("ws"), ws);
+  assert.equal(apiUrl(`/api/diff/inst-a?ws=${other}`, BASE, ws, new Set([ws, other])).searchParams.get("ws"), other);
 });
 
 test("does not pin ws on unscoped endpoints and without a verified id", () => {

@@ -3,8 +3,15 @@
 <head>
   <meta charset="utf-8" />
   <meta http-equiv="Content-Security-Policy"
-        content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;" />
+        content="default-src 'self'; script-src 'self' 'sha256-0Jdk9tmT9Tt8cjZwiacnC7eiFpnP3st50xHv+9r+lAw='; style-src 'self' 'unsafe-inline'; img-src 'self' data:;" />
   <title>OAS Desktop</title>
+  <script type="importmap">
+  { "imports": {
+      "marked": "../node_modules/marked/lib/marked.esm.js",
+      "dompurify": "../node_modules/dompurify/dist/purify.es.mjs",
+      "highlight.js": "./vendor/highlight.mjs"
+  } }
+  </script>
   <link rel="stylesheet" href="../node_modules/@xterm/xterm/css/xterm.css" />
   <link rel="stylesheet" href="theme.css" />
   <link rel="stylesheet" href="shell.css" />

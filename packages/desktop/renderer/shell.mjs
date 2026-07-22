@@ -7,6 +7,8 @@
 // chat transcript, spawn, jira) lives in the ported views — the shell chrome
 // stays a thin rail so nothing is duplicated.
 import { currentWorkspace } from "./views/common.mjs";
+import { createViewLifecycle } from "./view-lifecycle.mjs";
+import { reserveKey, whenKeyFree } from "./tab-keys.mjs";
 
 const desk = window.oasDesktop;
 
@@ -32,7 +34,10 @@ let activeTab = null;
 
 /** key: optional dedup key — activating an existing tab instead of opening a
  * twin. View modules keep module-level state (they are singletons by design),
- * so one tab per view/file is also a correctness requirement. */
+ * so one tab per view/file is also a correctness requirement. Callers of a
+ * KEYED open must `await whenKeyFree(key)` first: a reopen during a closed
+ * tab's deferred cleanup queues behind it instead of being dropped or torn
+ * down by the stale lifecycle. */
 function addTab({ title, key, onClose, onShow }) {
   if (key) {
     for (const [tid, t] of tabs) if (t.key === key) { activateTab(tid); return null; }
@@ -69,7 +74,13 @@ function activateTab(id) {
 function closeTab(id) {
   const t = tabs.get(id);
   if (!t) return;
-  try { t.onClose?.(); } catch (e) { console.error(e); }
+  // onClose may return a promise (deferred cleanup while a mount is pending);
+  // reserve the key until it resolves — reopen requests queue behind it via
+  // whenKeyFree() instead of mounting under the stale lifecycle.
+  try {
+    const r = t.onClose?.();
+    if (r && typeof r.then === "function" && t.key) reserveKey(t.key, r);
+  } catch (e) { console.error(e); }
   t.tabEl.remove();
   t.paneEl.remove();
   tabs.delete(id);
@@ -82,6 +93,8 @@ function closeTab(id) {
 
 // ── view host: load ./views/<name>.mjs, mount into a tab ─────────────────
 async function openViewTab(name, title, extra = {}, key = `view:${name}`) {
+  // A reopen during a closed tab's deferred cleanup queues here — never dropped.
+  await whenKeyFree(key);
   let mod;
   try { mod = await import(`./views/${name}.mjs`); }
   catch (e) {
@@ -89,16 +102,23 @@ async function openViewTab(name, title, extra = {}, key = `view:${name}`) {
     if (made) made.paneEl.innerHTML = `<div class="placeholder"><h2>${name}</h2><div>view module failed to load: ${e.message}</div></div>`;
     return;
   }
+  const life = createViewLifecycle(mod, (e) => console.error(e));
   const made = addTab({
     title,
     key,
-    onClose: () => { try { mod.unmount?.(); } catch (e) { console.error(e); } },
+    // Close is safe at any time — including while the async mount is still
+    // pending: the lifecycle defers cleanup until mount settles and then
+    // runs THAT mount's disposer (never the module-wide unmount mid-flight,
+    // which would clear every open mount of the module).
+    onClose: () => life.close(),
   });
   if (!made) return; // existing tab activated
   const el = document.createElement("div");
   el.style.height = "100%";
   made.paneEl.append(el);
-  try { await mod.mount(el, { ...ctx, ...extra }); }
+  try {
+    await life.mounted(el, { ...ctx, ...extra });
+  }
   catch (e) { el.innerHTML = `<div class="placeholder"><h2>${name}</h2><div>mount failed: ${e.message}</div></div>`; }
 }
 
@@ -110,6 +130,7 @@ async function openTerminalTab(instance) {
   // same-named instance in another workspace is a different terminal.
   const ws = currentWorkspace();
   const key = `term:${ws}:${instance}`;
+  await whenKeyFree(key);
   for (const [tid, t] of tabs) if (t.key === key) { activateTab(tid); return; }
   if (pendingTerms.has(key)) return; // an open for this key is already in flight
   pendingTerms.add(key);
@@ -195,9 +216,6 @@ const NAV = [
   { name: "spawn", label: "Spawn", icon: "✚", title: "Spawn" },
   { name: "brain", label: "Brain", icon: "◈", title: "Agent brain" },
   { name: "jira", label: "Jira", icon: "◫", title: "Jira" },
-  // diff.mjs is a placeholder until the viewers developer ships it; the nav
-  // entry keeps its integration mechanical.
-  { name: "diff", label: "Diff", icon: "±", title: "Diff" },
 ];
 const navEl = document.getElementById("nav");
 for (const v of NAV) {
@@ -209,6 +227,42 @@ for (const v of NAV) {
   b.querySelector(".label").textContent = v.label;
   b.addEventListener("click", () => openViewTab(v.name, v.title));
   navEl.append(b);
+}
+
+// Diff needs an instance (ctx.instance per the view contract) — the nav
+// entry opens a small shell-owned picker over the current workspace roster.
+{
+  const b = document.createElement("button");
+  b.className = "nav-item";
+  b.title = "Diff (pick an instance)";
+  b.innerHTML = `<span class="icon">±</span><span class="label">Diff</span>`;
+  b.addEventListener("click", () => openDiffPicker());
+  navEl.append(b);
+}
+
+async function openDiffPicker() {
+  const ws = currentWorkspace();
+  // keyed per workspace — switching workspaces must not resurrect a stale roster
+  const made = addTab({ title: "Diff", key: `view:diff-picker:${ws}` });
+  if (!made) return;
+  const el = document.createElement("div");
+  el.className = "placeholder";
+  el.innerHTML = `<h2>Diff</h2><div>pick an instance</div>`;
+  made.paneEl.append(el);
+  let panel;
+  try { panel = await api(`/api/panel${ws ? `?ws=${encodeURIComponent(ws)}` : ""}`); }
+  catch (e) { el.lastChild.textContent = `roster unavailable: ${e.message}`; return; }
+  const list = document.createElement("div");
+  list.style.cssText = "display:flex;flex-direction:column;gap:4px;max-height:60%;overflow:auto";
+  for (const i of panel.instances) {
+    const btn = document.createElement("button");
+    btn.className = "nav-item";
+    btn.textContent = `${i.instance}${i.branch ? ` · ${i.branch}` : ""}`;
+    btn.addEventListener("click", () => openViewTab("diff", `± ${i.instance}`, { instance: i.instance, ws }, `diff:${ws}:${i.instance}`));
+    list.append(btn);
+  }
+  if (!panel.instances.length) list.textContent = "no instances";
+  el.append(list);
 }
 
 document.getElementById("ws-name").textContent = "";
