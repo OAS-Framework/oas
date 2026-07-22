@@ -37,6 +37,8 @@ marketplace capability (`capabilities/oas-web/`: `bin/oas-web.mjs` server +
 * [lessons/typing-echo-visibility.md](lessons/typing-echo-visibility.md) - Keys can reach tmux while the panel still appears unable to type if the UI does not force a terminal repaint and snap to the bottom row after input; key flushes should force a short-tail refresh and pin the prompt briefly.
 * [lessons/multiline-send-bracketed-paste.md](lessons/multiline-send-bracketed-paste.md) - Any path that delivers text containing newlines into an agent pane must use load-buffer plus paste-buffer -p; raw send-keys/newline delivery submits each line separately or can execute pasted lines one by one.
 * [lessons/stale-response-race.md](lessons/stale-response-race.md) - the chatReq request-generation, selection-pinning, and cache-isolation guards against transcript cross-bleed.
+* [lessons/file-endpoint-realpath-guard.md](lessons/file-endpoint-realpath-guard.md) - The /api/file endpoint must realpath both the requested file and each allowed root, then require exact-root or root-plus-separator containment so dotdot, symlink, and sibling-prefix escapes fail closed.
+* [lessons/instance-work-mode-not-path.md](lessons/instance-work-mode-not-path.md) - In panelData/control-pane instances, work carries the mode string (worktree/checkout/attached); derive the actual work tree as <home>/work before using it as a cwd or allowed file root.
 
 ## playbooks/
 

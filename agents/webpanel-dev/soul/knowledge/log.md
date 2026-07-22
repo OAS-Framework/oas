@@ -1,6 +1,9 @@
 # Knowledge Log
 
 ## 2026-07-22
+* **Creation**: added [Guard file-serving paths by realpathing requests and roots](/lessons/file-endpoint-realpath-guard.md) from the api-file-path-guard note: `/api/file` realpaths the requested path and all allowed roots, then requires exact-root or root-plus-separator containment to block dotdot, symlink, and sibling-prefix escapes.
+* **Creation**: added [Instance work is a mode, not a filesystem path](/lessons/instance-work-mode-not-path.md) from the inst-work-is-mode-not-path note: control-pane `inst.work` is the work mode string, so endpoints derive the actual tree as `<home>/work`.
+* **Update**: [oas-web architecture](/architecture/oas-web-architecture.md) now lists `/api/file`, records the realpath-based file-serving guard, and links the control-pane work-mode path gotcha.
 * **Creation**: added [Keep roster collection out of the serving process](/lessons/snapshot-collection-off-thread.md) from the snapshot-collection note: synchronous `collectControlPane` work in the single-threaded server made key latency spiky, so `/api/panel` and `findInstance` serve from a background child-process snapshot.
 * **Creation**: added [Typing must force-repaint and pin the prompt row](/lessons/typing-echo-visibility.md) from the typing-echo note: keys reached tmux but echo stayed invisible until typing forced a short-tail repaint and temporary bottom snap.
 * **Update**: [oas-web architecture](/architecture/oas-web-architecture.md) now records the background child-process roster snapshot path and links to the snapshot-collection lesson.
