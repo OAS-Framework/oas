@@ -228,6 +228,9 @@ $("themebtn").onclick = () => {
   const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
   document.documentElement.dataset.theme = next;
   localStorage.setItem("oasweb.theme", next);
+  // adaptBg's fold depends on the theme: invalidate every pane's render
+  // signature and repaint so cached captures re-render for the new theme.
+  panes.forEach((p) => { p.lastSig = ""; if (p.sel) refreshTerm(p, true); });
 };
 
 /* ── sidebar collapse — persisted, Ctrl/Cmd-B toggles (except while a
@@ -427,15 +430,20 @@ function applySgr(attr, params) {
     // anything else: ignore gracefully
   }
 }
-/* Fold raw rgb() backgrounds toward the theme terminal background: a TUI
-   painting its own near-default background (near-black on dark, near-white
-   on light) would otherwise render as an opaque highlight-like run. Pure —
-   the theme flag is a parameter so node tests can drive it without a DOM.
-   Mid-luminance backgrounds (genuine highlights) pass through untouched. */
+/* Fold raw rgb() backgrounds that are near the theme's own default terminal
+   background: a TUI painting its near-default background (near-black on dark,
+   near-white on light) would otherwise render as an opaque highlight-like
+   run. Only NEAR-NEUTRAL colors fold — the channel spread (max−min) must be
+   small — so genuine saturated highlights (blue, yellow, …) always pass
+   through regardless of luminance. Pure — the theme flag is a parameter so
+   node tests can drive it without a DOM. */
 function adaptBg(css, dark) {
   const m = /rgb\((\d+),(\d+),(\d+)\)/.exec(css);
   if (!m) return css;
-  const lum = (0.2126 * +m[1] + 0.7152 * +m[2] + 0.0722 * +m[3]) / 255;
+  const r = +m[1], g = +m[2], b = +m[3];
+  const spread = Math.max(r, g, b) - Math.min(r, g, b);
+  if (spread > 32) return css; // saturated: a real highlight, keep it
+  const lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
   if (dark && lum < 0.16) return null;
   if (!dark && lum > 0.86) return null;
   return css;
