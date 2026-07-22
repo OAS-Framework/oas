@@ -126,24 +126,35 @@ function fileSection(doc, f, stat, sideBySide) {
   return wrap;
 }
 
-let mounted = null;
+/* Per-mount state — the shell opens one diff tab per workspace+instance, so
+   each mount owns its nodes and returns its disposer (the view host prefers
+   it); exported unmount() disposes all active mounts (harness compat). */
+const mounts = new Set();
 
 export async function mount(el, ctx) {
-  unmount();
   const doc = el.ownerDocument;
   const root = doc.createElement("div");
   root.className = "dfv";
   const style = doc.createElement("style");
   style.textContent = STYLE;
   el.append(style, root);
-  mounted = { root, style };
+  const dispose = () => {
+    if (!mounts.has(dispose)) return;
+    mounts.delete(dispose);
+    root.remove();
+    style.remove();
+  };
+  mounts.add(dispose);
 
   const state = { staged: false, sideBySide: false };
   const render = async () => {
     root.innerHTML = `<div class="dfv-head">Loading diff for ${escapeHtml(ctx.instance || "")}…</div>`;
     let data;
     try {
-      const res = await ctx.api(`/api/diff/${encodeURIComponent(ctx.instance)}?staged=${state.staged ? 1 : 0}`);
+      // ctx.ws (from the shell's workspace-keyed picker) scopes the server-side
+      // instance lookup — same-named instances exist across workspaces.
+      const ws = ctx.ws ? `&ws=${encodeURIComponent(ctx.ws)}` : "";
+      const res = await ctx.api(`/api/diff/${encodeURIComponent(ctx.instance)}?staged=${state.staged ? 1 : 0}${ws}`);
       data = res && res.json ? await res.json() : res;
       if (data.error) throw new Error(data.error);
     } catch (e) {
@@ -181,11 +192,9 @@ export async function mount(el, ctx) {
     for (const f of parseUnifiedDiff(data.diff)) root.append(fileSection(doc, f, statOf.get(f.path), state.sideBySide));
   };
   await render();
+  return dispose;
 }
 
 export function unmount() {
-  if (!mounted) return;
-  mounted.root.remove();
-  mounted.style.remove();
-  mounted = null;
+  for (const d of [...mounts]) d();
 }

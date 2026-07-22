@@ -14,6 +14,8 @@
  *   POST /api/interrupt/<instance>  sends Ctrl-C (Escape for pi/claude prompts stays manual)
 
  *   GET  /api/jira/<instance>       epic + Agent Roster for instances with oas.jira meta
+ *   GET  /api/brain/<agent>?ws=<id> agent "brain" JSON: soul (AGENTS.md, skills,
+ *                                   knowledge tree) + per-instance artifacts (abs paths)
  *   GET  /api/file?path=<abs>       text file content, guarded to workspace roots + agent homes
  *   GET  /api/diff/<instance>?staged=0|1   unified git diff of the instance's work tree + stats
  *
@@ -213,8 +215,11 @@ function snapshotPanel(wsId) {
   const id = wsId && snapshot.byWs.has(wsId) ? wsId : ids[0];
   return id ? snapshot.byWs.get(id) : null;
 }
-function findInstance(name) {
+function findInstance(name, wsId) {
   if (!snapshot.byWs.size) snapshot = { at: Date.now(), byWs: collectNow() }; // cold start, once
+  // With a ws scope, resolve ONLY in that workspace — same-named instances
+  // exist across workspaces and "first match anywhere" picks the wrong one.
+  if (wsId) return snapshot.byWs.get(wsId)?.instances.find((i) => i.instance === name);
   for (const d of snapshot.byWs.values()) {
     const hit = d.instances.find((i) => i.instance === name);
     if (hit) return hit;
@@ -359,6 +364,116 @@ function chatData(inst, limit = 120) {
   try { text = readFileSync(file, "utf8"); } catch { return { available: false, kind, turns: [] }; }
   const turns = parseTranscript(text.split("\n").filter(Boolean), kind);
   return { available: true, kind, file, turns: turns.slice(-limit) };
+}
+
+// ---- Agent brain: soul + instance artifacts as absolute paths ----
+// The desktop brain view renders this map; file CONTENT is fetched separately
+// through /api/file (path-guarded there). This endpoint only walks known
+// agent directories under the workspace's agents roots — the agent name is
+// resolved through the same kernel seams as spawn (findAgent /
+// findCapabilityAgent), never from a caller-supplied path.
+function listSkills(dir) {
+  // skills live as <dir>/<skill>/SKILL.md with `name`/`description` frontmatter
+  const skills = [];
+  try {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      if (!e.isDirectory()) continue;
+      const s = skillEntry(join(dir, e.name));
+      if (s) skills.push(s);
+    }
+  } catch { /* no skills dir */ }
+  return skills.sort((a, b) => a.name.localeCompare(b.name));
+}
+function skillEntry(skillDir) {
+  const p = join(skillDir, "SKILL.md");
+  if (!existsSync(p)) return null;
+  let meta = {};
+  try { meta = core.parseFrontmatter(readFileSync(p, "utf8")).meta || {}; } catch { /* unreadable skill */ }
+  return { name: meta.name || basename(skillDir), path: p, description: String(meta.description || "").trim() };
+}
+function mdTree(dir) {
+  // all markdown files of a knowledge bundle, depth-first, absolute paths
+  const out = [];
+  const walk = (d, depth) => {
+    if (depth > 6) return; // bundles are shallow; guard against cycles
+    let entries;
+    try { entries = readdirSync(d, { withFileTypes: true }); } catch { return; }
+    for (const e of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+      if (e.name.startsWith(".")) continue;
+      const p = join(d, e.name);
+      if (e.isDirectory()) walk(p, depth + 1);
+      else if (e.isFile() && e.name.endsWith(".md")) out.push(p);
+    }
+  };
+  walk(dir, 0);
+  return out;
+}
+const mdIf = (p) => (existsSync(p) ? p : null);
+function brainData(agentName, wsId) {
+  const ws = wsId ? workspaceById(wsId) : workspaces()[0];
+  let def, root;
+  for (const r of ws?.roots || []) {
+    def = core.findAgent(r, agentName) || core.findCapabilityAgent(dirname(r), r, agentName);
+    if (def) { root = r; break; }
+  }
+  if (!def) return null;
+  // capability agents keep their canonical soul read-only in the package
+  const soulDir = def._soulDir || join(def._dir, "soul");
+  // Skills: local souls carry soul/skills/; capability agents ALSO declare
+  // skills at the package level (manifest `skills:` paths). Runtime
+  // composition includes both sources — mirror that: merge local + package,
+  // deterministic duplicate handling (local soul wins, then first-seen).
+  /* OASWEB_BRAINSKILLS_BEGIN — capability skill-path expansion, extracted by tests */
+  const expandSkillPath = (p, exists, list, entry) =>
+    // manifest paths are either a leaf skill dir (contains SKILL.md) or a
+    // parent tree of skill dirs (the `skills: ["skills"]` form) — core
+    // materialization accepts both, so must we.
+    exists(join(p, "SKILL.md")) ? [entry(p)].filter(Boolean) : list(p);
+  const mergeSkills = (...groups) => {
+    const byName = new Map();
+    for (const g of groups) for (const s of g) if (!byName.has(s.name)) byName.set(s.name, s);
+    return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
+  };
+  /* OASWEB_BRAINSKILLS_END */
+  const localSkills = listSkills(join(soulDir, "skills"));
+  let packageSkills = [];
+  if (def.capability) {
+    try {
+      packageSkills = core.capabilitySkillDirs(def.capability, dirname(root))
+        .flatMap((p) => expandSkillPath(p, existsSync, listSkills, skillEntry));
+    } catch { /* manifest unreadable — no package skills */ }
+  }
+  const soulSkills = mergeSkills(localSkills, packageSkills);
+  const knowledgeDir = join(soulDir, "knowledge");
+  const instances = [];
+  const instancesDir = join(def._dir, "instances");
+  let instNames = [];
+  try { instNames = readdirSync(instancesDir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name); } catch { /* no instances yet */ }
+  for (const name of instNames.sort()) {
+    const home = join(instancesDir, name);
+    const live = findInstance(name);
+    const notesDir = join(home, "notes");
+    instances.push({
+      instance: name, home, running: live ? !!live.running : false,
+      agentsMd: mdIf(join(home, "AGENTS.md")),
+      skills: listSkills(join(home, ".agents", "skills")),
+      state: mdIf(join(home, "STATE.md")),
+      task: mdIf(join(home, "TASK.md")),
+      notes: existsSync(notesDir) ? mdTree(notesDir) : [],
+    });
+  }
+  return {
+    agent: def.name, description: def.description || "", agentsRoot: root,
+    soul: {
+      agentsMd: mdIf(join(soulDir, "AGENTS.md")),
+      skills: soulSkills,
+      knowledge: {
+        index: mdIf(join(knowledgeDir, "index.md")),
+        tree: existsSync(knowledgeDir) ? mdTree(knowledgeDir) : [],
+      },
+    },
+    instances,
+  };
 }
 
 // ---- Jira (P2): epic + Agent Roster via acli, using the instance's oas.jira meta ----
@@ -582,6 +697,11 @@ const server = createServer(async (req, res) => {
       return send(res, 200, d || panelData(url.searchParams.get("ws") || undefined));
     }
     if (req.method === "GET" && path === "/api/agents") return send(res, 200, agentsData(url.searchParams.get("ws") || undefined));
+    const bm = path.match(/^\/api\/brain\/([A-Za-z0-9._-]+)$/);
+    if (bm && req.method === "GET") {
+      const d = brainData(bm[1], url.searchParams.get("ws") || undefined);
+      return d ? send(res, 200, d) : send(res, 404, { error: `unknown agent "${bm[1]}"` });
+    }
     if (req.method === "POST" && path === "/api/spawn") {
       const body = await readBody(req);
       if (typeof body.agent !== "string" || !body.agent || typeof body.agentsRoot !== "string" || !body.agentsRoot)
@@ -595,7 +715,7 @@ const server = createServer(async (req, res) => {
     }
     const m = path.match(/^\/api\/(session|keys|interrupt|jira|chat|diff)\/([A-Za-z0-9._-]+)$/);
     if (m) {
-      const inst = findInstance(m[2]);
+      const inst = findInstance(m[2], url.searchParams.get("ws") || undefined);
       if (!inst) return send(res, 404, { error: `unknown instance "${m[2]}"` });
       if (m[1] === "session" && req.method === "GET") {
         if (!inst.running) return send(res, 200, { running: false, text: "" });

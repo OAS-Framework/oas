@@ -164,6 +164,7 @@ test("oas-web manifest: compatibility floor covers the core APIs the server uses
   const apiFloors = [
     ["listCapabilityAgents", "0.16.0"],
     ["findCapabilityAgent", "0.16.0"],
+    ["capabilitySkillDirs", "0.10.0"],
   ];
   const cmp = (a, b) => {
     const pa = a.split(".").map(Number), pb = b.split(".").map(Number);
@@ -285,6 +286,97 @@ test("oas-web server: POST origin guard rejects hostile/null origins without cra
     assert.equal(ok.status, 404, "loopback origin passes the guard (unknown instance)");
     // server survived the malformed origin
     assert.equal((await fetch(`http://127.0.0.1:${port}/api/panel`)).status, 200);
+  } finally { proc.kill(); }
+});
+
+// ---- /api/brain/<agent>: soul + instance artifact map per the desktop-app contract ----
+
+test("oas-web brain: capability skill paths expand leaf AND parent-tree forms; local + package merge", () => {
+  const src = extractBlock(join(CAP, "bin", "oas-web.mjs"), "BRAINSKILLS");
+  const { expandSkillPath, mergeSkills } = new Function("join",
+    src + "\nreturn { expandSkillPath, mergeSkills };")((...p) => p.join("/"));
+  const entry = (p) => ({ name: p.split("/").pop(), path: p + "/SKILL.md", description: "" });
+  const list = (p) => [entry(p + "/a"), entry(p + "/b")];
+  // leaf form: the path itself contains SKILL.md → one skill
+  assert.deepEqual(expandSkillPath("/cap/skills/code-review", (f) => f === "/cap/skills/code-review/SKILL.md", list, entry)
+    .map((s) => s.name), ["code-review"]);
+  // parent-tree form (`skills: ["skills"]`): no SKILL.md at the path → list children
+  assert.deepEqual(expandSkillPath("/cap/skills", () => false, list, entry).map((s) => s.name), ["a", "b"]);
+  // merge: local soul skill wins on duplicate names; result sorted
+  const merged = mergeSkills(
+    [{ name: "dup", path: "/soul/skills/dup/SKILL.md" }, { name: "z", path: "/soul/skills/z/SKILL.md" }],
+    [{ name: "dup", path: "/cap/skills/dup/SKILL.md" }, { name: "a", path: "/cap/skills/a/SKILL.md" }]);
+  assert.deepEqual(merged.map((s) => s.name), ["a", "dup", "z"]);
+  assert.equal(merged.find((s) => s.name === "dup").path, "/soul/skills/dup/SKILL.md", "local soul wins duplicates");
+});
+
+test("desktop dev-serve: non-loopback Host is rejected before static serving or the /api proxy", () => {
+  const file = join(ROOT, "packages", "desktop", "renderer", "dev-serve.mjs");
+  const src = readFileSync(file, "utf8");
+  const m = src.match(/\/\* DEVSERVE_HOSTGUARD_BEGIN[^*]*\*\/([\s\S]*?)\/\* DEVSERVE_HOSTGUARD_END \*\//);
+  assert.ok(m, "host-guard block markers present in dev-serve.mjs");
+  const loopbackHost = new Function(m[1] + "\nreturn loopbackHost;")();
+  for (const ok of ["127.0.0.1", "127.0.0.1:4830", "localhost:4830", "LOCALHOST", "[::1]:4830", "::1"])
+    assert.ok(loopbackHost(ok), `${ok} passes`);
+  for (const bad of ["attacker.example", "attacker.example:54830", "evil.127.0.0.1", "127.0.0.1.evil.com", "", undefined])
+    assert.ok(!loopbackHost(bad), `${bad} is rejected`);
+  // and the guard runs before any routing: it is the first statement of the handler
+  assert.ok(/createServer\(\(req, res\) => \{\s*\/\/[^\n]*\n[^\n]*\n[^\n]*\n\s*if \(!loopbackHost\(req\.headers\.host\)\)/.test(src),
+    "host guard is the handler's first check");
+});
+
+test("oas-web server: /api/brain returns the contract shape with absolute paths", async () => {
+  // capability agents (reviewer) need installed capabilities — restore first (no-op when present)
+  execFileSync(process.execPath, [CLI, "install", "--dir", ROOT], { stdio: "ignore" });
+  const port = 4000 + Math.floor(Math.random() * 2000);
+  const proc = spawn(process.execPath, [join(CAP, "bin", "oas-web.mjs"), "start", "--port", String(port), "--dir", ROOT], { stdio: "ignore" });
+  try {
+    let up = false;
+    for (let i = 0; i < 40 && !up; i++) {
+      await new Promise((r) => setTimeout(r, 100));
+      try { await fetch(`http://127.0.0.1:${port}/api/panel`); up = true; } catch { /* retry */ }
+    }
+    assert.ok(up, "server came up");
+    // pick a real agent from /api/agents (persistent souls have a soul/ dir)
+    const agents = (await (await fetch(`http://127.0.0.1:${port}/api/agents`)).json()).agents;
+    const target = agents.find((a) => a.kind === "persistent") || agents[0];
+    assert.ok(target, "an agent exists to inspect");
+    const d = await (await fetch(`http://127.0.0.1:${port}/api/brain/${target.name}`)).json();
+    assert.equal(d.agent, target.name);
+    assert.equal(typeof d.description, "string");
+    assert.ok(d.agentsRoot.startsWith("/"), "agentsRoot is absolute");
+    // soul block: AGENTS.md path, skills [{name,path,description}], knowledge {index,tree}
+    assert.ok(d.soul && typeof d.soul === "object", "soul block present");
+    if (d.soul.agentsMd) assert.ok(d.soul.agentsMd.startsWith("/") && d.soul.agentsMd.endsWith("AGENTS.md"));
+    assert.ok(Array.isArray(d.soul.skills));
+    for (const s of d.soul.skills) {
+      assert.ok(s.name && s.path.startsWith("/") && s.path.endsWith("SKILL.md"), "skill has name + absolute SKILL.md path");
+      assert.equal(typeof s.description, "string");
+    }
+    assert.ok(d.soul.knowledge && Array.isArray(d.soul.knowledge.tree));
+    for (const p of d.soul.knowledge.tree) assert.ok(p.startsWith("/") && p.endsWith(".md"), "knowledge tree entries are absolute .md paths");
+    if (d.soul.knowledge.index) assert.ok(d.soul.knowledge.tree.includes(d.soul.knowledge.index), "index is part of the tree");
+    // instances block
+    assert.ok(Array.isArray(d.instances));
+    for (const i of d.instances) {
+      assert.ok(i.instance && i.home.startsWith("/"), "instance has name + absolute home");
+      assert.equal(typeof i.running, "boolean");
+      assert.ok(Array.isArray(i.skills) && Array.isArray(i.notes));
+      for (const k of ["agentsMd", "state", "task"]) if (i[k] !== null) assert.ok(i[k].startsWith(i.home), `${k} lives under the instance home`);
+      for (const n of i.notes) assert.ok(n.startsWith(i.home) && n.endsWith(".md"));
+    }
+    // unknown agent → 404; hostile agent name never becomes a path probe
+    assert.equal((await fetch(`http://127.0.0.1:${port}/api/brain/no-such-agent`)).status, 404);
+    assert.equal((await fetch(`http://127.0.0.1:${port}/api/brain/..%2F..%2Fetc`)).status, 404, "traversal-shaped names don't match the route");
+    // capability-defined agents: their skills are declared at the PACKAGE level
+    // (manifest `skills:` paths), not under the soul dir — the brain must show
+    // the canonical skill set (regression: reviewer reported soul.skills: []).
+    const rev = await (await fetch(`http://127.0.0.1:${port}/api/brain/reviewer`)).json();
+    assert.ok(rev.soul, "capability agent resolves a brain");
+    const skillNames = rev.soul.skills.map((s) => s.name);
+    assert.ok(skillNames.includes("code-review") && skillNames.includes("security-review"),
+      `capability agent carries its package skills (got: ${skillNames.join(", ")})`);
+    for (const s of rev.soul.skills) assert.ok(s.path.startsWith("/") && s.path.endsWith("SKILL.md"));
   } finally { proc.kill(); }
 });
 

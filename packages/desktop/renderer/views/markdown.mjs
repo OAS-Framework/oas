@@ -135,10 +135,13 @@ const STYLE = `
 .mdv .mdv-error { color: #c33; }
 `;
 
-let mounted = null;
+/* Per-mount state: the shell opens several markdown tabs at once, so each
+   mount owns its own nodes and returns its disposer (the view host prefers
+   it). The exported unmount() disposes ALL active mounts — kept for the
+   original module-contract callers (harness). */
+const mounts = new Set();
 
 export async function mount(el, ctx) {
-  unmount();
   const root = el.ownerDocument.createElement("div");
   root.className = "mdv";
   const style = el.ownerDocument.createElement("style");
@@ -152,7 +155,14 @@ export async function mount(el, ctx) {
     ctx.openFile(a.getAttribute("data-open-file"));
   };
   root.addEventListener("click", onClick);
-  mounted = { el, root, style, onClick };
+  const dispose = () => {
+    if (!mounts.has(dispose)) return;
+    mounts.delete(dispose);
+    root.removeEventListener("click", onClick);
+    root.remove();
+    style.remove();
+  };
+  mounts.add(dispose);
 
   const path = ctx.path;
   root.innerHTML = `<div class="mdv-meta">Loading ${escapeHtml(path || "")}…</div>`;
@@ -163,7 +173,7 @@ export async function mount(el, ctx) {
     if (file.error) throw new Error(file.error);
   } catch (e) {
     root.innerHTML = `<div class="mdv-error">Could not open ${escapeHtml(path || "(no path)")}: ${escapeHtml(e.message || String(e))}</div>`;
-    return;
+    return dispose;
   }
   const meta = `<div class="mdv-meta">${escapeHtml(file.path)} · ${file.size} bytes</div>`;
   const doc = el.ownerDocument;
@@ -174,12 +184,9 @@ export async function mount(el, ctx) {
     const lang = EXT_LANG[(file.name.split(".").pop() || "").toLowerCase()];
     root.innerHTML = `${meta}<pre class="md-code"><code class="hljs">${highlight(file.content, lang)}</code></pre>`;
   }
+  return dispose;
 }
 
 export function unmount() {
-  if (!mounted) return;
-  mounted.root.removeEventListener("click", mounted.onClick);
-  mounted.root.remove();
-  mounted.style.remove();
-  mounted = null;
+  for (const d of [...mounts]) d();
 }

@@ -1,58 +1,79 @@
 <!doctype html>
-<!--
-  Dev harness for the desktop viewer modules (no Electron needed).
+<html lang="en">
+<!-- oas desktop — renderer view harness.
+     Develops the views against a running oas-web server without the Electron
+     shell: it supplies the contract ctx = { api, openFile, openTerminal }
+     with stub openFile/openTerminal, plus tab chrome and a theme toggle.
 
-  Run:
-    node capabilities/oas-web/bin/oas-web.mjs start --port 4820 --dir <workspace>
-    cd packages/desktop && npx serve .   (or any static server with ESM + node_modules)
-
-  Simplest: open via a bundler-less dev server that maps bare imports, or use
-  an importmap as below (works from `python3 -m http.server` in packages/desktop).
+     Usage:
+       node capabilities/oas-web/bin/oas-web.mjs start --port 4821 --dir <ws>
+       node packages/desktop/renderer/harness-server.mjs --port 4899 --api http://127.0.0.1:4821
+       open http://127.0.0.1:4899/
 -->
-<html>
 <head>
 <meta charset="utf-8">
-<title>desktop views harness</title>
-<script type="importmap">
-{ "imports": {
-    "marked": "./node_modules/marked/lib/marked.esm.js",
-    "dompurify": "./node_modules/dompurify/dist/purify.es.mjs",
-    "highlight.js": "./node_modules/highlight.js/es/index.js"
-} }
-</script>
+<title>oas desktop — view harness</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="./theme.css" data-oas-theme>
 <style>
-  body { margin: 0; font-family: -apple-system, sans-serif; }
-  #bar { padding: 8px 12px; border-bottom: 1px solid #ccc; display: flex; gap: 8px; }
-  #bar input { flex: 1; font: 13px monospace; }
-  #view { height: calc(100vh - 50px); overflow: auto; }
+  body { margin: 0; height: 100vh; display: flex; flex-direction: column;
+         background: var(--bg); color: var(--fg);
+         font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  header { height: 40px; padding: 0 14px; display: flex; align-items: center; gap: 8px;
+           background: var(--surface); border-bottom: 1px solid var(--border); flex: none; }
+  header .tab { background: none; border: 1px solid transparent; color: var(--muted); border-radius: 8px;
+                padding: 4px 12px; cursor: pointer; font: 12.5px inherit; font-weight: 600; }
+  header .tab.active { color: var(--fg); border-color: var(--border); background: var(--surface-2); }
+  header .spacer { flex: 1; }
+  header .note { color: var(--faint); font-size: 11.5px; }
+  #host { flex: 1; min-height: 0; }
 </style>
 </head>
 <body>
-<div id="bar">
-  <input id="path" placeholder="/abs/path/to/file.md  — or —  instance name for diff">
-  <button id="openMd">open file</button>
-  <button id="openDiff">open diff</button>
-</div>
-<div id="view"></div>
+<header>
+  <strong style="font-size:13px"><span style="color:var(--accent)">●</span> oas desktop harness</strong>
+  <button class="tab" data-view="instances">Instances</button>
+  <button class="tab" data-view="spawn">Spawn</button>
+  <button class="tab" data-view="jira">Jira</button>
+  <span class="spacer"></span>
+  <span class="note" id="note"></span>
+  <button class="tab" id="themebtn" title="Toggle light/dark">◐</button>
+</header>
+<div id="host"></div>
 <script type="module">
-  import * as markdown from "./renderer/views/markdown.js";
-  import * as diff from "./renderer/views/diff.js";
-  const API = "http://127.0.0.1:4820";
-  const el = document.getElementById("view");
+  const API = new URLSearchParams(location.search).get("api") || ""; // "" = same-origin (harness-server proxy)
+  document.getElementById("note").textContent = `api ${API || "same-origin"} · openTerminal/openFile are stubs`;
+
+  const savedTheme = localStorage.getItem("oas.desktop.theme");
+  const sysDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+  document.documentElement.dataset.theme = savedTheme || (sysDark ? "dark" : "light");
+  document.getElementById("themebtn").onclick = () => {
+    const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+    document.documentElement.dataset.theme = next;
+    localStorage.setItem("oas.desktop.theme", next);
+  };
+
+  /* contract ctx — the shell provides the real one; the harness stubs the
+     cross-view hooks and points api() at the oas-web server. */
   const ctx = {
-    api: (pathname) => fetch(API + pathname).then((r) => r.json()),
-    openFile: (path) => { document.getElementById("path").value = path; markdown.mount(el, { ...ctx, path }); },
-    openTerminal: (i) => alert("openTerminal(" + i + ") — shell-owned"),
+    api: (pathname, opts) => fetch(API + pathname, opts),
+    openFile: (path) => alert(`ctx.openFile (shell hook)\n${path}`),
+    openTerminal: (instance) => alert(`ctx.openTerminal (shell hook, tui-dev's view)\n${instance}`),
   };
+
+  const host = document.getElementById("host");
   let current = null;
-  document.getElementById("openMd").onclick = () => {
-    current?.unmount(); current = markdown;
-    markdown.mount(el, { ...ctx, path: document.getElementById("path").value });
-  };
-  document.getElementById("openDiff").onclick = () => {
-    current?.unmount(); current = diff;
-    diff.mount(el, { ...ctx, instance: document.getElementById("path").value });
-  };
+  async function show(name) {
+    if (current) { current.mod.unmount(); current = null; }
+    const mod = await import(`./views/${name}.mjs`);
+    mod.mount(host, ctx);
+    current = { name, mod };
+    for (const b of document.querySelectorAll(".tab[data-view]"))
+      b.classList.toggle("active", b.dataset.view === name);
+  }
+  for (const b of document.querySelectorAll(".tab[data-view]"))
+    b.onclick = () => show(b.dataset.view);
+  show("instances");
 </script>
 </body>
 </html>

@@ -17,6 +17,9 @@ The web panel lives in `capabilities/oas-web/` and is deliberately tiny:
   - `POST /api/spawn` — spawns an agent in an allowlisted workspace root,
     with `task: ""` meaning "await instructions" (see
     [spawn endpoint](spawn-endpoint.md)).
+  - `GET /api/brain/<agent>?ws=<id>` — returns soul artifact paths and
+    running-state for the desktop brain view while resolving agent names
+    through kernel lookup seams (see [agent brain endpoint](agent-brain-endpoint-and-view.md)).
   - `GET /api/session/<instance>?lines=n` — raw ANSI tmux `capture-pane` text plus pane geometry, cursor state, and history depth.
   - `GET /api/chat/<instance>?limit=n` — parsed structured transcript turns.
   - `GET /api/file` — guarded file reads for desktop viewers; realpaths the

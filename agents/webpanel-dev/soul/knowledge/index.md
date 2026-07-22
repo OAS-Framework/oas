@@ -20,7 +20,9 @@ marketplace capability (`capabilities/oas-web/`: `bin/oas-web.mjs` server +
 * [architecture/multi-workspace-switcher.md](architecture/multi-workspace-switcher.md) - The server accepts a repeatable --dir flag whose contexts each resolve to their team/deployment scope (duplicates collapse), the UI shows a workspace dropdown only when more than one workspace is watched, and instance-name APIs pass ?ws= so same-named instances resolve inside the selected workspace.
 * [architecture/raw-key-passthrough-and-host-guard.md](architecture/raw-key-passthrough-and-host-guard.md) - POST /api/keys is the panel's sole text-input path, sending browser keydown bytes into the logically focused pane via tmux send-keys -H, routing large or pasted payloads through load-buffer/paste-buffer, forcing a short-tail repaint so echo is visible, and enforcing loopback Host on every request plus loopback Origin on POSTs.
 * [architecture/spawn-endpoint.md](architecture/spawn-endpoint.md) - POST /api/spawn treats browser-supplied agentsRoot as a selector into the server's workspace roots, while task "" intentionally spawns an awaiting-instructions instance.
+* [architecture/agent-brain-endpoint-and-view.md](architecture/agent-brain-endpoint-and-view.md) - GET /api/brain resolves agent names through kernel agent lookup seams, returns only artifact paths, and feeds the desktop renderer's contract-based brain view.
 * [architecture/split-panes-and-compact-shell.md](architecture/split-panes-and-compact-shell.md) - v0.7.0 replaced the single session surface with per-pane session state in an editor-style split row, plus a persisted collapsible sidebar and 32px compact pane header.
+* [architecture/desktop-renderer-views-port.md](architecture/desktop-renderer-views-port.md) - The oas-web panel maps to desktop renderer views under packages/desktop/renderer/views/ as plain mount/unmount ES modules, with a same-origin harness proxy for development.
 
 ## decisions/
 
@@ -30,6 +32,8 @@ marketplace capability (`capabilities/oas-web/`: `bin/oas-web.mjs` server +
 
 ## lessons/
 
+* [lessons/harness-proxy-origin-guard.md](lessons/harness-proxy-origin-guard.md) - A dev proxy in front of oas-web must enforce the loopback Host/Origin guard at its own boundary and forward the browser's real Origin rather than rewriting it to a trusted loopback value.
+* [lessons/behavioral-security-regressions.md](lessons/behavioral-security-regressions.md) - Guard regressions must drive the real boundary with forged requests and a fake upstream, because source-string checks pass when the guard is inverted, unreachable, or no longer returns 403.
 * [lessons/manifest-compat-floor-core-apis.md](lessons/manifest-compat-floor-core-apis.md) - When oas-web starts calling a new core.* helper, capabilities/oas-web/oas.json compatibility.oas must be raised to the kernel version that helper first shipped in, and the manifest-floor regression test's API map should be extended with that helper.
 * [lessons/fast-attach-cache-tail-backfill.md](lessons/fast-attach-cache-tail-backfill.md) - Attach latency is dominated by rebuilding the control-pane registry and serial tmux round trips, so keep a short registry cache, merge pane metadata queries, paint a cached or short tail first, and deep-backfill later with the requested line count in the render signature.
 * [lessons/logical-key-routing-not-dom-focus.md](lessons/logical-key-routing-not-dom-focus.md) - Binding keydown to the terminal element made typing silently die whenever a button or header click moved DOM focus while the pane still looked focused; route keys with a window listener to the logical focused pane and ignore real editable controls.
