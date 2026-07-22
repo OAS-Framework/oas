@@ -24,6 +24,22 @@ decisions/ and referenced from here.
 
 ---
 
+## PR #14 — oas-web 0.8.0 spawn-from-panel: /api/agents + /api/spawn (2026-07-22)
+- verdict: RETURNED — gates 1–3 (direction, correctness, security) PASS; gate 4
+  (mergeability) FAIL: branch forked before PR #13 and conflicts with main in
+  capabilities/oas-web/oas.json (version/description) and webpanel-dev's soul
+  index.md. Full gate verified green in a scratch merge with main (60/60,
+  check, validate, pack:check). agentsRoot allowlist (selector into server
+  workspace roots) is a sound pattern; compat-floor regression test
+  (core.* API → min kernel version map) is a keeper. Author asked to merge
+  main, resolve the two conflicts, re-run the gate, and re-request.
+- owner: webpanel-dev-spawn-from-panel · coordinator: none
+- taught us: the /api/agents test needs the deployment's installed
+  capabilities (.agents/capabilities/installed with oas-review) — a bare
+  scratch worktree fails it environmentally; copy installed/ in (or run from
+  the deployment root). Also: scratch worktrees need `npm install` before
+  `npm run validate` (ajv devDep).
+
 ## PR #13 — oas-web 0.7.1 'cannot type' fix: logical pane key routing (2026-07-22)
 - verdict: MERGED — all four gates green; approval again a PR comment
   (same-account block). Root-caused 0.7.0 regression: keydown bound to the

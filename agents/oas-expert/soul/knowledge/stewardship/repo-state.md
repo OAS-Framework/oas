@@ -41,11 +41,16 @@ than letting the file grow stale.
 
 ## In flight
 
-- (nothing)
+- PR #14 (oas-web 0.8.0 spawn-from-panel: /api/agents + /api/spawn, agentsRoot
+  allowlist, no-task default spawn) — RETURNED 2026-07-22 for merge conflicts
+  with main (post-#13 fork); gates 1–3 pass, owner
+  webpanel-dev-spawn-from-panel resolving and re-requesting.
 
 ## Recent deliveries
 
 - (record PR #, one-line scope, verdict, merge/close date)
+- PR #14 oas-web 0.8.0 spawn-from-panel: RETURNED 2026-07-22 (mergeability
+  only — conflicts with main; see delivery-log).
 - PR #13 oas.web 0.7.1 logical key routing fix: MERGED 2026-07-22 (see
   delivery-log).
 - PR #12 oas.web 0.7.0 panel refinements: MERGED 2026-07-22 (see
