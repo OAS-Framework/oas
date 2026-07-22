@@ -32,6 +32,10 @@ The web panel lives in `capabilities/oas-web/` and is deliberately tiny:
   - `POST /api/interrupt/<instance>` — sends Ctrl-C.
   - `GET /api/jira/<instance>` — epic + Agent Roster via `acli` when
     `capabilityMeta["oas.jira"]` is present.
+  Instance-addressed routes (`session`, `keys`, `interrupt`, `jira`, `chat`,
+  and `diff`) forward `?ws=` when the UI has a selected workspace, so
+  `findInstance(name, wsId)` resolves same-named instances strictly inside that
+  workspace; see [the workspace-scoping lesson](/lessons/workspace-scoped-instance-routing.md).
 - `ui/panel.html` — all CSS, JS, rendering, panes, and polling loops in one
   file. No build step, no framework. Hard-refresh (Cmd-Shift-R) is the deploy.
   The current shell has an editor-style panes array, focused-pane key routing,
@@ -43,8 +47,10 @@ The web panel lives in `capabilities/oas-web/` and is deliberately tiny:
 - **Roster**: `lib/control-pane/model.mjs` `collectControlPane(root)` — same
   data as the TUI (`oas pane`). Slow collection runs in the hidden
   `oas-web.mjs collect` child-process path; the serving process answers
-  `/api/panel` and `findInstance` from an in-memory snapshot so key/input
-  endpoints are not blocked by roster rebuilds. The kernel is found in-tree
+  `/api/panel` and `findInstance(name, wsId)` from an in-memory snapshot so
+  key/input endpoints are not blocked by roster rebuilds, and scoped instance
+  lookups fail closed inside the supplied workspace instead of falling back to a
+  global first match. The kernel is found in-tree
   (`../../..`) or, for marketplace installs, via `oas root` (a copied package
   must never assume it sits inside the kernel tree). Control-pane instance
   objects expose `work` as the work mode, not a filesystem path; endpoints that
@@ -72,8 +78,9 @@ Session attach is staged for perceived speed: paint a cached frame immediately
 when available, fetch a short `/api/session?lines=120` tail so the pane becomes
 interactive quickly, then background-backfill the deep `/api/session?lines=2000`
 scrollback. The server keeps a 2.5s instance-registry cache around
-`findInstance()` so session polls do not rebuild `collectControlPane` for every
-workspace on each request, and `paneInfo()` keeps pane size/history/cursor lookup
+`findInstance(name, wsId)` so session polls do not rebuild `collectControlPane`
+for every workspace on each request, and `paneInfo()` keeps pane
+size/history/cursor lookup
 to one tmux `display-message` round-trip. The requested `lines` value is part of
 the render signature so a tail paint cannot suppress the later deep backfill; see
 [the fast-attach lesson](/lessons/fast-attach-cache-tail-backfill.md).
