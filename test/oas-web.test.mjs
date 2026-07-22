@@ -21,6 +21,32 @@ function loadRenderer() {
 }
 const R = loadRenderer();
 
+// ---- manifest/API compatibility: the declared kernel floor must cover the
+// core APIs the server calls (regression guard: calling a helper newer than
+// the compatibility floor would silently break on accepted kernel versions).
+
+test("oas-web manifest: compatibility floor covers the core APIs the server uses", () => {
+  const manifest = JSON.parse(readFileSync(join(CAP, "oas.json"), "utf8"));
+  const floor = /([\d.]+)/.exec(manifest.compatibility?.oas || "")?.[1];
+  assert.ok(floor, "manifest declares a compatibility floor");
+  const src = readFileSync(join(CAP, "bin", "oas-web.mjs"), "utf8");
+  // core API → kernel version it first shipped in
+  const apiFloors = [
+    ["listCapabilityAgents", "0.16.0"],
+    ["findCapabilityAgent", "0.16.0"],
+  ];
+  const cmp = (a, b) => {
+    const pa = a.split(".").map(Number), pb = b.split(".").map(Number);
+    for (let i = 0; i < 3; i++) { if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) - (pb[i] || 0); }
+    return 0;
+  };
+  for (const [api, minV] of apiFloors) {
+    if (!src.includes(`core.${api}`)) continue;
+    assert.ok(cmp(floor, minV) >= 0,
+      `server calls core.${api} (needs oas >=${minV}) but manifest floor is >=${floor}`);
+  }
+});
+
 test("oas-web renderer: each capture line is one row; history maps the screen start", () => {
   const d = { text: "h1\nh2\nscreen1\nscreen2\n", history: 2, size: { rows: 5, cols: 20, cx: 0, cy: 0, cursor: false } };
   const html = R.renderCapture(d);
