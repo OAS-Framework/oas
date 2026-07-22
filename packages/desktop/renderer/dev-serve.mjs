@@ -11,7 +11,9 @@
  *   node packages/desktop/renderer/dev-serve.mjs [--port 4830] [--api 4820]
  *   open http://127.0.0.1:4830/dev-brain.html
  *
- * Dev-only; binds 127.0.0.1, path-guarded to this directory.
+ * Dev-only; binds 127.0.0.1, path-guarded to this directory, and rejects
+ * non-loopback Host values — a DNS-rebinding page must not reach the /api
+ * proxy (which rewrites Host to loopback) through this port.
  */
 import { createServer, request } from "node:http";
 import { readFileSync, existsSync, statSync } from "node:fs";
@@ -27,7 +29,20 @@ const port = arg("port", 4830);
 const apiPort = arg("api", 4820);
 const TYPES = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".json": "application/json" };
 
+/* DEVSERVE_HOSTGUARD_BEGIN — loopback Host guard, extracted by tests */
+function loopbackHost(hostHeader) {
+  const raw = String(hostHeader || "").toLowerCase();
+  // strip a port — but not the tail of a bare IPv6 address like "::1"
+  const h = raw === "::1" ? raw : raw.replace(/:\d+$/, "");
+  return h === "127.0.0.1" || h === "localhost" || h === "[::1]" || h === "::1";
+}
+/* DEVSERVE_HOSTGUARD_END */
+
 createServer((req, res) => {
+  // DNS-rebinding guard BEFORE static serving or proxying: the /api proxy
+  // rewrites Host to loopback, so an arbitrary inbound Host would otherwise
+  // let a hostile origin read agent metadata/transcripts through this port.
+  if (!loopbackHost(req.headers.host)) { res.writeHead(403); res.end("forbidden host"); return; }
   const url = new URL(req.url, "http://localhost");
   if (url.pathname.startsWith("/api/")) {
     // same-origin proxy to the oas-web server

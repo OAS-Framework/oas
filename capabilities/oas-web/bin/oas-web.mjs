@@ -413,17 +413,31 @@ function brainData(agentName, wsId) {
   if (!def) return null;
   // capability agents keep their canonical soul read-only in the package
   const soulDir = def._soulDir || join(def._dir, "soul");
-  // Skills: local souls carry soul/skills/; capability agents declare their
-  // skills at the package level (manifest `skills:` paths) — the soul dir
-  // itself has none, so resolve the owning capability's declared skill dirs.
-  let soulSkills = listSkills(join(soulDir, "skills"));
-  if (!soulSkills.length && def.capability) {
+  // Skills: local souls carry soul/skills/; capability agents ALSO declare
+  // skills at the package level (manifest `skills:` paths). Runtime
+  // composition includes both sources — mirror that: merge local + package,
+  // deterministic duplicate handling (local soul wins, then first-seen).
+  /* OASWEB_BRAINSKILLS_BEGIN — capability skill-path expansion, extracted by tests */
+  const expandSkillPath = (p, exists, list, entry) =>
+    // manifest paths are either a leaf skill dir (contains SKILL.md) or a
+    // parent tree of skill dirs (the `skills: ["skills"]` form) — core
+    // materialization accepts both, so must we.
+    exists(join(p, "SKILL.md")) ? [entry(p)].filter(Boolean) : list(p);
+  const mergeSkills = (...groups) => {
+    const byName = new Map();
+    for (const g of groups) for (const s of g) if (!byName.has(s.name)) byName.set(s.name, s);
+    return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
+  };
+  /* OASWEB_BRAINSKILLS_END */
+  const localSkills = listSkills(join(soulDir, "skills"));
+  let packageSkills = [];
+  if (def.capability) {
     try {
-      soulSkills = core.capabilitySkillDirs(def.capability, dirname(root))
-        .map((d) => skillEntry(d)).filter(Boolean)
-        .sort((a, b) => a.name.localeCompare(b.name));
-    } catch { /* manifest unreadable — no skills */ }
+      packageSkills = core.capabilitySkillDirs(def.capability, dirname(root))
+        .flatMap((p) => expandSkillPath(p, existsSync, listSkills, skillEntry));
+    } catch { /* manifest unreadable — no package skills */ }
   }
+  const soulSkills = mergeSkills(localSkills, packageSkills);
   const knowledgeDir = join(soulDir, "knowledge");
   const instances = [];
   const instancesDir = join(def._dir, "instances");
