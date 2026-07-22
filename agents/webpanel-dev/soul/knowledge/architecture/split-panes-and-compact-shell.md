@@ -10,8 +10,9 @@ timestamp: 2026-07-22
 
 The panel shell uses an editor-style `#panes` container backed by a panes array.
 Each pane owns its own session id, poll loop, renderer container, and
-stale-response guards. One pane is focused at a time and receives keyboard
-input.
+stale-response guards. One pane is logically focused at a time and receives
+keyboard input through the global key router, even if DOM focus is on a pane
+header or shell control.
 
 Roster clicks replace the focused pane's session. Modifier-clicking a roster
 entry opens a new split. Splits use an equal-width flex row; there is no
@@ -31,4 +32,6 @@ than restoring the taller `vhead` block.
 - Per-pane stale-response guards generalize the poller lesson in
   [Stale-response race in the chat poller](/lessons/stale-response-race.md).
 - Focused-pane key routing relies on
-  [Raw key passthrough and the POST host/origin guard](/architecture/raw-key-passthrough-and-host-guard.md).
+  [Raw key passthrough and the POST host/origin guard](/architecture/raw-key-passthrough-and-host-guard.md);
+  the DOM-focus regression is captured in
+  [Route panel keyboard by logical pane focus, not DOM focus](/lessons/logical-key-routing-not-dom-focus.md).
