@@ -2,6 +2,10 @@
 
 ## 2026-07-22
 
+- **Creation**: [async-mount-close-race.md](async-mount-close-race.md)
+  — promoted the async close-during-mount cleanup race lesson from tui-dev-desktop-shell notes.
+- **Update**: [view-mount-disposer-contract.md](view-mount-disposer-contract.md)
+  — linked the async mount close race to the per-mount disposer contract.
 - **Creation**: [view-mount-disposer-contract.md](view-mount-disposer-contract.md)
   — promoted the backward-compatible `mount(el, ctx)` per-mount disposer contract from tui-dev-desktop-shell notes.
 - **Update**: [desktop-shell-layout.md](desktop-shell-layout.md)

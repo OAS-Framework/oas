@@ -21,6 +21,10 @@ The contract extension is backward-compatible:
 - `markdown.mjs` and `diff.mjs` keep a module-level `mounts` set of disposers
   so the exported `unmount()` still disposes every mount for harness
   compatibility.
+- If `mount()` is async, the host must treat close-during-mount as pending
+  cleanup and wait for settle before choosing between the returned disposer and
+  legacy `unmount()`. See [Async mount close race — cleanup must wait for
+  settle](async-mount-close-race.md).
 
 Regression coverage lives in `packages/desktop/test/multi-mount.test.mjs`: two
 mounts coexist, disposers are independent, `ctx.ws` forwards, and module-level
