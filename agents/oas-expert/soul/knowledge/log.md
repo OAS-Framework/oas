@@ -1,6 +1,8 @@
 # Knowledge Log
 
 ## 2026-07-22
+* **Update**: skills/pr-review — added scratch-worktree gate environment setup before judging PR failures.
+* **Creation**: [Scratch-worktree PR gates need dependencies and installed capabilities](/lessons/scratch-worktree-pr-gate-environment.md) — bare scratch worktrees can fail `npm run validate` without devDependencies and oas-web `/api/agents` without deployment installed capabilities, even when the PR is correct.
 * **Update**: skills/pr-review — added same-account approval fallback and worktree-held branch deletion recovery gotchas.
 * **Creation**: [PR merge friction — same-account approval and worktree-held branch deletion](/lessons/pr-review-same-account-and-worktree-branch-delete.md) — single-account GitHub auth blocks `gh pr review --approve`; `gh pr merge --delete-branch` can leave local branch deletion to the owning worktree.
 * **Creation**: [stewardship/](/stewardship/) section — repo-state.md (living on-main/in-flight/open-threads picture) and delivery-log.md (append-only per-PR verdicts); maintenance contract: every instance feeds it, per-PR maintainers append before retiring.
