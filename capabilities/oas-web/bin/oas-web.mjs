@@ -12,7 +12,10 @@
  *   GET  /api/session/<instance>?lines=n   ANSI pane capture of the live session
  *   POST /api/keys/<instance>       { data } → raw key bytes into the session (no Enter)
  *   POST /api/interrupt/<instance>  sends Ctrl-C (Escape for pi/claude prompts stays manual)
+
  *   GET  /api/jira/<instance>       epic + Agent Roster for instances with oas.jira meta
+ *   GET  /api/file?path=<abs>       text file content, guarded to workspace roots + agent homes
+ *   GET  /api/diff/<instance>?staged=0|1   unified git diff of the instance's work tree + stats
  *
  * SECURITY: binds 127.0.0.1 ONLY. This process can type into your terminals.
  * Interaction model: terminal-direct (tmux send-keys / capture-pane) — the
@@ -20,8 +23,8 @@
  */
 import { createServer } from "node:http";
 import { execFile, execFileSync, execSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { existsSync, readFileSync, readdirSync, statSync, realpathSync } from "node:fs";
+import { basename, dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { homedir } from "node:os";
 
@@ -401,6 +404,113 @@ export function parseRoster(text) {
   }).filter((r) => Object.values(r).some(Boolean));
 }
 
+// ---- File serving (markdown/brain viewers) + git diff (diff viewer) ----
+
+/* OASWEB_FILEGUARD_BEGIN — path-traversal guard for /api/file, extracted by
+   tests. A requested path is readable ONLY if its realpath (symlinks resolved)
+   sits under one of the allowed roots — realpaths themselves — so `..`
+   segments, sneaky prefixes (/root-evil vs /root) and symlink escapes all
+   fail closed. */
+function underRoot(realPath, realRoot) {
+  return realPath === realRoot || realPath.startsWith(realRoot.endsWith(sep) ? realRoot : realRoot + sep);
+}
+function resolveGuardedFile(requested, allowedRoots) {
+  if (typeof requested !== "string" || !requested.startsWith("/")) return { error: "path must be absolute", code: 400 };
+  let real;
+  try { real = realpathSync(resolve(requested)); } catch { return { error: "no such file", code: 404 }; }
+  const roots = [];
+  for (const r of allowedRoots) { try { roots.push(realpathSync(r)); } catch { /* skip missing */ } }
+  if (!roots.some((root) => underRoot(real, root))) return { error: "path outside allowed roots", code: 403 };
+  return { real };
+}
+/* OASWEB_FILEGUARD_END */
+
+const MARKDOWN_EXT = new Set([".md", ".markdown", ".mdown", ".mkd"]);
+const FILE_MAX_BYTES = 2 * 1024 * 1024;
+
+/** Allowed roots for /api/file: every agents root of every workspace (agent
+ * homes — souls, instances, knowledge) plus the known instances' work trees
+ * and repos (the brain/diff viewers open files there too). */
+function fileRoots() {
+  const roots = workspaces().flatMap((w) => w.roots);
+  for (const d of snapshot.byWs.values()) {
+    for (const i of d.instances) {
+      if (i.home) { roots.push(i.home); roots.push(join(i.home, "work")); } // <home>/work = the work tree (i.work is the MODE)
+      if (i.repo) roots.push(i.repo);
+    }
+  }
+  return roots;
+}
+
+function fileData(requested) {
+  const g = resolveGuardedFile(requested, fileRoots());
+  if (g.error) return g;
+  const st = statSync(g.real);
+  if (!st.isFile()) return { error: "not a regular file", code: 400 };
+  if (st.size > FILE_MAX_BYTES) return { error: `file too large (${st.size} bytes)`, code: 413 };
+  const buf = readFileSync(g.real);
+  if (buf.includes(0)) return { error: "binary file", code: 415 };
+  return {
+    body: {
+      path: g.real, name: basename(g.real), size: st.size, mtime: st.mtime.toISOString(),
+      markdown: MARKDOWN_EXT.has(extname(g.real).toLowerCase()),
+      content: buf.toString("utf8"),
+    },
+  };
+}
+
+function git(cwd, argv) {
+  return execFileSync("git", ["-C", cwd, ...argv], { encoding: "utf8", timeout: 15000, maxBuffer: 32 * 1024 * 1024 });
+}
+
+/** Git diff of an instance's work tree: unified diff + per-file stats.
+ * staged=1 diffs the index (--cached); default diffs the work tree and
+ * includes untracked files as added (intent-to-add view via numstat merge). */
+function diffData(inst, staged) {
+  // inst.work is the work MODE (worktree/checkout/attached); the tree itself
+  // lives at <home>/work by convention (model.mjs gitState uses the same path).
+  const cwd = existsSync(join(inst.home || "", "work")) ? join(inst.home, "work") : inst.repo;
+  if (!cwd || !existsSync(cwd)) return { error: "instance has no work tree", code: 404 };
+  let branch = null;
+  try { branch = git(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]).trim(); } catch { return { error: "not a git repository", code: 409 }; }
+  const mode = staged ? ["--cached"] : [];
+  const numstat = git(cwd, ["diff", ...mode, "--numstat", "-M"]);
+  const nameStatus = git(cwd, ["diff", ...mode, "--name-status", "-M"]);
+  const statusOf = new Map();
+  for (const line of nameStatus.split("\n")) {
+    const c = line.split("\t");
+    if (c.length < 2) continue;
+    // renames: "R100\told\tnew" — key by the new path
+    statusOf.set(c[c.length - 1], c[0][0]);
+  }
+  const files = [];
+  for (const line of numstat.split("\n")) {
+    const c = line.split("\t");
+    if (c.length < 3) continue;
+    const path = c[c.length - 1];
+    files.push({ path, status: statusOf.get(path) || "M",
+                 additions: c[0] === "-" ? null : Number(c[0]),
+                 deletions: c[1] === "-" ? null : Number(c[1]) });
+  }
+  let diff = git(cwd, ["diff", ...mode, "-M"]);
+  if (!staged) {
+    // untracked files: show as additions so new work is visible in the viewer
+    const untracked = git(cwd, ["ls-files", "--others", "--exclude-standard"]).split("\n").filter(Boolean);
+    for (const path of untracked) {
+      let text;
+      try {
+        const buf = readFileSync(join(cwd, path));
+        if (buf.includes(0) || buf.length > FILE_MAX_BYTES) { files.push({ path, status: "A", additions: null, deletions: null }); continue; }
+        text = buf.toString("utf8");
+      } catch { continue; }
+      const lines = text.length ? text.replace(/\n$/, "").split("\n") : [];
+      files.push({ path, status: "A", additions: lines.length, deletions: 0 });
+      diff += `diff --git a/${path} b/${path}\nnew file mode 100644\n--- /dev/null\n+++ b/${path}\n@@ -0,0 +1,${lines.length} @@\n${lines.map((l) => "+" + l).join("\n")}\n`;
+    }
+  }
+  return { body: { repo: cwd, branch, staged: !!staged, files, diff } };
+}
+
 // ---- HTTP ----
 const UI = readFileSync(join(HERE, "..", "ui", "panel.html"), "utf8");
 const send = (res, code, body, type = "application/json") => {
@@ -443,7 +553,11 @@ const server = createServer(async (req, res) => {
       try { return send(res, 200, { spawned: true, ...spawnAgent(body) }); }
       catch (e) { return send(res, 409, { error: String(e.message || e).slice(0, 300) }); }
     }
-    const m = path.match(/^\/api\/(session|keys|interrupt|jira|chat)\/([A-Za-z0-9._-]+)$/);
+    if (req.method === "GET" && path === "/api/file") {
+      const r = fileData(url.searchParams.get("path") || "");
+      return r.error ? send(res, r.code, { error: r.error }) : send(res, 200, r.body);
+    }
+    const m = path.match(/^\/api\/(session|keys|interrupt|jira|chat|diff)\/([A-Za-z0-9._-]+)$/);
     if (m) {
       const inst = findInstance(m[2]);
       if (!inst) return send(res, 404, { error: `unknown instance "${m[2]}"` });
@@ -477,6 +591,10 @@ const server = createServer(async (req, res) => {
       }
       if (m[1] === "jira" && req.method === "GET") return send(res, 200, jiraPanel(inst));
       if (m[1] === "chat" && req.method === "GET") return send(res, 200, chatData(inst, Number(url.searchParams.get("limit") || 120)));
+      if (m[1] === "diff" && req.method === "GET") {
+        const r = diffData(inst, url.searchParams.get("staged") === "1");
+        return r.error ? send(res, r.code, { error: r.error }) : send(res, 200, r.body);
+      }
     }
     return send(res, 404, { error: "not found" });
   } catch (e) {

@@ -1,0 +1,11 @@
+{
+  "name": "@oas-framework/desktop",
+  "private": true,
+  "version": "0.1.0",
+  "description": "OAS desktop app (Electron) — renderer views and shell. Not part of the published kernel package.",
+  "type": "module",
+  "dependencies": {
+    "highlight.js": "^11.11.1",
+    "marked": "^16.4.2"
+  }
+}
