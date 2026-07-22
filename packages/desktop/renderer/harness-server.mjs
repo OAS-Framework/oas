@@ -44,10 +44,15 @@ export function createHarnessServer(api) {
       req.pipe(p);
       return;
     }
-    // static files from the renderer dir only (no traversal)
-    const rel = url.pathname === "/" ? "/harness.html" : url.pathname;
-    const file = normalize(join(HERE, rel));
-    if (!(file === HERE || file.startsWith(HERE + sep)) || !existsSync(file)) { res.writeHead(404); res.end("not found"); return; }
+    // static files: the renderer dir, plus /node_modules/* pinned to the
+    // package's node_modules (browser-ready ESM deps — marked, dompurify —
+    // resolve through the importmap; still traversal-guarded).
+    const NM = join(HERE, "..", "node_modules");
+    const base = url.pathname.startsWith("/node_modules/") ? NM : HERE;
+    const rel = url.pathname === "/" ? "/harness.html"
+      : url.pathname.startsWith("/node_modules/") ? url.pathname.slice("/node_modules".length) : url.pathname;
+    const file = normalize(join(base, rel));
+    if (!(file === base || file.startsWith(base + sep)) || !existsSync(file)) { res.writeHead(404); res.end("not found"); return; }
     const ext = file.slice(file.lastIndexOf("."));
     res.writeHead(200, { "content-type": `${TYPES[ext] || "application/octet-stream"}; charset=utf-8`, "cache-control": "no-store" });
     res.end(readFileSync(file));
