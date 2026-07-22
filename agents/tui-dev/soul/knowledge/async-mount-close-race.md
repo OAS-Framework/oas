@@ -1,8 +1,8 @@
 ---
 type: Lesson
-title: Async tab lifecycle cleanup must track fulfillment and key reservation
-description: When a desktop tab closes during async mount, cleanup must wait for settle, fall back to module unmount only after a fulfilled legacy mount, and keep dedup keys reserved until cleanup completes.
-tags: [desktop, view-host, async, race, lifecycle]
+title: Async tab lifecycle cleanup must track fulfillment and awaitable key reservations
+description: When a desktop tab closes during async mount, cleanup must wait for settle, fall back to module unmount only after a fulfilled legacy mount, and make dedup-key reservations awaitable so fast reopens queue behind cleanup.
+tags: [desktop, view-host, async, race, lifecycle, queueing]
 timestamp: 2026-07-22
 ---
 
@@ -27,10 +27,15 @@ The fix shape lives in `renderer/view-lifecycle.mjs` as
 A later review found the matching dedup-key race: if the tab key is freed when
 close is requested, a user can reopen the tab before deferred cleanup finishes;
 the stale lifecycle's later module-wide `unmount()` can then tear down the new
-mount. The host keeps the key in `reservedKeys` until the tab's `close()`
-promise resolves after cleanup, and `addTab` refuses reserved keys. The
-follow-on fulfillment/reservation fixes landed in `3cfc66d` and were
-live-verified with `brain.mjs`.
+mount. The host keeps the key reserved until the tab's `close()` promise
+resolves after cleanup, but reserved-key open requests must wait instead of
+being refused. Returning `null` for a temporarily reserved key is ambiguous with
+"existing tab activated", so `openViewTab` can silently drop the user's
+close→fast-reopen intent and leave no tab. The fix shape is
+`reserveKey(key, cleanupPromise)` plus `whenKeyFree(key)`: store the cleanup
+promise per key, make every keyed open await `whenKeyFree(key)` before the
+dedup scan and mount, and delete the reservation in a
+`.catch(() => {}).finally(...)` path so failed cleanup still releases the key.
 
 The lifecycle is DOM-free so deferred-promise unit tests can drive the races
 deterministically: close-mid-mount, legacy view, mount error, and two lifecycles
@@ -46,3 +51,7 @@ General rules:
   the fulfilled legacy mount may use module-wide fallback cleanup.
 - Any resource freed "on close" should really be freed on cleanup-complete;
   the gap between those two moments is where reopens live.
+- A reservation on a shared resource needs an awaitable handle so blocked
+  requests can queue. A boolean "is reserved" check can only drop the request
+  or recreate the race; test the host composition path, not only a manually
+  chained lifecycle sequence.
