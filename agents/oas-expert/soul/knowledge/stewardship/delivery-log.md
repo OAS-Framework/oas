@@ -24,6 +24,18 @@ decisions/ and referenced from here.
 
 ---
 
+## PR #8 — oas.web 0.6.0 terminal-faithful session view (2026-07-22)
+- verdict: MERGED — all four gates green; approval recorded as a PR comment
+  (GitHub blocks same-account `gh pr review --approve`).
+- owner: webpanel-dev-terminal-fidelity · coordinator: dev-coordinator-1
+- taught us: zero-dep held under real pressure — the hand-rolled SGR
+  renderer with a DOM-free marker block (`OASWEB_RENDERER_BEGIN/END`)
+  extracted for node tests is a reusable pattern for testing browser-embedded
+  logic without a bundler. New POST Host/Origin loopback guard hardens the
+  panel's 127.0.0.1 posture against DNS rebinding. Two doc nits returned
+  as follow-ups (stale `-J` reference, inverted paste-normalization claim
+  in webpanel-dev's knowledge). Release needed to publish 0.6.0.
+
 ## PR #4 — session-error surfacing (2026-07-22)
 - verdict: CLOSED — approved on quality, discarded by operator instruction
   before merge; branches deleted.

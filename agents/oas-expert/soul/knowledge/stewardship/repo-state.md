@@ -16,23 +16,27 @@ than letting the file grow stale.
 
 ## On main
 
+- PR #8 merged 2026-07-22: oas.web 0.6.0 terminal-faithful session view —
+  hand-rolled zero-dep ANSI/SGR renderer, /api/keys raw passthrough,
+  bracketed paste, POST Host/Origin loopback guard.
 - v0.17.2 line: multi-dev coordination discipline (aweb-first per-commit
   reviewers, ephemeral service agents, lineage nesting), named TUI themes
   (dark/solarized) with palette isolation + tmux splits, skill-load mandates
   in all injections, coordinator maintainer-merge contract.
 - Capabilities at: oas.review 1.1.3, oas.okf 1.2.2, oas.aweb 1.5.1,
-  oas.web 0.5.0 (published marketplace carries review 1.1.2 until next tag).
+  oas.web 0.6.0 (published marketplace carries review 1.1.2 and web 0.5.0
+  until next tag).
 
 ## In flight
 
-- PR #8 — oas.web 0.6.0 terminal-faithful session view (zero-dep ANSI/SGR
-  renderer, /api/keys raw passthrough, bracketed paste, Host/Origin guard);
-  owner webpanel-dev-terminal-fidelity, coordinator dev-coordinator-1;
-  awaiting maintainer review.
+- (nothing)
 
 ## Recent deliveries
 
 - (record PR #, one-line scope, verdict, merge/close date)
+- PR #8 oas.web 0.6.0 terminal-faithful session view: MERGED 2026-07-22
+  (see delivery-log); two non-blocking doc nits returned to webpanel-dev
+  as follow-ups.
 - PR #4 session-error-surfacing: built + approved, then **discarded by
   operator instruction** 2026-07-22 (branches deleted; recoverable from the
   closed PR's commits if wanted).
@@ -41,4 +45,8 @@ than letting the file grow stale.
 
 - Org-level GitHub Actions policy blocks CI bump-PRs — manual rescue each
   release until an org admin relaxes it.
-- Marketplace oas.review 1.1.2 vs repo 1.1.3 — fold into next release.
+- Marketplace oas.review 1.1.2 vs repo 1.1.3, and oas.web 0.5.0 vs repo
+  0.6.0 — fold into next release/tag.
+- webpanel-dev knowledge doc nits from PR #8 review: stale `capture-pane -J`
+  reference in hand-rolled-terminal-renderer.md; inverted paste-normalization
+  claim in raw-key-passthrough-and-host-guard.md.
