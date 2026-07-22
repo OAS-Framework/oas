@@ -1,6 +1,8 @@
 # Knowledge Log
 
 ## 2026-07-22
+* **Creation**: added [Agent brain endpoint and desktop brain view](/architecture/agent-brain-endpoint-and-view.md) from the brain endpoint note: `/api/brain/<agent>` resolves names through kernel agent lookup seams, returns only artifact paths, and feeds the contract-based desktop brain view.
+* **Update**: [oas-web architecture](/architecture/oas-web-architecture.md) now lists `GET /api/brain/<agent>?ws=<id>` in the server surface.
 * **Creation**: added [Keep roster collection out of the serving process](/lessons/snapshot-collection-off-thread.md) from the snapshot-collection note: synchronous `collectControlPane` work in the single-threaded server made key latency spiky, so `/api/panel` and `findInstance` serve from a background child-process snapshot.
 * **Creation**: added [Typing must force-repaint and pin the prompt row](/lessons/typing-echo-visibility.md) from the typing-echo note: keys reached tmux but echo stayed invisible until typing forced a short-tail repaint and temporary bottom snap.
 * **Update**: [oas-web architecture](/architecture/oas-web-architecture.md) now records the background child-process roster snapshot path and links to the snapshot-collection lesson.
