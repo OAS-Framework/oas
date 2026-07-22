@@ -16,6 +16,9 @@ than letting the file grow stale.
 
 ## On main
 
+- PR #10 merged 2026-07-22: webpanel-dev soul doc nits from the PR #8
+  review fixed (renderer -J claim, paste-normalization direction).
+
 - PR #8 merged 2026-07-22: oas.web 0.6.0 terminal-faithful session view —
   hand-rolled zero-dep ANSI/SGR renderer, /api/keys raw passthrough,
   bracketed paste, POST Host/Origin loopback guard.
@@ -34,6 +37,7 @@ than letting the file grow stale.
 ## Recent deliveries
 
 - (record PR #, one-line scope, verdict, merge/close date)
+- PR #10 webpanel-dev doc nits: MERGED 2026-07-22 (see delivery-log).
 - PR #8 oas.web 0.6.0 terminal-faithful session view: MERGED 2026-07-22
   (see delivery-log); two non-blocking doc nits returned to webpanel-dev
   as follow-ups.
@@ -47,6 +51,3 @@ than letting the file grow stale.
   release until an org admin relaxes it.
 - Marketplace oas.review 1.1.2 vs repo 1.1.3, and oas.web 0.5.0 vs repo
   0.6.0 — fold into next release/tag.
-- webpanel-dev knowledge doc nits from PR #8 review: stale `capture-pane -J`
-  reference in hand-rolled-terminal-renderer.md; inverted paste-normalization
-  claim in raw-key-passthrough-and-host-guard.md.

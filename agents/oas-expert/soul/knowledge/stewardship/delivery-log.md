@@ -24,6 +24,15 @@ decisions/ and referenced from here.
 
 ---
 
+## PR #10 — webpanel-dev soul doc nits from PR #8 review (2026-07-22)
+- verdict: MERGED — docs-only, both corrected claims verified against
+  oas-web implementation (`capture-pane -p -e` without -J; server-side
+  `\r\n?` → `\n` into load-buffer/paste-buffer -p); bundle passes OKF
+  --strict. Approval again recorded as PR comment (same-account block).
+- owner: webpanel-dev-1 · coordinator: none
+- taught us: nothing new — the return-as-follow-up flow from PR #8 closed
+  cleanly in one docs-only PR.
+
 ## PR #8 — oas.web 0.6.0 terminal-faithful session view (2026-07-22)
 - verdict: MERGED — all four gates green; approval recorded as a PR comment
   (GitHub blocks same-account `gh pr review --approve`).
