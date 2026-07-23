@@ -624,9 +624,13 @@ test("oas-web tmux targets: exact-match anchoring fails closed for reads AND wri
 });
 
 test("oas-web paneInfo: geometry comes from the ACTIVE pane, same pane capture/send target", (t) => {
-  // Two panes of different widths, active = index 1: the paneInfo command
-  // must report the active pane's geometry (what capture-pane and send-keys
-  // on a window target operate on), not list-panes row 0.
+  // Drive the REAL paneInfo (extracted marker block, with the real
+  // tmuxTarget in scope) against a two-pane fixture where the active pane
+  // is index 1 with a distinct width — reverting the -f '#{pane_active}'
+  // filter makes this fail (row 0's width would be reported).
+  const tgtSrc = extractBlock(join(CAP, "bin", "oas-web.mjs"), "TMUXTGT");
+  const piSrc = extractBlock(join(CAP, "bin", "oas-web.mjs"), "PANEINFO");
+  const paneInfo = new Function("execFileSync", `${tgtSrc}${piSrc}; return paneInfo;`)(execFileSync);
   const session = `oaswebpane${process.pid}`;
   try {
     execFileSync("tmux", ["new-session", "-d", "-s", session, "-n", "w1", "-x", "101", "-y", "30"], { timeout: 4000 });
@@ -634,17 +638,23 @@ test("oas-web paneInfo: geometry comes from the ACTIVE pane, same pane capture/s
   try {
     const target = `=${session}:=w1`;
     execFileSync("tmux", ["split-window", "-h", "-t", target], { timeout: 4000 });
+    execFileSync("tmux", ["resize-pane", "-t", `${target}.1`, "-x", "30"], { timeout: 4000 });
     execFileSync("tmux", ["select-pane", "-t", `${target}.1`], { timeout: 4000 });
-    const row = (args) => execFileSync("tmux", ["list-panes", "-t", target, ...args,
-      "-F", "#{pane_index} #{pane_width}"], { encoding: "utf8", timeout: 4000 }).trim().split("\n")[0];
-    const unfiltered = row([]);
-    const active = row(["-f", "#{pane_active}"]);          // the paneInfo path
-    assert.notEqual(unfiltered, active, "row 0 is NOT the active pane in this layout (hazard is real)");
-    assert.equal(active.split(" ")[0], "1", "filtered row is the active pane (index 1)");
-    // capture-pane on the window target reads the ACTIVE pane — same pane
-    const capWidth = Number(execFileSync("tmux", ["display-message", "-p", "-t", `${target}.1`, "#{pane_width}"],
+    // print some output into pane 1 so its history/cursor differ from pane 0
+    execFileSync("tmux", ["send-keys", "-t", `${target}.1`, "printf 'a\\nb\\nc\\n'", "Enter"], { timeout: 4000 });
+    const paneW = (idx) => Number(execFileSync("tmux", ["display-message", "-p", "-t", `${target}.${idx}`, "#{pane_width}"],
       { encoding: "utf8", timeout: 4000 }).trim());
-    assert.equal(Number(active.split(" ")[1]), capWidth, "geometry matches the pane capture/send operate on");
+    const w0 = paneW(0), w1 = paneW(1);
+    assert.notEqual(w0, w1, "fixture: the two panes have distinct widths");
+    const info = paneInfo({ tmux: { session, window: "w1" } });
+    assert.equal(info.size.cols, w1, "paneInfo reports the ACTIVE pane's width (pane 1), not row 0's");
+    // same pane capture-pane operates on: the window target's active pane
+    const capW = Number(execFileSync("tmux", ["display-message", "-p", "-t", `${target}.1`, "#{pane_width}"],
+      { encoding: "utf8", timeout: 4000 }).trim());
+    assert.equal(info.size.cols, capW, "geometry matches the pane capture/send target");
+    // fail-closed path of the real function: missing window falls back to defaults
+    const missing = paneInfo({ tmux: { session, window: "nope" } });
+    assert.equal(missing.size.cols, 80, "missing window returns the safe default, never another pane");
   } finally {
     try { execFileSync("tmux", ["kill-session", "-t", `=${session}`], { timeout: 4000 }); } catch { /* gone */ }
   }

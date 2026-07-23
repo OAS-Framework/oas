@@ -261,6 +261,8 @@ function capture(inst, lines) {
  * cursor_flag and copy-mode (in copy mode the live cursor is not where
  * typing lands). history_size lets the client map capture lines to screen
  * rows deterministically (cursor row = history + cursor_y). */
+/* OASWEB_PANEINFO_BEGIN — active-pane geometry, extracted by tests (depends
+   on tmuxTarget + execFileSync in scope). */
 function paneInfo(inst) {
   try {
     // list-panes, NOT display-message: display-message -p -t <missing target>
@@ -277,6 +279,7 @@ function paneInfo(inst) {
              history: out[6] || 0 };
   } catch { return { size: { cols: 80, rows: 24, cx: 0, cy: 0, cursor: false }, history: 0 }; }
 }
+/* OASWEB_PANEINFO_END */
 
 /** Raw keystroke passthrough: bytes from the browser terminal go straight into
  * the pane via send-keys -H (hex bytes) — no key-name interpretation, no Enter. */
