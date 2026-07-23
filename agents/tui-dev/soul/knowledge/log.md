@@ -2,6 +2,14 @@
 
 ## 2026-07-23
 
+- **Update**: [anchor-tmux-attach-targets.md](anchor-tmux-attach-targets.md)
+  — recorded the `set-option -t` exception: viewer-local option targets do not accept `=` anchors, so only unique random viewer session names may use that unanchored form.
+- **Update**: [desktop-terminal-direct-attach.md](desktop-terminal-direct-attach.md)
+  — replaced the grouped viewer session description with the independent link-window viewer shape and source-window-death behavior.
+- **Removal**: [desktop-terminal-grouped-viewer-sessions.md](desktop-terminal-grouped-viewer-sessions.md)
+  — superseded by [desktop-terminal-link-window-viewer-isolation.md](desktop-terminal-link-window-viewer-isolation.md) because grouped sessions share window membership and can escape to sibling windows.
+- **Creation**: [desktop-terminal-link-window-viewer-isolation.md](desktop-terminal-link-window-viewer-isolation.md)
+  — promoted the lesson that desktop terminal viewers need independent sessions containing only a link-window to the exact source window, plus locked prefix/root navigation keys.
 - **Update**: [desktop-terminal-direct-attach.md](desktop-terminal-direct-attach.md)
   — merged the grouped-viewer-session follow-up so direct node-pty attach uses a per-tab grouped session rather than the durable session's shared current-window selection.
 - **Creation**: [desktop-terminal-grouped-viewer-sessions.md](desktop-terminal-grouped-viewer-sessions.md)
