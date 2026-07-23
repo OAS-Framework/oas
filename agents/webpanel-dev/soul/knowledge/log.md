@@ -1,6 +1,8 @@
 # Knowledge Log
 
 ## 2026-07-23
+* **Creation**: added [Guard async render completions on both success and error paths](/lessons/guard-both-completion-paths.md) from the guard-both-completion-paths note: Brain selection loads must mint a new generation per selection and reuse one owns() predicate for success and catch so stale rejections cannot overwrite a newer render.
+* **Update**: [Agent brain endpoint and desktop brain view](/architecture/agent-brain-endpoint-and-view.md) now records the corrected Brain renderer selection-race guard and links the completion-path lesson.
 * **Creation**: added [Race-guard tests must overlap generations and fail when the guard is weakened](/lessons/race-guard-tests-overlap-generations.md) from the race-guard-tests note: request-generation guard tests must create two concurrent in-flight generations, resolve newest first, and fail when the generation comparison is removed so disposal-only coverage cannot masquerade as a race regression.
 * **Update**: [Workspace-sensitive async results need local tickets and global workspace generations](/lessons/stale-response-race.md) now links the overlapping-generation mutation-check lesson from its regression-pattern guidance.
 * **Creation**: added [Pin node --test globs in repos that contain sibling worktrees](/lessons/pin-node-test-globs-in-nested-worktrees.md) from the bare-node-test-worktree-recursion note: bare `node --test` recursed into sibling agent worktrees and ran stale destructive tmux tests, so `npm test` must pin globs and retire tests must target a sandbox tmux session.
