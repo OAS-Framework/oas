@@ -46,7 +46,7 @@ export function onThemeChange(fn) {
 
 /* tmux carries cells/colors, never the host terminal emulator's font. Keep
    desktop typography as an explicit persisted preference, seeded from
-   semantic CSS tokens (OS monospace + 14px by default). */
+   semantic CSS tokens (OS monospace + 12px by default). */
 export function terminalTypography(el = document.documentElement) {
   const css = getComputedStyle(el);
   let family = css.getPropertyValue("--term-font-family").trim() || "ui-monospace, monospace";
