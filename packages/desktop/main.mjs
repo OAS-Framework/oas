@@ -10,12 +10,13 @@
 //     terminal tab, bytes streamed to xterm.js over IPC. Closing a tab kills
 //     the pty ONLY — the tmux session is the durable host and must survive.
 import { app, BrowserWindow, ipcMain, shell } from "electron";
-import { spawn } from "node:child_process";
+import { spawn, execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { apiUrl, apiInit } from "./api-url.mjs";
+import { openTerm } from "./tmux-target.mjs";
 
 const require = createRequire(import.meta.url);
 const pty = require("node-pty");
@@ -143,17 +144,18 @@ let nextPtyId = 1;
 
 ipcMain.handle("term:open", (e, { session, window: win, cols, rows }) => {
   guard(e);
-  if (typeof session !== "string" || !/^[\w@%.:-]+$/.test(session)) throw new Error("term:open: bad session name");
-  const target = win !== undefined && win !== null ? `${session}:${win}` : session;
-  const id = nextPtyId++;
-  // Direct attach: tmux stays the durable session host; the pty is a viewer.
-  const p = pty.spawn("tmux", ["attach-session", "-t", target], {
-    name: "xterm-256color",
-    cols: Math.max(20, Number(cols) || 80),
-    rows: Math.max(5, Number(rows) || 24),
-    cwd: process.env.HOME,
-    env: process.env,
+  // openTerm (tmux-target.mjs) anchors the target (=session:=window — tmux
+  // -t prefix-matches by default), PREFLIGHTS it so a missing exact target
+  // rejects here (→ the renderer's "could not attach" banner) instead of
+  // surfacing as a late async pty exit, then spawns the viewer pty.
+  const { pty: p } = openTerm({ session, window: win, cols, rows }, {
+    preflight: (target) => execFileSync("tmux", ["list-panes", "-t", target], { stdio: "ignore", timeout: 4000 }),
+    // Direct attach: tmux stays the durable session host; the pty is a viewer.
+    spawnPty: (target, c, r) => pty.spawn("tmux", ["attach-session", "-t", target], {
+      name: "xterm-256color", cols: c, rows: r, cwd: process.env.HOME, env: process.env,
+    }),
   });
+  const id = nextPtyId++;
   const wc = e.sender;
   p.onData((data) => { if (!wc.isDestroyed()) wc.send(`term:data:${id}`, data); });
   p.onExit(({ exitCode }) => {

@@ -13,7 +13,8 @@ Starter knowledge for the Terminal Control Pane developer
 * [Electron renderer native ESM dependencies](electron-renderer-native-esm-dependencies.md) — Bare imports in the unbundled Electron renderer need an importmap, the importmap's inline script needs a CSP hash, and highlight.js must be bundled from its dual-package shim into browser-loadable ESM.
 * [Electron desktop shell hardening review lessons](desktop-shell-hardening-review-lessons.md) — First desktop shell review findings to preserve: block same-window navigation and foreign-frame IPC, verify oas-web serves the requested workspace, and audit Electron/toolchain dev dependencies at scaffold time.
 * [WHATWG URL resolution is an SSRF footgun in privileged proxies](url-resolution-ssrf-footgun.md) — new URL(path, base) resolves protocol-relative ("//host/x") and backslash ("/\\host/x") inputs to a different origin, so a privileged fetch proxy must check url.origin against the base origin, not just require a leading slash.
-* [Desktop terminal is a direct tmux attach via node-pty](desktop-terminal-direct-attach.md) — The desktop app's integrated terminal spawns node-pty running `tmux attach-session -t <session>:<window>` and pipes bytes over IPC to xterm.js — no capture-pane polling, no send-keys, no WebSocket bridge; closing the tab kills the pty only.
+* [Desktop terminal is a direct tmux attach via node-pty](desktop-terminal-direct-attach.md) — The desktop app's integrated terminal spawns node-pty running `tmux attach-session` with a validated `=session:=window` target and pipes bytes over IPC to xterm.js — no capture-pane polling, no send-keys, no WebSocket bridge.
+* [Anchor every tmux target the desktop constructs](anchor-tmux-attach-targets.md) — tmux prefix-matches unanchored targets even for attach-session, so desktop code must build `=session:=window` through a validating helper and fail loudly when the exact window is gone.
 
 ## Architecture
 
@@ -31,7 +32,8 @@ Starter knowledge for the Terminal Control Pane developer
 ## Verification and decisions
 
 * [Testing with pure functions and fake snapshots](testing-pure-functions-fake-snapshots.md) — how to verify the pane headless: parser tests, renderFrame against hand-built snapshots.
+* [Bare node --test recurses into sibling agent worktrees](node-test-recursion-worktrees.md) — In an OAS repo that contains agents/*/instances/*/work, bare node --test discovers stale suites from sibling worktrees; pin explicit test globs and guard CLI subprocess tests with inert environment.
 * [Verifying an Electron app headlessly via CDP and ELECTRON_RUN_AS_NODE](electron-headless-verification.md) — How to drive and verify an Electron shell without a human at the GUI — remote-debugging-port + CDP Runtime.evaluate for the renderer, ELECTRON_RUN_AS_NODE for native-module (node-pty) checks under the Electron ABI.
-* [Regression tests must exercise the layer that had the bug](regression-tests-bug-layer.md) — A regression test only pins a bug if it executes the code layer whose ordering or composition was wrong; extract that layer behind injectable dependencies instead of testing only a helper it calls.
+* [Regression tests must exercise the layer that had the bug](regression-tests-bug-layer.md) — A regression test only pins a bug if it executes the code layer whose ordering or guard was wrong; extract that layer behind injectable dependencies, assert order, and mutation-check by reverting the fix before claiming coverage.
 * [Scope destructive cleanup during live desktop testing](pkill-scoping-discipline.md) — Broad `pkill -f` patterns and unanchored tmux targets during app testing can kill foreign processes machine-wide — always scope patterns to your own worktree path, exact PIDs, or exact tmux targets.
 * [Control Pane decisions (reference)](reference-control-pane-decisions.md) — pointers to the binding decisions in the oas-expert soul (standalone read-only TUI, v3 cards, visual language, web pane).
