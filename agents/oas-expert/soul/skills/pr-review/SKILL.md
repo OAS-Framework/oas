@@ -73,6 +73,11 @@ BEFORE retiring — it is the last gate of the review.
 
 ## Operational gotchas
 
+- **tmux target prefix matching can kill the reviewer**: tmux `-t session:window`
+  targets prefix-match unless anchored; code or tests that exercise retire paths
+  must use exact `=<session>:=<window>` targets, and tests must override the tmux
+  session to a nonexistent name instead of touching the live default session.
+  See `knowledge/lessons/tmux-target-exact-matching.md`.
 - **Bare scratch worktree false failures**: `npm run validate` needs installed
   devDependencies (for example `ajv`), and the oas-web `/api/agents` test needs
   the deployment's `.agents/capabilities/installed/` under the server `--dir`
