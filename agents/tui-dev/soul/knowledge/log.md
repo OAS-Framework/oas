@@ -2,6 +2,8 @@
 
 ## 2026-07-23
 
+- **Update**: [regression-tests-bug-layer.md](regression-tests-bug-layer.md)
+  — merged the mutation-check discipline from tui-dev-desktop-shell notes: before claiming guard/order regression coverage, delete the fix and verify the new tests fail.
 - **Update**: [desktop-terminal-direct-attach.md](desktop-terminal-direct-attach.md)
   — merged the exact-match attach-target lesson so node-pty attach uses validated `=session:=window` targets instead of unanchored prefix-matchable `session:window`.
 - **Creation**: [anchor-tmux-attach-targets.md](anchor-tmux-attach-targets.md)

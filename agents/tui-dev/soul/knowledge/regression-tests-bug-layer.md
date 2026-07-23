@@ -1,8 +1,8 @@
 ---
 type: Lesson
 title: Regression tests must exercise the layer that had the bug
-description: A regression test only pins a bug if it executes the code layer whose ordering or composition was wrong; extract that layer behind injectable dependencies instead of testing only a helper it calls.
-tags: [testing, regression, desktop, composition]
+description: A regression test only pins a bug if it executes the code layer whose ordering or guard was wrong; extract that layer behind injectable dependencies, assert order, and mutation-check by reverting the fix before claiming coverage.
+tags: [testing, regression, desktop, composition, mutation]
 timestamp: 2026-07-23
 ---
 
@@ -11,6 +11,15 @@ A reviewer found a terminal ordering regression test that exercised
 composition code in `shell.mjs`. The test therefore also passed against the
 parent commit where setup happened after `await start()`, so it pinned the
 helper but not the bug.
+
+A second review found the same mistake in a terminal preflight regression: the
+test re-proved isolated tmux behavior while `main.mjs`'s preflight could be
+deleted with the suite still green. The fix shape was again to extract the
+buggy sequence with injectable dependencies and assert the order directly:
+`openTerm` must build the [anchored target](anchor-tmux-attach-targets.md), run
+preflight, and only then spawn. A failed preflight records preflight only and no
+spawn; a successful path uses the same anchored target through the ordered
+steps.
 
 The durable fix shape is to extract the composition itself behind injectable
 dependencies, leaving the shell entry point thin. For the desktop terminal,
@@ -22,6 +31,12 @@ lifecycle + xterm + preload bridge + banner + observer wiring, while tests pass
   `term.dispose`, with no setup entries at all;
 - live open records the full setup inside the lifecycle `onReady` callback,
   then teardown disposes exactly the resources setup created.
+
+Before claiming a regression test, hand-mutate the fix out: comment or delete
+the guard, preflight, or ordering change, then run the new tests. They must go
+red. If they stay green, the test is documentation rather than protection. Do
+this especially when a review finding says "X must happen before Y" or "guard G
+must exist"; those are easy to test vacuously at the wrong layer.
 
 Rule: when a review finding says "X happens in the wrong order in file F", the
 regression must execute F's code or an extraction of it. Testing only a helper F
