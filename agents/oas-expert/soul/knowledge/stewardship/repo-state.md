@@ -97,7 +97,10 @@ than letting the file grow stale.
   delay when the recipient session is mid-turn (2 delayed while busy, 2
   prompt while idle); no drops observed. Reported to the human by
   tui-dev-desktop-shell. Triage: check `aw mail inbox --show-all` before
-  assuming a retired sender died. Escalated to the human operator via
+  assuming a retired sender died. Two data points at a consistent ~30-min
+  offset (10:16→~10:4x, 10:23→~10:5x) suggest a fixed-period flush; operator
+  report filed by tui-dev-desktop-shell with message-ids and timestamps.
+  Fleet-facing lessons also promoted into tui-dev's soul knowledge. Escalated to the human operator via
   tui-dev-desktop-shell; triage guidance: window-gone + no-event now most
   likely means completed-but-event-dropped, check `--show-all` and the
   session log tail.
