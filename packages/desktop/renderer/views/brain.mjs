@@ -172,7 +172,11 @@ function renderBrain(body, d, ctx) {
 async function json(res) { return res && typeof res.json === "function" ? res.json() : res; }
 
 let unsubWs = null;
-let gen = 0; // request generation — stale responses never paint
+let rosterGen = 0; // /api/agents generation — workspace refreshes
+let gen = 0;       // /api/brain generation — agent selections
+// SEPARATE tokens (review 3dfe7d1): selections and roster refreshes must not
+// share one counter, or a selection made while /api/agents is in flight
+// cancels the required workspace refresh and strands the stale roster.
 
 export async function mount(el, ctx) {
   root = document.createElement("div");
@@ -198,27 +202,43 @@ export async function mount(el, ctx) {
     const a = (loadAgents.list || []).find((x) => x.name === name);
     desc.textContent = a?.description || "";
     status(`Loading ${name}…`);
+    // House generation-token pattern (see diff.mjs owns()): BOTH completion
+    // paths check ownership — an earlier request's rejection must not replace
+    // a later selection's rendered brain (round-4 review @3ebfc47), and the
+    // selected name is bound in too so completion can't paint a stale agent.
+    const owns = () => myGen === gen && root && sel.value === name;
     try {
       const d = await json(await ctx.api(`/api/brain/${encodeURIComponent(name)}${wsQuery()}`));
-      if (myGen !== gen || !root) return; // stale request or unmounted
+      if (!owns()) return; // superseded, unmounted, or selection moved on
       if (d.error) { status(d.error); return; }
-      if (sel.value === name) renderBrain(body, d, ctx); // stale-response guard
-    } catch (e) { if (myGen === gen && root) status(`Failed to load brain: ${e.message || e}`); }
+      renderBrain(body, d, ctx);
+    } catch (e) { if (owns()) status(`Failed to load brain: ${e.message || e}`); }
   };
 
   // Workspace-aware agent loading: /api/agents is ws-scoped, and the shared
   // workspace bus (Instances/Spawn/Jira switchers) must refresh this view.
   async function loadAgents() {
-    const myGen = ++gen;
+    const myRoster = ++rosterGen;
+    gen++;               // also retire in-flight brain requests of the old roster
+    sel.disabled = true; // a stale-roster selection must not race the refresh
     status("Loading agents…");
     let agents = [];
     try {
       const d = await json(await ctx.api(`/api/agents${wsQuery()}`));
       agents = (d.agents || []).filter((a, i, arr) => arr.findIndex((x) => x.name === a.name) === i);
-    } catch (e) { if (myGen === gen && root) status(`Failed to load agents: ${e.message || e}`); return; }
-    if (myGen !== gen || !root) return;
+    } catch (e) {
+      // Current-request failure must re-enable the selector (nothing remains
+      // in flight); a STALE failure must not unlock a newer refresh's lock.
+      if (myRoster === rosterGen && root) {
+        sel.disabled = false;
+        status(`Failed to load agents: ${e.message || e}`);
+      }
+      return;
+    }
+    if (myRoster !== rosterGen || !root) return;
     loadAgents.list = agents;
     sel.innerHTML = "";
+    sel.disabled = false;
     if (!agents.length) { desc.textContent = ""; status("No agents in this workspace."); return; }
     for (const a of agents) {
       const o = document.createElement("option");
@@ -226,16 +246,19 @@ export async function mount(el, ctx) {
       o.textContent = a.name;
       sel.append(o);
     }
-    await load(sel.value, myGen);
+    await load(sel.value, ++gen);
   }
 
-  sel.addEventListener("change", () => load(sel.value, gen));
+  // every selection is a NEW generation — reusing the current gen lets a
+  // prior request's late completion (success OR error) win over this one
+  sel.addEventListener("change", () => load(sel.value, ++gen));
   unsubWs = onWorkspaceChange(() => loadAgents());
   await loadAgents();
 }
 
 export function unmount() {
   gen++;
+  rosterGen++;
   if (unsubWs) { unsubWs(); unsubWs = null; }
   if (root) { root.remove(); root = null; }
 }

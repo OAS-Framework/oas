@@ -70,7 +70,7 @@ View functions that render need a stub `globalThis.document` with
 no-switch control that proves auto-open still works when the generation has
 not changed. For UI request-generation guards, keep the two generations truly
 overlapping and mutation-check that removing the generation comparison fails;
-see [Race-guard tests must overlap generations and fail when the guard is weakened](/lessons/race-guard-tests-overlap-generations.md).
+see [Race-guard tests must overlap generations and fail when the guard is weakened](/lessons/race-guard-tests-overlap-generations.md). When a parent refresh replaces a child control's options, split the request generations by request kind and disable the stale control while the parent refresh is in flight; see [Split request generations by independently superseding request kind](/lessons/split-generation-counters-per-request-kind.md).
 
 # General lesson
 
