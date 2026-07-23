@@ -128,14 +128,11 @@ test("markdown: sanitizeHtml strips scripts/handlers and normalizes every anchor
   assert.equal(fa.getAttribute("target"), null, "fragment link is not externalized");
 });
 
-test("diff: stale slow response cannot overwrite a newer render (generation guard)", async () => {
+test("diff: two live generations resolved in reverse order — older cannot clobber newer", async () => {
   const { JSDOM } = await import("jsdom");
   const dom = new JSDOM("<!doctype html><body><div id=el></div>");
   const el = dom.window.document.getElementById("el");
-  // Requests resolve manually so the test controls completion ORDER. (The
-  // loading screen removes the toggles, so overlapping generations arise from
-  // a request still in flight when the mount is superseded/disposed.)
-  const inflight = []; // { staged, resolve }
+  const inflight = []; // { staged, resolve } — resolved manually, in test-chosen order
   const mkData = (tag, staged) => ({ repo: "/r", branch: tag, staged, files: [], diff: "" });
   const ctx = {
     instance: "inst-x",
@@ -146,22 +143,43 @@ test("diff: stale slow response cannot overwrite a newer render (generation guar
   await new Promise((r) => setTimeout(r, 10));
   inflight.shift().resolve(mkData("initial", false));
   const dispose = await mountP;
-  const btn = (label) => [...el.querySelectorAll("button")].find((b) => b.textContent === label);
-  // toggle to staged, resolve, then toggle back — leaving the worktree
-  // request SLOW (unresolved)
-  btn("show staged").dispatchEvent(new dom.window.Event("click"));
+  // Retain the toggle before the loading screen detaches it — a click on the
+  // retained node still fires the handler, which is exactly the rapid-toggle
+  // user behavior (two renders in flight at once).
+  const stagedBtn = [...el.querySelectorAll("button")].find((b) => b.textContent === "show staged");
+  assert.ok(stagedBtn, "staged toggle rendered");
+  stagedBtn.dispatchEvent(new dom.window.Event("click"));   // gen A: staged=1
+  stagedBtn.dispatchEvent(new dom.window.Event("click"));   // gen B: staged=0 (newer)
   await new Promise((r) => setTimeout(r, 10));
-  inflight.shift().resolve(mkData("staged-view", true));
+  assert.equal(inflight.length, 2, "two concurrent requests in flight");
+  const [older, newer] = inflight.splice(0, 2);
+  assert.equal(older.staged, true, "older generation requested staged");
+  assert.equal(newer.staged, false, "newer generation requested worktree");
+  // REVERSED completion order: newer lands first, older (stale) last
+  newer.resolve(mkData("newer-view", false));
   await new Promise((r) => setTimeout(r, 10));
-  assert.ok(el.innerHTML.includes("staged-view"), "staged render displayed");
-  btn("show worktree").dispatchEvent(new dom.window.Event("click"));
+  assert.ok(el.innerHTML.includes("newer-view"), "newer render displayed");
+  older.resolve(mkData("stale-view", true));
   await new Promise((r) => setTimeout(r, 10));
-  const slow = inflight.shift();
-  assert.equal(slow.staged, false, "slow worktree request in flight");
-  // the mount is disposed (tab closed / superseded) while the request is
-  // still in flight; its late completion must be discarded, not rendered
+  assert.ok(el.innerHTML.includes("newer-view"), "newer render survives the stale completion");
+  assert.ok(!el.innerHTML.includes("stale-view"), "stale generation never rendered");
   if (typeof dispose === "function") dispose(); else dv.unmount();
-  slow.resolve(mkData("stale-late", false));
+});
+
+test("diff: a response landing after dispose never renders", async () => {
+  const { JSDOM } = await import("jsdom");
+  const dom = new JSDOM("<!doctype html><body><div id=el></div>");
+  const el = dom.window.document.getElementById("el");
+  const inflight = [];
+  const ctx = {
+    instance: "inst-x",
+    api: () => new Promise((resolve) => inflight.push(resolve)),
+    openFile: () => {}, openTerminal: () => {},
+  };
+  const mountP = dv.mount(el, ctx); // initial request stays in flight
   await new Promise((r) => setTimeout(r, 10));
-  assert.ok(!el.innerHTML.includes("stale-late"), "response landing after dispose never renders");
+  dv.unmount(); // tab closed while awaiting (module-level dispose-all)
+  inflight.shift()({ repo: "/r", branch: "post-dispose", staged: false, files: [], diff: "" });
+  await Promise.race([mountP, new Promise((r) => setTimeout(r, 30))]);
+  assert.ok(!el.innerHTML.includes("post-dispose"), "post-dispose response never rendered");
 });
