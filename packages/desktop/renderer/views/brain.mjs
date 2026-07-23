@@ -172,7 +172,11 @@ function renderBrain(body, d, ctx) {
 async function json(res) { return res && typeof res.json === "function" ? res.json() : res; }
 
 let unsubWs = null;
-let gen = 0; // request generation — stale responses never paint
+let rosterGen = 0; // /api/agents generation — workspace refreshes
+let gen = 0;       // /api/brain generation — agent selections
+// SEPARATE tokens (review 3dfe7d1): selections and roster refreshes must not
+// share one counter, or a selection made while /api/agents is in flight
+// cancels the required workspace refresh and strands the stale roster.
 
 export async function mount(el, ctx) {
   root = document.createElement("div");
@@ -214,16 +218,19 @@ export async function mount(el, ctx) {
   // Workspace-aware agent loading: /api/agents is ws-scoped, and the shared
   // workspace bus (Instances/Spawn/Jira switchers) must refresh this view.
   async function loadAgents() {
-    const myGen = ++gen;
+    const myRoster = ++rosterGen;
+    gen++;               // also retire in-flight brain requests of the old roster
+    sel.disabled = true; // a stale-roster selection must not race the refresh
     status("Loading agents…");
     let agents = [];
     try {
       const d = await json(await ctx.api(`/api/agents${wsQuery()}`));
       agents = (d.agents || []).filter((a, i, arr) => arr.findIndex((x) => x.name === a.name) === i);
-    } catch (e) { if (myGen === gen && root) status(`Failed to load agents: ${e.message || e}`); return; }
-    if (myGen !== gen || !root) return;
+    } catch (e) { if (myRoster === rosterGen && root) status(`Failed to load agents: ${e.message || e}`); return; }
+    if (myRoster !== rosterGen || !root) return;
     loadAgents.list = agents;
     sel.innerHTML = "";
+    sel.disabled = false;
     if (!agents.length) { desc.textContent = ""; status("No agents in this workspace."); return; }
     for (const a of agents) {
       const o = document.createElement("option");
@@ -231,7 +238,7 @@ export async function mount(el, ctx) {
       o.textContent = a.name;
       sel.append(o);
     }
-    await load(sel.value, myGen);
+    await load(sel.value, ++gen);
   }
 
   // every selection is a NEW generation — reusing the current gen lets a
@@ -243,6 +250,7 @@ export async function mount(el, ctx) {
 
 export function unmount() {
   gen++;
+  rosterGen++;
   if (unsubWs) { unsubWs(); unsubWs = null; }
   if (root) { root.remove(); root = null; }
 }

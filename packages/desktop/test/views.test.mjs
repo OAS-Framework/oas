@@ -248,3 +248,54 @@ test("brain: stale rejection cannot replace a newer selection's rendered brain",
     g.document = saved.document; g.window = saved.window; g.localStorage = saved.localStorage;
   }
 });
+
+test("brain: a selection during an in-flight roster refresh cannot cancel it", async () => {
+  const { JSDOM } = await import("jsdom");
+  const dom = new JSDOM("<!doctype html><body><div id=el></div>", { url: "http://127.0.0.1/" });
+  const g = globalThis;
+  const saved = { document: g.document, window: g.window, localStorage: g.localStorage };
+  g.document = dom.window.document; g.window = dom.window; g.localStorage = dom.window.localStorage;
+  try {
+    const brain = await import("../renderer/views/brain.mjs");
+    const common = await import("../renderer/views/common.mjs");
+    const el = dom.window.document.getElementById("el");
+    const rosterInflight = []; // manually resolved /api/agents requests
+    const mkBrain = (agent) => ({ agent, description: "", agentsRoot: "/r",
+      soul: { agentsMd: null, skills: [], knowledge: { index: null, tree: [] } }, instances: [] });
+    let rosterCalls = 0;
+    const ctx = {
+      api: (pathname) => {
+        if (pathname.startsWith("/api/agents")) {
+          rosterCalls++;
+          // first roster (mount) resolves immediately; later ones held in flight
+          if (rosterCalls === 1) return Promise.resolve({ agents: [{ name: "old-a" }, { name: "old-b" }] });
+          return new Promise((resolve) => rosterInflight.push(resolve));
+        }
+        return Promise.resolve(mkBrain(decodeURIComponent(pathname.match(/brain\/([^?]+)/)[1])));
+      },
+      openFile: () => {}, openTerminal: () => {},
+    };
+    await brain.mount(el, ctx);
+    const sel = el.querySelector("select");
+    assert.equal(sel.value, "old-a", "old workspace roster loaded");
+    // workspace switches → roster refresh starts and stays in flight
+    common.setWorkspace("ws-new");
+    await new Promise((r) => setTimeout(r, 10));
+    assert.equal(rosterInflight.length, 1, "new roster request in flight");
+    assert.ok(sel.disabled, "selector disabled while the roster refreshes");
+    // user tries to select on the STALE selector anyway (programmatic change
+    // event — the regression: this used to ++gen and cancel the roster)
+    sel.value = "old-b";
+    sel.dispatchEvent(new dom.window.Event("change"));
+    await new Promise((r) => setTimeout(r, 10));
+    // the roster response must still be accepted
+    rosterInflight.shift()({ agents: [{ name: "new-x" }] });
+    await new Promise((r) => setTimeout(r, 10));
+    assert.equal(sel.value, "new-x", "new workspace roster populated despite the mid-flight selection");
+    assert.ok(!sel.disabled, "selector re-enabled after the refresh");
+    brain.unmount();
+    common.setWorkspace(""); // restore shared state for other tests
+  } finally {
+    g.document = saved.document; g.window = saved.window; g.localStorage = saved.localStorage;
+  }
+});
