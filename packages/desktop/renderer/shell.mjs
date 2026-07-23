@@ -384,7 +384,6 @@ async function openTerminalTabInner(instance, ws, key) {
   const term = new Terminal({
     fontSize: type.fontSize,
     fontFamily: type.fontFamily,
-    lineHeight: 1.2,
     theme: xtermTheme(),
     scrollback: 5000,
   });
@@ -481,7 +480,7 @@ const palette = createPalette({
       const next = window.prompt("Terminal font family (CSS font-family value)", current);
       if (next !== null) setTerminalFontFamily(next);
     } },
-    { label: "Terminal: reset typography", run: () => { setTerminalFontFamily(""); setTerminalFontSize(12); } },
+    { label: "Terminal: reset typography", run: () => { setTerminalFontFamily(""); setTerminalFontSize(13); } },
   ],
 });
 window.addEventListener("keydown", (e) => {

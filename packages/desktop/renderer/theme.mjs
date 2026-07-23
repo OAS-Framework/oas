@@ -46,11 +46,11 @@ export function onThemeChange(fn) {
 
 /* tmux carries cells/colors, never the host terminal emulator's font. Keep
    desktop typography as an explicit persisted preference, seeded from
-   semantic CSS tokens (OS monospace + 12px by default). */
+   semantic CSS tokens (OS monospace + 13px by default). */
 export function terminalTypography(el = document.documentElement) {
   const css = getComputedStyle(el);
   let family = css.getPropertyValue("--term-font-family").trim() || "ui-monospace, monospace";
-  let size = Number.parseFloat(css.getPropertyValue("--term-font-size")) || 12;
+  let size = Number.parseFloat(css.getPropertyValue("--term-font-size")) || 13;
   try {
     family = localStorage.getItem(TERM_FONT_KEY) || family;
     size = Number(localStorage.getItem(TERM_SIZE_KEY)) || size;
@@ -63,7 +63,7 @@ function notifyTerminalTypography() {
   for (const fn of [...terminalListeners]) { try { fn(value); } catch { /* isolate listener */ } }
 }
 export function setTerminalFontSize(size) {
-  const value = Math.min(28, Math.max(9, Number(size) || 12));
+  const value = Math.min(28, Math.max(9, Number(size) || 13));
   try { localStorage.setItem(TERM_SIZE_KEY, String(value)); } catch { /* storage-less */ }
   notifyTerminalTypography();
 }

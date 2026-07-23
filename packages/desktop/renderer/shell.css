@@ -99,10 +99,8 @@ body {
   height: 100%; color: var(--muted); gap: 8px; padding: 24px; text-align: center;
 }
 .placeholder h2 { color: var(--fg); margin: 0; font-weight: 600; }
-.term-wrap { position: absolute; inset: 0; padding: 8px 36px 14px; overflow: hidden; background: var(--bg); }
-.term-wrap .xterm { height: 100%; overflow: hidden; border-radius: 8px;
-                    box-shadow: 0 0 0 1px var(--border); }
-.term-wrap .xterm-viewport { border-radius: 8px; }
+.term-wrap { position: absolute; inset: 0; padding: 0 32px; background: var(--term-bg); }
+.term-wrap .xterm { width: 100%; height: 100%; }
 .instance-landing { height: 100%; display: grid; place-items: center; padding: 32px; text-align: center; color: var(--muted); }
 .instance-landing .big { display: block; font-size: 36px; opacity: .45; margin-bottom: 10px; }
 .instance-landing h2 { margin: 0 0 5px; color: var(--fg); font-size: 16px; font-weight: 600; }
