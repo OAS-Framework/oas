@@ -334,6 +334,27 @@ contract or the API contract. Order chosen so every step is visible value.
    surface, focus-visible sweep, contrast verification, `prefers-reduced-
    motion` guards; fix list executed before calling phase 2 done.
 
+### Addendum — human directives (received via coordinator before phase-2
+go-ahead; to be re-confirmed in the go-ahead mail)
+
+Binding design directives that supersede anything conflicting above:
+
+1. **Diff viewer surface removed** — no nav entry, no diff tabs. `/api/diff`
+   and `diff.mjs` stay in the tree, dormant; removing dead UI wiring is in my
+   scope. (Step 5 no longer polishes a diff view; `--diff-*` tokens remain
+   defined for a possible return.)
+2. **Markdown reader is the flagship viewer** — `openFile → markdown` gets
+   the depth budget: typography, highlighting, anchors, relative-link
+   resolution via `ctx.openFile`, strong loading/empty states.
+3. **Jira surface hidden entirely** — no nav entry or inline cards; code
+   stays unwired. Verify no remnants during the polish pass.
+4. **Three first-class surfaces**: (a) hierarchy view = home + primary
+   navigation (extra investment beyond step 4); (b) a proper **souls
+   browser** stage view (descriptions + spawn affordances, palette-reachable)
+   — promoted from the sidebar-list sketch in §2; (c) a nice way into agent
+   brains.
+5. Everything else (themes, tokens, palette, a11y) stands as written.
+
 Dependencies/risks flagged to the coordinator up front: (a) step 5 touches
 other developers' view code — I will work on the *integrated* branch only,
 after their merges; (b) coordination-edge data for §3 uses whatever
