@@ -1,5 +1,6 @@
 # Lessons
 
+* [tmux target prefix matching can kill foreign windows](tmux-target-exact-matching.md) - tmux `-t session:window` targets prefix-match unless anchored with `=`; exact `=<session>:=<window>` targets and nonexistent test sessions prevent retire tests from killing live siblings.
 * [Returned PRs can go stale under fast same-capability cadence](pr-return-staleness-fast-capability-cadence.md) - A PR returned only for merge conflicts can re-conflict before re-review when another PR on the same capability lands in between; handback should re-merge main and re-check mergeability.
 * [Scratch-worktree PR gates need dependencies and installed capabilities](scratch-worktree-pr-gate-environment.md) - Running the full OAS repo gate in a fresh git worktree fails environmentally unless you install devDependencies and provide the deployment's installed capabilities.
 * [PR review friction — same-account review states and worktree-held branch deletion](pr-review-same-account-and-worktree-branch-delete.md) - In single-account deployments, maintainer approval or request-changes reviews may need to be recorded as PR comments, and branch deletion after merge may require deleting only the remote when another instance's worktree holds the local branch.

@@ -252,7 +252,7 @@ test("team block resolves closest-first, reaches hooks/TASK.md, and drives team-
   write(join(ws, "agents", "ws-agent", "soul", "AGENTS.md"), "# ws-agent\n");
   write(join(repo, "agents", "repo-agent", "soul", "soul.yaml"), `name: repo-agent\nkind: persistent\nrepo: ${repo}\nwork: checkout\n`);
   write(join(repo, "agents", "repo-agent", "soul", "AGENTS.md"), "# repo-agent\n");
-  const env = { ...process.env }; delete env.PI_AGENTS_ROOT;
+  const env = { ...process.env, PI_AGENTS_TMUX_SESSION: "oas-test-nosuch" }; delete env.PI_AGENTS_ROOT;
   const r = spawnSync(process.execPath, [CLI, "status", "--team", "--json", "--dir", repo], { encoding: "utf8", env });
   assert.equal(r.status, 0, r.stderr);
   const payload = JSON.parse(r.stdout);
@@ -290,7 +290,7 @@ test("workspace mode links work to the team scope, records no branch, and requir
     const meta = JSON.parse(readFileSync(join(res.home, "instance.json"), "utf8"));
     assert.equal(meta.branch, undefined);
     // Retire never touches the workspace tree.
-    retireInstance(root, "coord-1", {});
+    retireInstance(root, "coord-1", { tmuxSession: "oas-test-nosuch" });
     assert.ok(existsSync(join(ws, "member-repo")));
   } finally { process.env.PATH = oldPath; }
   // No boundary: a bare repo outside any team/workspace config refuses workspace mode.
@@ -312,7 +312,7 @@ test("cross-repo spawn resolves a sibling repo's soul via the team scope and hom
   mkdirSync(join(repoA, "agents"), { recursive: true });
   write(join(repoB, "agents", "api-dev", "soul", "soul.yaml"), `name: api-dev\nkind: persistent\nrepo: ${repoB}\nwork: checkout\nruntime: pi\n`);
   write(join(repoB, "agents", "api-dev", "soul", "AGENTS.md"), "# api-dev\n");
-  const env = { ...process.env, PATH: fakeRuntimes(base) }; delete env.PI_AGENTS_ROOT;
+  const env = { ...process.env, PATH: fakeRuntimes(base), PI_AGENTS_TMUX_SESSION: "oas-test-nosuch" }; delete env.PI_AGENTS_ROOT;
   // Spawn from repo A; soul lives in repo B — unique team-wide match wins.
   let r = spawnSync(process.execPath, [CLI, "spawn", "api-dev", "--no-launch", "--json", "--dir", repoA], { encoding: "utf8", env });
   assert.equal(r.status, 0, r.stderr);
@@ -383,7 +383,7 @@ test("capability-defined agents resolve when active, home locally, and keep the 
       assert.match(readFileSync(join(res.home, "AGENTS.md"), "utf8"), /Review fresh/);
       // the package soul was not written to (no instances/, no scaffolded memory)
       assert.ok(!existsSync(join(capDir, "agents", "reviewer", "instances")));
-      core.retireInstance(root, "reviewer-1", {});
+      core.retireInstance(root, "reviewer-1", { tmuxSession: "oas-test-nosuch" });
     } finally { process.env.PATH = oldPath; }
   });
 });
@@ -404,7 +404,7 @@ test("capability agents carry their own capability's skills regardless of target
     try {
       const res = core.spawnInstance(root, { ...agent, repo }, { instance: "checker-1", launch: false });
       assert.ok(existsSync(join(res.home, ".agents", "skills", "deep-check", "SKILL.md")), "own capability skill materialized");
-      core.retireInstance(root, "checker-1", {});
+      core.retireInstance(root, "checker-1", { tmuxSession: "oas-test-nosuch" });
     } finally { process.env.PATH = oldPath; }
   });
 });

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { spawn, execFileSync } from "node:child_process";
 import { request as httpRequest } from "node:http";
 import { join, dirname } from "node:path";
@@ -164,6 +164,7 @@ test("oas-web manifest: compatibility floor covers the core APIs the server uses
   const apiFloors = [
     ["listCapabilityAgents", "0.16.0"],
     ["findCapabilityAgent", "0.16.0"],
+    ["capabilitySkillDirs", "0.10.0"],
   ];
   const cmp = (a, b) => {
     const pa = a.split(".").map(Number), pb = b.split(".").map(Number);
@@ -288,6 +289,123 @@ test("oas-web server: POST origin guard rejects hostile/null origins without cra
   } finally { proc.kill(); }
 });
 
+// ---- /api/brain/<agent>: soul + instance artifact map per the desktop-app contract ----
+
+test("oas-web brain: findInstance is workspace-scoped — same-named instance elsewhere doesn't mark this one running", () => {
+  const src = extractBlock(join(CAP, "bin", "oas-web.mjs"), "FINDINST");
+  // two workspaces with a same-named instance: running in ws-b, stopped in ws-a
+  const snapshot = { byWs: new Map([
+    ["ws-a", { instances: [{ instance: "dev-1", running: false }] }],
+    ["ws-b", { instances: [{ instance: "dev-1", running: true }, { instance: "only-b", running: true }] }],
+  ]) };
+  const findInstance = new Function("snapshot", "collectNow", "Date",
+    src + "\nreturn findInstance;")(snapshot, () => snapshot.byWs, Date);
+  // scoped lookups resolve within their workspace only — the regression:
+  // /api/brain marked ws-a's stopped dev-1 as running via ws-b's twin
+  assert.equal(findInstance("dev-1", "ws-a").running, false, "ws-a's dev-1 is stopped");
+  assert.equal(findInstance("dev-1", "ws-b").running, true, "ws-b's dev-1 is running");
+  assert.equal(findInstance("only-b", "ws-a"), undefined, "scoped lookup never leaks another workspace");
+  // unscoped (legacy callers) still searches all workspaces
+  assert.equal(findInstance("only-b").running, true);
+  // the brain endpoint passes its resolved workspace id to findInstance
+  const serverSrc = readFileSync(join(CAP, "bin", "oas-web.mjs"), "utf8");
+  assert.ok(/const live = findInstance\(name, ws\?\.id\)/.test(serverSrc),
+    "brainData scopes its running lookup to the resolved workspace");
+});
+
+test("oas-web brain: capability skill paths expand leaf AND parent-tree forms; local + package merge", () => {
+  const src = extractBlock(join(CAP, "bin", "oas-web.mjs"), "BRAINSKILLS");
+  const { expandSkillPath, mergeSkills } = new Function("join",
+    src + "\nreturn { expandSkillPath, mergeSkills };")((...p) => p.join("/"));
+  const entry = (p) => ({ name: p.split("/").pop(), path: p + "/SKILL.md", description: "" });
+  const list = (p) => [entry(p + "/a"), entry(p + "/b")];
+  // leaf form: the path itself contains SKILL.md → one skill
+  assert.deepEqual(expandSkillPath("/cap/skills/code-review", (f) => f === "/cap/skills/code-review/SKILL.md", list, entry)
+    .map((s) => s.name), ["code-review"]);
+  // parent-tree form (`skills: ["skills"]`): no SKILL.md at the path → list children
+  assert.deepEqual(expandSkillPath("/cap/skills", () => false, list, entry).map((s) => s.name), ["a", "b"]);
+  // merge: local soul skill wins on duplicate names; result sorted
+  const merged = mergeSkills(
+    [{ name: "dup", path: "/soul/skills/dup/SKILL.md" }, { name: "z", path: "/soul/skills/z/SKILL.md" }],
+    [{ name: "dup", path: "/cap/skills/dup/SKILL.md" }, { name: "a", path: "/cap/skills/a/SKILL.md" }]);
+  assert.deepEqual(merged.map((s) => s.name), ["a", "dup", "z"]);
+  assert.equal(merged.find((s) => s.name === "dup").path, "/soul/skills/dup/SKILL.md", "local soul wins duplicates");
+});
+
+test("desktop harness: every shipped view has a tab in the shared harness", () => {
+  // README claims a single shared harness for ALL views — enforce it: each
+  // views/*.mjs exporting the view contract (mount) must be reachable from a
+  // harness.html tab (regression: Brain shipped with a standalone harness).
+  const rendererDir = join(ROOT, "packages", "desktop", "renderer");
+  const viewsDir = join(rendererDir, "views");
+  const views = readdirSync(viewsDir).filter((f) => f.endsWith(".mjs"))
+    .filter((f) => /export (async )?function mount\(/.test(readFileSync(join(viewsDir, f), "utf8")))
+    .map((f) => f.replace(/\.mjs$/, ""));
+  assert.ok(views.length >= 5, `shipped views found (got: ${views.join(", ")})`);
+  const harness = readFileSync(join(rendererDir, "harness.html"), "utf8");
+  for (const v of views)
+    assert.ok(harness.includes(`data-view="${v}"`), `harness.html has a tab for the "${v}" view`);
+  // and no stray standalone harnesses reappear next to the shared one
+  const strays = readdirSync(rendererDir).filter((f) => /^dev-.*\.(html|mjs)$/.test(f));
+  assert.deepEqual(strays, [], "no standalone dev-* harness files alongside the shared harness");
+});
+
+
+test("oas-web server: /api/brain returns the contract shape with absolute paths", async () => {
+  // capability agents (reviewer) need installed capabilities — restore first (no-op when present)
+  execFileSync(process.execPath, [CLI, "install", "--dir", ROOT], { stdio: "ignore" });
+  const port = 4000 + Math.floor(Math.random() * 2000);
+  const proc = spawn(process.execPath, [join(CAP, "bin", "oas-web.mjs"), "start", "--port", String(port), "--dir", ROOT], { stdio: "ignore" });
+  try {
+    let up = false;
+    for (let i = 0; i < 40 && !up; i++) {
+      await new Promise((r) => setTimeout(r, 100));
+      try { await fetch(`http://127.0.0.1:${port}/api/panel`); up = true; } catch { /* retry */ }
+    }
+    assert.ok(up, "server came up");
+    // pick a real agent from /api/agents (persistent souls have a soul/ dir)
+    const agents = (await (await fetch(`http://127.0.0.1:${port}/api/agents`)).json()).agents;
+    const target = agents.find((a) => a.kind === "persistent") || agents[0];
+    assert.ok(target, "an agent exists to inspect");
+    const d = await (await fetch(`http://127.0.0.1:${port}/api/brain/${target.name}`)).json();
+    assert.equal(d.agent, target.name);
+    assert.equal(typeof d.description, "string");
+    assert.ok(d.agentsRoot.startsWith("/"), "agentsRoot is absolute");
+    // soul block: AGENTS.md path, skills [{name,path,description}], knowledge {index,tree}
+    assert.ok(d.soul && typeof d.soul === "object", "soul block present");
+    if (d.soul.agentsMd) assert.ok(d.soul.agentsMd.startsWith("/") && d.soul.agentsMd.endsWith("AGENTS.md"));
+    assert.ok(Array.isArray(d.soul.skills));
+    for (const s of d.soul.skills) {
+      assert.ok(s.name && s.path.startsWith("/") && s.path.endsWith("SKILL.md"), "skill has name + absolute SKILL.md path");
+      assert.equal(typeof s.description, "string");
+    }
+    assert.ok(d.soul.knowledge && Array.isArray(d.soul.knowledge.tree));
+    for (const p of d.soul.knowledge.tree) assert.ok(p.startsWith("/") && p.endsWith(".md"), "knowledge tree entries are absolute .md paths");
+    if (d.soul.knowledge.index) assert.ok(d.soul.knowledge.tree.includes(d.soul.knowledge.index), "index is part of the tree");
+    // instances block
+    assert.ok(Array.isArray(d.instances));
+    for (const i of d.instances) {
+      assert.ok(i.instance && i.home.startsWith("/"), "instance has name + absolute home");
+      assert.equal(typeof i.running, "boolean");
+      assert.ok(Array.isArray(i.skills) && Array.isArray(i.notes));
+      for (const k of ["agentsMd", "state", "task"]) if (i[k] !== null) assert.ok(i[k].startsWith(i.home), `${k} lives under the instance home`);
+      for (const n of i.notes) assert.ok(n.startsWith(i.home) && n.endsWith(".md"));
+    }
+    // unknown agent → 404; hostile agent name never becomes a path probe
+    assert.equal((await fetch(`http://127.0.0.1:${port}/api/brain/no-such-agent`)).status, 404);
+    assert.equal((await fetch(`http://127.0.0.1:${port}/api/brain/..%2F..%2Fetc`)).status, 404, "traversal-shaped names don't match the route");
+    // capability-defined agents: their skills are declared at the PACKAGE level
+    // (manifest `skills:` paths), not under the soul dir — the brain must show
+    // the canonical skill set (regression: reviewer reported soul.skills: []).
+    const rev = await (await fetch(`http://127.0.0.1:${port}/api/brain/reviewer`)).json();
+    assert.ok(rev.soul, "capability agent resolves a brain");
+    const skillNames = rev.soul.skills.map((s) => s.name);
+    assert.ok(skillNames.includes("code-review") && skillNames.includes("security-review"),
+      `capability agent carries its package skills (got: ${skillNames.join(", ")})`);
+    for (const s of rev.soul.skills) assert.ok(s.path.startsWith("/") && s.path.endsWith("SKILL.md"));
+  } finally { proc.kill(); }
+});
+
 // ---- /api/agents + /api/spawn: roster of spawnable souls incl. capability agents ----
 
 test("oas-web server: /api/agents lists persistent AND capability-defined agents; /api/spawn validates", async () => {
@@ -330,4 +448,214 @@ test("oas-web server: /api/agents lists persistent AND capability-defined agents
     const err = (await r.json()).error;
     assert.ok(!/unknown agent/.test(err), `reviewer resolves via findCapabilityAgent (got: ${err})`);
   } finally { proc.kill(); }
+});
+
+// ---- /api/file guard + /api/diff (desktop viewers) ----
+
+test("oas-web file guard: traversal, prefix-sneak, and symlink escapes fail closed", async () => {
+  const { mkdtempSync, writeFileSync, mkdirSync, symlinkSync, realpathSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { sep, resolve } = await import("node:path");
+  const src = extractBlock(join(CAP, "bin", "oas-web.mjs"), "FILEGUARD");
+  const resolveGuardedFile = new Function("realpathSync", "resolve", "sep",
+    `${src}; return resolveGuardedFile;`)(realpathSync, resolve, sep);
+  const base = mkdtempSync(join(tmpdir(), "oasweb-guard-"));
+  const root = join(base, "root"); mkdirSync(root);
+  const evil = join(base, "root-evil"); mkdirSync(evil);
+  writeFileSync(join(root, "ok.md"), "# hi");
+  writeFileSync(join(evil, "secret"), "no");
+  writeFileSync(join(base, "outside"), "no");
+  symlinkSync(join(base, "outside"), join(root, "link"));
+  assert.ok(resolveGuardedFile(join(root, "ok.md"), [root]).real, "in-root file allowed");
+  assert.equal(resolveGuardedFile(join(root, "..", "outside"), [root]).code, 403, "dotdot traversal rejected");
+  assert.equal(resolveGuardedFile(join(evil, "secret"), [root]).code, 403, "prefix-sneak sibling rejected");
+  assert.equal(resolveGuardedFile(join(root, "link"), [root]).code, 403, "symlink escape rejected");
+  assert.equal(resolveGuardedFile("relative/path", [root]).code, 400, "relative path rejected");
+  assert.equal(resolveGuardedFile(join(root, "missing"), [root]).code, 404, "missing file is 404");
+});
+
+test("oas-web server: /api/file serves guarded text files with markdown flag; /api/diff 404s unknown instance", async () => {
+  const port = 4000 + Math.floor(Math.random() * 2000);
+  const proc = spawn(process.execPath, [join(CAP, "bin", "oas-web.mjs"), "start", "--port", String(port), "--dir", ROOT], { stdio: "ignore" });
+  try {
+    let up = false;
+    for (let i = 0; i < 40 && !up; i++) {
+      await new Promise((r) => setTimeout(r, 100));
+      try { await fetch(`http://127.0.0.1:${port}/api/panel`); up = true; } catch { /* retry */ }
+    }
+    assert.ok(up, "server came up");
+    const get = (p) => fetch(`http://127.0.0.1:${port}${p}`);
+    // outside every root → 403 (or 404 if the path doesn't exist — never 200)
+    const denied = await get(`/api/file?path=${encodeURIComponent("/etc/hosts")}`);
+    assert.ok([403, 404].includes(denied.status), `outside path rejected (${denied.status})`);
+    assert.equal((await get("/api/file?path=relative.md")).status, 400, "relative path is 400");
+    // a file inside a server-reported agents root must serve
+    const ad = await (await get("/api/agents")).json();
+    const roots = [...new Set(ad.agents.map((a) => a.agentsRoot))];
+    const { readdirSync, existsSync: ex } = await import("node:fs");
+    let served = false;
+    for (const agentsRoot of roots) {
+      for (const a of readdirSync(agentsRoot)) {
+        const p = join(agentsRoot, a, "soul", "AGENTS.md");
+        if (!ex(p)) continue;
+        const r = await get(`/api/file?path=${encodeURIComponent(p)}`);
+        if (r.status !== 200) continue;
+        const d = await r.json();
+        assert.equal(d.path, p);
+      assert.equal(d.markdown, true, "md extension sets markdown flag");
+      assert.ok(typeof d.content === "string" && d.content.length, "content served");
+      assert.ok(d.name && d.size > 0 && d.mtime, "metadata present");
+      served = true; break;
+      }
+      if (served) break;
+    }
+    assert.ok(served, "an agent AGENTS.md was served through the guard");
+    assert.equal((await get("/api/diff/no-such-instance")).status, 404, "diff for unknown instance is 404");
+  } finally { proc.kill(); }
+});
+
+test("oas-web server: hostile Host header is rejected on GET file/diff APIs (DNS rebinding)", async () => {
+  const port = 4000 + Math.floor(Math.random() * 2000);
+  const proc = spawn(process.execPath, [join(CAP, "bin", "oas-web.mjs"), "start", "--port", String(port), "--dir", ROOT], { stdio: "ignore" });
+  try {
+    let up = false;
+    for (let i = 0; i < 40 && !up; i++) {
+      await new Promise((r) => setTimeout(r, 100));
+      try { await fetch(`http://127.0.0.1:${port}/api/panel`); up = true; } catch { /* retry */ }
+    }
+    assert.ok(up, "server came up");
+    const rawGet = (path) => new Promise((resolve, reject) => {
+      const rq = httpRequest({ host: "127.0.0.1", port, path, method: "GET",
+        headers: { host: "attacker.example" } }, (rs) => resolve(rs.statusCode));
+      rq.on("error", reject); rq.end();
+    });
+    assert.equal(await rawGet(`/api/file?path=${encodeURIComponent(join(ROOT, "README.md"))}`), 403, "rebinding host cannot read files");
+    assert.equal(await rawGet("/api/diff/x"), 403, "rebinding host cannot read diffs");
+    assert.equal(await rawGet("/api/panel"), 403, "rebinding host cannot enumerate roots");
+    assert.equal((await fetch(`http://127.0.0.1:${port}/api/panel`)).status, 200, "loopback host still serves");
+  } finally { proc.kill(); }
+});
+
+test("oas-web diff stats: -z rename records key by the new path with R status", () => {
+  const src = extractBlock(join(CAP, "bin", "oas-web.mjs"), "DIFFSTAT");
+  const parseDiffStats = new Function(`${src}; return parseDiffStats;`)();
+  // rename dir/old.js -> dir/new name.js (space: -z handles unusual names), plus a modify
+  const numstat = "3\t1\t\0dir/old.js\0dir/new name.js\0" + "5\t2\tplain.js\0";
+  const nameStatus = "R100\0dir/old.js\0dir/new name.js\0" + "M\0plain.js\0";
+  const files = parseDiffStats(numstat, nameStatus);
+  assert.equal(files.length, 2);
+  const ren = files.find((f) => f.status === "R");
+  assert.ok(ren, "rename detected");
+  assert.equal(ren.path, "dir/new name.js", "keyed by the NEW path");
+  assert.equal(ren.additions, 3); assert.equal(ren.deletions, 1);
+  const mod = files.find((f) => f.path === "plain.js");
+  assert.equal(mod.status, "M"); assert.equal(mod.additions, 5);
+});
+
+test("oas-web diff synthesis: untracked symlinks render link text, FIFOs are skipped unread", async () => {
+  const { mkdtempSync, writeFileSync, symlinkSync, lstatSync, readlinkSync, readFileSync } = await import("node:fs");
+  const { execFileSync: xfs } = await import("node:child_process");
+  const { tmpdir } = await import("node:os");
+  const src = extractBlock(join(CAP, "bin", "oas-web.mjs"), "UNTRACKED");
+  const synthUntracked = new Function(`${src}; return synthUntracked;`)();
+  const dir = mkdtempSync(join(tmpdir(), "oasweb-untracked-"));
+  writeFileSync(join(dir, "secret-target"), "TOP-SECRET-KEY-MATERIAL");
+  symlinkSync(join(dir, "secret-target"), join(dir, "leak.txt"));
+  writeFileSync(join(dir, "plain.txt"), "hello\n");
+  try { xfs("mkfifo", [join(dir, "pipe")], { timeout: 4000 }); } catch { /* platform without mkfifo */ }
+  const untracked = ["leak.txt", "plain.txt", ...(lstatSync(join(dir, "pipe"), { throwIfNoEntry: false }) ? ["pipe"] : [])];
+  const files = [];
+  const io = { lstatSync, readlinkSync, readFileSync, join, maxBytes: 2 * 1024 * 1024 };
+  const diff = synthUntracked(dir, untracked, files, io);
+  assert.ok(!diff.includes("TOP-SECRET-KEY-MATERIAL"), "symlink target content never read into the diff");
+  assert.ok(diff.includes("+hello"), "regular file content synthesized");
+  const leak = files.find((f) => f.path === "leak.txt");
+  assert.ok(leak, "symlink listed as added");
+  assert.ok(diff.includes("secret-target"), "symlink renders its link text (readlink)");
+  const pipe = files.find((f) => f.path === "pipe");
+  if (pipe) assert.equal(pipe.additions, null, "FIFO listed but never opened");
+  // swap-in guard: a statSync-based implementation would follow the symlink
+  assert.ok(src.includes("lstatSync") || src.includes("io.lstatSync"), "implementation lstat's entries");
+});
+
+// ---- tmux target anchoring: prefix-match hazard (reviewer-death bug class) ----
+
+test("oas-web tmux targets: exact-match anchoring fails closed for reads AND writes", (t) => {
+  const src = extractBlock(join(CAP, "bin", "oas-web.mjs"), "TMUXTGT");
+  const tmuxTarget = new Function(`${src}; return tmuxTarget;`)();
+  // component validation: separator/anchor injection rejected
+  assert.equal(tmuxTarget({ tmux: { session: "s1", window: "reviewer-1" } }), "=s1:=reviewer-1");
+  for (const bad of ["a:b", "a=b", "", "a b"]) {
+    assert.throws(() => tmuxTarget({ tmux: { session: bad, window: "w" } }), `session "${bad}" rejected`);
+    assert.throws(() => tmuxTarget({ tmux: { session: "s", window: bad } }), `window "${bad}" rejected`);
+  }
+  // live half: reviewer-1 ABSENT, reviewer-15abc PRESENT — the unanchored
+  // target would prefix-match the live window; the anchored one must error.
+  const session = `oaswebtgt${process.pid}`;
+  try {
+    execFileSync("tmux", ["new-session", "-d", "-s", session, "-n", "reviewer-15abc"], { timeout: 4000 });
+  } catch { t.skip("tmux unavailable"); return; }
+  try {
+    const anchored = tmuxTarget({ tmux: { session, window: "reviewer-1" } });
+    const unanchored = `${session}:reviewer-1`;
+    // sanity: the hazard is real — unanchored prefix-match hits the live window
+    const hit = execFileSync("tmux", ["display-message", "-p", "-t", unanchored, "#{window_name}"],
+      { encoding: "utf8", timeout: 4000 }).trim();
+    assert.equal(hit, "reviewer-15abc", "unanchored target prefix-matches the wrong live window");
+    // read path fails closed
+    assert.throws(() => execFileSync("tmux", ["capture-pane", "-p", "-t", anchored], { stdio: "pipe", timeout: 4000 }),
+      "anchored capture-pane errors instead of exposing the wrong pane");
+    assert.throws(() => execFileSync("tmux", ["list-panes", "-t", anchored, "-F", "#{pane_width}"], { stdio: "pipe", timeout: 4000 }),
+      "anchored list-panes (paneInfo path) errors");
+    // NOTE display-message -p -t <missing> silently falls back to a default
+    // context instead of erroring — that's why paneInfo uses list-panes.
+    // write path fails closed
+    assert.throws(() => execFileSync("tmux", ["send-keys", "-t", anchored, "-H", "78"], { stdio: "pipe", timeout: 4000 }),
+      "anchored send-keys errors instead of typing into the wrong window");
+    assert.throws(() => execFileSync("tmux", ["send-keys", "-t", anchored, "C-c"], { stdio: "pipe", timeout: 4000 }),
+      "anchored interrupt errors");
+    // the exact-name window still works end to end
+    const ok = tmuxTarget({ tmux: { session, window: "reviewer-15abc" } });
+    execFileSync("tmux", ["send-keys", "-t", ok, "-H", "23"], { timeout: 4000 }); // harmless '#'
+    assert.ok(execFileSync("tmux", ["capture-pane", "-p", "-t", ok], { encoding: "utf8", timeout: 4000 }) !== undefined);
+  } finally {
+    try { execFileSync("tmux", ["kill-session", "-t", `=${session}`], { timeout: 4000 }); } catch { /* already gone */ }
+  }
+});
+
+test("oas-web paneInfo: geometry comes from the ACTIVE pane, same pane capture/send target", (t) => {
+  // Drive the REAL paneInfo (extracted marker block, with the real
+  // tmuxTarget in scope) against a two-pane fixture where the active pane
+  // is index 1 with a distinct width — reverting the -f '#{pane_active}'
+  // filter makes this fail (row 0's width would be reported).
+  const tgtSrc = extractBlock(join(CAP, "bin", "oas-web.mjs"), "TMUXTGT");
+  const piSrc = extractBlock(join(CAP, "bin", "oas-web.mjs"), "PANEINFO");
+  const paneInfo = new Function("execFileSync", `${tgtSrc}${piSrc}; return paneInfo;`)(execFileSync);
+  const session = `oaswebpane${process.pid}`;
+  try {
+    execFileSync("tmux", ["new-session", "-d", "-s", session, "-n", "w1", "-x", "101", "-y", "30"], { timeout: 4000 });
+  } catch { t.skip("tmux unavailable"); return; }
+  try {
+    const target = `=${session}:=w1`;
+    execFileSync("tmux", ["split-window", "-h", "-t", target], { timeout: 4000 });
+    execFileSync("tmux", ["resize-pane", "-t", `${target}.1`, "-x", "30"], { timeout: 4000 });
+    execFileSync("tmux", ["select-pane", "-t", `${target}.1`], { timeout: 4000 });
+    // print some output into pane 1 so its history/cursor differ from pane 0
+    execFileSync("tmux", ["send-keys", "-t", `${target}.1`, "printf 'a\\nb\\nc\\n'", "Enter"], { timeout: 4000 });
+    const paneW = (idx) => Number(execFileSync("tmux", ["display-message", "-p", "-t", `${target}.${idx}`, "#{pane_width}"],
+      { encoding: "utf8", timeout: 4000 }).trim());
+    const w0 = paneW(0), w1 = paneW(1);
+    assert.notEqual(w0, w1, "fixture: the two panes have distinct widths");
+    const info = paneInfo({ tmux: { session, window: "w1" } });
+    assert.equal(info.size.cols, w1, "paneInfo reports the ACTIVE pane's width (pane 1), not row 0's");
+    // same pane capture-pane operates on: the window target's active pane
+    const capW = Number(execFileSync("tmux", ["display-message", "-p", "-t", `${target}.1`, "#{pane_width}"],
+      { encoding: "utf8", timeout: 4000 }).trim());
+    assert.equal(info.size.cols, capW, "geometry matches the pane capture/send target");
+    // fail-closed path of the real function: missing window falls back to defaults
+    const missing = paneInfo({ tmux: { session, window: "nope" } });
+    assert.equal(missing.size.cols, 80, "missing window returns the safe default, never another pane");
+  } finally {
+    try { execFileSync("tmux", ["kill-session", "-t", `=${session}`], { timeout: 4000 }); } catch { /* gone */ }
+  }
 });

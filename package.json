@@ -14,7 +14,7 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "test": "node --test",
+    "test": "node --test 'test/**/*.test.mjs' 'tests/**/*.test.mjs' 'capabilities/**/*.test.mjs' 'packages/**/*.test.mjs'",
     "check": "node --check lib/core.mjs && node --check bin/oas.mjs",
     "check:pi": "node --experimental-strip-types --check packages/pi/extension/index.ts",
     "validate": "node scripts/validate-project.mjs",
