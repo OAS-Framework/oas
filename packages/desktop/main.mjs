@@ -177,13 +177,17 @@ ipcMain.handle("term:open", (e, { session, window: win, cols, rows }) => {
   guard(e);
   // openTerm (tmux-target.mjs): anchors + PREFLIGHTS the exact source target
   // (missing target rejects here → the renderer's "could not attach"), then
-  // creates a per-tab GROUPED viewer session pinned to the exact window and
-  // attaches the pty THERE. The viewer owns an independent current-window
-  // selection, so no other client's window switch can ever steer this tab
-  // (steady-state wrong-agent hazard); the durable session is never touched.
+  // builds a per-tab LINKED-WINDOW viewer session (placeholder → link exact
+  // window → drop placeholder → lock keys) and attaches the pty THERE. The
+  // viewer contains ONLY the linked window: no client's window switch, no
+  // viewer-side key binding, and no sibling auto-select on window death can
+  // ever steer this tab to another agent — when the source window dies the
+  // viewer terminates (pty exit → "session ended"). Durable session
+  // untouched.
   const { pty: p, killViewer } = openTerm({ session, window: win, cols, rows }, {
     preflight: (target) => tmuxRun(["list-panes", "-t", target]),
     tmux: tmuxRun,
+    tmuxOut: (args) => execFileSync("tmux", args, { encoding: "utf8", timeout: 4000 }).trim(),
     spawnPty: (target, c, r) => pty.spawn("tmux", ["attach-session", "-t", target], {
       name: "xterm-256color", cols: c, rows: r, cwd: process.env.HOME, env: process.env,
     }),
