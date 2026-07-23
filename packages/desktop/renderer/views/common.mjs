@@ -47,11 +47,20 @@ const wsListeners = new Set();
 /* In-memory source of truth; localStorage is persistence only (absent in
    node tests and storage-less shells). */
 let wsCurrent = (() => { try { return localStorage.getItem(WS_KEY) || ""; } catch { return ""; } })();
+/* Workspace GENERATION — bumped on every switch. Async paths capture it at
+   dispatch and discard completions from an older generation: a deferred
+   roster/agents/jira response — or a finished spawn — from workspace A must
+   never paint or act after the user switched to B (same-named instances
+   across workspaces make identity checks insufficient; see the ws-scoping
+   lesson). */
+let wsGen = 0;
+export function workspaceGeneration() { return wsGen; }
 export function currentWorkspace() {
   return wsCurrent;
 }
 export function setWorkspace(id) {
   wsCurrent = id || "";
+  wsGen++;                                   // invalidate all in-flight ws-scoped work
   try { localStorage.setItem(WS_KEY, wsCurrent); } catch { /* storage-less env */ }
   for (const fn of [...wsListeners]) { try { fn(wsCurrent); } catch { /* listener error must not break others */ } }
 }

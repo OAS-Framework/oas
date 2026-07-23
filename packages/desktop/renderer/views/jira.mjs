@@ -5,7 +5,7 @@
    Contract: mount(el, ctx) / unmount(). Plain ES module + DOM. */
 import {
   escapeHtml, apiJson, ensureTheme,
-  setWorkspace, onWorkspaceChange, renderWorkspaceSelect, wsQuery, instanceApiPath,
+  setWorkspace, onWorkspaceChange, renderWorkspaceSelect, wsQuery, instanceApiPath, workspaceGeneration,
 } from "./common.mjs";
 
 let state = null;
@@ -44,10 +44,12 @@ export function unmount() {
 }
 
 async function refresh(s) {
+  const myGen = workspaceGeneration();       // capture at dispatch
   let panel;
   try { panel = await apiJson(s.ctx, `/api/panel${wsQuery()}`); }
   catch { return; }
-  if (!s.alive) return;
+  // discard deferred roster responses from a previous workspace
+  if (!s.alive || myGen !== workspaceGeneration()) return;
   s.panel = panel;
   renderWorkspaceSelect(s.q("wssel"), panel.workspaces, panel.workspace?.id || "");
   renderList(s);
