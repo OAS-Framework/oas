@@ -46,4 +46,5 @@ minting and confirm the test fails.
 
 - [Agent brain endpoint and desktop brain view](/architecture/agent-brain-endpoint-and-view.md) records the Brain renderer contract this race affected.
 - [Race-guard tests must overlap generations and fail when the guard is weakened](/lessons/race-guard-tests-overlap-generations.md) covers the broader request-generation test shape.
+- [Split request generations by independently superseding request kind](/lessons/split-generation-counters-per-request-kind.md) covers Brain's roster-refresh versus selection-load counter split.
 - [Workspace-sensitive async results need local tickets and global workspace generations](/lessons/stale-response-race.md) covers workspace-scoped async stale-result guards.
