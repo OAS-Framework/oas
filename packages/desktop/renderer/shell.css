@@ -77,14 +77,18 @@ body {
 }
 #tabbar:empty { display: none; }
 .tab {
-  display: flex; align-items: center; gap: 8px;
-  padding: 0 12px; cursor: pointer; white-space: nowrap;
+  display: flex; align-items: center; white-space: nowrap;
   background: var(--surface-2); border-right: 1px solid var(--border);
   color: var(--muted); max-width: 240px;
 }
 .tab.active { background: var(--bg); color: var(--fg); box-shadow: inset 0 2px 0 var(--accent); }
-.tab .close { opacity: .5; padding: 0 2px; border-radius: 3px; }
-.tab .close:hover { opacity: 1; background: var(--surface-2); }
+.tab-trigger, .tab .close {
+  appearance: none; border: 0; background: none; color: inherit; font: inherit; cursor: pointer;
+}
+.tab-trigger { align-self: stretch; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+               padding: 0 4px 0 12px; text-align: left; }
+.tab .close { opacity: .65; margin: 0 8px 0 2px; padding: 2px 5px; border-radius: 4px; font-size: 15px; }
+.tab .close:hover, .tab .close:focus-visible { opacity: 1; background: var(--surface-2); }
 #tabhost { flex: 1; position: relative; min-height: 0; }
 #stagehost { flex: 1; position: relative; min-height: 0; }
 #stagehost > div { height: 100%; }

@@ -15,6 +15,7 @@ import { createPalette, isPaletteShortcut } from "./palette.mjs";
 import { createViewLifecycle } from "./view-lifecycle.mjs";
 import { reserveKey, whenKeyFree } from "./tab-keys.mjs";
 import { createTerminalTab } from "./terminal-tab.mjs";
+import { createTabChrome, tabKeyAction } from "./tab-a11y.mjs";
 import {
   terminalTabsForWorkspace, tabVisibleInContext, canActivateTab,
   fallbackTabForContext, terminalOpenOwnsWorkspace,
@@ -88,7 +89,12 @@ function showTabLayer(on) {
   if (!on) {
     stageHost.style.display = "";
     activeTab = null;
-    for (const t of tabs.values()) t.tabEl.classList.remove("active");
+    for (const t of tabs.values()) {
+      t.tabEl.classList.remove("active");
+      t.triggerEl.setAttribute("aria-selected", "false");
+      t.triggerEl.tabIndex = -1;
+      t.paneEl.hidden = true;
+    }
   } else {
     stageHost.style.display = "none";
     updateContextTabs();
@@ -98,7 +104,7 @@ function showTabLayer(on) {
 function updateContextTabs() {
   for (const t of tabs.values()) {
     const visible = tabVisibleInContext(t, sidebarMode, currentWorkspace());
-    t.tabEl.style.display = visible ? "" : "none";
+    t.tabEl.hidden = !visible;
   }
 }
 
@@ -219,7 +225,7 @@ async function showInstances() {
 // ── tabs ──────────────────────────────────────────────────────────────────
 const tabbar = document.getElementById("tabbar");
 const tabhost = document.getElementById("tabhost");
-const tabs = new Map(); // id -> { tabEl, paneEl, title, key, onClose, onShow }
+const tabs = new Map(); // id -> { tabEl, triggerEl, closeEl, paneEl, title, key, onClose, onShow }
 let nextTabId = 1;
 let activeTab = null;
 
@@ -229,26 +235,32 @@ let activeTab = null;
  * KEYED open must `await whenKeyFree(key)` first: a reopen during a closed
  * tab's deferred cleanup queues behind it instead of being dropped or torn
  * down by the stale lifecycle. */
+function onTabKeydown(e, id) {
+  const visible = [...tabs].filter(([, t]) => !t.tabEl.hidden);
+  const at = visible.findIndex(([tid]) => tid === id);
+  if (at < 0) return;
+  const action = tabKeyAction(e, at, visible.length);
+  if (!action) return;
+  e.preventDefault();
+  if (action.type === "close") { closeTab(id, true); return; }
+  const [nextId, tab] = visible[action.index];
+  if (activateTab(nextId)) tab.triggerEl.focus();
+}
+
 function addTab({ title, key, kind = "artifact", workspace = null, onClose, onShow }) {
   if (key) {
     for (const [tid, t] of tabs) if (t.key === key) { activateTab(tid); return null; }
   }
   const id = nextTabId++;
-  const tabEl = document.createElement("div");
-  tabEl.className = "tab";
-  const label = document.createElement("span");
-  label.textContent = title;
-  const close = document.createElement("span");
-  close.className = "close";
-  close.textContent = "×";
-  tabEl.append(label, close);
-  const paneEl = document.createElement("div");
-  paneEl.className = "tab-pane";
+  const { tabEl, triggerEl, closeEl, paneEl } = createTabChrome(
+    document, id, title, navigator.platform.includes("Mac"),
+  );
   tabbar.append(tabEl);
   tabhost.append(paneEl);
-  tabEl.addEventListener("click", (e) => { if (e.target !== close) activateTab(id); });
-  close.addEventListener("click", () => closeTab(id));
-  tabs.set(id, { tabEl, paneEl, title, key, kind, workspace, onClose, onShow });
+  triggerEl.addEventListener("click", () => activateTab(id));
+  triggerEl.addEventListener("keydown", (e) => onTabKeydown(e, id));
+  closeEl.addEventListener("click", (e) => { e.stopPropagation(); closeTab(id, true); });
+  tabs.set(id, { tabEl, triggerEl, closeEl, paneEl, title, key, kind, workspace, onClose, onShow });
   activateTab(id);
   return { id, paneEl };
 }
@@ -269,14 +281,18 @@ function activateTab(id) {
   }
   showTabLayer(true);
   for (const [tid, t] of tabs) {
-    t.tabEl.classList.toggle("active", tid === id);
-    t.paneEl.classList.toggle("active", tid === id);
+    const selected = tid === id;
+    t.tabEl.classList.toggle("active", selected);
+    t.triggerEl.setAttribute("aria-selected", String(selected));
+    t.triggerEl.tabIndex = selected ? 0 : -1;
+    t.paneEl.classList.toggle("active", selected);
+    t.paneEl.hidden = !selected;
   }
   tabs.get(id)?.onShow?.();
   return true;
 }
 
-function closeTab(id) {
+function closeTab(id, restoreFocus = false) {
   const t = tabs.get(id);
   if (!t) return;
   // onClose may return a promise (deferred cleanup while a mount is pending);
@@ -291,9 +307,13 @@ function closeTab(id) {
   tabs.delete(id);
   if (activeTab === id) {
     const fallback = fallbackTabForContext(tabs, sidebarMode, currentWorkspace());
-    if (fallback) activateTab(fallback[0]);
-    else if (t.kind === "terminal") showInstances();
+    if (fallback) {
+      activateTab(fallback[0]);
+      if (restoreFocus) fallback[1].triggerEl.focus();
+    } else if (t.kind === "terminal") showInstances();
     else { activeTab = null; showTabLayer(false); if (stage) setNavActive(stage.name); }
+  } else if (restoreFocus) {
+    tabs.get(activeTab)?.triggerEl.focus();
   }
 }
 

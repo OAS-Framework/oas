@@ -71,12 +71,36 @@ const NODE_W = 208, NODE_H = 58, GAP_X = 26, GAP_Y = 46, PAD = 40;
 export function layoutForest(instances) {
   const byName = new Map(instances.map((i) => [i.instance, { inst: i, children: [] }]));
   const roots = [];
+  const parentOf = new Map();
   for (const n of byName.values()) {
     const p = n.inst.parentInstance && byName.get(n.inst.parentInstance);
-    if (p && p !== n) p.children.push(n); else roots.push(n);
+    if (p && p !== n) { p.children.push(n); parentOf.set(n, p); }
+    else roots.push(n);
   }
   const rank = (a, b) => (a.inst.running === b.inst.running
     ? a.inst.instance.localeCompare(b.inst.instance) : a.inst.running ? -1 : 1);
+
+  // A malformed parentInstance cycle has no natural root and used to vanish
+  // entirely. Mark normal root-reachable nodes, then promote one deterministic
+  // node from every still-unreachable component and sever only its incoming
+  // edge. Because every node has at most one parent, that single cut breaks the
+  // component's cycle while retaining all nodes and all other valid edges.
+  const reachable = new Set();
+  const mark = (n) => {
+    if (reachable.has(n)) return;
+    reachable.add(n);
+    n.children.forEach(mark);
+  };
+  roots.forEach(mark);
+  for (const n of [...byName.values()].sort(rank)) {
+    if (reachable.has(n)) continue;
+    const p = parentOf.get(n);
+    if (p) p.children = p.children.filter((child) => child !== n);
+    parentOf.delete(n);
+    roots.push(n);
+    mark(n);
+  }
+
   roots.sort(rank);
   let cursor = 0; // next free leaf x slot
   const place = (n, depth) => {

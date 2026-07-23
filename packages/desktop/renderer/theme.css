@@ -10,7 +10,7 @@
   --border: #2d333c;
   --fg: #e6edf3;          /* primary text  (13.9:1 on bg) */
   --muted: #9aa4b2;       /* secondary text (5.6:1 on surface) */
-  --faint: #6e7681;       /* tertiary/disabled */
+  --faint: #8b949e;       /* tertiary/disabled; AA where also used as metadata */
   --accent: #4493f8;      /* interactive */
   --accent-fg: #ffffff;
   --ok: #3fb950; --warn: #d29922; --danger: #f85149;
@@ -41,23 +41,23 @@
   --surface-2: #f0e9d2;
   --border: #ddd4bc;
   --fg: #37424a;
-  --muted: #657b83;
-  --faint: #93a1a1;
-  --accent: #1f6fb2;
+  --muted: #56676d;
+  --faint: #55666b;
+  --accent: #155f96;
   --accent-fg: #ffffff;
-  --ok: #667f00; --warn: #9a6a00; --danger: #c73f3f;
-  --chip-bg: #ede5cc; --chip-fg: #62707a;
+  --ok: #465f00; --warn: #725500; --danger: #b52f35;
+  --chip-bg: #ede5cc; --chip-fg: #56676d;
   --sel: #1f6fb21f;
   --term-bg: #fdf6e3;
   --term-fg: #586e75;
   --term-sel: #d3c9a8;
   --shadow: 0 1px 3px rgb(88 110 117 / .14);
   /* solarized ANSI remap — base colors stay AA-readable on paper */
-  --ansi-black: #93a1a1; --ansi-red: #dc322f; --ansi-green: #859900; --ansi-yellow: #b58900;
-  --ansi-blue: #268bd2; --ansi-magenta: #d33682; --ansi-cyan: #2aa198; --ansi-white: #586e75;
-  --ansi-bright-black: #839496; --ansi-bright-red: #cb4b16; --ansi-bright-green: #6b7f00;
-  --ansi-bright-yellow: #8f6c00; --ansi-bright-blue: #1f6fb2; --ansi-bright-magenta: #b02e6d;
-  --ansi-bright-cyan: #1f8a82; --ansi-bright-white: #37424a;
+  --ansi-black: #55666b; --ansi-red: #b52f35; --ansi-green: #465f00; --ansi-yellow: #725500;
+  --ansi-blue: #155d91; --ansi-magenta: #9d2b61; --ansi-cyan: #0f6863; --ansi-white: #56676d;
+  --ansi-bright-black: #56676d; --ansi-bright-red: #a43a14; --ansi-bright-green: #4f6f00;
+  --ansi-bright-yellow: #725500; --ansi-bright-blue: #155f96; --ansi-bright-magenta: #9d2b61;
+  --ansi-bright-cyan: #0f6863; --ansi-bright-white: #37424a;
   --md-code-bg: #58637510; --md-rule: #5863752e;
   --graph-edge: #ddd4bc; --graph-edge-coord: #1f6fb2;
 }
@@ -168,12 +168,10 @@
 .oas-view .toolhead .tverb { color: var(--ok); font-weight: 700; flex: none; }
 .oas-view .toolhead.running .tverb { color: var(--warn); animation: oas-pulse 1.2s ease-in-out infinite; }
 .oas-view .toolhead .tcmd { color: var(--term-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.oas-view .toolout { color: color-mix(in srgb, var(--term-fg) 62%, transparent); white-space: pre-wrap;
+.oas-view .toolout { color: var(--muted); white-space: pre-wrap;
                      word-break: break-all; font-size: 12px; padding: 3px 0 0 18px; }
-.oas-view .toolout.full { max-height: 360px; overflow-y: auto;
-                          color: color-mix(in srgb, var(--term-fg) 80%, transparent); }
-.oas-view .tool .more { color: color-mix(in srgb, var(--term-fg) 40%, transparent); padding-left: 18px;
-                        font-size: 11px; cursor: pointer; }
+.oas-view .toolout.full { max-height: 360px; overflow-y: auto; color: var(--term-fg); }
+.oas-view .tool .more { color: var(--muted); padding-left: 18px; font-size: 11px; cursor: pointer; }
 .oas-view .tool .more:hover { color: var(--term-fg); }
 .oas-view .tool.wf { border: 1px solid color-mix(in srgb, var(--term-fg) 18%, transparent);
                      border-radius: 8px; padding: 10px 14px; margin: 10px 0;
