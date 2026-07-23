@@ -16,7 +16,7 @@ import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { apiUrl, apiInit } from "./api-url.mjs";
-import { openTerm } from "./tmux-target.mjs";
+import { openTerm, sweepViewers } from "./tmux-target.mjs";
 import { ensureServerOnPort } from "./server-compat.mjs";
 
 const require = createRequire(import.meta.url);
@@ -152,45 +152,68 @@ ipcMain.handle("api", async (e, pathname, opts) => {
   return { ok: r.ok, status: r.status, body: json };
 });
 
-// ---- IPC: integrated terminal (node-pty ↔ tmux attach) ------------------
-const ptys = new Map(); // id -> IPty
+// ---- IPC: integrated terminal (node-pty ↔ grouped tmux viewer session) ---
+const ptys = new Map(); // id -> { pty, killViewer }
 let nextPtyId = 1;
+
+const tmuxRun = (args) => execFileSync("tmux", args, { stdio: "ignore", timeout: 4000 });
+
+/** Sweep viewer sessions leaked by CRASHED desktop instances (exact: only
+ * oasdesk-<pid>- names whose pid is dead). Run at app start and quit. */
+function sweepOrphanViewers() {
+  try {
+    const names = execFileSync("tmux", ["list-sessions", "-F", "#{session_name}"], { encoding: "utf8", timeout: 4000 })
+      .split("\n").filter(Boolean);
+    const swept = sweepViewers({
+      listSessions: () => names,
+      killSession: (name) => tmuxRun(["kill-session", "-t", `=${name}`]),
+      pidAlive: (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } },
+    });
+    if (swept.length) console.log(`oas-desktop: swept ${swept.length} orphaned viewer session(s): ${swept.join(", ")}`);
+  } catch { /* no tmux server — nothing to sweep */ }
+}
 
 ipcMain.handle("term:open", (e, { session, window: win, cols, rows }) => {
   guard(e);
-  // openTerm (tmux-target.mjs) anchors the target (=session:=window — tmux
-  // -t prefix-matches by default), PREFLIGHTS it so a missing exact target
-  // rejects here (→ the renderer's "could not attach" banner) instead of
-  // surfacing as a late async pty exit, then spawns the viewer pty.
-  const { pty: p } = openTerm({ session, window: win, cols, rows }, {
-    preflight: (target) => execFileSync("tmux", ["list-panes", "-t", target], { stdio: "ignore", timeout: 4000 }),
-    // Direct attach: tmux stays the durable session host; the pty is a viewer.
+  // openTerm (tmux-target.mjs): anchors + PREFLIGHTS the exact source target
+  // (missing target rejects here → the renderer's "could not attach"), then
+  // creates a per-tab GROUPED viewer session pinned to the exact window and
+  // attaches the pty THERE. The viewer owns an independent current-window
+  // selection, so no other client's window switch can ever steer this tab
+  // (steady-state wrong-agent hazard); the durable session is never touched.
+  const { pty: p, killViewer } = openTerm({ session, window: win, cols, rows }, {
+    preflight: (target) => tmuxRun(["list-panes", "-t", target]),
+    tmux: tmuxRun,
     spawnPty: (target, c, r) => pty.spawn("tmux", ["attach-session", "-t", target], {
       name: "xterm-256color", cols: c, rows: r, cwd: process.env.HOME, env: process.env,
     }),
   });
   const id = nextPtyId++;
   const wc = e.sender;
+  const dropViewer = () => { try { killViewer(); } catch { /* already gone (session ended) */ } };
   p.onData((data) => { if (!wc.isDestroyed()) wc.send(`term:data:${id}`, data); });
   p.onExit(({ exitCode }) => {
     ptys.delete(id);
+    dropViewer(); // pty gone (detach or session end) — the viewer session must not linger
     if (!wc.isDestroyed()) wc.send(`term:exit:${id}`, exitCode);
   });
-  ptys.set(id, p);
+  ptys.set(id, { pty: p, killViewer: dropViewer });
   return id;
 });
-ipcMain.on("term:write", (e, id, data) => { guard(e); ptys.get(id)?.write(String(data)); });
+ipcMain.on("term:write", (e, id, data) => { guard(e); ptys.get(id)?.pty.write(String(data)); });
 ipcMain.on("term:resize", (e, id, cols, rows) => {
   guard(e);
-  const p = ptys.get(id);
-  if (p && cols > 0 && rows > 0) { try { p.resize(cols, rows); } catch { /* racing exit */ } }
+  const t = ptys.get(id);
+  if (t && cols > 0 && rows > 0) { try { t.pty.resize(cols, rows); } catch { /* racing exit */ } }
 });
 ipcMain.on("term:close", (e, id) => {
   guard(e);
-  // Kill the pty ONLY — tmux detaches the client; the session lives on.
-  const p = ptys.get(id);
+  // Kill the pty and ITS viewer session only — the durable session and its
+  // windows always survive (onExit also drops the viewer; both are safe).
+  const t = ptys.get(id);
   ptys.delete(id);
-  try { p?.kill(); } catch { /* already gone */ }
+  try { t?.pty.kill(); } catch { /* already gone */ }
+  t?.killViewer();
 });
 
 // ---- window -------------------------------------------------------------
@@ -223,6 +246,7 @@ async function createWindow() {
 }
 
 app.whenReady().then(async () => {
+  sweepOrphanViewers(); // a previously crashed desktop must not leak viewer sessions
   try { await ensureServer(); }
   catch (e) { console.error(`oas-desktop: ${e.message}`); }
   await createWindow();
@@ -232,10 +256,14 @@ app.whenReady().then(async () => {
 app.on("window-all-closed", () => { app.quit(); });
 
 function shutdown() {
-  // Detach every viewer pty (never the tmux sessions) and stop the server
-  // only if we started it.
-  for (const p of ptys.values()) { try { p.kill(); } catch { /* best-effort */ } }
+  // Detach every pty and kill its viewer session (never the durable
+  // sessions); stop the server only if we started it; sweep any orphans.
+  for (const t of ptys.values()) {
+    try { t.pty.kill(); } catch { /* best-effort */ }
+    t.killViewer();
+  }
   ptys.clear();
+  sweepOrphanViewers();
   if (serverChild) { try { serverChild.kill(); } catch { /* best-effort */ } serverChild = null; }
 }
 app.on("before-quit", shutdown);
