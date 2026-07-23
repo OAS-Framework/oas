@@ -9,7 +9,7 @@
 import { currentWorkspace } from "./views/common.mjs";
 import { createViewLifecycle } from "./view-lifecycle.mjs";
 import { reserveKey, whenKeyFree } from "./tab-keys.mjs";
-import { createTermLifecycle } from "./term-lifecycle.mjs";
+import { createTerminalTab } from "./terminal-tab.mjs";
 
 const desk = window.oasDesktop;
 
@@ -161,32 +161,23 @@ async function openTerminalTabInner(instance, ws, key) {
   const fit = new FitAddon.FitAddon();
   term.loadAddon(fit);
 
-  let offData = null, offExit = null;
-  let ro = null;
-
-  // Lifecycle-aware terminal open: closing while termOpen() is pending must
-  // detach the pty the moment it materializes (an invisible attached tmux
-  // client would otherwise leak until app shutdown). Same disease — and same
-  // shape of cure — as the view mount lifecycle.
-  const life = createTermLifecycle(
-    { open: () => desk.termOpen({ session: inst.tmux.session, window: inst.tmux.window, cols: term.cols, rows: term.rows }),
-      closePty: (id) => desk.termClose(id) },
-    (e) => console.error(e),
-  );
-
-  const disposeUi = () => {
-    // Detach-only semantics live in the lifecycle; this is the UI teardown.
-    offData?.(); offExit?.();
-    ro?.disconnect();
-    term.dispose();
-  };
+  // Composition (setup-inside-onReady, teardown symmetry) lives in
+  // terminal-tab.mjs so its ordering is unit-testable (review termlc2).
+  const tab = createTerminalTab({
+    desk,
+    term,
+    tmux: { session: inst.tmux.session, window: inst.tmux.window },
+    wrap,
+    isActive: () => made.paneEl.classList.contains("active"),
+    fit: () => fit.fit(),
+  });
 
   const made = addTab({
     title: `⌗ ${instance}`,
     key,
     // close() resolves when cleanup (incl. a late-materializing pty detach)
     // actually ran — closeTab reserves the key on this promise.
-    onClose: () => life.close(disposeUi),
+    onClose: () => tab.close(),
     onShow: () => { requestAnimationFrame(() => { try { fit.fit(); } catch {} }); },
   });
   if (!made) { term.dispose(); return; } // lost a race to an identical tab
@@ -194,37 +185,7 @@ async function openTerminalTabInner(instance, ws, key) {
   term.open(wrap);
   fit.fit();
 
-  await life.start(
-    (ptyId) => {
-      // ALL post-attach setup lives here: onReady runs before the lifecycle's
-      // settle signal, so a close-during-pending resumes only after this and
-      // disposeUi covers every resource created — nothing is set up on a
-      // disposed terminal (review termlc: handlers/observer/focus after the
-      // await ran even when close had already torn the UI down).
-      offData = desk.onTermData(ptyId, (data) => term.write(data));
-      offExit = desk.onTermExit(ptyId, () => {
-        life.forget(); // pty is gone; close() must not double-kill
-        const banner = document.createElement("div");
-        banner.className = "term-banner";
-        banner.textContent = "session ended — close this tab";
-        wrap.append(banner);
-      });
-      term.onData((data) => { if (life.ptyId() !== null) desk.termWrite(life.ptyId(), data); });
-      term.onResize(({ cols, rows }) => { if (life.ptyId() !== null) desk.termResize(life.ptyId(), cols, rows); });
-      ro = new ResizeObserver(() => {
-        if (!made.paneEl.classList.contains("active")) return;
-        try { fit.fit(); } catch { /* zero-size while hidden */ }
-      });
-      ro.observe(wrap);
-      term.focus();
-    },
-    (e) => {
-      const banner = document.createElement("div");
-      banner.className = "term-banner";
-      banner.textContent = `could not attach: ${e?.message || e}`;
-      wrap.append(banner);
-    },
-  );
+  await tab.start();
 }
 
 // ── nav rail ──────────────────────────────────────────────────────────────
