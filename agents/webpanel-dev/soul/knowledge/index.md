@@ -51,6 +51,7 @@ marketplace capability (`capabilities/oas-web/`: `bin/oas-web.mjs` server +
 * [lessons/untrusted-worktree-entries-lstat-before-reading.md](lessons/untrusted-worktree-entries-lstat-before-reading.md) - Desktop viewers must lstat untracked worktree entries before reading them: render symlinks as readlink text and skip FIFOs/devices so untrusted worktrees cannot leak files or hang the server.
 * [lessons/sanitize-marked-markdown-before-innerhtml.md](lessons/sanitize-marked-markdown-before-innerhtml.md) - DOMPurify decides what untrusted markdown markup survives, but surviving anchors still need a post-sanitize pass that rewrites local file links and forces safe target/rel on external links before innerHTML.
 * [lessons/git-rename-stats-nul-parsing.md](lessons/git-rename-stats-nul-parsing.md) - Diff viewers must parse git --numstat -z and --name-status -z output with explicit old-NUL-new rename fields instead of the human dir/{old => new} form.
+* [lessons/pin-node-test-globs-in-nested-worktrees.md](lessons/pin-node-test-globs-in-nested-worktrees.md) - In OAS repos where agent instance homes contain nested work checkouts, bare node --test can recurse into stale sibling suites, so npm test must pin intended globs and destructive helpers must default to sandbox targets.
 
 ## playbooks/
 

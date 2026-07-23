@@ -1,5 +1,8 @@
 # Knowledge Log
 
+## 2026-07-23
+* **Creation**: added [Pin node --test globs in repos that contain sibling worktrees](/lessons/pin-node-test-globs-in-nested-worktrees.md) from the bare-node-test-worktree-recursion note: bare `node --test` recursed into sibling agent worktrees and ran stale destructive tmux tests, so `npm test` must pin globs and retire tests must target a sandbox tmux session.
+
 ## 2026-07-22
 * **Creation**: added [Contract-test the shared desktop renderer harness against shipped views](/lessons/shared-renderer-harness-enumeration-test.md) from the shared-harness enumeration note: renderer harness tabs should be enforced by enumerating mount-exporting views and banning stray `dev-*` harness files.
 * **Update**: [Desktop renderer views port of the panel](/architecture/desktop-renderer-views-port.md) and [Agent brain endpoint and desktop brain view](/architecture/agent-brain-endpoint-and-view.md) now link the shared-harness enumeration lesson and record that `harness-server.mjs` is the surviving same-origin proxy.
