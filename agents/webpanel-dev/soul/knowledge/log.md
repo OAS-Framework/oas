@@ -1,5 +1,10 @@
 # Knowledge Log
 
+## 2026-07-23
+* **Creation**: added [Race-guard tests must overlap generations and fail when the guard is weakened](/lessons/race-guard-tests-overlap-generations.md) from the race-guard-tests note: request-generation guard tests must create two concurrent in-flight generations, resolve newest first, and fail when the generation comparison is removed so disposal-only coverage cannot masquerade as a race regression.
+* **Update**: [Workspace-sensitive async results need local tickets and global workspace generations](/lessons/stale-response-race.md) now links the overlapping-generation mutation-check lesson from its regression-pattern guidance.
+* **Creation**: added [Pin node --test globs in repos that contain sibling worktrees](/lessons/pin-node-test-globs-in-nested-worktrees.md) from the bare-node-test-worktree-recursion note: bare `node --test` recursed into sibling agent worktrees and ran stale destructive tmux tests, so `npm test` must pin globs and retire tests must target a sandbox tmux session.
+
 ## 2026-07-22
 * **Creation**: added [Pin node --test globs when agent worktrees are siblings](/lessons/pinned-node-test-globs.md) from the pinned-test-globs-sibling-worktrees note: bare `node --test` can recurse into `agents/*/instances/*/work`, inflate counts, and execute stale destructive tests; use `npm test` with pinned globs.
 * **Creation**: added [Contract-test the shared desktop renderer harness against shipped views](/lessons/shared-renderer-harness-enumeration-test.md) from the shared-harness enumeration note: renderer harness tabs should be enforced by enumerating mount-exporting views and banning stray `dev-*` harness files.

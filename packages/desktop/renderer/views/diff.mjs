@@ -147,17 +147,29 @@ export async function mount(el, ctx) {
   mounts.add(dispose);
 
   const state = { staged: false, sideBySide: false };
+  // Request-generation guard: rapid staged/worktree toggles start concurrent
+  // fetches, and a SLOW OLD response must not overwrite a newer render (or a
+  // disposed mount). Each render owns a monotonic token, captures its mode
+  // before the await, and discards its completion if it no longer owns the
+  // mount — same pattern as the shell's c40b1b2/1eef32f fixes.
+  let renderGen = 0;
   const render = async () => {
+    const gen = ++renderGen;
+    const mode = { staged: state.staged, sideBySide: state.sideBySide };
+    const owns = () => gen === renderGen && mounts.has(dispose);
     root.innerHTML = `<div class="dfv-head">Loading diff for ${escapeHtml(ctx.instance || "")}…</div>`;
     let data;
     try {
       // ctx.ws (from the shell's workspace-keyed picker) scopes the server-side
       // instance lookup — same-named instances exist across workspaces.
       const ws = ctx.ws ? `&ws=${encodeURIComponent(ctx.ws)}` : "";
-      const res = await ctx.api(`/api/diff/${encodeURIComponent(ctx.instance)}?staged=${state.staged ? 1 : 0}${ws}`);
+      const res = await ctx.api(`/api/diff/${encodeURIComponent(ctx.instance)}?staged=${mode.staged ? 1 : 0}${ws}`);
+      if (!owns()) return; // superseded or disposed while awaiting
       data = res && res.json ? await res.json() : res;
+      if (!owns()) return;
       if (data.error) throw new Error(data.error);
     } catch (e) {
+      if (!owns()) return;
       root.innerHTML = `<div class="dfv-head">Diff unavailable: ${escapeHtml(e.message || String(e))}</div>`;
       return;
     }
@@ -166,13 +178,13 @@ export async function mount(el, ctx) {
     head.className = "dfv-head";
     head.innerHTML = `<span class="branch">${escapeHtml(data.branch || "")}</span><span>${escapeHtml(data.repo || "")}</span>`;
     const mkBtn = (label, on) => { const b = doc.createElement("button"); b.textContent = label; b.addEventListener("click", on); head.append(b); };
-    mkBtn(state.staged ? "show worktree" : "show staged", () => { state.staged = !state.staged; render(); });
-    mkBtn(state.sideBySide ? "unified" : "side-by-side", () => { state.sideBySide = !state.sideBySide; render(); });
+    mkBtn(mode.staged ? "show worktree" : "show staged", () => { state.staged = !state.staged; render(); });
+    mkBtn(mode.sideBySide ? "unified" : "side-by-side", () => { state.sideBySide = !state.sideBySide; render(); });
     root.append(head);
 
     if (!data.files.length) {
       const p = doc.createElement("div");
-      p.textContent = state.staged ? "Nothing staged." : "Working tree clean.";
+      p.textContent = mode.staged ? "Nothing staged." : "Working tree clean.";
       root.append(p);
       return;
     }
@@ -189,7 +201,7 @@ export async function mount(el, ctx) {
       list.append(li);
     }
     root.append(list);
-    for (const f of parseUnifiedDiff(data.diff)) root.append(fileSection(doc, f, statOf.get(f.path), state.sideBySide));
+    for (const f of parseUnifiedDiff(data.diff)) root.append(fileSection(doc, f, statOf.get(f.path), mode.sideBySide));
   };
   await render();
   return dispose;
