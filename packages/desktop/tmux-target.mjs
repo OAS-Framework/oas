@@ -22,7 +22,7 @@ export function tmuxAttachTarget(session, window) {
   if (typeof session !== "string" || !/^[\w@%.-]+$/.test(session)) {
     throw new Error("term:open: bad session name");
   }
-  if (window === undefined || window === null || window === "") return `=${session}`;
+  if (window === undefined || window === null) return `=${session}`;
   const win = String(window);
   if (!/^[\w@%.-]+$/.test(win)) throw new Error("term:open: bad window name");
   return `=${session}:=${win}`;

@@ -10,7 +10,7 @@
 //     terminal tab, bytes streamed to xterm.js over IPC. Closing a tab kills
 //     the pty ONLY — the tmux session is the durable host and must survive.
 import { app, BrowserWindow, ipcMain, shell } from "electron";
-import { spawn } from "node:child_process";
+import { spawn, execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
@@ -149,6 +149,16 @@ ipcMain.handle("term:open", (e, { session, window: win, cols, rows }) => {
   // similarly named LIVE window — keystrokes into the wrong agent. With the
   // anchor tmux errors out instead; the renderer shows "could not attach".
   const target = tmuxAttachTarget(session, win);
+  // Preflight: node-pty's spawn succeeds once the tmux BINARY starts — a bad
+  // -t target only surfaces as an async exit AFTER term:open resolved with an
+  // id, so the renderer's open-error path never fired (it painted "session
+  // ended" at best, or raced a blank tab). Verify the exact target exists
+  // NOW and throw, so the renderer's "could not attach" banner is reliable.
+  try {
+    execFileSync("tmux", ["list-panes", "-t", target], { stdio: "ignore", timeout: 4000 });
+  } catch {
+    throw new Error(`term:open: no tmux target ${target}`);
+  }
   const id = nextPtyId++;
   // Direct attach: tmux stays the durable session host; the pty is a viewer.
   const p = pty.spawn("tmux", ["attach-session", "-t", target], {

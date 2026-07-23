@@ -20,9 +20,17 @@ test("rejects malformed session/window values", () => {
   for (const bad of [undefined, 42, "", "a:b", "a b", "$(x)", "a;b", "=s"]) {
     assert.throws(() => tmuxAttachTarget(bad, "w"), /bad session/, `session ${JSON.stringify(bad)}`);
   }
-  for (const bad of ["a:b", "a b", "$(x)", "a;b", "=w"]) {
+  for (const bad of ["a:b", "a b", "$(x)", "a;b", "=w", ""]) {
     assert.throws(() => tmuxAttachTarget("s", bad), /bad window/, `window ${JSON.stringify(bad)}`);
   }
+});
+
+test("only undefined/null mean 'no window' — empty string fails closed", () => {
+  // review tmuxtgt nit: an explicit "" must not silently become a
+  // session-only target (selecting the session's CURRENT window).
+  assert.equal(tmuxAttachTarget("s", undefined), "=s");
+  assert.equal(tmuxAttachTarget("s", null), "=s");
+  assert.throws(() => tmuxAttachTarget("s", ""), /bad window/);
 });
 
 test("live tmux: anchored target rejects a missing exact window instead of prefix-matching", (t) => {
@@ -34,7 +42,12 @@ test("live tmux: anchored target rejects a missing exact window instead of prefi
     // Unanchored "session:reviewer-1" would PREFIX-MATCH the live
     // "reviewer-15c135c" window — the wrong-agent hazard.
     const unanchored = spawnSync("tmux", ["list-panes", "-t", `${session}:reviewer-1`], { encoding: "utf8", timeout: 5000 });
-    // Anchored form must refuse: no exact "reviewer-1" window exists.
+    // Anchored form must refuse: no exact "reviewer-1" window exists. This
+    // doubles as the PREFLIGHT regression — main.mjs runs exactly this
+    // list-panes check before spawning the pty, so a missing exact target
+    // makes term:open THROW (→ renderer's "could not attach" banner, proven
+    // in packages/desktop/test/terminal-tab.test.mjs) instead of surfacing
+    // as a late async pty exit.
     const anchored = spawnSync("tmux", ["list-panes", "-t", tmuxAttachTarget(session, "reviewer-1")], { encoding: "utf8", timeout: 5000 });
     assert.notEqual(anchored.status, 0, "anchored target must NOT resolve a prefix match");
     if (unanchored.status === 0) {
