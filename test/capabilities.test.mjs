@@ -290,7 +290,7 @@ test("workspace mode links work to the team scope, records no branch, and requir
     const meta = JSON.parse(readFileSync(join(res.home, "instance.json"), "utf8"));
     assert.equal(meta.branch, undefined);
     // Retire never touches the workspace tree.
-    retireInstance(root, "coord-1", {});
+    retireInstance(root, "coord-1", { tmuxSession: "oas-test-nosuch" });
     assert.ok(existsSync(join(ws, "member-repo")));
   } finally { process.env.PATH = oldPath; }
   // No boundary: a bare repo outside any team/workspace config refuses workspace mode.
@@ -383,7 +383,7 @@ test("capability-defined agents resolve when active, home locally, and keep the 
       assert.match(readFileSync(join(res.home, "AGENTS.md"), "utf8"), /Review fresh/);
       // the package soul was not written to (no instances/, no scaffolded memory)
       assert.ok(!existsSync(join(capDir, "agents", "reviewer", "instances")));
-      core.retireInstance(root, "reviewer-1", {});
+      core.retireInstance(root, "reviewer-1", { tmuxSession: "oas-test-nosuch" });
     } finally { process.env.PATH = oldPath; }
   });
 });
@@ -404,7 +404,7 @@ test("capability agents carry their own capability's skills regardless of target
     try {
       const res = core.spawnInstance(root, { ...agent, repo }, { instance: "checker-1", launch: false });
       assert.ok(existsSync(join(res.home, ".agents", "skills", "deep-check", "SKILL.md")), "own capability skill materialized");
-      core.retireInstance(root, "checker-1", {});
+      core.retireInstance(root, "checker-1", { tmuxSession: "oas-test-nosuch" });
     } finally { process.env.PATH = oldPath; }
   });
 });
