@@ -1,5 +1,9 @@
 # Knowledge Log
 
+## 2026-07-23
+* **Update**: skills/pr-review — added the tmux target prefix-matching review gotcha for spawn/retire tests and exact `=<session>:=<window>` targeting.
+* **Creation**: [tmux target prefix matching can kill foreign windows](/lessons/tmux-target-exact-matching.md) — tmux `-t session:window` can prefix-match sibling windows; retire paths must use exact targets and tests must avoid real sessions.
+
 ## 2026-07-22
 * **Update**: skills/pr-review — added same-capability conflict-return staleness guidance and clarified that same-account GitHub auth also blocks request-changes reviews.
 * **Update**: [PR review friction — same-account review states and worktree-held branch deletion](/lessons/pr-review-same-account-and-worktree-branch-delete.md) — clarified that the same-account review block applies to `gh pr review --request-changes` as well as approvals.
