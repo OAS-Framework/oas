@@ -86,3 +86,36 @@ test("closePty failure is absorbed and cleanup still completes", async () => {
   assert.equal(uiDisposed, 1, "UI teardown despite detach failure");
   assert.equal(errors.length, 1);
 });
+
+test("setup/teardown ordering: close-during-pending resumes only AFTER onReady finished, so disposeUi covers onReady's resources", async () => {
+  // Review termlc: the shell created handlers/observer/focus AFTER awaiting
+  // start(), so a mid-flight close ran disposeUi first and the setup landed
+  // on a disposed terminal. All setup now lives in onReady; this pins the
+  // lifecycle guarantee that makes it sound: close() cannot resolve between
+  // open-resolution and onReady completion.
+  const gate = deferred();
+  const order = [];
+  const life = createTermLifecycle({ open: () => gate.promise, closePty: () => order.push("detach") });
+  const starting = life.start(
+    () => { order.push("setup"); },      // resources created in onReady
+    () => {},
+  );
+  const closing = life.close(() => { order.push("disposeUi"); });
+  gate.resolve(11);                      // pty materializes after close
+  await starting;
+  await closing;
+  // closed-before-settle: onReady is skipped entirely (no setup on a dead
+  // tab) and the pty is detached; disposeUi runs last — never before a
+  // possible setup.
+  assert.deepEqual(order, ["detach", "disposeUi"]);
+
+  // live path: setup must be complete before any later close's disposeUi.
+  const order2 = [];
+  const gate2 = deferred();
+  const life2 = createTermLifecycle({ open: () => gate2.promise, closePty: () => order2.push("detach") });
+  const starting2 = life2.start(() => { order2.push("setup"); }, () => {});
+  gate2.resolve(12);
+  await starting2;
+  await life2.close(() => { order2.push("disposeUi"); });
+  assert.deepEqual(order2, ["setup", "detach", "disposeUi"], "setup strictly precedes teardown");
+});

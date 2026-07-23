@@ -196,6 +196,11 @@ async function openTerminalTabInner(instance, ws, key) {
 
   await life.start(
     (ptyId) => {
+      // ALL post-attach setup lives here: onReady runs before the lifecycle's
+      // settle signal, so a close-during-pending resumes only after this and
+      // disposeUi covers every resource created — nothing is set up on a
+      // disposed terminal (review termlc: handlers/observer/focus after the
+      // await ran even when close had already torn the UI down).
       offData = desk.onTermData(ptyId, (data) => term.write(data));
       offExit = desk.onTermExit(ptyId, () => {
         life.forget(); // pty is gone; close() must not double-kill
@@ -204,6 +209,14 @@ async function openTerminalTabInner(instance, ws, key) {
         banner.textContent = "session ended — close this tab";
         wrap.append(banner);
       });
+      term.onData((data) => { if (life.ptyId() !== null) desk.termWrite(life.ptyId(), data); });
+      term.onResize(({ cols, rows }) => { if (life.ptyId() !== null) desk.termResize(life.ptyId(), cols, rows); });
+      ro = new ResizeObserver(() => {
+        if (!made.paneEl.classList.contains("active")) return;
+        try { fit.fit(); } catch { /* zero-size while hidden */ }
+      });
+      ro.observe(wrap);
+      term.focus();
     },
     (e) => {
       const banner = document.createElement("div");
@@ -212,15 +225,6 @@ async function openTerminalTabInner(instance, ws, key) {
       wrap.append(banner);
     },
   );
-  term.onData((data) => { if (life.ptyId() !== null) desk.termWrite(life.ptyId(), data); });
-  term.onResize(({ cols, rows }) => { if (life.ptyId() !== null) desk.termResize(life.ptyId(), cols, rows); });
-
-  ro = new ResizeObserver(() => {
-    if (!made.paneEl.classList.contains("active")) return;
-    try { fit.fit(); } catch { /* zero-size while hidden */ }
-  });
-  ro.observe(wrap);
-  term.focus();
 }
 
 // ── nav rail ──────────────────────────────────────────────────────────────
