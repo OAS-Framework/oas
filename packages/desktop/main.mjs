@@ -17,7 +17,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { apiUrl, apiInit } from "./api-url.mjs";
 import { openTerm } from "./tmux-target.mjs";
-import { selectServer } from "./server-compat.mjs";
+import { ensureServerOnPort } from "./server-compat.mjs";
 
 const require = createRequire(import.meta.url);
 const pty = require("node-pty");
@@ -98,17 +98,17 @@ function spawnServer(onPort) {
 }
 
 async function ensureServer() {
-  // Selection seam (server-compat.mjs): reuse only a server that covers OUR
-  // workspace AND identifies as this checkout via /api/version; anything
-  // else — wrong workspace, older/foreign server — gets left alone and we
-  // spawn our own on the next free port.
-  const choice = await selectServer({ panelWorkspaces, probeVersion, matchWorkspace, local: localServerIdentity() });
-  if (choice.action === "reuse") { wsId = choice.wsId; return { spawned: false }; }
-  if (choice.portOccupied) {
-    console.log(`oas-desktop: server on ${port} — ${choice.reason} — starting a dedicated one`);
-    port = await freePort(port + 1);
-  }
-  spawnServer(port);
+  // ensureServerOnPort (server-compat.mjs) is the testable seam for the
+  // whole step: reuse only a server that covers OUR workspace AND identifies
+  // as this checkout via /api/version; otherwise leave it alone and spawn
+  // our own — on the next free port when the current one is occupied.
+  const r = await ensureServerOnPort({
+    panelWorkspaces, probeVersion, matchWorkspace, local: localServerIdentity(),
+    port, freePort: (from) => freePort(from), spawnServer: (p) => spawnServer(p),
+    log: (m) => console.log(`oas-desktop: ${m}`),
+  });
+  port = r.port;
+  if (!r.spawned) { wsId = r.wsId; return { spawned: false }; }
   // wait for the server to come up (max ~10s) and verify its workspace
   for (let i = 0; i < 40; i++) {
     const ws = await panelWorkspaces();

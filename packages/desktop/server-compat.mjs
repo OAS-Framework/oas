@@ -64,3 +64,30 @@ export async function selectServer(io) {
   if (!compat.compatible) return { action: "spawn", portOccupied: true, reason: `incompatible (${compat.reason})` };
   return { action: "reuse", wsId };
 }
+
+/**
+ * The full ensure step — selection PLUS the caller's consumption of it
+ * (review srvcompat3: tests proved selectServer emits portOccupied but not
+ * that the caller consumes it; reverting the caller to reason-string
+ * matching left tests green). Injectable port/spawn effects.
+ *
+ * @param {object} io   selectServer's io PLUS:
+ * @param {number} io.port                       current port
+ * @param {(from: number) => Promise<number>} io.freePort
+ * @param {(port: number) => void} io.spawnServer
+ * @param {(msg: string) => void} [io.log]
+ * @returns {Promise<{ spawned: boolean, port: number, wsId: string|null }>}
+ *   wsId is null when spawned (the caller verifies the new server's
+ *   workspace during its readiness wait).
+ */
+export async function ensureServerOnPort(io) {
+  const choice = await selectServer(io);
+  if (choice.action === "reuse") return { spawned: false, port: io.port, wsId: choice.wsId };
+  let port = io.port;
+  if (choice.portOccupied) {
+    io.log?.(`server on ${port} — ${choice.reason} — starting a dedicated one`);
+    port = await io.freePort(port + 1);
+  }
+  io.spawnServer(port);
+  return { spawned: true, port, wsId: null };
+}
