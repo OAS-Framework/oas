@@ -123,16 +123,44 @@ function makeMarked(filePath) {
 }
 
 const STYLE = `
-.mdv { max-width: 860px; margin: 0 auto; padding: 24px 32px 64px; font: 15px/1.65 -apple-system, "Segoe UI", sans-serif; }
+.mdv-scroll { height: 100%; overflow-y: auto; background: var(--bg, #fff); color: var(--fg, #222); }
+.mdv { max-width: 860px; margin: 0 auto; padding: 28px 36px 72px; font: 15px/1.7 -apple-system, "Segoe UI", sans-serif; }
+.mdv h1 { font-size: 1.7em; margin: 1.2em 0 .6em; }
+.mdv h2 { font-size: 1.35em; margin: 1.4em 0 .5em; }
+.mdv h3 { font-size: 1.12em; margin: 1.3em 0 .4em; }
+.mdv h1:first-child { margin-top: 0; }
 .mdv h1, .mdv h2 { border-bottom: 1px solid var(--md-rule, #8883); padding-bottom: .3em; }
-.mdv pre.md-code { padding: 12px 14px; border-radius: 6px; overflow-x: auto; background: var(--md-code-bg, #8881); }
-.mdv code { font: 13px/1.5 "SF Mono", Menlo, monospace; }
-.mdv :not(pre) > code { background: var(--md-code-bg, #8881); padding: .15em .35em; border-radius: 4px; }
-.mdv table { border-collapse: collapse; } .mdv th, .mdv td { border: 1px solid var(--md-rule, #8883); padding: 4px 10px; }
-.mdv blockquote { margin: 0; padding: 0 1em; border-left: 3px solid var(--md-rule, #8885); opacity: .85; }
-.mdv img { max-width: 100%; }
-.mdv .mdv-meta { font-size: 12px; opacity: .6; margin-bottom: 16px; }
-.mdv .mdv-error { color: #c33; }
+.mdv h1, .mdv h2, .mdv h3, .mdv h4 { position: relative; scroll-margin-top: 16px; }
+.mdv .hanchor { position: absolute; left: -22px; top: 0; opacity: 0; color: var(--accent, #4493f8);
+                text-decoration: none; font-weight: 400; }
+.mdv h1:hover .hanchor, .mdv h2:hover .hanchor, .mdv h3:hover .hanchor, .mdv h4:hover .hanchor { opacity: .8; }
+.mdv a { color: var(--accent, #2f6fb2); }
+.mdv pre.md-code { position: relative; padding: 13px 15px; border-radius: 8px; overflow-x: auto;
+                   background: var(--md-code-bg, #8881); border: 1px solid var(--md-rule, #8882); }
+.mdv pre.md-code .md-copy { position: absolute; top: 6px; right: 6px; opacity: 0; border: 1px solid var(--border, #ccc);
+                            background: var(--surface, #fff); color: var(--muted, #667); border-radius: 6px;
+                            font: 11px -apple-system, sans-serif; padding: 3px 9px; cursor: pointer; }
+.mdv pre.md-code:hover .md-copy { opacity: 1; }
+.mdv pre.md-code .md-copy:hover { color: var(--fg, #222); border-color: var(--accent, #4493f8); }
+.mdv code { font: 13px/1.55 "SF Mono", ui-monospace, Menlo, monospace; }
+.mdv :not(pre) > code { background: var(--md-code-bg, #8881); padding: .15em .4em; border-radius: 4px; }
+.mdv table { border-collapse: collapse; display: block; overflow-x: auto; }
+.mdv th, .mdv td { border: 1px solid var(--md-rule, #8883); padding: 5px 12px; }
+.mdv th { background: var(--md-code-bg, #8881); }
+.mdv blockquote { margin: 0; padding: 2px 1em; border-left: 3px solid var(--accent, #8885); opacity: .88; }
+.mdv img { max-width: 100%; border-radius: 6px; }
+.mdv hr { border: none; border-top: 1px solid var(--md-rule, #8883); margin: 24px 0; }
+.mdv li + li { margin-top: .18em; }
+.mdv .mdv-meta { font: 12px "SF Mono", ui-monospace, monospace; color: var(--muted, #888); margin-bottom: 18px;
+                 display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
+.mdv .mdv-meta .crumb { word-break: break-all; }
+.mdv .mdv-error { color: var(--danger, #c33); }
+.mdv .mdv-loading { display: flex; align-items: center; gap: 10px; color: var(--muted, #888);
+                    font: 13px -apple-system, sans-serif; padding: 48px 0; justify-content: center; }
+@keyframes mdv-spin { to { transform: rotate(360deg); } }
+.mdv .mdv-spinner { width: 14px; height: 14px; border: 2px solid var(--md-rule, #8883);
+                    border-top-color: var(--accent, #4493f8); border-radius: 50%;
+                    animation: mdv-spin .7s linear infinite; }
 `;
 
 /* Per-mount state: the shell opens several markdown tabs at once, so each
@@ -142,30 +170,52 @@ const STYLE = `
 const mounts = new Set();
 
 export async function mount(el, ctx) {
-  const root = el.ownerDocument.createElement("div");
+  const doc0 = el.ownerDocument;
+  const scroll = doc0.createElement("div");
+  scroll.className = "mdv-scroll";
+  const root = doc0.createElement("div");
   root.className = "mdv";
-  const style = el.ownerDocument.createElement("style");
+  scroll.append(root);
+  const style = doc0.createElement("style");
   style.textContent = STYLE;
-  el.append(style, root);
+  el.append(style, scroll);
 
   const onClick = (e) => {
     const a = e.target.closest?.("a[data-open-file]");
-    if (!a) return;
-    e.preventDefault();
-    ctx.openFile(a.getAttribute("data-open-file"));
+    if (a) {
+      e.preventDefault();
+      ctx.openFile(a.getAttribute("data-open-file"));
+      return;
+    }
+    // heading anchors + in-document fragment links scroll locally
+    const frag = e.target.closest?.('a[href^="#"]');
+    if (frag) {
+      e.preventDefault();
+      const id = decodeURIComponent(frag.getAttribute("href").slice(1));
+      scroll.querySelector(`[id="${CSS.escape(id)}"]`)?.scrollIntoView({ block: "start" });
+      return;
+    }
+    const copy = e.target.closest?.(".md-copy");
+    if (copy) {
+      const code = copy.parentElement.querySelector("code")?.textContent || "";
+      navigator.clipboard?.writeText(code).then(() => {
+        copy.textContent = "copied";
+        setTimeout(() => { copy.textContent = "copy"; }, 1200);
+      });
+    }
   };
-  root.addEventListener("click", onClick);
+  scroll.addEventListener("click", onClick);
   const dispose = () => {
     if (!mounts.has(dispose)) return;
     mounts.delete(dispose);
-    root.removeEventListener("click", onClick);
-    root.remove();
+    scroll.removeEventListener("click", onClick);
+    scroll.remove();
     style.remove();
   };
   mounts.add(dispose);
 
   const path = ctx.path;
-  root.innerHTML = `<div class="mdv-meta">Loading ${escapeHtml(path || "")}…</div>`;
+  root.innerHTML = `<div class="mdv-loading"><span class="mdv-spinner"></span> Loading ${escapeHtml(String(path || "").split("/").pop())}…</div>`;
   let file;
   try {
     const res = await ctx.api(`/api/file?path=${encodeURIComponent(path)}`);
@@ -175,16 +225,47 @@ export async function mount(el, ctx) {
     root.innerHTML = `<div class="mdv-error">Could not open ${escapeHtml(path || "(no path)")}: ${escapeHtml(e.message || String(e))}</div>`;
     return dispose;
   }
-  const meta = `<div class="mdv-meta">${escapeHtml(file.path)} · ${file.size} bytes</div>`;
+  if (!mounts.has(dispose)) return dispose;   // closed while the file loaded
+  const kb = file.size >= 10240 ? `${(file.size / 1024).toFixed(1)} KB` : `${file.size} B`;
+  const meta = `<div class="mdv-meta"><span class="crumb">${escapeHtml(file.path)}</span><span>${kb}</span></div>`;
   const doc = el.ownerDocument;
   if (file.markdown) {
     root.innerHTML = meta + sanitizeHtml(makeMarked(file.path).parse(file.content), doc);
+    decorate(root, doc);
   } else {
     // plain/code file: read-only highlighted view
     const lang = EXT_LANG[(file.name.split(".").pop() || "").toLowerCase()];
     root.innerHTML = `${meta}<pre class="md-code"><code class="hljs">${highlight(file.content, lang)}</code></pre>`;
+    decorate(root, doc);
   }
   return dispose;
+}
+
+/* Post-render decoration (plain DOM, after sanitize): slugged heading ids +
+   hover anchors, and a copy button on every fenced block. */
+function decorate(root, doc) {
+  const seen = new Map();
+  for (const h of root.querySelectorAll("h1, h2, h3, h4")) {
+    const slugBase = h.textContent.trim().toLowerCase().replace(/[^\w]+/g, "-").replace(/^-+|-+$/g, "") || "section";
+    const n = seen.get(slugBase) || 0;
+    seen.set(slugBase, n + 1);
+    const slug = n ? `${slugBase}-${n}` : slugBase;
+    h.id = slug;
+    const a = doc.createElement("a");
+    a.className = "hanchor";
+    a.href = `#${slug}`;
+    a.textContent = "#";
+    a.setAttribute("aria-label", `Link to “${h.textContent.trim()}”`);
+    h.prepend(a);
+  }
+  for (const pre of root.querySelectorAll("pre.md-code")) {
+    const b = doc.createElement("button");
+    b.className = "md-copy";
+    b.type = "button";
+    b.textContent = "copy";
+    b.setAttribute("aria-label", "Copy code block");
+    pre.append(b);
+  }
 }
 
 export function unmount() {
