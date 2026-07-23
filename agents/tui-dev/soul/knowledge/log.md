@@ -1,7 +1,21 @@
 # Knowledge Log
 
+## 2026-07-23
+
+- **Triage**: dropped the aweb late-awakening addendum from tui-dev-desktop-shell notes because it described a transient messaging incident already reported to the OAS/aweb owners, not durable tui-dev desktop-shell knowledge.
+- **Update**: [async-mount-close-race.md](async-mount-close-race.md)
+  — linked the companion regression-test-layer lesson so lifecycle helpers are not mistaken for coverage of their caller composition.
+- **Creation**: [regression-tests-bug-layer.md](regression-tests-bug-layer.md)
+  — promoted the reviewer finding that regressions must execute the layer that had the bug, extracting desktop terminal composition behind injectable dependencies when needed.
+- **Update**: [async-mount-close-race.md](async-mount-close-race.md)
+  — merged the terminal lifecycle `onReady` ordering lesson from tui-dev-desktop-shell notes so post-acquisition handlers, observers, and focus setup happen before settle or not at all.
+- **Update**: [pkill-scoping-discipline.md](pkill-scoping-discipline.md)
+  — merged the tmux prefix-matching reviewer incident follow-up from tui-dev-desktop-shell notes, including exact `=`-anchored targets and stale-worktree caution.
+
 ## 2026-07-22
 
+- **Update**: [async-mount-close-race.md](async-mount-close-race.md)
+  — merged the terminal pty close-during-pending-open lifecycle lesson from tui-dev-desktop-shell notes, including late pty release and silent closed-tab rejection handling.
 - **Update**: [desktop-shell-view-integration-lessons.md](desktop-shell-view-integration-lessons.md)
   — replaced endpoint-by-endpoint workspace pinning guidance with route-family classification from tui-dev-desktop-shell notes.
 - **Creation**: [route-family-workspace-pinning.md](route-family-workspace-pinning.md)

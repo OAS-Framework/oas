@@ -9,6 +9,7 @@
 import { currentWorkspace } from "./views/common.mjs";
 import { createViewLifecycle } from "./view-lifecycle.mjs";
 import { reserveKey, whenKeyFree } from "./tab-keys.mjs";
+import { createTerminalTab } from "./terminal-tab.mjs";
 
 const desk = window.oasDesktop;
 
@@ -160,23 +161,23 @@ async function openTerminalTabInner(instance, ws, key) {
   const fit = new FitAddon.FitAddon();
   term.loadAddon(fit);
 
-  let ptyId = null;
-  let offData = null, offExit = null;
-  let ro = null;
-
-  const cleanup = () => {
-    // Detach only: kill the viewer pty; NEVER the tmux session.
-    offData?.(); offExit?.();
-    ro?.disconnect();
-    if (ptyId !== null) desk.termClose(ptyId);
-    ptyId = null;
-    term.dispose();
-  };
+  // Composition (setup-inside-onReady, teardown symmetry) lives in
+  // terminal-tab.mjs so its ordering is unit-testable (review termlc2).
+  const tab = createTerminalTab({
+    desk,
+    term,
+    tmux: { session: inst.tmux.session, window: inst.tmux.window },
+    wrap,
+    isActive: () => made.paneEl.classList.contains("active"),
+    fit: () => fit.fit(),
+  });
 
   const made = addTab({
     title: `⌗ ${instance}`,
     key,
-    onClose: cleanup,
+    // close() resolves when cleanup (incl. a late-materializing pty detach)
+    // actually ran — closeTab reserves the key on this promise.
+    onClose: () => tab.close(),
     onShow: () => { requestAnimationFrame(() => { try { fit.fit(); } catch {} }); },
   });
   if (!made) { term.dispose(); return; } // lost a race to an identical tab
@@ -184,30 +185,7 @@ async function openTerminalTabInner(instance, ws, key) {
   term.open(wrap);
   fit.fit();
 
-  ptyId = await desk.termOpen({
-    session: inst.tmux.session,
-    window: inst.tmux.window,
-    cols: term.cols,
-    rows: term.rows,
-  });
-
-  offData = desk.onTermData(ptyId, (data) => term.write(data));
-  offExit = desk.onTermExit(ptyId, () => {
-    ptyId = null;
-    const banner = document.createElement("div");
-    banner.className = "term-banner";
-    banner.textContent = "session ended — close this tab";
-    wrap.append(banner);
-  });
-  term.onData((data) => { if (ptyId !== null) desk.termWrite(ptyId, data); });
-  term.onResize(({ cols, rows }) => { if (ptyId !== null) desk.termResize(ptyId, cols, rows); });
-
-  ro = new ResizeObserver(() => {
-    if (!made.paneEl.classList.contains("active")) return;
-    try { fit.fit(); } catch { /* zero-size while hidden */ }
-  });
-  ro.observe(wrap);
-  term.focus();
+  await tab.start();
 }
 
 // ── nav rail ──────────────────────────────────────────────────────────────

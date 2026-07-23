@@ -1,9 +1,9 @@
 ---
 type: Lesson
-title: Async tab lifecycle cleanup must track fulfillment and awaitable key reservations
-description: When a desktop tab closes during async mount, cleanup must wait for settle, fall back to module unmount only after a fulfilled legacy mount, and make dedup-key reservations awaitable so fast reopens queue behind cleanup.
-tags: [desktop, view-host, async, race, lifecycle, queueing]
-timestamp: 2026-07-22
+title: Async resource lifecycles must handle close during pending acquisition
+description: When a desktop owner can close during async mount or terminal open, lifecycle state must track closed/settled/fulfilled, release late materialized resources, reserve dedup keys until cleanup completes, and run setup inside `onReady` before settle.
+tags: [desktop, view-host, async, race, lifecycle, queueing, pty]
+timestamp: 2026-07-23
 ---
 
 A follow-up review of the [per-mount disposer contract](view-mount-disposer-contract.md)
@@ -41,11 +41,39 @@ The lifecycle is DOM-free so deferred-promise unit tests can drive the races
 deterministically: close-mid-mount, legacy view, mount error, and two lifecycles
 of one module with a mid-flight close.
 
+The same disease appeared again in terminal tabs: `cleanup()` checked
+`ptyId !== null` while `termOpen()` was still awaiting, so closing during the
+pending open leaked an invisible attached tmux client until app shutdown when
+the id arrived after the tab died. The terminal fix mirrors the view lifecycle
+with `createTermLifecycle`: a late pty materialization on an already-closed tab
+immediately calls `closePty(id)` and skips data/exit handler wiring; rejection
+after close is silent; rejection while live shows the error banner; `forget()`
+covers session-ended cases where main already dropped the pty; and closePty
+failures are absorbed so UI teardown still completes. This is the cleanup side
+of the [direct tmux attach terminal contract](desktop-terminal-direct-attach.md).
+
+A reviewer then closed the loop on the terminal pty case: wiring xterm
+handlers, the `ResizeObserver`, and focus after `await life.start(...)` is
+still outside the lifecycle. On a close during pending open, `start()`'s
+`finally` can signal settle, `close()` can resume and dispose the UI while the
+observer is still null, and then the awaiting caller can continue and install
+handlers or focus a dead terminal outside every cleanup path. Put all resource
+setup inside the lifecycle's `onReady` callback, which runs before the settle
+signal; code textually after `await start()` has no ordering relationship with
+close. Pin both branches in tests: closed path skips `onReady` and records
+`[detach, disposeUi]`; live path records `[setup, detach, disposeUi]`.
+
 General rules:
 
+- Treat awaited lifecycle start as an ownership boundary: caller code after
+  `await start()` is not protected from close-during-pending interleavings;
+  handler, observer, focus, and other cleanup-requiring setup belongs in
+  `onReady` so it is established before settle or skipped for dead owners.
 - Whenever cleanup depends on a value produced by an in-flight async operation,
   closing must wait for settle. Checking "is the cleanup value there yet?" at
-  close time is the race, not the fix.
+  close time is the race, not the fix; if the value materializes after close,
+  release it immediately in the acquisition continuation before exposing it to
+  the dead owner.
 - Every async fallback path needs a state bit for what actually happened. A
   rejected mount and a fulfilled legacy mount both lack a disposer, but only
   the fulfilled legacy mount may use module-wide fallback cleanup.
@@ -53,5 +81,6 @@ General rules:
   the gap between those two moments is where reopens live.
 - A reservation on a shared resource needs an awaitable handle so blocked
   requests can queue. A boolean "is reserved" check can only drop the request
-  or recreate the race; test the host composition path, not only a manually
-  chained lifecycle sequence.
+  or recreate the race; test the host composition path (see the
+  [regression test layer lesson](regression-tests-bug-layer.md)), not only a
+  manually chained lifecycle sequence.
