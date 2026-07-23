@@ -16,10 +16,8 @@ export function mount(el, ctx) {
   el.innerHTML = `
     <div class="oas-view">
       <div class="side">
-        <div class="filterbar">
+        <div class="filterbar bar">
           <select class="field wssel" style="display:none"></select>
-        </div>
-        <div class="filterbar" style="padding-top:0">
           <input class="field filter" placeholder="Filter agents…" autocomplete="off">
         </div>
         <div class="groups"><div class="loading-block"><span class="spinner"></span> Loading agents…</div></div>

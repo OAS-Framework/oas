@@ -35,10 +35,8 @@ export function mount(el, ctx) {
   el.innerHTML = `
     <div class="oas-view">
       <div class="side">
-        <div class="filterbar">
+        <div class="filterbar bar">
           <select class="field wssel" style="display:none"></select>
-        </div>
-        <div class="filterbar" style="padding-top:0">
           <input class="field filter" placeholder="Filter agents, repos, tasks…" autocomplete="off">
         </div>
         <div class="groups"><div class="loading-block"><span class="spinner"></span> Loading roster…</div></div>
@@ -141,7 +139,6 @@ function renderRoster(s) {
             <span class="chip rt">${escapeHtml(i.runtime)}</span>
             <span class="chip">${escapeHtml(i.work)}${i.branch ? " · " + escapeHtml(i.branch) : ""}</span>
             ${i.git && i.git.dirty ? `<span class="chip dirty">±${Number(i.git.dirty)}</span>` : ""}
-            ${i.jira ? '<span class="chip">jira</span>' : ""}
           </div>`;
         d.onclick = () => select(s, i.instance);
         rbox.appendChild(d);
@@ -171,7 +168,8 @@ function select(s, name) {
   s.pendingSends.length = 0;
   s.q("chat").innerHTML = '<div class="loading-block"><span class="spinner"></span> Loading session…</div>';
   refreshChat(s, true);
-  refreshJira(s, name);
+  // Jira surface hidden by directive — refreshJira stays exported (dormant,
+  // regression-tested) but is no longer invoked, so no inline card renders.
 }
 
 function renderHead(s, i) {

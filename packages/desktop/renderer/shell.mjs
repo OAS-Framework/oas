@@ -7,11 +7,14 @@
 // chat transcript, spawn, jira) lives in the ported views — the shell chrome
 // stays a thin rail so nothing is duplicated.
 import { currentWorkspace } from "./views/common.mjs";
+import { initTheme, toggleTheme, xtermTheme, onThemeChange } from "./theme.mjs";
+import { createPalette } from "./palette.mjs";
 import { createViewLifecycle } from "./view-lifecycle.mjs";
 import { reserveKey, whenKeyFree } from "./tab-keys.mjs";
 import { createTerminalTab } from "./terminal-tab.mjs";
 
 const desk = window.oasDesktop;
+initTheme();
 
 // ── ctx (shared by all views) ─────────────────────────────────────────────
 async function api(pathname, opts) {
@@ -24,7 +27,63 @@ const ctx = {
   api,
   openFile: (path) => openViewTab("markdown", `≡ ${String(path).split("/").pop()}`, { path }, `file:${path}`),
   openTerminal: (instance) => openTerminalTab(instance),
+  // additive shell affordance (views feature-detect it): switch the STAGE
+  // to a named sidebar view (stage views are not tabs — see below).
+  openView: (name) => showStage(name),
 };
+
+// ── stage: the sidebar-driven main surface ──────────────────────────
+// Sidebar items switch the stage view in place; they never create tabs.
+// The tab strip is reserved for OPENED ARTIFACTS (terminals, files): things
+// you accumulate and close, not places you navigate. Selecting a nav item
+// hides the tab layer; activating a tab covers the stage.
+const stageHost = document.getElementById("stagehost");
+let stage = null;           // { name, life, el }
+let stageOp = 0;            // switch generation — a slow mount must not paint over a newer switch
+
+async function showStage(name) {
+  const v = NAV.find((x) => x.name === name);
+  setNavActive(name);
+  showTabLayer(false);
+  if (stage && stage.name === name) return;   // already on this surface
+  const myOp = ++stageOp;
+  const prev = stage;
+  stage = null;
+  if (prev) { try { await prev.life.close(); } catch (e) { console.error(e); } prev.el.remove(); }
+  if (myOp !== stageOp) return;               // superseded by a faster switch
+  let mod;
+  try { mod = await import(`./views/${name}.mjs`); }
+  catch (e) {
+    if (myOp !== stageOp) return;
+    stageHost.innerHTML = `<div class="placeholder"><h2>${name}</h2><div>view module failed to load: ${e.message}</div></div>`;
+    return;
+  }
+  if (myOp !== stageOp) return;
+  const life = createViewLifecycle(mod, (e) => console.error(e));
+  const el = document.createElement("div");
+  el.style.height = "100%";
+  stageHost.innerHTML = "";
+  stageHost.append(el);
+  stage = { name, life, el };
+  try { await life.mounted(el, ctx); }
+  catch (e) { el.innerHTML = `<div class="placeholder"><h2>${v?.title || name}</h2><div>mount failed: ${e.message}</div></div>`; }
+}
+
+function setNavActive(name) {
+  for (const b of navEl.querySelectorAll(".nav-item")) b.classList.toggle("active", b.dataset.view === name);
+}
+
+function showTabLayer(on) {
+  document.getElementById("tabhost").style.display = on ? "" : "none";
+  if (!on) {
+    stageHost.style.display = "";
+    activeTab = null;
+    for (const t of tabs.values()) t.tabEl.classList.remove("active");
+  } else {
+    stageHost.style.display = "none";
+    setNavActive(null);
+  }
+}
 
 // ── tabs ──────────────────────────────────────────────────────────────────
 const tabbar = document.getElementById("tabbar");
@@ -65,6 +124,7 @@ function addTab({ title, key, onClose, onShow }) {
 
 function activateTab(id) {
   activeTab = id;
+  showTabLayer(true);
   for (const [tid, t] of tabs) {
     t.tabEl.classList.toggle("active", tid === id);
     t.paneEl.classList.toggle("active", tid === id);
@@ -88,7 +148,7 @@ function closeTab(id) {
   if (activeTab === id) {
     const rest = [...tabs.keys()];
     if (rest.length) activateTab(rest[rest.length - 1]);
-    else activeTab = null;
+    else { activeTab = null; showTabLayer(false); if (stage) setNavActive(stage.name); }
   }
 }
 
@@ -155,9 +215,11 @@ async function openTerminalTabInner(instance, ws, key) {
   const term = new Terminal({
     fontSize: 13,
     fontFamily: "SF Mono, Menlo, monospace",
-    theme: { background: "#16161e", foreground: "#c0caf5" },
+    theme: xtermTheme(),
     scrollback: 5000,
   });
+  // live terminals follow the app theme (unsubscribed on tab close)
+  const offTheme = onThemeChange(() => { term.options.theme = xtermTheme(); });
   const fit = new FitAddon.FitAddon();
   term.loadAddon(fit);
 
@@ -177,10 +239,10 @@ async function openTerminalTabInner(instance, ws, key) {
     key,
     // close() resolves when cleanup (incl. a late-materializing pty detach)
     // actually ran — closeTab reserves the key on this promise.
-    onClose: () => tab.close(),
+    onClose: () => { offTheme(); return tab.close(); },
     onShow: () => { requestAnimationFrame(() => { try { fit.fit(); } catch {} }); },
   });
-  if (!made) { term.dispose(); return; } // lost a race to an identical tab
+  if (!made) { offTheme(); term.dispose(); return; } // lost a race to an identical tab
   made.paneEl.append(wrap);
   term.open(wrap);
   fit.fit();
@@ -189,64 +251,70 @@ async function openTerminalTabInner(instance, ws, key) {
 }
 
 // ── nav rail ──────────────────────────────────────────────────────────────
+// Three first-class surfaces (human directive): the agent hierarchy (home),
+// souls browse+spawn, and agent brains — plus the instance transcript list.
+// Diff and Jira surfaces are intentionally NOT wired (modules stay dormant
+// in the tree per the coordinator's directive).
 const NAV = [
+  { name: "hierarchy", label: "Agents", icon: "⌘", title: "Agents" },
   { name: "instances", label: "Instances", icon: "◉", title: "Instances" },
   { name: "spawn", label: "Spawn", icon: "✚", title: "Spawn" },
   { name: "brain", label: "Brain", icon: "◈", title: "Agent brain" },
-  { name: "jira", label: "Jira", icon: "◫", title: "Jira" },
 ];
 const navEl = document.getElementById("nav");
 for (const v of NAV) {
   const b = document.createElement("button");
   b.className = "nav-item";
   b.title = v.title;
+  b.dataset.view = v.name;
   b.innerHTML = `<span class="icon"></span><span class="label"></span>`;
   b.querySelector(".icon").textContent = v.icon;
   b.querySelector(".label").textContent = v.label;
-  b.addEventListener("click", () => openViewTab(v.name, v.title));
+  b.addEventListener("click", () => showStage(v.name));
   navEl.append(b);
 }
 
-// Diff needs an instance (ctx.instance per the view contract) — the nav
-// entry opens a small shell-owned picker over the current workspace roster.
+// theme toggle at the bottom of the rail
 {
+  const foot = document.getElementById("nav-foot");
   const b = document.createElement("button");
   b.className = "nav-item";
-  b.title = "Diff (pick an instance)";
-  b.innerHTML = `<span class="icon">±</span><span class="label">Diff</span>`;
-  b.addEventListener("click", () => openDiffPicker());
-  navEl.append(b);
+  b.title = "Toggle light/dark theme";
+  b.innerHTML = `<span class="icon">◐</span><span class="label">Theme</span>`;
+  b.addEventListener("click", () => toggleTheme());
+  (foot || navEl).append(b);
 }
 
-async function openDiffPicker() {
-  const ws = currentWorkspace();
-  // keyed per workspace — switching workspaces must not resurrect a stale roster
-  const made = addTab({ title: "Diff", key: `view:diff-picker:${ws}` });
-  if (!made) return;
-  const el = document.createElement("div");
-  el.className = "placeholder";
-  el.innerHTML = `<h2>Diff</h2><div>pick an instance</div>`;
-  made.paneEl.append(el);
-  let panel;
-  try { panel = await api(`/api/panel${ws ? `?ws=${encodeURIComponent(ws)}` : ""}`); }
-  catch (e) { el.lastChild.textContent = `roster unavailable: ${e.message}`; return; }
-  const list = document.createElement("div");
-  list.style.cssText = "display:flex;flex-direction:column;gap:4px;max-height:60%;overflow:auto";
-  for (const i of panel.instances) {
-    const btn = document.createElement("button");
-    btn.className = "nav-item";
-    btn.textContent = `${i.instance}${i.branch ? ` · ${i.branch}` : ""}`;
-    btn.addEventListener("click", () => openViewTab("diff", `± ${i.instance}`, { instance: i.instance, ws }, `diff:${ws}:${i.instance}`));
-    list.append(btn);
+// ── command palette (⌘K): jump to an instance or run a command ───────────
+const palette = createPalette({
+  loadInstances: async () => {
+    const ws = currentWorkspace();
+    const p = await api(`/api/panel${ws ? `?ws=${encodeURIComponent(ws)}` : ""}`);
+    return p.instances || [];
+  },
+  openTerminal: (name) => openTerminalTab(name),
+  commands: [
+    { label: "View: Agents (hierarchy)", run: () => showStage("hierarchy") },
+    { label: "View: Instances", run: () => showStage("instances") },
+    { label: "View: Spawn an agent", run: () => showStage("spawn") },
+    { label: "View: Agent brain", run: () => showStage("brain") },
+    { label: "Theme: toggle light/dark", run: () => toggleTheme() },
+  ],
+});
+window.addEventListener("keydown", (e) => {
+  // ⌘K / Ctrl-K opens the palette — but NEVER while a terminal pane has
+  // focus with Ctrl (Ctrl-K belongs to the shell running in tmux; Cmd-K is
+  // safe — macOS never forwards Cmd chords to the pty).
+  if (e.key.toLowerCase() === "k" && e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+    e.preventDefault();
+    palette.toggle();
   }
-  if (!panel.instances.length) list.textContent = "no instances";
-  el.append(list);
-}
+});
 
 document.getElementById("ws-name").textContent = "";
 api("/api/panel").then((p) => {
   document.getElementById("ws-name").textContent = p.workspace?.name ? `· ${p.workspace.name}` : "";
 }).catch(() => {});
 
-// Home view.
-openViewTab("instances", "Instances");
+// Home surface: the agent hierarchy — running instances and how they relate.
+showStage("hierarchy");

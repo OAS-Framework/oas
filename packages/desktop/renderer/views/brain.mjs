@@ -16,8 +16,8 @@ const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").
 const CSS = `
 .brain { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--bg); color: var(--fg);
          font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-.brain-bar { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--border);
-             background: var(--surface); flex: none; }
+.brain-bar { display: flex; align-items: center; gap: 10px; height: var(--bar-h, 48px); flex: none; padding: 0 14px;
+             border-bottom: 1px solid var(--border); background: var(--surface); }
 .brain-bar label { color: var(--muted); font-size: 12px; }
 .brain-bar select { background: var(--surface-2); color: var(--fg); border: 1px solid var(--border); border-radius: 8px;
                     padding: 5px 8px; font: inherit; max-width: 320px; }
