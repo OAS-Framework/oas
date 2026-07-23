@@ -11,7 +11,7 @@ import {
   initTheme, toggleTheme, xtermTheme, onThemeChange,
   terminalTypography, setTerminalFontSize, setTerminalFontFamily, onTerminalTypographyChange,
 } from "./theme.mjs";
-import { createPalette } from "./palette.mjs";
+import { createPalette, isPaletteShortcut } from "./palette.mjs";
 import { createViewLifecycle } from "./view-lifecycle.mjs";
 import { reserveKey, whenKeyFree } from "./tab-keys.mjs";
 import { createTerminalTab } from "./terminal-tab.mjs";
@@ -468,10 +468,8 @@ const palette = createPalette({
   ],
 });
 window.addEventListener("keydown", (e) => {
-  // ⌘K / Ctrl-K opens the palette — but NEVER while a terminal pane has
-  // focus with Ctrl (Ctrl-K belongs to the shell running in tmux; Cmd-K is
-  // safe — macOS never forwards Cmd chords to the pty).
-  if (e.key.toLowerCase() === "k" && e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+  const insideTerminal = !!e.target?.closest?.(".xterm");
+  if (isPaletteShortcut(e, insideTerminal)) {
     e.preventDefault();
     palette.toggle();
   }

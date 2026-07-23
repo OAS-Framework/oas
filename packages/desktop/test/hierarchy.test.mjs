@@ -29,6 +29,18 @@ test("layoutForest: children sit below and centered under their parent; no overl
   assert.ok(width > 0 && height > 0);
 });
 
+test("layoutForest: cross-root parentInstance keeps its edge and depth", () => {
+  const { nodes } = hier.layoutForest([
+    { instance: "parent-A", workspace: "/team/root-A", running: true },
+    { instance: "child-B", workspace: "/team/root-B", parentInstance: "parent-A", running: true },
+  ]);
+  const parent = nodes.find((n) => n.inst.instance === "parent-A");
+  const child = nodes.find((n) => n.inst.instance === "child-B");
+  assert.deepEqual(parent.children.map((n) => n.inst.instance), ["child-B"],
+    "visual root boundaries must not sever spawn parentage");
+  assert.ok(child.y > parent.y, "cross-root child remains below its parent");
+});
+
 test("layoutForest: a parentInstance missing from the roster makes the child a root (no crash)", () => {
   const { nodes } = hier.layoutForest([
     { instance: "orphan", parentInstance: "retired-elsewhere", running: true },

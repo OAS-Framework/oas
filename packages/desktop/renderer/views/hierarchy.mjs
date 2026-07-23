@@ -64,7 +64,7 @@ const CSS = `
 .hier-empty-wrap { flex: 1; display: flex; align-items: center; justify-content: center; }
 `;
 
-const NODE_W = 208, NODE_H = 58, GAP_X = 26, GAP_Y = 46, WS_GAP = 70, PAD = 40;
+const NODE_W = 208, NODE_H = 58, GAP_X = 26, GAP_Y = 46, PAD = 40;
 
 /* Tidy-tree layout for a forest: post-order, children centered under the
    parent; leaves packed left-to-right. Returns nodes with x/y set. */
@@ -229,70 +229,51 @@ function render(s) {
     return;
   }
 
-  // group by workspace name (roster may span several); groups lay out side
-  // by side. Each agent BOX is individually draggable — its offset lives in
-  // s.nodeOffsets (surviving the 4s refresh) and its spawn edges follow live.
-  const groups = new Map();
-  for (const i of list) {
-    const ws = (i.workspace || "?").split("/").pop();
-    if (!groups.has(ws)) groups.set(ws, []);
-    groups.get(ws).push(i);
-  }
-
+  // Build parentage from the FULL roster before any visual decoration.
+  // parentInstance may cross agent/workspace roots in a team-scoped panel;
+  // pre-grouping would turn a valid child into an orphan and drop its edge.
+  // Node metadata still identifies its repo/root, and free dragging provides
+  // visual partitioning without corrupting topology.
+  const { nodes, width, height } = layoutForest(list);
   const stage = document.createElement("div");
   stage.className = "hier-stage";
+  const group = document.createElement("div");
+  group.className = "hier-group";
+  group.dataset.ws = "all";
+  group.style.left = "0";
+  group.style.top = "0";
 
   const BLEED = 2000; // edge svg overdraw so dragged boxes keep their edges
-  let offX = 0, maxH = 0;
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.classList.add("hier-edges");
+  svg.setAttribute("width", width + BLEED * 2);
+  svg.setAttribute("height", height + NODE_H + BLEED * 2);
+  svg.setAttribute("viewBox", `${-BLEED} ${-BLEED} ${width + BLEED * 2} ${height + NODE_H + BLEED * 2}`);
+  svg.style.left = `${-BLEED}px`; svg.style.top = `${-BLEED}px`;
+  group.append(svg);
+
   s.edgesByNode = new Map(); // instance -> [path els touching it]
-  s.bounds = { w: 0, h: 0 };
-  for (const [wsName, items] of groups) {
-    const { nodes, width, height } = layoutForest(items);
-    const group = document.createElement("div");
-    group.className = "hier-group";
-    group.dataset.ws = wsName;
-    group.style.left = `${offX}px`;
-    group.style.top = "0";
-
-    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    svg.classList.add("hier-edges");
-    svg.setAttribute("width", width + BLEED * 2);
-    svg.setAttribute("height", height + NODE_H + BLEED * 2);
-    svg.setAttribute("viewBox", `${-BLEED} ${-BLEED} ${width + BLEED * 2} ${height + NODE_H + BLEED * 2}`);
-    svg.style.left = `${-BLEED}px`; svg.style.top = `${-BLEED}px`;
-    group.append(svg);
-
-    if (groups.size > 1) {
-      const lbl = document.createElement("div");
-      lbl.className = "hier-ws";
-      lbl.textContent = wsName;
-      lbl.style.left = "0"; lbl.style.top = "-24px";
-      group.append(lbl);
-    }
-    // final position = tidy layout + any user drag offset
-    for (const n of nodes) {
-      const off = s.nodeOffsets.get(n.inst.instance) || { x: 0, y: 0 };
-      n.fx = n.x + off.x; n.fy = n.y + off.y;
-      group.append(nodeEl(s, n, wsName));
-    }
-    for (const n of nodes) {
-      for (const c of n.children) {
-        const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
-        p.dataset.child = c.inst.instance;
-        p.dataset.parent = n.inst.instance;
-        drawEdge(p, n, c);
-        svg.append(p);
-        for (const nm of [n.inst.instance, c.inst.instance]) {
-          if (!s.edgesByNode.has(nm)) s.edgesByNode.set(nm, []);
-          s.edgesByNode.get(nm).push(p);
-        }
+  s.bounds = { w: width, h: height };
+  // final position = tidy layout + any user drag offset
+  for (const n of nodes) {
+    const off = s.nodeOffsets.get(n.inst.instance) || { x: 0, y: 0 };
+    n.fx = n.x + off.x; n.fy = n.y + off.y;
+    group.append(nodeEl(s, n, n.inst.workspace || "?"));
+  }
+  for (const n of nodes) {
+    for (const c of n.children) {
+      const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      p.dataset.child = c.inst.instance;
+      p.dataset.parent = n.inst.instance;
+      drawEdge(p, n, c);
+      svg.append(p);
+      for (const nm of [n.inst.instance, c.inst.instance]) {
+        if (!s.edgesByNode.has(nm)) s.edgesByNode.set(nm, []);
+        s.edgesByNode.get(nm).push(p);
       }
     }
-    stage.append(group);
-    offX += width + WS_GAP;
-    maxH = Math.max(maxH, height);
   }
-  s.bounds = { w: offX - WS_GAP, h: maxH };
+  stage.append(group);
   canvas.append(stage);
   // first paint (or workspace switch): fit the forest to the visible screen
   if (!s.fitted) { s.fitted = true; fit(s); } else applyTransform(s);

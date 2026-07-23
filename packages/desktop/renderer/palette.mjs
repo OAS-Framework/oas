@@ -4,6 +4,15 @@
    Shell-owned chrome: plain DOM, semantic tokens, keyboard-first
    (arrows/Enter/Esc), aria roles for the listbox pattern. */
 
+export function isPaletteShortcut(e, insideTerminal = false) {
+  if (String(e.key || "").toLowerCase() !== "k" || e.altKey || e.shiftKey) return false;
+  // Cmd-K is shell-owned on macOS. Ctrl-K is shell-owned on Windows/Linux
+  // only outside xterm; inside xterm it belongs to the attached program.
+  if (e.metaKey && !e.ctrlKey) return true;
+  if (e.ctrlKey && !e.metaKey) return !insideTerminal;
+  return false;
+}
+
 export function createPalette({ loadInstances, openTerminal, commands = [] }) {
   let overlay = null;
   let gen = 0; // load generation — a stale instance list must not paint over a newer open
