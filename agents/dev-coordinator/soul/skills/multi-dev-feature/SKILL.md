@@ -97,6 +97,20 @@ to the owning developer(s), re-merge, re-gate, re-review.
 
 ## Gotchas
 
+- If multiple parallel instances of the same soul harvest into separate
+  branches, their soul knowledge files can conflict during integration. Union
+  append-only `knowledge/log.md` conflicts yourself, but route duplicate
+  lessons, competing concept rewrites, and section-index judgment to an owner
+  instance of that soul. See [Concurrent harvests of one soul need owner
+  reconciliation for knowledge
+  conflicts](../knowledge/lessons/concurrent-harvest-conflicts-one-soul.md).
+- If a reviewer appears dead, check `aw mail inbox --show-all` before acting;
+  awakening events can lag behind delivered verdict mail. If the session JSONL
+  stops cleanly mid-turn and the tmux window is missing, treat it as an
+  external kill: unblock the waiter by having it spawn a fresh one-shot
+  reviewer on the same commit, then retire the dead instance. See [Reviewer
+  deaths can come from tmux prefix-target
+  kills](../knowledge/lessons/reviewer-deaths-tmux-prefix-targets.md).
 - If review flags factual errors in a developer's `notes/` or knowledge content,
   have the developer fix the notes before running `oas okf harvest`; harvest
   promotes notes verbatim. See [Fix doc nits in notes before the harvest
