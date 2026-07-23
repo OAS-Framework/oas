@@ -26,7 +26,7 @@ Flags/env:
 The shell has three navigation contexts:
 
 - **Active overview** — the home surface: a fitted, zoomable tidy tree of
-  active instances and `parentInstance` spawn relationships. Agent boxes can
+  running and idle instances with `parentInstance` spawn relationships. Agent boxes can
   be repositioned freely; edges follow live.
 - **Instances** — the shell's single sidebar becomes a compact, recursively
   nested roster. Selecting a running instance opens its direct tmux-attach
