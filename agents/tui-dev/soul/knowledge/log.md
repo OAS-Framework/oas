@@ -2,6 +2,10 @@
 
 ## 2026-07-23
 
+- **Update**: [desktop-terminal-direct-attach.md](desktop-terminal-direct-attach.md)
+  — merged the grouped-viewer-session follow-up so direct node-pty attach uses a per-tab grouped session rather than the durable session's shared current-window selection.
+- **Creation**: [desktop-terminal-grouped-viewer-sessions.md](desktop-terminal-grouped-viewer-sessions.md)
+  — promoted the decision that desktop terminal tabs need per-tab tmux viewer sessions grouped to the durable session, with independent current-window selection and exact cleanup.
 - **Update**: [desktop-shell-view-integration-lessons.md](desktop-shell-view-integration-lessons.md)
   — reframed older-server inline degradation as defense-in-depth and linked the identity/version reuse probe.
 - **Creation**: [server-reuse-identity-probe.md](server-reuse-identity-probe.md)
