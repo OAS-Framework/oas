@@ -7,7 +7,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { tmuxAttachTarget } from "../packages/desktop/tmux-target.mjs";
+import { tmuxAttachTarget, openTerm } from "../packages/desktop/tmux-target.mjs";
 
 test("anchors both components: =session:=window", () => {
   assert.equal(tmuxAttachTarget("pi-agents", "reviewer-1"), "=pi-agents:=reviewer-1");
@@ -33,6 +33,40 @@ test("only undefined/null mean 'no window' — empty string fails closed", () =>
   assert.throws(() => tmuxAttachTarget("s", ""), /bad window/);
 });
 
+// openTerm: the sequence that had the bug (review tmuxtgt2) — preflight must
+// run and reject BEFORE any pty is spawned; success spawns with the same
+// anchored target the preflight verified.
+test("openTerm: failed preflight rejects before pty spawn", () => {
+  const calls = [];
+  assert.throws(() => openTerm({ session: "s", window: "gone" }, {
+    preflight: (t) => { calls.push(["preflight", t]); throw new Error("no such window"); },
+    spawnPty: (t) => { calls.push(["spawn", t]); return {}; },
+  }), /no tmux target =s:=gone/);
+  assert.deepEqual(calls, [["preflight", "=s:=gone"]], "pty never spawned after failed preflight");
+});
+
+test("openTerm: successful preflight spawns with the SAME anchored target, in order", () => {
+  const calls = [];
+  const fake = { fake: true };
+  const r = openTerm({ session: "s", window: "w", cols: 120, rows: 40 }, {
+    preflight: (t) => calls.push(["preflight", t]),
+    spawnPty: (t, c, rws) => { calls.push(["spawn", t, c, rws]); return fake; },
+  });
+  assert.deepEqual(calls, [["preflight", "=s:=w"], ["spawn", "=s:=w", 120, 40]]);
+  assert.equal(r.pty, fake);
+  assert.equal(r.target, "=s:=w");
+});
+
+test("openTerm: dimension clamping and validation flow through", () => {
+  const calls = [];
+  openTerm({ session: "s", cols: 0, rows: -5 }, {
+    preflight: () => {},
+    spawnPty: (t, c, r) => { calls.push([t, c, r]); return {}; },
+  });
+  assert.deepEqual(calls, [["=s", 80, 5]], "cols default applied, rows clamped to minimum; session-only target");
+  assert.throws(() => openTerm({ session: "a:b", window: "w" }, { preflight: () => {}, spawnPty: () => ({}) }), /bad session/);
+});
+
 test("live tmux: anchored target rejects a missing exact window instead of prefix-matching", (t) => {
   const probe = spawnSync("tmux", ["-V"], { encoding: "utf8" });
   if (probe.error || probe.status !== 0) return t.skip("tmux not available");
@@ -43,11 +77,8 @@ test("live tmux: anchored target rejects a missing exact window instead of prefi
     // "reviewer-15c135c" window — the wrong-agent hazard.
     const unanchored = spawnSync("tmux", ["list-panes", "-t", `${session}:reviewer-1`], { encoding: "utf8", timeout: 5000 });
     // Anchored form must refuse: no exact "reviewer-1" window exists. This
-    // doubles as the PREFLIGHT regression — main.mjs runs exactly this
-    // list-panes check before spawning the pty, so a missing exact target
-    // makes term:open THROW (→ renderer's "could not attach" banner, proven
-    // in packages/desktop/test/terminal-tab.test.mjs) instead of surfacing
-    // as a late async pty exit.
+    // is what makes openTerm's preflight (which runs exactly this
+    // list-panes check) reject a missing exact target.
     const anchored = spawnSync("tmux", ["list-panes", "-t", tmuxAttachTarget(session, "reviewer-1")], { encoding: "utf8", timeout: 5000 });
     assert.notEqual(anchored.status, 0, "anchored target must NOT resolve a prefix match");
     if (unanchored.status === 0) {

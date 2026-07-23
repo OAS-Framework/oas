@@ -27,3 +27,33 @@ export function tmuxAttachTarget(session, window) {
   if (!/^[\w@%.-]+$/.test(win)) throw new Error("term:open: bad window name");
   return `=${session}:=${win}`;
 }
+
+/**
+ * The term:open sequence — target anchoring, preflight, pty spawn — with
+ * injectable dependencies so the ORDER is testable (review tmuxtgt2: a
+ * preflight only proven by an isolated tmux test is unprotected; deleting
+ * it left the suite green).
+ *
+ * node-pty's spawn succeeds once the tmux BINARY starts; a bad -t target
+ * only surfaces as an async exit AFTER term:open resolved with an id — the
+ * renderer's open-error path then never fires (a 'session ended' banner at
+ * best, or a blank tab when the exit races the listener install). The
+ * preflight verifies the exact target NOW and throws BEFORE any pty exists,
+ * so a missing target reliably rejects term:open → the renderer's
+ * 'could not attach' banner.
+ *
+ * @param {{ session: string, window?: string|number, cols?: number, rows?: number }} spec
+ * @param {{ preflight: (target: string) => void,   // throws if target absent
+ *           spawnPty: (target: string, cols: number, rows: number) => any }} io
+ * @returns {{ target: string, pty: any }}
+ */
+export function openTerm(spec, io) {
+  const target = tmuxAttachTarget(spec.session, spec.window);
+  try {
+    io.preflight(target);
+  } catch {
+    throw new Error(`term:open: no tmux target ${target}`);
+  }
+  const pty = io.spawnPty(target, Math.max(20, Number(spec.cols) || 80), Math.max(5, Number(spec.rows) || 24));
+  return { target, pty };
+}

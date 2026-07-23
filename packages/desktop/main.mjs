@@ -16,7 +16,7 @@ import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { apiUrl, apiInit } from "./api-url.mjs";
-import { tmuxAttachTarget } from "./tmux-target.mjs";
+import { openTerm } from "./tmux-target.mjs";
 
 const require = createRequire(import.meta.url);
 const pty = require("node-pty");
@@ -144,30 +144,18 @@ let nextPtyId = 1;
 
 ipcMain.handle("term:open", (e, { session, window: win, cols, rows }) => {
   guard(e);
-  // Exact-match anchored target (=session:=window): tmux -t prefix-matches
-  // by default, so a stale roster + gone window would otherwise attach to a
-  // similarly named LIVE window — keystrokes into the wrong agent. With the
-  // anchor tmux errors out instead; the renderer shows "could not attach".
-  const target = tmuxAttachTarget(session, win);
-  // Preflight: node-pty's spawn succeeds once the tmux BINARY starts — a bad
-  // -t target only surfaces as an async exit AFTER term:open resolved with an
-  // id, so the renderer's open-error path never fired (it painted "session
-  // ended" at best, or raced a blank tab). Verify the exact target exists
-  // NOW and throw, so the renderer's "could not attach" banner is reliable.
-  try {
-    execFileSync("tmux", ["list-panes", "-t", target], { stdio: "ignore", timeout: 4000 });
-  } catch {
-    throw new Error(`term:open: no tmux target ${target}`);
-  }
-  const id = nextPtyId++;
-  // Direct attach: tmux stays the durable session host; the pty is a viewer.
-  const p = pty.spawn("tmux", ["attach-session", "-t", target], {
-    name: "xterm-256color",
-    cols: Math.max(20, Number(cols) || 80),
-    rows: Math.max(5, Number(rows) || 24),
-    cwd: process.env.HOME,
-    env: process.env,
+  // openTerm (tmux-target.mjs) anchors the target (=session:=window — tmux
+  // -t prefix-matches by default), PREFLIGHTS it so a missing exact target
+  // rejects here (→ the renderer's "could not attach" banner) instead of
+  // surfacing as a late async pty exit, then spawns the viewer pty.
+  const { pty: p } = openTerm({ session, window: win, cols, rows }, {
+    preflight: (target) => execFileSync("tmux", ["list-panes", "-t", target], { stdio: "ignore", timeout: 4000 }),
+    // Direct attach: tmux stays the durable session host; the pty is a viewer.
+    spawnPty: (target, c, r) => pty.spawn("tmux", ["attach-session", "-t", target], {
+      name: "xterm-256color", cols: c, rows: r, cwd: process.env.HOME, env: process.env,
+    }),
   });
+  const id = nextPtyId++;
   const wc = e.sender;
   p.onData((data) => { if (!wc.isDestroyed()) wc.send(`term:data:${id}`, data); });
   p.onExit(({ exitCode }) => {
