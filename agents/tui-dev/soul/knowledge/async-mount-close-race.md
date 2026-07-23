@@ -81,5 +81,6 @@ General rules:
   the gap between those two moments is where reopens live.
 - A reservation on a shared resource needs an awaitable handle so blocked
   requests can queue. A boolean "is reserved" check can only drop the request
-  or recreate the race; test the host composition path, not only a manually
-  chained lifecycle sequence.
+  or recreate the race; test the host composition path (see the
+  [regression test layer lesson](regression-tests-bug-layer.md)), not only a
+  manually chained lifecycle sequence.
