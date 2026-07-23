@@ -1,6 +1,8 @@
 # Knowledge Log
 
 ## 2026-07-23
+* **Update**: skills/pr-review — added window-gone/no-verdict triage: check all-mail history and session logs before diagnosing a vanished reviewer as killed.
+* **Creation**: [Vanished agent window + no verdict — completed-but-event-dropped vs killed](/lessons/window-gone-completed-vs-killed-triage.md) — a vanished tmux window with no verdict awakening can mean clean self-retirement plus a channel delivery fault; distinguish it from an external kill via `aw mail inbox --show-all` and the session log tail.
 * **Update**: skills/pr-review — added the bare `node --test` discovery-scope gotcha for stale sibling worktrees and suspiciously high test counts.
 * **Creation**: [Bare `node --test` recurses into agent worktrees — runs stale sibling test suites](/lessons/bare-node-test-recurses-into-agent-worktrees.md) — bare `node --test` walks nested agent work checkouts; root test scripts must pin explicit globs to avoid running stale sibling suites.
 * **Update**: skills/pr-review — added the tmux target prefix-matching review gotcha for spawn/retire tests and exact `=<session>:=<window>` targeting.
