@@ -73,6 +73,13 @@ BEFORE retiring — it is the last gate of the review.
 
 ## Operational gotchas
 
+- **Bare `node --test` can run stale sibling worktrees**: `node --test` with no
+  path arguments walks the whole current tree except `node_modules`. In OAS
+  deployment roots, `agents/*/instances/*/work` are nested repo checkouts, so a
+  bare test script can execute stale sibling suites. Treat suspiciously high
+  test counts as a discovery-scope smell, and pin package test scripts to
+  explicit globs. See
+  `knowledge/lessons/bare-node-test-recurses-into-agent-worktrees.md`.
 - **tmux target prefix matching can kill the reviewer**: tmux `-t session:window`
   targets prefix-match unless anchored; code or tests that exercise retire paths
   must use exact `=<session>:=<window>` targets, and tests must override the tmux
