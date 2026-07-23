@@ -2,8 +2,8 @@
 type: Lesson
 title: Workspace-sensitive async results need local tickets and global workspace generations
 description: Every async result that depends on the selected workspace — roster/agent refreshes, Jira fetches, and spawn completions — must capture a global workspace generation as well as any per-path request ticket, because same-named instances and workspace switches can let stale paints or terminal-opening actions land in the wrong workspace.
-tags: [oas-web, race-condition, chatReq, polling, workspace, generation-token, spawn, gotcha]
-timestamp: 2026-07-22
+tags: [oas-web, race-condition, chatReq, polling, workspace, generation-token, spawn, testing, gotcha]
+timestamp: 2026-07-23
 ---
 
 # The bug
@@ -68,7 +68,9 @@ View functions that render need a stub `globalThis.document` with
 `createElement` and cleanup afterward; prefer assertions on state such as
 `s.souls` over DOM details. For spawn, include both the switch-race case and a
 no-switch control that proves auto-open still works when the generation has
-not changed.
+not changed. For UI request-generation guards, keep the two generations truly
+overlapping and mutation-check that removing the generation comparison fails;
+see [Race-guard tests must overlap generations and fail when the guard is weakened](/lessons/race-guard-tests-overlap-generations.md).
 
 # General lesson
 
