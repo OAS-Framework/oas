@@ -622,3 +622,30 @@ test("oas-web tmux targets: exact-match anchoring fails closed for reads AND wri
     try { execFileSync("tmux", ["kill-session", "-t", `=${session}`], { timeout: 4000 }); } catch { /* already gone */ }
   }
 });
+
+test("oas-web paneInfo: geometry comes from the ACTIVE pane, same pane capture/send target", (t) => {
+  // Two panes of different widths, active = index 1: the paneInfo command
+  // must report the active pane's geometry (what capture-pane and send-keys
+  // on a window target operate on), not list-panes row 0.
+  const session = `oaswebpane${process.pid}`;
+  try {
+    execFileSync("tmux", ["new-session", "-d", "-s", session, "-n", "w1", "-x", "101", "-y", "30"], { timeout: 4000 });
+  } catch { t.skip("tmux unavailable"); return; }
+  try {
+    const target = `=${session}:=w1`;
+    execFileSync("tmux", ["split-window", "-h", "-t", target], { timeout: 4000 });
+    execFileSync("tmux", ["select-pane", "-t", `${target}.1`], { timeout: 4000 });
+    const row = (args) => execFileSync("tmux", ["list-panes", "-t", target, ...args,
+      "-F", "#{pane_index} #{pane_width}"], { encoding: "utf8", timeout: 4000 }).trim().split("\n")[0];
+    const unfiltered = row([]);
+    const active = row(["-f", "#{pane_active}"]);          // the paneInfo path
+    assert.notEqual(unfiltered, active, "row 0 is NOT the active pane in this layout (hazard is real)");
+    assert.equal(active.split(" ")[0], "1", "filtered row is the active pane (index 1)");
+    // capture-pane on the window target reads the ACTIVE pane — same pane
+    const capWidth = Number(execFileSync("tmux", ["display-message", "-p", "-t", `${target}.1`, "#{pane_width}"],
+      { encoding: "utf8", timeout: 4000 }).trim());
+    assert.equal(Number(active.split(" ")[1]), capWidth, "geometry matches the pane capture/send operate on");
+  } finally {
+    try { execFileSync("tmux", ["kill-session", "-t", `=${session}`], { timeout: 4000 }); } catch { /* gone */ }
+  }
+});

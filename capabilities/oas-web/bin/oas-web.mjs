@@ -265,8 +265,11 @@ function paneInfo(inst) {
   try {
     // list-panes, NOT display-message: display-message -p -t <missing target>
     // silently falls back to a default context instead of erroring — the
-    // anchored target must fail CLOSED on the read path too.
-    const out = execFileSync("tmux", ["list-panes", "-t", tmuxTarget(inst), "-F",
+    // anchored target must fail CLOSED on the read path too. The -f filter
+    // selects the ACTIVE pane: capture-pane/send-keys on a window target
+    // operate on the active pane, and list-panes emits all panes in index
+    // order — row 0 is the wrong pane once the user splits and switches.
+    const out = execFileSync("tmux", ["list-panes", "-t", tmuxTarget(inst), "-f", "#{pane_active}", "-F",
       "#{pane_width} #{pane_height} #{cursor_x} #{cursor_y} #{cursor_flag} #{pane_in_mode} #{history_size}"],
       { encoding: "utf8", timeout: 4000 }).trim().split("\n")[0].split(/\s+/).map(Number);
     return { size: { cols: out[0] || 80, rows: out[1] || 24, cx: out[2] || 0, cy: out[3] || 0,
