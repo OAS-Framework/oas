@@ -6,7 +6,7 @@
 // The shell owns tabs/navigation and provides ctx. The full roster (with
 // chat transcript, spawn, jira) lives in the ported views — the shell chrome
 // stays a thin rail so nothing is duplicated.
-import { currentWorkspace } from "./views/common.mjs";
+import { currentWorkspace, groupInstances, onWorkspaceChange } from "./views/common.mjs";
 import { initTheme, toggleTheme, xtermTheme, onThemeChange } from "./theme.mjs";
 import { createPalette } from "./palette.mjs";
 import { createViewLifecycle } from "./view-lifecycle.mjs";
@@ -27,9 +27,10 @@ const ctx = {
   api,
   openFile: (path) => openViewTab("markdown", `≡ ${String(path).split("/").pop()}`, { path }, `file:${path}`),
   openTerminal: (instance) => openTerminalTab(instance),
+  openBrain: (agent) => openBrainTab(agent),
   // additive shell affordance (views feature-detect it): switch the STAGE
   // to a named sidebar view (stage views are not tabs — see below).
-  openView: (name) => showStage(name),
+  openView: (name) => name === "instances" ? showInstances() : showStage(name),
 };
 
 // ── stage: the sidebar-driven main surface ──────────────────────────
@@ -43,6 +44,7 @@ let stageOp = 0;            // switch generation — a slow mount must not paint
 
 async function showStage(name) {
   const v = NAV.find((x) => x.name === name);
+  setSidebarMode(name === "spawn" ? "souls" : "overview");
   setNavActive(name);
   showTabLayer(false);
   if (stage && stage.name === name) return;   // already on this surface
@@ -75,14 +77,140 @@ function setNavActive(name) {
 
 function showTabLayer(on) {
   document.getElementById("tabhost").style.display = on ? "" : "none";
+  tabbar.style.display = on ? "" : "none";
   if (!on) {
     stageHost.style.display = "";
     activeTab = null;
     for (const t of tabs.values()) t.tabEl.classList.remove("active");
   } else {
     stageHost.style.display = "none";
-    setNavActive(null);
+    updateContextTabs();
   }
+}
+
+function updateContextTabs() {
+  for (const t of tabs.values()) {
+    const visible = sidebarMode === "instances"
+      ? t.kind === "terminal"
+      : sidebarMode === "souls"
+        ? t.kind === "brain" || t.kind === "file"
+        : false;
+    t.tabEl.style.display = visible ? "" : "none";
+  }
+}
+
+// ── one contextual sidebar: nav + recursive instance roster ─────────────
+let sidebarMode = "overview";
+let contextRosterGen = 0;
+let contextRosterEl = null;
+let contextFilter = "";
+
+function initContextRoster() {
+  contextRosterEl = document.getElementById("instance-roster");
+  const input = contextRosterEl.querySelector(".ctx-filter");
+  input.addEventListener("input", (e) => { contextFilter = e.target.value.toLowerCase(); refreshContextRoster(); });
+}
+
+function setSidebarMode(mode) {
+  sidebarMode = mode;
+  const sidebar = document.getElementById("sidebar");
+  const instances = mode === "instances";
+  sidebar.classList.toggle("instances-mode", instances);
+  if (contextRosterEl) contextRosterEl.hidden = !instances;
+  if (typeof tabs !== "undefined") updateContextTabs();
+}
+
+async function refreshContextRoster() {
+  if (!contextRosterEl || sidebarMode !== "instances") return;
+  const myGen = ++contextRosterGen;
+  const ws = currentWorkspace();
+  const owns = () => myGen === contextRosterGen && sidebarMode === "instances" && currentWorkspace() === ws;
+  const listEl = contextRosterEl.querySelector(".ctx-list");
+  let panel;
+  try {
+    panel = await api(`/api/panel${ws ? `?ws=${encodeURIComponent(ws)}` : ""}`);
+  } catch (e) {
+    if (owns()) listEl.innerHTML = `<div class="ctx-empty">Roster unavailable: ${e.message}</div>`;
+    return;
+  }
+  if (!owns()) return;
+  renderContextRoster(panel.instances || []);
+}
+
+function renderContextRoster(instances) {
+  const listEl = contextRosterEl.querySelector(".ctx-list");
+  listEl.innerHTML = "";
+  const visible = instances.filter((i) => !contextFilter ||
+    [i.instance, i.agent, i.repoName, i.task].some((v) => String(v || "").toLowerCase().includes(contextFilter)));
+  contextRosterEl.querySelector(".ctx-count").textContent = `${instances.filter((i) => i.running).length}/${instances.length}`;
+  if (!visible.length) {
+    listEl.innerHTML = `<div class="ctx-empty">${instances.length ? "Nothing matches." : "No instances."}</div>`;
+    return;
+  }
+  for (const [, repos] of groupInstances(visible)) {
+    for (const [repo, items] of repos) {
+      const rh = document.createElement("div");
+      rh.className = "ctx-repo";
+      rh.textContent = repo;
+      listEl.append(rh);
+      for (const i of items) {
+        const row = document.createElement("button");
+        const activeKey = tabs.get(activeTab)?.key;
+        const isActive = activeKey === `term:${currentWorkspace()}:${i.instance}`;
+        row.className = "ctx-inst" + (i.running ? "" : " idle") + (isActive ? " active" : "");
+        row.style.setProperty("--depth", String(i.depth || 0));
+        row.disabled = !i.running;
+        row.title = i.running ? `Open ${i.instance} terminal` : `${i.instance} is idle`;
+        // One guide per REAL ancestry depth — not a one-level .child class.
+        const guides = document.createElement("span");
+        guides.className = "ctx-guides";
+        for (let d = 0; d < (i.depth || 0); d++) {
+          const guide = document.createElement("span");
+          guide.className = "ctx-guide";
+          guide.style.left = `${10 + d * 14}px`;
+          guides.append(guide);
+        }
+        const dot = document.createElement("span");
+        dot.className = `ctx-dot ${i.running ? "on" : "off"}`;
+        const copy = document.createElement("span");
+        copy.className = "ctx-copy";
+        const name = document.createElement("span");
+        name.className = "ctx-name";
+        name.textContent = i.instance;
+        const meta = document.createElement("span");
+        meta.className = "ctx-meta";
+        meta.textContent = i.task || i.agent || "";
+        copy.append(name, meta);
+        row.append(guides, dot, copy);
+        row.addEventListener("click", () => openTerminalTab(i.instance));
+        listEl.append(row);
+      }
+    }
+  }
+}
+
+async function showInstances() {
+  setSidebarMode("instances");
+  setNavActive("instances");
+  refreshContextRoster();
+  const openTerms = [...tabs].filter(([, t]) => t.kind === "terminal");
+  if (openTerms.length) { activateTab(openTerms.at(-1)[0]); return; }
+  showTabLayer(false);
+  if (stage?.name === "instances") return;
+  const myOp = ++stageOp;
+  const prev = stage;
+  stage = null;
+  if (prev) {
+    try { await prev.life.close(); } catch (e) { console.error(e); }
+    prev.el.remove();
+  }
+  if (myOp !== stageOp) return;
+  const el = document.createElement("div");
+  el.className = "instance-landing";
+  el.innerHTML = `<div><span class="big">⌁</span><h2>Select an instance</h2><p>Choose a running instance from the sidebar to open its live terminal.</p></div>`;
+  stageHost.innerHTML = "";
+  stageHost.append(el);
+  stage = { name: "instances", el, life: { close: async () => {} } };
 }
 
 // ── tabs ──────────────────────────────────────────────────────────────────
@@ -98,7 +226,7 @@ let activeTab = null;
  * KEYED open must `await whenKeyFree(key)` first: a reopen during a closed
  * tab's deferred cleanup queues behind it instead of being dropped or torn
  * down by the stale lifecycle. */
-function addTab({ title, key, onClose, onShow }) {
+function addTab({ title, key, kind = "artifact", onClose, onShow }) {
   if (key) {
     for (const [tid, t] of tabs) if (t.key === key) { activateTab(tid); return null; }
   }
@@ -117,13 +245,22 @@ function addTab({ title, key, onClose, onShow }) {
   tabhost.append(paneEl);
   tabEl.addEventListener("click", (e) => { if (e.target !== close) activateTab(id); });
   close.addEventListener("click", () => closeTab(id));
-  tabs.set(id, { tabEl, paneEl, title, key, onClose, onShow });
+  tabs.set(id, { tabEl, paneEl, title, key, kind, onClose, onShow });
   activateTab(id);
   return { id, paneEl };
 }
 
 function activateTab(id) {
   activeTab = id;
+  const current = tabs.get(id);
+  if (current?.kind === "terminal") {
+    setSidebarMode("instances");
+    setNavActive("instances");
+    refreshContextRoster();
+  } else if (current?.kind === "brain") {
+    setSidebarMode("souls");
+    setNavActive("spawn");
+  }
   showTabLayer(true);
   for (const [tid, t] of tabs) {
     t.tabEl.classList.toggle("active", tid === id);
@@ -148,12 +285,20 @@ function closeTab(id) {
   if (activeTab === id) {
     const rest = [...tabs.keys()];
     if (rest.length) activateTab(rest[rest.length - 1]);
+    else if (t.kind === "terminal") showInstances();
     else { activeTab = null; showTabLayer(false); if (stage) setNavActive(stage.name); }
   }
 }
 
 // ── view host: load ./views/<name>.mjs, mount into a tab ─────────────────
-async function openViewTab(name, title, extra = {}, key = `view:${name}`) {
+async function openBrainTab(agent) {
+  // brain.mjs is intentionally one live mount: selecting another soul
+  // replaces the previous brain tab instead of accumulating stale selectors.
+  for (const [id, t] of tabs) if (t.kind === "brain") closeTab(id);
+  return openViewTab("brain", `◈ ${agent}`, { agent }, "view:brain", "brain");
+}
+
+async function openViewTab(name, title, extra = {}, key = `view:${name}`, kind = name === "markdown" ? "file" : "artifact") {
   // A reopen during a closed tab's deferred cleanup queues here — never dropped.
   await whenKeyFree(key);
   let mod;
@@ -167,6 +312,7 @@ async function openViewTab(name, title, extra = {}, key = `view:${name}`) {
   const made = addTab({
     title,
     key,
+    kind,
     // Close is safe at any time — including while the async mount is still
     // pending: the lifecycle defers cleanup until mount settles and then
     // runs THAT mount's disposer (never the module-wide unmount mid-flight,
@@ -186,6 +332,11 @@ async function openViewTab(name, title, extra = {}, key = `view:${name}`) {
 // ── integrated terminal tab (the shell's own flagship view) ──────────────
 const pendingTerms = new Set(); // keys reserved while a roster fetch is in flight
 async function openTerminalTab(instance) {
+  // Terminal always enters the Instances context: one shell sidebar with the
+  // compact recursive roster, terminal alone in the main area.
+  setSidebarMode("instances");
+  setNavActive("instances");
+  refreshContextRoster();
   // Honor the views' workspace bus: an instance selected in a secondary
   // (server-advertised) workspace must resolve against THAT roster, and a
   // same-named instance in another workspace is a different terminal.
@@ -237,6 +388,7 @@ async function openTerminalTabInner(instance, ws, key) {
   const made = addTab({
     title: `⌗ ${instance}`,
     key,
+    kind: "terminal",
     // close() resolves when cleanup (incl. a late-materializing pty detach)
     // actually ran — closeTab reserves the key on this promise.
     onClose: () => { offTheme(); return tab.close(); },
@@ -256,10 +408,9 @@ async function openTerminalTabInner(instance, ws, key) {
 // Diff and Jira surfaces are intentionally NOT wired (modules stay dormant
 // in the tree per the coordinator's directive).
 const NAV = [
-  { name: "hierarchy", label: "Agents", icon: "⌘", title: "Agents" },
+  { name: "hierarchy", label: "Active overview", icon: "⌘", title: "Active overview" },
   { name: "instances", label: "Instances", icon: "◉", title: "Instances" },
-  { name: "spawn", label: "Spawn", icon: "✚", title: "Spawn" },
-  { name: "brain", label: "Brain", icon: "◈", title: "Agent brain" },
+  { name: "spawn", label: "Soul roster", icon: "✦", title: "Soul roster" },
 ];
 const navEl = document.getElementById("nav");
 for (const v of NAV) {
@@ -270,7 +421,7 @@ for (const v of NAV) {
   b.innerHTML = `<span class="icon"></span><span class="label"></span>`;
   b.querySelector(".icon").textContent = v.icon;
   b.querySelector(".label").textContent = v.label;
-  b.addEventListener("click", () => showStage(v.name));
+  b.addEventListener("click", () => v.name === "instances" ? showInstances() : showStage(v.name));
   navEl.append(b);
 }
 
@@ -294,10 +445,9 @@ const palette = createPalette({
   },
   openTerminal: (name) => openTerminalTab(name),
   commands: [
-    { label: "View: Agents (hierarchy)", run: () => showStage("hierarchy") },
-    { label: "View: Instances", run: () => showStage("instances") },
-    { label: "View: Spawn an agent", run: () => showStage("spawn") },
-    { label: "View: Agent brain", run: () => showStage("brain") },
+    { label: "View: Active overview", run: () => showStage("hierarchy") },
+    { label: "View: Instances", run: () => showInstances() },
+    { label: "View: Soul roster", run: () => showStage("spawn") },
     { label: "Theme: toggle light/dark", run: () => toggleTheme() },
   ],
 });
@@ -315,6 +465,12 @@ document.getElementById("ws-name").textContent = "";
 api("/api/panel").then((p) => {
   document.getElementById("ws-name").textContent = p.workspace?.name ? `· ${p.workspace.name}` : "";
 }).catch(() => {});
+
+// Contextual instance roster: the ONE shell sidebar becomes the recursive
+// roster in Instances mode (no view-owned second sidebar).
+initContextRoster();
+onWorkspaceChange(() => { contextRosterGen++; if (sidebarMode === "instances") refreshContextRoster(); });
+setInterval(() => { if (sidebarMode === "instances") refreshContextRoster(); }, 4000);
 
 // Home surface: the agent hierarchy — running instances and how they relate.
 showStage("hierarchy");

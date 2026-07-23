@@ -463,9 +463,8 @@ function openPop(s, name) {
       <button class="act pbrain">Brain</button>
     </div>`;
   pop.querySelector(".pterm").addEventListener("click", () => s.ctx.openTerminal(name));
-  pop.querySelector(".pbrain").addEventListener("click", () =>
-    s.ctx.openView ? s.ctx.openView("brain") : null);
-  if (!s.ctx.openView) pop.querySelector(".pbrain").style.display = "none";
+  pop.querySelector(".pbrain").addEventListener("click", () => s.ctx.openBrain?.(i.agent));
+  if (!s.ctx.openBrain) pop.querySelector(".pbrain").style.display = "none";
   // append inside the node's group so the popover sits by its (dragged) box
   (entry.el.parentElement || s.canvas.querySelector(".hier-stage"))?.append(pop);
 }

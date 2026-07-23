@@ -11,11 +11,13 @@ body {
 
 /* ── nav rail ── */
 #sidebar {
-  width: 132px; min-width: 132px;
+  width: 180px; min-width: 180px;
   background: var(--surface);
   border-right: 1px solid var(--border);
   display: flex; flex-direction: column;
+  transition: width .16s ease, min-width .16s ease;
 }
+#sidebar.instances-mode { width: 300px; min-width: 300px; }
 .side-head {
   height: var(--bar-h); flex: none; display: flex; align-items: center;
   padding: 0 14px; font-weight: 700; font-size: 14px; color: var(--accent);
@@ -25,6 +27,38 @@ body {
 .side-head span { color: var(--muted); font-weight: 400; font-size: 12px; }
 #nav { display: flex; flex-direction: column; padding: 8px 6px; gap: 2px; }
 #nav-foot { margin-top: auto; display: flex; flex-direction: column; padding: 8px 6px; }
+
+/* ── contextual instance roster (the same shell sidebar, never a second) ── */
+#instance-roster { flex: 1; min-height: 0; display: flex; flex-direction: column; border-top: 1px solid var(--border); }
+#instance-roster[hidden] { display: none; }
+.ctx-head { height: 32px; flex: none; padding: 0 10px; display: flex; align-items: center; gap: 8px;
+            color: var(--muted); font-size: 10.5px; font-weight: 650; text-transform: uppercase; letter-spacing: .065em; }
+.ctx-count { margin-left: auto; color: var(--faint); font-weight: 500; letter-spacing: 0; }
+.ctx-filter { margin: 0 8px 7px; width: calc(100% - 16px); height: 30px; flex: none; padding: 0 9px;
+              border: 1px solid var(--border); border-radius: 7px; background: var(--bg); color: var(--fg);
+              font: 12px/1 inherit; outline: none; }
+.ctx-filter:focus { border-color: var(--accent); }
+.ctx-filter::placeholder { color: var(--faint); }
+.ctx-list { flex: 1; min-height: 0; overflow-y: auto; padding: 0 6px 10px; }
+.ctx-repo { height: 24px; padding: 6px 7px 2px; color: var(--faint); font-size: 10.5px; font-weight: 600;
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ctx-inst { position: relative; width: 100%; height: 42px; display: flex; align-items: center; gap: 7px;
+            padding: 4px 7px 4px calc(9px + var(--depth) * 14px); border: 1px solid transparent;
+            border-radius: 7px; background: none; color: var(--fg); font: inherit; text-align: left; cursor: pointer; }
+.ctx-inst:hover { background: var(--surface-2); }
+.ctx-inst.active { background: var(--sel); border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+.ctx-inst:disabled { cursor: default; opacity: .52; }
+.ctx-inst:disabled:hover { background: none; }
+.ctx-guides { position: absolute; inset: 0 auto 0 0; pointer-events: none; }
+.ctx-guide { position: absolute; top: -3px; bottom: -3px; width: 1px; background: var(--border); }
+.ctx-guide:last-child::after { content: ""; position: absolute; left: 0; top: 20px; width: 8px; height: 1px; background: var(--border); }
+.ctx-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+.ctx-dot.on { background: var(--ok); box-shadow: 0 0 0 2px color-mix(in srgb, var(--ok) 18%, transparent); }
+.ctx-dot.off { border: 1.5px solid var(--faint); background: transparent; }
+.ctx-copy { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.ctx-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 600; }
+.ctx-meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 10.5px; }
+.ctx-empty { padding: 20px 10px; color: var(--muted); text-align: center; font-size: 12px; }
 .nav-item {
   display: flex; align-items: center; gap: 8px;
   background: none; border: none; border-radius: 6px;
@@ -65,8 +99,13 @@ body {
   height: 100%; color: var(--muted); gap: 8px; padding: 24px; text-align: center;
 }
 .placeholder h2 { color: var(--fg); margin: 0; font-weight: 600; }
-.term-wrap { position: absolute; inset: 0; padding: 6px; background: var(--term-bg); }
+.term-wrap { position: absolute; inset: 0; padding: 14px 16px; background: var(--term-bg); }
 .term-wrap .xterm { height: 100%; }
+.term-wrap .xterm-viewport { border-radius: 6px; }
+.instance-landing { height: 100%; display: grid; place-items: center; padding: 32px; text-align: center; color: var(--muted); }
+.instance-landing .big { display: block; font-size: 36px; opacity: .45; margin-bottom: 10px; }
+.instance-landing h2 { margin: 0 0 5px; color: var(--fg); font-size: 16px; font-weight: 600; }
+.instance-landing p { margin: 0; font-size: 13px; }
 .term-banner {
   position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
   background: color-mix(in srgb, var(--term-bg) 85%, transparent); color: var(--warn); font-size: 15px; z-index: 5;

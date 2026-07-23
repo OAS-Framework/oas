@@ -46,7 +46,8 @@ const CSS = `
 .brain-inst-head { display: flex; align-items: center; gap: 8px; }
 .brain-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); flex: none; }
 .brain-dot.on { background: var(--ok); }
-.brain-status { padding: 24px; color: var(--muted); text-align: center; }
+.brain-status { padding: 48px 24px; color: var(--muted); text-align: center; font-size: 13.5px; }
+.brain-status .big { font-size: 32px; display: block; margin-bottom: 12px; opacity: .5; }
 `;
 
 function card(title, count, innerEl) {
@@ -196,7 +197,7 @@ export async function mount(el, ctx) {
   root.append(style, bar, body);
   el.append(root);
 
-  const status = (msg) => { body.innerHTML = `<div class="brain-status">${esc(msg)}</div>`; };
+  const status = (msg, glyph) => { body.innerHTML = `<div class="brain-status" style="flex:1">${glyph ? `<span class="big">${glyph}</span>` : ""}${esc(msg)}</div>`; };
 
   const load = async (name, myGen) => {
     const a = (loadAgents.list || []).find((x) => x.name === name);
@@ -239,13 +240,15 @@ export async function mount(el, ctx) {
     loadAgents.list = agents;
     sel.innerHTML = "";
     sel.disabled = false;
-    if (!agents.length) { desc.textContent = ""; status("No agents in this workspace."); return; }
+    if (!agents.length) { desc.textContent = ""; status("No agents in this workspace.", "◎"); return; }
     for (const a of agents) {
       const o = document.createElement("option");
       o.value = a.name;
       o.textContent = a.name;
       sel.append(o);
     }
+    // Soul roster's "View brain" opens this artifact at the chosen soul.
+    if (ctx.agent && agents.some((a) => a.name === ctx.agent)) sel.value = ctx.agent;
     await load(sel.value, ++gen);
   }
 
