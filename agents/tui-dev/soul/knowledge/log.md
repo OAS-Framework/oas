@@ -2,6 +2,10 @@
 
 ## 2026-07-23
 
+- **Update**: [desktop-shell-view-integration-lessons.md](desktop-shell-view-integration-lessons.md)
+  — reframed older-server inline degradation as defense-in-depth and linked the identity/version reuse probe.
+- **Creation**: [server-reuse-identity-probe.md](server-reuse-identity-probe.md)
+  — promoted the lesson that a workspace/liveness probe is not enough to reuse an existing desktop server; capability+version must exactly match the local manifest or the desktop should spawn its own server.
 - **Update**: [regression-tests-bug-layer.md](regression-tests-bug-layer.md)
   — merged the mutation-check discipline from tui-dev-desktop-shell notes: before claiming guard/order regression coverage, delete the fix and verify the new tests fail.
 - **Update**: [desktop-terminal-direct-attach.md](desktop-terminal-direct-attach.md)
