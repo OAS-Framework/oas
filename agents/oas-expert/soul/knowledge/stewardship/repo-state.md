@@ -16,6 +16,14 @@ than letting the file grow stale.
 
 ## On main
 
+- 2026-07-23 reviewer-deaths incident fixes (direct commits, incident
+  response): b3eeed0 — retireInstance tmux kill-window targets `=`-anchored
+  (tmux targets prefix-match; test fixture "reviewer-1" was killing live
+  reviewer-15c135c* windows); 0753b40 — `npm test` pinned to explicit globs
+  (bare `node --test` recursed into agents/*/instances/*/work sibling
+  checkouts, re-running stale unfixed suites) + CLI-subprocess spawn/retire
+  tests export PI_AGENTS_TMUX_SESSION=oas-test-nosuch.
+
 - PR #17 merged 2026-07-22: oas.web 0.8.1 — visible, instant typing (echo
   snap+burst client-side; server never collects — `oas-web.mjs collect`
   child-process roster snapshot every 3s), /api/keys debug/failure paths
@@ -81,6 +89,18 @@ than letting the file grow stale.
   closed PR's commits if wanted).
 
 ## Open threads
+
+- aweb channel awakening drops (2 consecutive repros 2026-07-23): verdict
+  mail from short-lived reviewer identities delivered and marked READ
+  server-side but no awakening injected into the recipient's idle session —
+  visible only via `aw mail inbox --show-all`. Looks like ack-before-inject
+  in the channel path. Escalated to the human operator via
+  tui-dev-desktop-shell; triage guidance: window-gone + no-event now most
+  likely means completed-but-event-dropped, check `--show-all` and the
+  session log tail.
+- Sibling agent worktrees predate the b3eeed0/0753b40 fixes; until they
+  merge main, `npm test` run from THOSE roots can still prefix-kill live
+  reviewer-* windows (owners notified via tui-dev thread).
 
 - Org-level GitHub Actions policy blocks CI bump-PRs — manual rescue each
   release until an org admin relaxes it.
