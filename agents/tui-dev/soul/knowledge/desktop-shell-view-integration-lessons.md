@@ -1,9 +1,9 @@
 ---
 type: Lesson
 title: Desktop shell view integration lessons
-description: Ported panel views rely on key-deduped tabs, per-mount disposers for multi-tab views, context-owning picker tabs, .mjs loader naming, route-family workspace pinning, exactly-once Fetch body serialization, and inline degradation when older shared servers lack endpoints.
+description: Ported panel views rely on key-deduped tabs, per-mount disposers for multi-tab views, context-owning picker tabs, .mjs loader naming, route-family workspace pinning, exact server identity/version reuse checks, exactly-once Fetch body serialization, and inline degradation when older shared servers lack endpoints.
 tags: [desktop, view-host, integration, ipc, workspace]
-timestamp: 2026-07-22
+timestamp: 2026-07-23
 ---
 
 When integrating webpanel-dev's ported views (`instances`, `spawn`, `jira`,
@@ -55,5 +55,9 @@ with the [Desktop shell view-host contract and layout](desktop-shell-layout.md):
   workspace in the terminal dedup key so a secondary advertised workspace does
   not open the wrong same-named instance or hit an unknown-instance error.
 - Shared older servers may lack new endpoints: the lfx `oas-web` on `4820`
-  predated `/api/brain` and returned `404`. Views must show such errors inline;
-  the dedicated-server path after workspace mismatch usually avoids it.
+  predated `/api/brain` and returned `404`. Inline view errors are only
+  defense-in-depth; server reuse must first follow [Server reuse needs an
+  identity probe, not just a liveness probe](server-reuse-identity-probe.md) by
+  comparing the server's capability+version identity response to the local
+  manifest and spawning this checkout's server on 404, mismatch, or network
+  failure without killing the foreign server.

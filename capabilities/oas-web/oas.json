@@ -1,7 +1,7 @@
 {
   "capability": "oas.web",
   "command": "web",
-  "version": "0.9.5",
+  "version": "0.9.6",
   "compatibility": {
     "oas": ">=0.16.0"
   },

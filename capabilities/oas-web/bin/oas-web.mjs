@@ -691,6 +691,10 @@ function synthUntracked(cwd, untracked, files, io) {
 
 // ---- HTTP ----
 const UI = readFileSync(join(HERE, "..", "ui", "panel.html"), "utf8");
+// Identity for compatibility probes (GET /api/version): the desktop app must
+// not reuse an OLDER installed oas-web that answers /api/panel but lacks the
+// desktop endpoints (/api/brain, /api/file, /api/diff...).
+const MANIFEST = JSON.parse(readFileSync(join(HERE, "..", "oas.json"), "utf8"));
 const send = (res, code, body, type = "application/json") => {
   const data = type === "application/json" ? JSON.stringify(body) : body;
   res.writeHead(code, { "content-type": `${type}; charset=utf-8`, "cache-control": "no-store" });
@@ -721,6 +725,9 @@ const server = createServer(async (req, res) => {
   }
   try {
     if (req.method === "GET" && path === "/") return send(res, 200, UI, "text/html");
+    if (req.method === "GET" && path === "/api/version") {
+      return send(res, 200, { capability: MANIFEST.capability, version: MANIFEST.version });
+    }
     if (req.method === "GET" && path === "/api/panel") {
       const d = snapshotPanel(url.searchParams.get("ws") || undefined);
       // first request before the initial snapshot lands: collect inline once
