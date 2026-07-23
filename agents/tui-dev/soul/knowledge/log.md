@@ -1,5 +1,12 @@
 # Knowledge Log
 
+## 2026-07-23
+
+- **Update**: [async-mount-close-race.md](async-mount-close-race.md)
+  — merged the terminal lifecycle `onReady` ordering lesson from tui-dev-desktop-shell notes so post-acquisition handlers, observers, and focus setup happen before settle or not at all.
+- **Update**: [pkill-scoping-discipline.md](pkill-scoping-discipline.md)
+  — merged the tmux prefix-matching reviewer incident follow-up from tui-dev-desktop-shell notes, including exact `=`-anchored targets and stale-worktree caution.
+
 ## 2026-07-22
 
 - **Update**: [async-mount-close-race.md](async-mount-close-race.md)

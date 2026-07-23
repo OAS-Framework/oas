@@ -1,9 +1,9 @@
 ---
 type: Lesson
 title: Async resource lifecycles must handle close during pending acquisition
-description: When a desktop owner can close during async mount or terminal open, lifecycle state must track closed/settled/fulfilled, release late materialized resources immediately, and keep dedup-key reservations awaitable until cleanup completes.
+description: When a desktop owner can close during async mount or terminal open, lifecycle state must track closed/settled/fulfilled, release late materialized resources, reserve dedup keys until cleanup completes, and run setup inside `onReady` before settle.
 tags: [desktop, view-host, async, race, lifecycle, queueing, pty]
-timestamp: 2026-07-22
+timestamp: 2026-07-23
 ---
 
 A follow-up review of the [per-mount disposer contract](view-mount-disposer-contract.md)
@@ -52,8 +52,23 @@ covers session-ended cases where main already dropped the pty; and closePty
 failures are absorbed so UI teardown still completes. This is the cleanup side
 of the [direct tmux attach terminal contract](desktop-terminal-direct-attach.md).
 
+A reviewer then closed the loop on the terminal pty case: wiring xterm
+handlers, the `ResizeObserver`, and focus after `await life.start(...)` is
+still outside the lifecycle. On a close during pending open, `start()`'s
+`finally` can signal settle, `close()` can resume and dispose the UI while the
+observer is still null, and then the awaiting caller can continue and install
+handlers or focus a dead terminal outside every cleanup path. Put all resource
+setup inside the lifecycle's `onReady` callback, which runs before the settle
+signal; code textually after `await start()` has no ordering relationship with
+close. Pin both branches in tests: closed path skips `onReady` and records
+`[detach, disposeUi]`; live path records `[setup, detach, disposeUi]`.
+
 General rules:
 
+- Treat awaited lifecycle start as an ownership boundary: caller code after
+  `await start()` is not protected from close-during-pending interleavings;
+  handler, observer, focus, and other cleanup-requiring setup belongs in
+  `onReady` so it is established before settle or skipped for dead owners.
 - Whenever cleanup depends on a value produced by an in-flight async operation,
   closing must wait for settle. Checking "is the cleanup value there yet?" at
   close time is the race, not the fix; if the value materializes after close,
