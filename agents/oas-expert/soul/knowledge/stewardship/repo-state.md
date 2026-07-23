@@ -93,8 +93,11 @@ than letting the file grow stale.
 - aweb channel awakening drops (2 consecutive repros 2026-07-23): verdict
   mail from short-lived reviewer identities delivered and marked READ
   server-side but no awakening injected into the recipient's idle session —
-  visible only via `aw mail inbox --show-all`. UPDATE 2026-07-23: delayed ~30 min, not lost — a
-  flush/reconnect sweep eventually delivers; live push path fails silently. Escalated to the human operator via
+  visible only via `aw mail inbox --show-all`. RESOLVED-as-characterized 2026-07-23: intermittent ~30-min
+  delay when the recipient session is mid-turn (2 delayed while busy, 2
+  prompt while idle); no drops observed. Reported to the human by
+  tui-dev-desktop-shell. Triage: check `aw mail inbox --show-all` before
+  assuming a retired sender died. Escalated to the human operator via
   tui-dev-desktop-shell; triage guidance: window-gone + no-event now most
   likely means completed-but-event-dropped, check `--show-all` and the
   session log tail.
