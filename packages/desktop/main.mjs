@@ -11,12 +11,13 @@
 //     the pty ONLY — the tmux session is the durable host and must survive.
 import { app, BrowserWindow, ipcMain, shell } from "electron";
 import { spawn, execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { apiUrl, apiInit } from "./api-url.mjs";
 import { openTerm } from "./tmux-target.mjs";
+import { serverCompatible } from "./server-compat.mjs";
 
 const require = createRequire(import.meta.url);
 const pty = require("node-pty");
@@ -47,6 +48,21 @@ async function panelWorkspaces() {
     const list = d.workspaces || [];
     allowedWs = new Set(list.map((w) => w.id));
     return list;
+  } catch { return null; }
+}
+
+/** This checkout's oas-web identity, for the reuse compatibility probe. */
+function localServerIdentity() {
+  const m = JSON.parse(readFileSync(join(REPO_ROOT, "capabilities", "oas-web", "oas.json"), "utf8"));
+  return { capability: m.capability, version: m.version };
+}
+
+/** Probe GET /api/version on the current port; null on network failure. */
+async function probeVersion() {
+  try {
+    const r = await fetch(`${base()}/api/version`, { signal: AbortSignal.timeout(1500) });
+    let body = null; try { body = await r.json(); } catch { /* non-JSON */ }
+    return { ok: r.ok, status: r.status, body };
   } catch { return null; }
 }
 
@@ -88,10 +104,17 @@ async function ensureServer() {
   const existing = await panelWorkspaces();
   if (existing) {
     const id = matchWorkspace(existing);
-    if (id) { wsId = id; return { spawned: false }; }
-    // wrong workspace — leave that server alone and start our own on the
-    // next free port (deterministic scan)
-    console.log(`oas-desktop: server on ${port} serves ${existing.map((w) => w.name).join(", ")}, not ${WORKSPACE} — starting a dedicated one`);
+    // Workspace coverage is necessary but NOT sufficient: an older installed
+    // oas-web answers /api/panel yet lacks the desktop endpoints (/api/brain,
+    // /api/file, /api/diff) — Brain would 404. Reuse only a server that
+    // identifies as THIS checkout via /api/version.
+    const compat = id ? serverCompatible(await probeVersion(), localServerIdentity()) : null;
+    if (id && compat.compatible) { wsId = id; return { spawned: false }; }
+    // wrong workspace or incompatible — leave that server alone and start
+    // our own on the next free port (deterministic scan)
+    console.log(id
+      ? `oas-desktop: server on ${port} is incompatible (${compat.reason}) — starting a dedicated one`
+      : `oas-desktop: server on ${port} serves ${existing.map((w) => w.name).join(", ")}, not ${WORKSPACE} — starting a dedicated one`);
     port = await freePort(port + 1);
   }
   spawnServer(port);
