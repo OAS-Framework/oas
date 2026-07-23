@@ -16,8 +16,8 @@ const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").
 const CSS = `
 .brain { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--bg); color: var(--fg);
          font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-.brain-bar { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--border);
-             background: var(--surface); flex: none; }
+.brain-bar { display: flex; align-items: center; gap: 10px; height: var(--bar-h, 48px); flex: none; padding: 0 14px;
+             border-bottom: 1px solid var(--border); background: var(--surface); }
 .brain-bar label { color: var(--muted); font-size: 12px; }
 .brain-bar select { background: var(--surface-2); color: var(--fg); border: 1px solid var(--border); border-radius: 8px;
                     padding: 5px 8px; font: inherit; max-width: 320px; }
@@ -46,7 +46,8 @@ const CSS = `
 .brain-inst-head { display: flex; align-items: center; gap: 8px; }
 .brain-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); flex: none; }
 .brain-dot.on { background: var(--ok); }
-.brain-status { padding: 24px; color: var(--muted); text-align: center; }
+.brain-status { padding: 48px 24px; color: var(--muted); text-align: center; font-size: 13.5px; }
+.brain-status .big { font-size: 32px; display: block; margin-bottom: 12px; opacity: .5; }
 `;
 
 function card(title, count, innerEl) {
@@ -172,7 +173,11 @@ function renderBrain(body, d, ctx) {
 async function json(res) { return res && typeof res.json === "function" ? res.json() : res; }
 
 let unsubWs = null;
-let gen = 0; // request generation — stale responses never paint
+let rosterGen = 0; // /api/agents generation — workspace refreshes
+let gen = 0;       // /api/brain generation — agent selections
+// SEPARATE tokens (review 3dfe7d1): selections and roster refreshes must not
+// share one counter, or a selection made while /api/agents is in flight
+// cancels the required workspace refresh and strands the stale roster.
 
 export async function mount(el, ctx) {
   root = document.createElement("div");
@@ -192,50 +197,71 @@ export async function mount(el, ctx) {
   root.append(style, bar, body);
   el.append(root);
 
-  const status = (msg) => { body.innerHTML = `<div class="brain-status">${esc(msg)}</div>`; };
+  const status = (msg, glyph) => { body.innerHTML = `<div class="brain-status" style="flex:1">${glyph ? `<span class="big">${glyph}</span>` : ""}${esc(msg)}</div>`; };
 
   const load = async (name, myGen) => {
     const a = (loadAgents.list || []).find((x) => x.name === name);
     desc.textContent = a?.description || "";
     status(`Loading ${name}…`);
+    // House generation-token pattern (see diff.mjs owns()): BOTH completion
+    // paths check ownership — an earlier request's rejection must not replace
+    // a later selection's rendered brain (round-4 review @3ebfc47), and the
+    // selected name is bound in too so completion can't paint a stale agent.
+    const owns = () => myGen === gen && root && sel.value === name;
     try {
       const d = await json(await ctx.api(`/api/brain/${encodeURIComponent(name)}${wsQuery()}`));
-      if (myGen !== gen || !root) return; // stale request or unmounted
+      if (!owns()) return; // superseded, unmounted, or selection moved on
       if (d.error) { status(d.error); return; }
-      if (sel.value === name) renderBrain(body, d, ctx); // stale-response guard
-    } catch (e) { if (myGen === gen && root) status(`Failed to load brain: ${e.message || e}`); }
+      renderBrain(body, d, ctx);
+    } catch (e) { if (owns()) status(`Failed to load brain: ${e.message || e}`); }
   };
 
   // Workspace-aware agent loading: /api/agents is ws-scoped, and the shared
   // workspace bus (Instances/Spawn/Jira switchers) must refresh this view.
   async function loadAgents() {
-    const myGen = ++gen;
+    const myRoster = ++rosterGen;
+    gen++;               // also retire in-flight brain requests of the old roster
+    sel.disabled = true; // a stale-roster selection must not race the refresh
     status("Loading agents…");
     let agents = [];
     try {
       const d = await json(await ctx.api(`/api/agents${wsQuery()}`));
       agents = (d.agents || []).filter((a, i, arr) => arr.findIndex((x) => x.name === a.name) === i);
-    } catch (e) { if (myGen === gen && root) status(`Failed to load agents: ${e.message || e}`); return; }
-    if (myGen !== gen || !root) return;
+    } catch (e) {
+      // Current-request failure must re-enable the selector (nothing remains
+      // in flight); a STALE failure must not unlock a newer refresh's lock.
+      if (myRoster === rosterGen && root) {
+        sel.disabled = false;
+        status(`Failed to load agents: ${e.message || e}`);
+      }
+      return;
+    }
+    if (myRoster !== rosterGen || !root) return;
     loadAgents.list = agents;
     sel.innerHTML = "";
-    if (!agents.length) { desc.textContent = ""; status("No agents in this workspace."); return; }
+    sel.disabled = false;
+    if (!agents.length) { desc.textContent = ""; status("No agents in this workspace.", "◎"); return; }
     for (const a of agents) {
       const o = document.createElement("option");
       o.value = a.name;
       o.textContent = a.name;
       sel.append(o);
     }
-    await load(sel.value, myGen);
+    // Soul roster's "View brain" opens this artifact at the chosen soul.
+    if (ctx.agent && agents.some((a) => a.name === ctx.agent)) sel.value = ctx.agent;
+    await load(sel.value, ++gen);
   }
 
-  sel.addEventListener("change", () => load(sel.value, gen));
+  // every selection is a NEW generation — reusing the current gen lets a
+  // prior request's late completion (success OR error) win over this one
+  sel.addEventListener("change", () => load(sel.value, ++gen));
   unsubWs = onWorkspaceChange(() => loadAgents());
   await loadAgents();
 }
 
 export function unmount() {
   gen++;
+  rosterGen++;
   if (unsubWs) { unsubWs(); unsubWs = null; }
   if (root) { root.remove(); root = null; }
 }

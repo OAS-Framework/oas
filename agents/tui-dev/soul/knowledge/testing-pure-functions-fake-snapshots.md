@@ -30,8 +30,13 @@ What to test and how:
 Run and full-repo verification:
 
 ```bash
-node --test test/control-pane-model.test.mjs   # or the repo's full `node --test`
+node --test test/control-pane-model.test.mjs
+npm test                                      # full repo via pinned globs, not bare `node --test`
 ```
+
+Never use bare `node --test` as full-repo verification from an OAS checkout that
+contains `agents/*/instances/*/work`; it can discover stale sibling worktree
+suites. See the [node test recursion lesson](node-test-recursion-worktrees.md).
 
 When changing the pane, extend these tests in kind — a new render feature gets
 a `renderFrame` assertion; a new parser gets direct input/output cases. What

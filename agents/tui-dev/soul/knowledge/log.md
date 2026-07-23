@@ -2,6 +2,33 @@
 
 ## 2026-07-23
 
+- **Update**: [anchor-tmux-attach-targets.md](anchor-tmux-attach-targets.md)
+  — recorded the `set-option -t` exception: viewer-local option targets do not accept `=` anchors, so only unique random viewer session names may use that unanchored form.
+- **Update**: [desktop-terminal-direct-attach.md](desktop-terminal-direct-attach.md)
+  — replaced the grouped viewer session description with the independent link-window viewer shape and source-window-death behavior.
+- **Removal**: [desktop-terminal-grouped-viewer-sessions.md](desktop-terminal-grouped-viewer-sessions.md)
+  — superseded by [desktop-terminal-link-window-viewer-isolation.md](desktop-terminal-link-window-viewer-isolation.md) because grouped sessions share window membership and can escape to sibling windows.
+- **Creation**: [desktop-terminal-link-window-viewer-isolation.md](desktop-terminal-link-window-viewer-isolation.md)
+  — promoted the lesson that desktop terminal viewers need independent sessions containing only a link-window to the exact source window, plus locked prefix/root navigation keys.
+- **Update**: [desktop-terminal-direct-attach.md](desktop-terminal-direct-attach.md)
+  — merged the grouped-viewer-session follow-up so direct node-pty attach uses a per-tab grouped session rather than the durable session's shared current-window selection.
+- **Creation**: [desktop-terminal-grouped-viewer-sessions.md](desktop-terminal-grouped-viewer-sessions.md)
+  — promoted the decision that desktop terminal tabs need per-tab tmux viewer sessions grouped to the durable session, with independent current-window selection and exact cleanup.
+- **Update**: [desktop-shell-view-integration-lessons.md](desktop-shell-view-integration-lessons.md)
+  — reframed older-server inline degradation as defense-in-depth and linked the identity/version reuse probe.
+- **Creation**: [server-reuse-identity-probe.md](server-reuse-identity-probe.md)
+  — promoted the lesson that a workspace/liveness probe is not enough to reuse an existing desktop server; capability+version must exactly match the local manifest or the desktop should spawn its own server.
+- **Update**: [regression-tests-bug-layer.md](regression-tests-bug-layer.md)
+  — merged the mutation-check discipline from tui-dev-desktop-shell notes: before claiming guard/order regression coverage, delete the fix and verify the new tests fail.
+- **Update**: [desktop-terminal-direct-attach.md](desktop-terminal-direct-attach.md)
+  — merged the exact-match attach-target lesson so node-pty attach uses validated `=session:=window` targets instead of unanchored prefix-matchable `session:window`.
+- **Creation**: [anchor-tmux-attach-targets.md](anchor-tmux-attach-targets.md)
+  — promoted the lesson that every desktop-constructed tmux `-t` target must be `=`-anchored and component-validated so stale rosters fail loudly instead of attaching keystrokes to the wrong window.
+- **Triage**: dropped the aweb awakening coda from node-test-recursion-worktrees.md because it described transient messaging-layer behavior, not durable tui-dev desktop-shell knowledge.
+- **Update**: [testing-pure-functions-fake-snapshots.md](testing-pure-functions-fake-snapshots.md)
+  — replaced the bare full-repo `node --test` suggestion with the pinned-glob test-script rule from the node test recursion lesson.
+- **Creation**: [node-test-recursion-worktrees.md](node-test-recursion-worktrees.md)
+  — promoted the lesson that bare `node --test` in an OAS repo discovers stale sibling agent worktree suites unless full-repo tests are pinned to explicit globs.
 - **Triage**: dropped the aweb late-awakening addendum from tui-dev-desktop-shell notes because it described a transient messaging incident already reported to the OAS/aweb owners, not durable tui-dev desktop-shell knowledge.
 - **Update**: [async-mount-close-race.md](async-mount-close-race.md)
   — linked the companion regression-test-layer lesson so lifecycle helpers are not mistaken for coverage of their caller composition.
