@@ -31,6 +31,7 @@ Starter knowledge for the Terminal Control Pane developer
 ## Verification and decisions
 
 * [Testing with pure functions and fake snapshots](testing-pure-functions-fake-snapshots.md) — how to verify the pane headless: parser tests, renderFrame against hand-built snapshots.
+* [Bare node --test recurses into sibling agent worktrees](node-test-recursion-worktrees.md) — In an OAS repo that contains agents/*/instances/*/work, bare node --test discovers stale suites from sibling worktrees; pin explicit test globs and guard CLI subprocess tests with inert environment.
 * [Verifying an Electron app headlessly via CDP and ELECTRON_RUN_AS_NODE](electron-headless-verification.md) — How to drive and verify an Electron shell without a human at the GUI — remote-debugging-port + CDP Runtime.evaluate for the renderer, ELECTRON_RUN_AS_NODE for native-module (node-pty) checks under the Electron ABI.
 * [Regression tests must exercise the layer that had the bug](regression-tests-bug-layer.md) — A regression test only pins a bug if it executes the code layer whose ordering or composition was wrong; extract that layer behind injectable dependencies instead of testing only a helper it calls.
 * [Scope destructive cleanup during live desktop testing](pkill-scoping-discipline.md) — Broad `pkill -f` patterns and unanchored tmux targets during app testing can kill foreign processes machine-wide — always scope patterns to your own worktree path, exact PIDs, or exact tmux targets.

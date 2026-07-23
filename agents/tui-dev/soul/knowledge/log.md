@@ -2,6 +2,11 @@
 
 ## 2026-07-23
 
+- **Triage**: dropped the aweb awakening coda from node-test-recursion-worktrees.md because it described transient messaging-layer behavior, not durable tui-dev desktop-shell knowledge.
+- **Update**: [testing-pure-functions-fake-snapshots.md](testing-pure-functions-fake-snapshots.md)
+  — replaced the bare full-repo `node --test` suggestion with the pinned-glob test-script rule from the node test recursion lesson.
+- **Creation**: [node-test-recursion-worktrees.md](node-test-recursion-worktrees.md)
+  — promoted the lesson that bare `node --test` in an OAS repo discovers stale sibling agent worktree suites unless full-repo tests are pinned to explicit globs.
 - **Triage**: dropped the aweb late-awakening addendum from tui-dev-desktop-shell notes because it described a transient messaging incident already reported to the OAS/aweb owners, not durable tui-dev desktop-shell knowledge.
 - **Update**: [async-mount-close-race.md](async-mount-close-race.md)
   — linked the companion regression-test-layer lesson so lifecycle helpers are not mistaken for coverage of their caller composition.
