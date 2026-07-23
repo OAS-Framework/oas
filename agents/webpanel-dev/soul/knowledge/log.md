@@ -1,6 +1,7 @@
 # Knowledge Log
 
 ## 2026-07-22
+* **Creation**: added [Pin node --test globs when agent worktrees are siblings](/lessons/pinned-node-test-globs.md) from the pinned-test-globs-sibling-worktrees note: bare `node --test` can recurse into `agents/*/instances/*/work`, inflate counts, and execute stale destructive tests; use `npm test` with pinned globs.
 * **Creation**: added [Contract-test the shared desktop renderer harness against shipped views](/lessons/shared-renderer-harness-enumeration-test.md) from the shared-harness enumeration note: renderer harness tabs should be enforced by enumerating mount-exporting views and banning stray `dev-*` harness files.
 * **Update**: [Desktop renderer views port of the panel](/architecture/desktop-renderer-views-port.md) and [Agent brain endpoint and desktop brain view](/architecture/agent-brain-endpoint-and-view.md) now link the shared-harness enumeration lesson and record that `harness-server.mjs` is the surviving same-origin proxy.
 * **Creation**: added [Shared-form async actions need operation ownership tokens](/lessons/shared-form-operation-token.md) from the operation-token-shared-forms note: shared forms need a per-operation owner token guarding success, error, field-clearing, and `finally` control-reset writes so stale completions cannot corrupt or re-enable a newer operation.
