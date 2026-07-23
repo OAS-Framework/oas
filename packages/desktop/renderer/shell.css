@@ -99,8 +99,11 @@ body {
   height: 100%; color: var(--muted); gap: 8px; padding: 24px; text-align: center;
 }
 .placeholder h2 { color: var(--fg); margin: 0; font-weight: 600; }
-.term-wrap { position: absolute; inset: 0; padding: 0 32px; background: var(--term-bg); }
-.term-wrap .xterm { width: 100%; height: 100%; }
+.term-wrap { position: absolute; inset: 0; background: var(--term-bg); }
+/* FitAddon measures .xterm's parent and subtracts padding from .xterm itself.
+   Keep horizontal gutters here—not on .term-wrap—or it allocates columns wider
+   than the visible terminal and the screen overflows the right edge. */
+.term-wrap .xterm { width: 100%; height: 100%; padding: 0 32px; }
 .instance-landing { height: 100%; display: grid; place-items: center; padding: 32px; text-align: center; color: var(--muted); }
 .instance-landing .big { display: block; font-size: 36px; opacity: .45; margin-bottom: 10px; }
 .instance-landing h2 { margin: 0 0 5px; color: var(--fg); font-size: 16px; font-weight: 600; }
