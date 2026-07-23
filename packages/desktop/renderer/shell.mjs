@@ -481,7 +481,7 @@ const palette = createPalette({
       const next = window.prompt("Terminal font family (CSS font-family value)", current);
       if (next !== null) setTerminalFontFamily(next);
     } },
-    { label: "Terminal: reset typography", run: () => { setTerminalFontFamily(""); setTerminalFontSize(14); } },
+    { label: "Terminal: reset typography", run: () => { setTerminalFontFamily(""); setTerminalFontSize(12); } },
   ],
 });
 window.addEventListener("keydown", (e) => {

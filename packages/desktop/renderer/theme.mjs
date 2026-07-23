@@ -50,7 +50,7 @@ export function onThemeChange(fn) {
 export function terminalTypography(el = document.documentElement) {
   const css = getComputedStyle(el);
   let family = css.getPropertyValue("--term-font-family").trim() || "ui-monospace, monospace";
-  let size = Number.parseFloat(css.getPropertyValue("--term-font-size")) || 14;
+  let size = Number.parseFloat(css.getPropertyValue("--term-font-size")) || 12;
   try {
     family = localStorage.getItem(TERM_FONT_KEY) || family;
     size = Number(localStorage.getItem(TERM_SIZE_KEY)) || size;
@@ -63,7 +63,7 @@ function notifyTerminalTypography() {
   for (const fn of [...terminalListeners]) { try { fn(value); } catch { /* isolate listener */ } }
 }
 export function setTerminalFontSize(size) {
-  const value = Math.min(28, Math.max(9, Number(size) || 14));
+  const value = Math.min(28, Math.max(9, Number(size) || 12));
   try { localStorage.setItem(TERM_SIZE_KEY, String(value)); } catch { /* storage-less */ }
   notifyTerminalTypography();
 }
