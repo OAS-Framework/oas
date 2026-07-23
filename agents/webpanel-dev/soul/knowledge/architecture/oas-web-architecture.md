@@ -3,7 +3,7 @@ type: Concept
 title: oas-web architecture — zero-dependency localhost server plus single-file UI
 description: The oas.web capability is a two-file system — bin/oas-web.mjs (a zero-dependency node:http server on 127.0.0.1) and ui/panel.html (a single self-contained HTML/CSS/JS page) — that reuses the kernel's control-pane model and tmux as its only seams to the agents.
 tags: [oas-web, architecture, capability, http, tmux]
-timestamp: 2026-07-22
+timestamp: 2026-07-23
 ---
 
 # Shape
@@ -88,10 +88,16 @@ interactive quickly, then background-backfill the deep `/api/session?lines=2000`
 scrollback. The server keeps a 2.5s instance-registry cache around
 `findInstance(name, wsId)` so session polls do not rebuild `collectControlPane`
 for every workspace on each request, and `paneInfo()` keeps pane
-size/history/cursor lookup
-to one tmux `display-message` round-trip. The requested `lines` value is part of
-the render signature so a tail paint cannot suppress the later deep backfill; see
+size/history/cursor lookup to one tmux metadata query. The requested `lines`
+value is part of the render signature so a tail paint cannot suppress the later
+deep backfill; see
 [the fast-attach lesson](/lessons/fast-attach-cache-tail-backfill.md).
+
+Tmux targets are exact-match anchored as validated `=session:=window` strings so
+stale rosters cannot prefix-match similarly named live windows. When missing
+panes must fail closed, pane metadata reads use `list-panes` rather than
+`display-message`, because `display-message` can fall back to a default context;
+see [the tmux target anchoring lesson](/lessons/tmux-anchored-targets-and-display-message-fallback.md).
 
 # Security invariant
 

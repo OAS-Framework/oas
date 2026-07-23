@@ -229,7 +229,22 @@ function findInstance(name, wsId) {
 }
 /* OASWEB_FINDINST_END */
 
-function tmuxTarget(inst) { return `${inst.tmux.session}:${inst.tmux.window}`; }
+/* OASWEB_TMUXTGT_BEGIN — exact-match anchored tmux target, extracted by
+   tests. tmux -t targets are PREFIX-matched by default: in the 3s
+   stale-snapshot window an exited window (reviewer-1) can prefix-match a
+   similarly named live one (reviewer-15…), exposing its pane to capture or
+   — worse — sending it keystrokes/Ctrl-C. `=` anchors each component to an
+   exact match, so tmux errors out instead of silently prefix-matching (same
+   pattern as packages/desktop/tmux-target.mjs on the attach path). */
+function tmuxTarget(inst) {
+  const s = String(inst?.tmux?.session ?? "");
+  const w = String(inst?.tmux?.window ?? "");
+  // conservative charset; ':' is the separator and '=' the anchor — both
+  // forbidden inside components so a crafted name cannot re-shape the target
+  if (!/^[\w@%.-]+$/.test(s) || !/^[\w@%.-]+$/.test(w)) throw new Error("invalid tmux target");
+  return `=${s}:=${w}`;
+}
+/* OASWEB_TMUXTGT_END */
 
 function capture(inst, lines) {
   try {
@@ -246,16 +261,25 @@ function capture(inst, lines) {
  * cursor_flag and copy-mode (in copy mode the live cursor is not where
  * typing lands). history_size lets the client map capture lines to screen
  * rows deterministically (cursor row = history + cursor_y). */
+/* OASWEB_PANEINFO_BEGIN — active-pane geometry, extracted by tests (depends
+   on tmuxTarget + execFileSync in scope). */
 function paneInfo(inst) {
   try {
-    const out = execFileSync("tmux", ["display-message", "-p", "-t", tmuxTarget(inst),
+    // list-panes, NOT display-message: display-message -p -t <missing target>
+    // silently falls back to a default context instead of erroring — the
+    // anchored target must fail CLOSED on the read path too. The -f filter
+    // selects the ACTIVE pane: capture-pane/send-keys on a window target
+    // operate on the active pane, and list-panes emits all panes in index
+    // order — row 0 is the wrong pane once the user splits and switches.
+    const out = execFileSync("tmux", ["list-panes", "-t", tmuxTarget(inst), "-f", "#{pane_active}", "-F",
       "#{pane_width} #{pane_height} #{cursor_x} #{cursor_y} #{cursor_flag} #{pane_in_mode} #{history_size}"],
-      { encoding: "utf8", timeout: 4000 }).trim().split(/\s+/).map(Number);
+      { encoding: "utf8", timeout: 4000 }).trim().split("\n")[0].split(/\s+/).map(Number);
     return { size: { cols: out[0] || 80, rows: out[1] || 24, cx: out[2] || 0, cy: out[3] || 0,
                      cursor: out[4] === 1 && out[5] !== 1 },
              history: out[6] || 0 };
   } catch { return { size: { cols: 80, rows: 24, cx: 0, cy: 0, cursor: false }, history: 0 }; }
 }
+/* OASWEB_PANEINFO_END */
 
 /** Raw keystroke passthrough: bytes from the browser terminal go straight into
  * the pane via send-keys -H (hex bytes) — no key-name interpretation, no Enter. */
