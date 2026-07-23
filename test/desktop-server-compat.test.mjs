@@ -39,7 +39,7 @@ test("network failure, wrong capability, and version mismatch are incompatible",
 // End-to-end through the PRODUCTION seam (selectServer, exactly what
 // ensureServer runs) against fake servers — re-implementing the decision in
 // the test would leave the real gate unprotected (review srvcompat).
-async function selectAgainst(url) {
+async function selectAgainst(url, matchWorkspace = (ws) => ws[0]?.id || null) {
   const panelWorkspaces = async () => {
     try {
       const r = await fetch(`${url}/api/panel`);
@@ -53,7 +53,7 @@ async function selectAgainst(url) {
       return { ok: r.ok, status: r.status, body };
     } catch { return null; }
   };
-  return selectServer({ panelWorkspaces, probeVersion, matchWorkspace: (ws) => ws[0]?.id || null, local: LOCAL });
+  return selectServer({ panelWorkspaces, probeVersion, matchWorkspace, local: LOCAL });
 }
 
 test("fake older server: /api/panel answers, /api/version 404s → selectServer says spawn", async () => {
@@ -93,7 +93,24 @@ test("fake matching server → selectServer says reuse with the matched workspac
 test("no server on the port → spawn", async () => {
   const choice = await selectAgainst("http://127.0.0.1:1"); // nothing listens
   assert.equal(choice.action, "spawn");
-  assert.equal(choice.reason, "no server on the port");
+  assert.equal(choice.portOccupied, false, "no listener — caller keeps the port");
+});
+
+test("spawn decisions carry the portOccupied discriminator (not reason strings)", async () => {
+  // review srvcompat2 nit: port selection must key on an explicit flag, so a
+  // wording change in reason can never alter behavior.
+  const server = createServer((req, res) => {
+    res.writeHead(200, { "content-type": "application/json" });
+    req.url.startsWith("/api/panel")
+      ? res.end(JSON.stringify({ workspaces: [{ id: "/other", name: "other" }], instances: [] }))
+      : res.end("{}");
+  });
+  await new Promise((ok) => server.listen(0, "127.0.0.1", ok));
+  try {
+    const choice = await selectAgainst(`http://127.0.0.1:${server.address().port}`, () => null); // no workspace match
+    assert.equal(choice.action, "spawn");
+    assert.equal(choice.portOccupied, true, "occupied port — caller must move");
+  } finally { server.close(); }
 });
 
 test("REAL oas-web serves /api/version matching its oas.json → reuse through the seam", async (t) => {

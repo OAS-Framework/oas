@@ -104,7 +104,7 @@ async function ensureServer() {
   // spawn our own on the next free port.
   const choice = await selectServer({ panelWorkspaces, probeVersion, matchWorkspace, local: localServerIdentity() });
   if (choice.action === "reuse") { wsId = choice.wsId; return { spawned: false }; }
-  if (choice.reason !== "no server on the port") {
+  if (choice.portOccupied) {
     console.log(`oas-desktop: server on ${port} — ${choice.reason} — starting a dedicated one`);
     port = await freePort(port + 1);
   }

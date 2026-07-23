@@ -46,19 +46,21 @@ export function serverCompatible(versionResponse, local) {
  * @param {(workspaces: Array<{id:string}>) => string|null} io.matchWorkspace
  * @param {{capability:string,version:string}} io.local
  * @returns {Promise<{ action: "reuse", wsId: string } |
- *                    { action: "spawn", reason: string }>}
+ *                    { action: "spawn", portOccupied: boolean, reason: string }>}
+ *   portOccupied: a server IS listening on the port (wrong workspace or
+ *   incompatible) — the caller must pick another port; reason is for logs.
  */
 export async function selectServer(io) {
   const existing = await io.panelWorkspaces();
-  if (!existing) return { action: "spawn", reason: "no server on the port" };
+  if (!existing) return { action: "spawn", portOccupied: false, reason: "no server on the port" };
   const wsId = io.matchWorkspace(existing);
   if (!wsId) {
-    return { action: "spawn", reason: `serves ${existing.map((w) => w.name).join(", ")} — not the requested workspace` };
+    return { action: "spawn", portOccupied: true, reason: `serves ${existing.map((w) => w.name).join(", ")} — not the requested workspace` };
   }
   // Workspace coverage is necessary but NOT sufficient: an older installed
   // oas-web answers /api/panel yet lacks the desktop endpoints. Reuse only a
   // server that identifies as THIS checkout via /api/version.
   const compat = serverCompatible(await io.probeVersion(), io.local);
-  if (!compat.compatible) return { action: "spawn", reason: `incompatible (${compat.reason})` };
+  if (!compat.compatible) return { action: "spawn", portOccupied: true, reason: `incompatible (${compat.reason})` };
   return { action: "reuse", wsId };
 }
