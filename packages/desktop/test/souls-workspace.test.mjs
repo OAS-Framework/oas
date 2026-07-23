@@ -1,0 +1,74 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { JSDOM } from "jsdom";
+
+const tick = () => new Promise((r) => setTimeout(r, 0));
+
+test("Soul roster: switching A→B during a hanging spawn removes A form and agentsRoot", async () => {
+  const dom = new JSDOM("<!doctype html><html><head></head><body><div id=host></div></body></html>", { url: "http://localhost" });
+  const oldDocument = globalThis.document;
+  const oldWindow = globalThis.window;
+  globalThis.document = dom.window.document;
+  globalThis.window = dom.window;
+
+  const common = await import("../renderer/views/common.mjs");
+  const spawn = await import("../renderer/views/spawn.mjs");
+  const previousWs = common.currentWorkspace();
+  let releaseA;
+  const opened = [];
+  const requests = [];
+  const agent = (name, root) => ({
+    name, agentsRoot: root, description: `${name} description`, runtime: "pi",
+    work: "workspace", repo: true, repoName: name,
+  });
+  const ctx = {
+    api(pathname, opts = {}) {
+      requests.push({ pathname, opts });
+      if (opts.method === "POST") return new Promise((ok) => { releaseA = ok; });
+      const ws = pathname.includes("ws=wsB") ? "wsB" : "wsA";
+      if (pathname.startsWith("/api/agents")) return Promise.resolve({ agents: [agent(`${ws}-soul`, `/${ws}/agents`)] });
+      if (pathname.startsWith("/api/panel")) return Promise.resolve({
+        instances: [], workspace: { id: ws },
+        workspaces: [{ id: "wsA", name: "A" }, { id: "wsB", name: "B" }],
+      });
+      throw new Error(`unexpected ${pathname}`);
+    },
+    openTerminal: (name) => opened.push(name),
+  };
+
+  try {
+    common.setWorkspace("wsA");
+    spawn.mount(dom.window.document.getElementById("host"), ctx);
+    await tick(); await tick();
+    assert.match(dom.window.document.body.textContent, /wsA-soul/);
+
+    dom.window.document.querySelector(".spawn-act").click();
+    dom.window.document.querySelector(".fspawn").click();
+    await tick();
+    assert.ok(releaseA, "workspace A spawn is hanging");
+    assert.ok(dom.window.document.querySelector(".soul-form button:disabled"));
+
+    common.setWorkspace("wsB");
+    // listener clears A synchronously; B paints after its two GETs resolve
+    assert.doesNotMatch(dom.window.document.body.textContent, /wsA-soul/);
+    await tick(); await tick();
+    assert.match(dom.window.document.body.textContent, /wsB-soul/);
+    assert.doesNotMatch(dom.window.document.body.textContent, /wsA-soul/);
+    assert.equal(dom.window.document.querySelector(".soul-form"), null, "stale A form removed");
+
+    releaseA({ instance: "inst-A", launched: true });
+    await tick(); await tick();
+    assert.deepEqual(opened, [], "late A completion never opens a terminal in B");
+    assert.match(dom.window.document.body.textContent, /wsB-soul/);
+    assert.doesNotMatch(dom.window.document.body.textContent, /inst-A|wsA-soul/);
+    const post = requests.find((r) => r.opts.method === "POST");
+    assert.match(post.opts.body, /"agentsRoot":"\/wsA\/agents"/,
+      "the dispatched request was A; no stale form exists to dispatch it again in B");
+  } finally {
+    spawn.unmount();
+    common.setWorkspace(previousWs);
+    dom.window.close();
+    if (oldDocument === undefined) delete globalThis.document; else globalThis.document = oldDocument;
+    if (oldWindow === undefined) delete globalThis.window; else globalThis.window = oldWindow;
+  }
+});

@@ -7,11 +7,15 @@
 // chat transcript, spawn, jira) lives in the ported views — the shell chrome
 // stays a thin rail so nothing is duplicated.
 import { currentWorkspace, groupInstances, onWorkspaceChange } from "./views/common.mjs";
-import { initTheme, toggleTheme, xtermTheme, onThemeChange } from "./theme.mjs";
+import {
+  initTheme, toggleTheme, xtermTheme, onThemeChange,
+  terminalTypography, setTerminalFontSize, setTerminalFontFamily, onTerminalTypographyChange,
+} from "./theme.mjs";
 import { createPalette } from "./palette.mjs";
 import { createViewLifecycle } from "./view-lifecycle.mjs";
 import { reserveKey, whenKeyFree } from "./tab-keys.mjs";
 import { createTerminalTab } from "./terminal-tab.mjs";
+import { terminalTabsForWorkspace, tabVisibleInContext } from "./workspace-tabs.mjs";
 
 const desk = window.oasDesktop;
 initTheme();
@@ -90,11 +94,7 @@ function showTabLayer(on) {
 
 function updateContextTabs() {
   for (const t of tabs.values()) {
-    const visible = sidebarMode === "instances"
-      ? t.kind === "terminal"
-      : sidebarMode === "souls"
-        ? t.kind === "brain" || t.kind === "file"
-        : false;
+    const visible = tabVisibleInContext(t, sidebarMode, currentWorkspace());
     t.tabEl.style.display = visible ? "" : "none";
   }
 }
@@ -193,7 +193,7 @@ async function showInstances() {
   setSidebarMode("instances");
   setNavActive("instances");
   refreshContextRoster();
-  const openTerms = [...tabs].filter(([, t]) => t.kind === "terminal");
+  const openTerms = terminalTabsForWorkspace(tabs, currentWorkspace());
   if (openTerms.length) { activateTab(openTerms.at(-1)[0]); return; }
   showTabLayer(false);
   if (stage?.name === "instances") return;
@@ -226,7 +226,7 @@ let activeTab = null;
  * KEYED open must `await whenKeyFree(key)` first: a reopen during a closed
  * tab's deferred cleanup queues behind it instead of being dropped or torn
  * down by the stale lifecycle. */
-function addTab({ title, key, kind = "artifact", onClose, onShow }) {
+function addTab({ title, key, kind = "artifact", workspace = null, onClose, onShow }) {
   if (key) {
     for (const [tid, t] of tabs) if (t.key === key) { activateTab(tid); return null; }
   }
@@ -245,7 +245,7 @@ function addTab({ title, key, kind = "artifact", onClose, onShow }) {
   tabhost.append(paneEl);
   tabEl.addEventListener("click", (e) => { if (e.target !== close) activateTab(id); });
   close.addEventListener("click", () => closeTab(id));
-  tabs.set(id, { tabEl, paneEl, title, key, kind, onClose, onShow });
+  tabs.set(id, { tabEl, paneEl, title, key, kind, workspace, onClose, onShow });
   activateTab(id);
   return { id, paneEl };
 }
@@ -363,14 +363,21 @@ async function openTerminalTabInner(instance, ws, key) {
   const wrap = document.createElement("div");
   wrap.className = "term-wrap";
 
+  const type = terminalTypography();
   const term = new Terminal({
-    fontSize: 13,
-    fontFamily: "SF Mono, Menlo, monospace",
+    fontSize: type.fontSize,
+    fontFamily: type.fontFamily,
+    lineHeight: 1.2,
     theme: xtermTheme(),
     scrollback: 5000,
   });
-  // live terminals follow the app theme (unsubscribed on tab close)
+  // live terminals follow app theme + persisted typography preferences
   const offTheme = onThemeChange(() => { term.options.theme = xtermTheme(); });
+  const offTypography = onTerminalTypographyChange((next) => {
+    term.options.fontFamily = next.fontFamily;
+    term.options.fontSize = next.fontSize;
+    requestAnimationFrame(() => { try { fit.fit(); } catch {} });
+  });
   const fit = new FitAddon.FitAddon();
   term.loadAddon(fit);
 
@@ -389,12 +396,13 @@ async function openTerminalTabInner(instance, ws, key) {
     title: `⌗ ${instance}`,
     key,
     kind: "terminal",
+    workspace: ws,
     // close() resolves when cleanup (incl. a late-materializing pty detach)
     // actually ran — closeTab reserves the key on this promise.
-    onClose: () => { offTheme(); return tab.close(); },
+    onClose: () => { offTheme(); offTypography(); return tab.close(); },
     onShow: () => { requestAnimationFrame(() => { try { fit.fit(); } catch {} }); },
   });
-  if (!made) { offTheme(); term.dispose(); return; } // lost a race to an identical tab
+  if (!made) { offTheme(); offTypography(); term.dispose(); return; } // lost a race to an identical tab
   made.paneEl.append(wrap);
   term.open(wrap);
   fit.fit();
@@ -449,6 +457,14 @@ const palette = createPalette({
     { label: "View: Instances", run: () => showInstances() },
     { label: "View: Soul roster", run: () => showStage("spawn") },
     { label: "Theme: toggle light/dark", run: () => toggleTheme() },
+    { label: "Terminal: increase font size", run: () => setTerminalFontSize(terminalTypography().fontSize + 1) },
+    { label: "Terminal: decrease font size", run: () => setTerminalFontSize(terminalTypography().fontSize - 1) },
+    { label: "Terminal: set font family…", run: () => {
+      const current = terminalTypography().fontFamily;
+      const next = window.prompt("Terminal font family (CSS font-family value)", current);
+      if (next !== null) setTerminalFontFamily(next);
+    } },
+    { label: "Terminal: reset typography", run: () => { setTerminalFontFamily(""); setTerminalFontSize(14); } },
   ],
 });
 window.addEventListener("keydown", (e) => {
@@ -469,7 +485,11 @@ api("/api/panel").then((p) => {
 // Contextual instance roster: the ONE shell sidebar becomes the recursive
 // roster in Instances mode (no view-owned second sidebar).
 initContextRoster();
-onWorkspaceChange(() => { contextRosterGen++; if (sidebarMode === "instances") refreshContextRoster(); });
+onWorkspaceChange(() => {
+  contextRosterGen++;
+  updateContextTabs();
+  if (sidebarMode === "instances") showInstances();
+});
 setInterval(() => { if (sidebarMode === "instances") refreshContextRoster(); }, 4000);
 
 // Home surface: the agent hierarchy — running instances and how they relate.

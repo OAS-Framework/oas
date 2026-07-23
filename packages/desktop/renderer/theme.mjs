@@ -7,6 +7,9 @@
 const KEY = "oasweb.theme"; // shared with capabilities/oas-web panel
 
 const listeners = new Set();
+const terminalListeners = new Set();
+const TERM_FONT_KEY = "oas.desktop.terminal.fontFamily";
+const TERM_SIZE_KEY = "oas.desktop.terminal.fontSize";
 
 export function currentTheme() {
   return document.documentElement.dataset.theme || "dark";
@@ -39,6 +42,42 @@ export function toggleTheme() {
 export function onThemeChange(fn) {
   listeners.add(fn);
   return () => listeners.delete(fn);
+}
+
+/* tmux carries cells/colors, never the host terminal emulator's font. Keep
+   desktop typography as an explicit persisted preference, seeded from
+   semantic CSS tokens (OS monospace + 14px by default). */
+export function terminalTypography(el = document.documentElement) {
+  const css = getComputedStyle(el);
+  let family = css.getPropertyValue("--term-font-family").trim() || "ui-monospace, monospace";
+  let size = Number.parseFloat(css.getPropertyValue("--term-font-size")) || 14;
+  try {
+    family = localStorage.getItem(TERM_FONT_KEY) || family;
+    size = Number(localStorage.getItem(TERM_SIZE_KEY)) || size;
+  } catch { /* storage-less */ }
+  return { fontFamily: family, fontSize: Math.min(28, Math.max(9, size)) };
+}
+
+function notifyTerminalTypography() {
+  const value = terminalTypography();
+  for (const fn of [...terminalListeners]) { try { fn(value); } catch { /* isolate listener */ } }
+}
+export function setTerminalFontSize(size) {
+  const value = Math.min(28, Math.max(9, Number(size) || 14));
+  try { localStorage.setItem(TERM_SIZE_KEY, String(value)); } catch { /* storage-less */ }
+  notifyTerminalTypography();
+}
+export function setTerminalFontFamily(family) {
+  const value = String(family || "").trim();
+  try {
+    if (value) localStorage.setItem(TERM_FONT_KEY, value);
+    else localStorage.removeItem(TERM_FONT_KEY);
+  } catch { /* storage-less */ }
+  notifyTerminalTypography();
+}
+export function onTerminalTypographyChange(fn) {
+  terminalListeners.add(fn);
+  return () => terminalListeners.delete(fn);
 }
 
 /* Build the xterm.js theme object from the live CSS tokens so the embedded

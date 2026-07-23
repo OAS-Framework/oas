@@ -20,6 +20,9 @@
   --term-bg: #0a0d12;     /* transcript surface follows the theme */
   --term-fg: #e6edf3;
   --term-sel: #264f78;
+  /* xterm typography: OS monospace by default; user overrides persist via theme.mjs */
+  --term-font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --term-font-size: 14px;
   --shadow: 0 1px 3px rgb(0 0 0 / .4);
   /* ── terminal ANSI set (feeds the xterm.js theme via theme.mjs) ── */
   --ansi-black: #768390; --ansi-red: #ff7b72; --ansi-green: #4ac26b; --ansi-yellow: #d9a032;

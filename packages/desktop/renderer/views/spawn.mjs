@@ -58,7 +58,15 @@ export function mount(el, ctx) {
   s.q = (cls) => el.querySelector("." + cls);
   s.q("filter").addEventListener("input", (e) => { s.filterText = e.target.value; renderGrid(s); });
   s.q("wssel").addEventListener("change", (e) => setWorkspace(e.target.value));
-  s.unsubWs = onWorkspaceChange(() => { s.sel = null; refresh(s); });
+  s.unsubWs = onWorkspaceChange(() => {
+    // Workspace switch owns the whole surface: invalidate any A spawn form
+    // immediately, remove its DOM before B loads, and clear A's agentsRoot.
+    s.spawnOp++;
+    s.sel = null;
+    s.selAgent = null;
+    s.q("souls-grid").innerHTML = '<div class="loading-block"><span class="spinner"></span> Loading agents…</div>';
+    refresh(s, true);
+  });
   refresh(s);
   s.timers.push(setInterval(() => refresh(s), 8000));
 }
@@ -73,7 +81,7 @@ export function unmount() {
 }
 
 /* Exported for the deferred cross-workspace regression. */
-export async function refresh(s) {
+export async function refresh(s, forceRender = false) {
   const myGen = workspaceGeneration();       // capture at dispatch
   let souls, panel;
   try {
@@ -87,7 +95,7 @@ export async function refresh(s) {
   if (!s.alive || myGen !== workspaceGeneration()) return;
   s.souls = souls;
   renderWorkspaceSelect(s.q("wssel"), panel.workspaces, panel.workspace?.id || "");
-  renderGrid(s);
+  renderGrid(s, forceRender);
 }
 
 function matches(s, a) {
@@ -96,10 +104,12 @@ function matches(s, a) {
   return [a.name, a.description, a.repoName].some((v) => String(v || "").toLowerCase().includes(t));
 }
 
-function renderGrid(s) {
+function renderGrid(s, force = false) {
   const grid = s.q("souls-grid");
-  // an in-flight spawn owns its card's form — do not repaint over it
-  if (grid.querySelector?.(".soul-form button:disabled")) return;
+  // Same-workspace polling must not replace a form that owns an in-flight
+  // mutation. A workspace switch passes force=true after invalidating that
+  // operation, so stale A UI can never suppress B's roster.
+  if (!force && grid.querySelector?.(".soul-form button:disabled")) return;
   grid.innerHTML = "";
   const list = s.souls.agents.filter((a) => matches(s, a));
   const spawnable = s.souls.agents.filter((a) => a.work !== "attached").length;
