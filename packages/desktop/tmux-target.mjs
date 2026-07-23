@@ -82,6 +82,7 @@ export function viewerPrefix(pid) {
  * @param {object} io
  * @param {(target: string) => void} io.preflight   throws if the exact source target is absent
  * @param {(args: string[]) => void} io.tmux        run a tmux command (throws on failure)
+ * @param {(args: string[]) => string} io.tmuxOut    run a tmux command, return trimmed stdout
  * @param {(target: string, cols: number, rows: number) => any} io.spawnPty
  * @param {() => string} [io.uniqueName]            viewer session name (default: prefix+pid+counter+random)
  * @returns {{ target: string, viewer: string, pty: any,
@@ -97,15 +98,19 @@ export function openTerm(spec, io) {
   }
   const viewer = io.uniqueName ? io.uniqueName()
     : `${viewerPrefix(process.pid)}${++viewerSeq}-${Math.random().toString(36).slice(2, 8)}`;
-  // 1. placeholder session — exists only to receive the link
-  io.tmux(["new-session", "-d", "-s", viewer]);
+  // 1. placeholder session — exists only to receive the link. Capture the
+  //    placeholder's window ID: fixed indices (0/9) break under a custom
+  //    base-index (review linkview — base-index 1 made kill-window :0 fail
+  //    and every open reject); window IDs are index-agnostic.
+  const placeholderId = io.tmuxOut(["new-session", "-d", "-s", viewer, "-P", "-F", "#{window_id}"]);
   const killViewer = () => io.tmux(["kill-session", "-t", `=${viewer}`]);
   try {
-    // 2. link the EXACT source window (anchored); index 9 avoids the
-    //    placeholder's 0 regardless of base-index
-    io.tmux(["link-window", "-s", target, "-t", `=${viewer}:9`]);
-    // 3. drop the placeholder — the linked window is now the ONLY window
-    io.tmux(["kill-window", "-t", `=${viewer}:0`]);
+    if (!/^@\d+$/.test(placeholderId)) throw new Error(`unexpected window id "${placeholderId}"`);
+    // 2. link the EXACT source window (anchored); bare "viewer:" lets tmux
+    //    pick a free index regardless of base-index
+    io.tmux(["link-window", "-s", target, "-t", `=${viewer}:`]);
+    // 3. drop the placeholder BY ID — the linked window is now the ONLY window
+    io.tmux(["kill-window", "-t", placeholderId]);
     // 4. lock the viewer's key handling: no prefix → no window-management
     //    bindings (next/last/new/select-window) can run; a nonexistent
     //    key-table inerts root-table bindings too. (set-option targets

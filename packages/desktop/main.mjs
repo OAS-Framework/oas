@@ -187,6 +187,7 @@ ipcMain.handle("term:open", (e, { session, window: win, cols, rows }) => {
   const { pty: p, killViewer } = openTerm({ session, window: win, cols, rows }, {
     preflight: (target) => tmuxRun(["list-panes", "-t", target]),
     tmux: tmuxRun,
+    tmuxOut: (args) => execFileSync("tmux", args, { encoding: "utf8", timeout: 4000 }).trim(),
     spawnPty: (target, c, r) => pty.spawn("tmux", ["attach-session", "-t", target], {
       name: "xterm-256color", cols: c, rows: r, cwd: process.env.HOME, env: process.env,
     }),

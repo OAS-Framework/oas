@@ -42,6 +42,7 @@ test("only undefined/null mean 'no window' — empty string fails closed", () =>
 const fakeIo = (calls, opts = {}) => ({
   preflight: (t) => { calls.push(["preflight", t]); if (opts.preflightFails) throw new Error("absent"); },
   tmux: (args) => { calls.push(["tmux", ...args]); if (opts.tmuxFails?.(args)) throw new Error("tmux failed"); },
+  tmuxOut: (args) => { calls.push(["tmuxOut", ...args]); return opts.windowId ?? "@7"; },
   spawnPty: (t, c, r) => { calls.push(["spawn", t, c, r]); if (opts.spawnFails) throw new Error("pty failed"); return opts.pty ?? {}; },
   uniqueName: () => "oasdesk-test-1",
 });
@@ -59,9 +60,9 @@ test("openTerm: linked-window viewer built in order, keys locked, pty attaches t
   const r = openTerm({ session: "s", window: "w", cols: 120, rows: 40 }, fakeIo(calls, { pty: fake }));
   assert.deepEqual(calls, [
     ["preflight", "=s:=w"],
-    ["tmux", "new-session", "-d", "-s", "oasdesk-test-1"],                    // independent placeholder — NOT grouped
-    ["tmux", "link-window", "-s", "=s:=w", "-t", "=oasdesk-test-1:9"],       // exact window linked in
-    ["tmux", "kill-window", "-t", "=oasdesk-test-1:0"],                       // placeholder dropped — link is the ONLY window
+    ["tmuxOut", "new-session", "-d", "-s", "oasdesk-test-1", "-P", "-F", "#{window_id}"], // placeholder, id captured (index-agnostic)
+    ["tmux", "link-window", "-s", "=s:=w", "-t", "=oasdesk-test-1:"],        // exact window linked; tmux picks a free index
+    ["tmux", "kill-window", "-t", "@7"],                                      // placeholder dropped BY ID — link is the ONLY window
     ["tmux", "set-option", "-t", "oasdesk-test-1", "prefix", "None"],         // key lock: no prefix → no window-management ops
     ["tmux", "set-option", "-t", "oasdesk-test-1", "prefix2", "None"],
     ["tmux", "set-option", "-t", "oasdesk-test-1", "key-table", "oasdesk-locked"],
@@ -74,11 +75,12 @@ test("openTerm: linked-window viewer built in order, keys locked, pty attaches t
   assert.deepEqual(calls.at(-1), ["tmux", "kill-session", "-t", "=oasdesk-test-1"]);
 });
 
-test("openTerm: viewer is killed (not leaked) when link, lock, or pty spawn fails", () => {
+test("openTerm: viewer is killed (not leaked) when link, lock, or pty spawn fails — and on a malformed window id", () => {
   for (const opts of [
     { tmuxFails: (a) => a[0] === "link-window" },
     { tmuxFails: (a) => a[0] === "set-option" },
     { spawnFails: true },
+    { windowId: "definitely-not-an-id" },
   ]) {
     const calls = [];
     assert.throws(() => openTerm({ session: "s", window: "w" }, fakeIo(calls, opts)));
@@ -148,6 +150,7 @@ test("live tmux: linked-window viewer — source window death terminates the vie
     const r = openTerm({ session: src, window: "instA" }, {
       preflight: (target) => execFileSync("tmux", ["list-panes", "-t", target], { stdio: "ignore", timeout: 5000 }),
       tmux: (args) => execFileSync("tmux", args, { stdio: "ignore", timeout: 5000 }),
+      tmuxOut: (args) => execFileSync("tmux", args, { encoding: "utf8", timeout: 5000 }).trim(),
       spawnPty: (target) => ({ target }),
     });
     viewer = r.viewer;
@@ -193,6 +196,7 @@ test("live tmux: viewer key path cannot leave the linked window; viewer kill spa
     const r = openTerm({ session: src, window: "instA" }, {
       preflight: (target) => execFileSync("tmux", ["list-panes", "-t", target], { stdio: "ignore", timeout: 5000 }),
       tmux: (args) => execFileSync("tmux", args, { stdio: "ignore", timeout: 5000 }),
+      tmuxOut: (args) => execFileSync("tmux", args, { encoding: "utf8", timeout: 5000 }).trim(),
       spawnPty: (target) => ({ target }),
     });
     viewer = r.viewer;
@@ -215,5 +219,41 @@ test("live tmux: viewer key path cannot leave the linked window; viewer kill spa
   } finally {
     if (viewer) spawnSync("tmux", ["kill-session", "-t", `=${viewer}`], { timeout: 5000 });
     spawnSync("tmux", ["kill-session", "-t", `=${src}`], { timeout: 5000 });
+  }
+});
+
+test("live tmux: viewer construction works under a nonzero base-index (isolated server)", (t) => {
+  // reviewer-linkview regression: with base-index 1 the placeholder is not
+  // at index 0 — window-id-based construction must not care. Isolated tmux
+  // server (-S socket) so the user's real server/options are untouched.
+  const probe = spawnSync("tmux", ["-V"], { encoding: "utf8" });
+  if (probe.error || probe.status !== 0) return t.skip("tmux not available");
+  const sock = `/tmp/oasbi-${process.pid}.sock`;
+  const T = (args, out = false) => {
+    const r = spawnSync("tmux", ["-S", sock, ...args], { encoding: "utf8", timeout: 5000 });
+    if (r.status !== 0) throw new Error(`tmux ${args[0]} failed: ${r.stderr}`);
+    return out ? r.stdout.trim() : undefined;
+  };
+  try {
+    T(["new-session", "-d", "-s", "boot", "sh"]);        // boot the server
+    T(["set-option", "-g", "base-index", "1"]);           // the customization that broke fixed indices
+    T(["new-session", "-d", "-s", "src", "-n", "instA", "sh"]);
+    T(["new-window", "-t", "=src", "-n", "instB", "sh"]);
+    assert.equal(T(["list-windows", "-t", "=src", "-F", "#{window_index} #{window_name}"], true).split("\n")[0], "1 instA",
+      "base-index 1 active: first window at index 1");
+
+    const r = openTerm({ session: "src", window: "instA" }, {
+      preflight: (target) => T(["list-panes", "-t", target]),
+      tmux: (args) => T(args),
+      tmuxOut: (args) => T(args, true),
+      spawnPty: (target) => ({ target }),
+    });
+    const wins = T(["list-windows", "-t", `=${r.viewer}`, "-F", "#{window_name}"], true).split("\n");
+    assert.deepEqual(wins, ["instA"], "viewer contains ONLY the linked window despite base-index 1");
+    r.killViewer();
+    assert.ok(T(["list-windows", "-t", "=src", "-F", "#{window_name}"], true).includes("instA"), "source intact");
+  } finally {
+    spawnSync("tmux", ["-S", sock, "kill-server"], { timeout: 5000 });
+    spawnSync("rm", ["-f", sock], { timeout: 5000 });
   }
 });
