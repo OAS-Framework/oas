@@ -1,7 +1,7 @@
 ---
 type: Lesson
 title: Anchor every tmux target the desktop constructs
-description: tmux prefix-matches unanchored targets even for attach-session, so desktop code must build `=session:=window` through a validating helper and fail loudly when the exact window is gone.
+description: tmux prefix-matches unanchored targets, so desktop code should build `=session:=window` through a validating helper for targets that accept anchors and fail loudly when the exact window is gone.
 tags: [tmux, desktop, terminal, security, exact-match]
 timestamp: 2026-07-23
 ---
@@ -25,7 +25,15 @@ be refused while the exact window name resolves.
 # Rule
 
 Every tmux `-t` target constructed by the desktop — attach, kill, list, or send
-— should be `=`-anchored and component-validated. When touching tmux code, grep
-for constructed `-t` arguments that lack `=` anchoring; failures should be loud
-(tmux "can't find window", then the existing renderer banner), never silent
-mis-attachments.
+— should be `=`-anchored and component-validated when that command accepts exact
+anchors. When touching tmux code, grep for constructed `-t` arguments that lack
+`=` anchoring; failures should be loud (tmux "can't find window", then the
+existing renderer banner), never silent mis-attachments.
+
+Do not blindly add `=` to tmux commands that reject exact anchors. The
+[link-window viewer isolation](desktop-terminal-link-window-viewer-isolation.md)
+path must set viewer-local options (`prefix`, `prefix2`, and `key-table`) with
+`set-option -t <viewer>`, because `set-option -t =<viewer>` is not accepted.
+That exception is only safe for the desktop-created viewer names, which are
+unique and random; source session/window targets still need exact anchored
+helpers.

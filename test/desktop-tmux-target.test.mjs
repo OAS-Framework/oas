@@ -34,14 +34,15 @@ test("only undefined/null mean 'no window' — empty string fails closed", () =>
 });
 
 // openTerm: the sequence that had the bug (review tmuxtgt2) — preflight must
-// run and reject BEFORE any pty is spawned; success creates a GROUPED viewer
-// session, selects the exact window IN THE VIEWER, and attaches the pty to
-// the viewer (phase-2 hook 2: attaching to the durable session followed its
-// shared current-window selection — any client's window switch steered
-// every open tab to the wrong agent).
+// run and reject BEFORE any pty is spawned; success builds a LINKED-WINDOW
+// viewer session (phase-2 hook 2 + reviewer-936f9a3's escape: grouping
+// shared window MEMBERSHIP, so sibling auto-select on window death and
+// viewer-side window-nav keys could steer the tab to another agent — the
+// viewer must contain ONLY a link to the exact window, with keys locked).
 const fakeIo = (calls, opts = {}) => ({
   preflight: (t) => { calls.push(["preflight", t]); if (opts.preflightFails) throw new Error("absent"); },
   tmux: (args) => { calls.push(["tmux", ...args]); if (opts.tmuxFails?.(args)) throw new Error("tmux failed"); },
+  tmuxOut: (args) => { calls.push(["tmuxOut", ...args]); return opts.windowId ?? "@7"; },
   spawnPty: (t, c, r) => { calls.push(["spawn", t, c, r]); if (opts.spawnFails) throw new Error("pty failed"); return opts.pty ?? {}; },
   uniqueName: () => "oasdesk-test-1",
 });
@@ -53,15 +54,19 @@ test("openTerm: failed preflight rejects before any viewer/pty exists", () => {
   assert.deepEqual(calls, [["preflight", "=s:=gone"]], "no viewer created, no pty spawned");
 });
 
-test("openTerm: grouped viewer created, exact window selected IN THE VIEWER, pty attaches to the viewer", () => {
+test("openTerm: linked-window viewer built in order, keys locked, pty attaches to the viewer", () => {
   const calls = [];
   const fake = { fake: true };
   const r = openTerm({ session: "s", window: "w", cols: 120, rows: 40 }, fakeIo(calls, { pty: fake }));
   assert.deepEqual(calls, [
     ["preflight", "=s:=w"],
-    ["tmux", "new-session", "-d", "-s", "oasdesk-test-1", "-t", "=s"],       // grouped to the durable session
-    ["tmux", "select-window", "-t", "=oasdesk-test-1:=w"],                   // selection in the VIEWER only
-    ["spawn", "=oasdesk-test-1", 120, 40],                                    // pty attaches to the viewer
+    ["tmuxOut", "new-session", "-d", "-s", "oasdesk-test-1", "-P", "-F", "#{window_id}"], // placeholder, id captured (index-agnostic)
+    ["tmux", "link-window", "-s", "=s:=w", "-t", "=oasdesk-test-1:"],        // exact window linked; tmux picks a free index
+    ["tmux", "kill-window", "-t", "@7"],                                      // placeholder dropped BY ID — link is the ONLY window
+    ["tmux", "set-option", "-t", "oasdesk-test-1", "prefix", "None"],         // key lock: no prefix → no window-management ops
+    ["tmux", "set-option", "-t", "oasdesk-test-1", "prefix2", "None"],
+    ["tmux", "set-option", "-t", "oasdesk-test-1", "key-table", "oasdesk-locked"],
+    ["spawn", "=oasdesk-test-1", 120, 40],                                     // pty attaches to the viewer
   ]);
   assert.equal(r.pty, fake);
   assert.equal(r.viewer, "oasdesk-test-1");
@@ -70,11 +75,16 @@ test("openTerm: grouped viewer created, exact window selected IN THE VIEWER, pty
   assert.deepEqual(calls.at(-1), ["tmux", "kill-session", "-t", "=oasdesk-test-1"]);
 });
 
-test("openTerm: viewer is killed (not leaked) when window selection or pty spawn fails", () => {
-  for (const opts of [{ tmuxFails: (a) => a[0] === "select-window" }, { spawnFails: true }]) {
+test("openTerm: viewer is killed (not leaked) when link, lock, or pty spawn fails — and on a malformed window id", () => {
+  for (const opts of [
+    { tmuxFails: (a) => a[0] === "link-window" },
+    { tmuxFails: (a) => a[0] === "set-option" },
+    { spawnFails: true },
+    { windowId: "definitely-not-an-id" },
+  ]) {
     const calls = [];
     assert.throws(() => openTerm({ session: "s", window: "w" }, fakeIo(calls, opts)));
-    assert.deepEqual(calls.at(-1), ["tmux", "kill-session", "-t", "=oasdesk-test-1"], `viewer cleaned up (${Object.keys(opts)})`);
+    assert.deepEqual(calls.at(-1), ["tmux", "kill-session", "-t", "=oasdesk-test-1"], `viewer cleaned up (${JSON.stringify(Object.keys(opts))})`);
   }
 });
 
@@ -82,7 +92,10 @@ test("openTerm: dimension clamping and validation flow through", () => {
   const calls = [];
   openTerm({ session: "s", cols: 0, rows: -5 }, fakeIo(calls));
   assert.deepEqual(calls.at(-1), ["spawn", "=oasdesk-test-1", 80, 5], "cols default applied, rows clamped to minimum");
-  assert.equal(calls.filter((c) => c[1] === "select-window").length, 0, "no window → no select");
+  // no window → whole session linked? No: link-window needs a window — the
+  // session-only form links the session's target shorthand — assert we still
+  // linked from the anchored session target.
+  assert.ok(calls.some((c) => c[1] === "link-window" && c[3] === "=s"), "session-only target linked as-is");
   assert.throws(() => openTerm({ session: "a:b", window: "w" }, fakeIo([])), /bad session/);
 });
 
@@ -123,49 +136,124 @@ test("live tmux: anchored target rejects a missing exact window instead of prefi
   }
 });
 
-test("live tmux: grouped viewer is immune to source-session window switches; teardown spares the source", (t) => {
-  // The phase-2 hook-2 scenario end-to-end on a real tmux: viewer pinned to
-  // window A stays on A while the SOURCE session's selection moves to B;
-  // killing the viewer leaves the source session and all windows intact.
+test("live tmux: linked-window viewer — source window death terminates the viewer, never activates a sibling", (t) => {
+  // reviewer-936f9a3 regression (a): live A+B; viewer on A; destroy A →
+  // viewer/pty target dies (NEVER activates B); B and the source survive.
   const probe = spawnSync("tmux", ["-V"], { encoding: "utf8" });
   if (probe.error || probe.status !== 0) return t.skip("tmux not available");
-  const src = `oasgsrc${process.pid}`;
-  const active = (target) =>
-    spawnSync("tmux", ["list-windows", "-t", `=${target}`, "-F", "#{window_name} #{?window_active,A,}"], { encoding: "utf8", timeout: 5000 })
-      .stdout.split("\n").find((l) => l.endsWith(" A"))?.split(" ")[0];
+  const src = `oaslwsrc${process.pid}`;
   let viewer = null;
   try {
     execFileSync("tmux", ["new-session", "-d", "-s", src, "-n", "instA", "sh"], { timeout: 5000 });
     execFileSync("tmux", ["new-window", "-t", `=${src}`, "-n", "instB", "sh"], { timeout: 5000 });
-    execFileSync("tmux", ["select-window", "-t", `=${src}:=instB`], { timeout: 5000 });
 
-    // open a viewer on window instA through the REAL openTerm sequence
-    // (spawnPty stubbed — attaching a client needs a TTY; the viewer
-    // session semantics are what this test pins)
     const r = openTerm({ session: src, window: "instA" }, {
       preflight: (target) => execFileSync("tmux", ["list-panes", "-t", target], { stdio: "ignore", timeout: 5000 }),
       tmux: (args) => execFileSync("tmux", args, { stdio: "ignore", timeout: 5000 }),
+      tmuxOut: (args) => execFileSync("tmux", args, { encoding: "utf8", timeout: 5000 }).trim(),
       spawnPty: (target) => ({ target }),
     });
     viewer = r.viewer;
     assert.equal(r.pty.target, `=${viewer}`, "pty attaches to the viewer session");
-    assert.equal(active(viewer), "instA", "viewer pinned to instance A");
+    const vwins = spawnSync("tmux", ["list-windows", "-t", `=${viewer}`, "-F", "#{window_name}"], { encoding: "utf8", timeout: 5000 }).stdout.trim().split("\n");
+    assert.deepEqual(vwins, ["instA"], "viewer contains ONLY the linked window");
 
-    // another client switches the SOURCE session's current window
+    // membership isolation: source window switches don't affect the viewer
     execFileSync("tmux", ["select-window", "-t", `=${src}:=instB`], { timeout: 5000 });
-    execFileSync("tmux", ["select-window", "-t", `=${src}:=instA`], { timeout: 5000 });
-    execFileSync("tmux", ["select-window", "-t", `=${src}:=instB`], { timeout: 5000 });
-    assert.equal(active(viewer), "instA", "viewer selection unaffected by source switches");
+    const vactive = spawnSync("tmux", ["list-windows", "-t", `=${viewer}`, "-F", "#{window_name} #{?window_active,A,}"], { encoding: "utf8", timeout: 5000 }).stdout;
+    assert.match(vactive, /instA A/, "viewer still on instA");
 
-    // teardown: kill ONLY the viewer
-    r.killViewer();
+    // THE escape: retire (kill) source instA — viewer must DIE, never show instB
+    execFileSync("tmux", ["kill-window", "-t", `=${src}:=instA`], { timeout: 5000 });
+    let alive = true;
+    for (let i = 0; i < 20 && alive; i++) {
+      alive = spawnSync("tmux", ["has-session", "-t", `=${viewer}`], { timeout: 5000 }).status === 0;
+      if (alive) { const w = spawnSync("tmux", ["list-windows", "-t", `=${viewer}`, "-F", "#{window_name}"], { encoding: "utf8", timeout: 5000 }).stdout; assert.ok(!w.includes("instB"), "viewer must NEVER contain/activate instB"); }
+    }
+    assert.equal(alive, false, "viewer terminated when its only (linked) window died");
     viewer = null;
     const sessions = spawnSync("tmux", ["list-sessions", "-F", "#{session_name}"], { encoding: "utf8", timeout: 5000 }).stdout;
     assert.ok(sessions.includes(src), "source session survives");
     const windows = spawnSync("tmux", ["list-windows", "-t", `=${src}`, "-F", "#{window_name}"], { encoding: "utf8", timeout: 5000 }).stdout;
-    assert.ok(windows.includes("instA") && windows.includes("instB"), "all source windows survive");
+    assert.ok(windows.includes("instB"), "sibling window B survives");
   } finally {
     if (viewer) spawnSync("tmux", ["kill-session", "-t", `=${viewer}`], { timeout: 5000 });
     spawnSync("tmux", ["kill-session", "-t", `=${src}`], { timeout: 5000 });
+  }
+});
+
+test("live tmux: viewer key path cannot leave the linked window; viewer kill spares the source", (t) => {
+  // reviewer-936f9a3 regression (b): window-management keys are inert in the
+  // viewer (prefix None + locked key-table), and teardown never touches the
+  // source. Driven via send-keys of the default prefix + window-nav keys.
+  const probe = spawnSync("tmux", ["-V"], { encoding: "utf8" });
+  if (probe.error || probe.status !== 0) return t.skip("tmux not available");
+  const src = `oaslwsrc2${process.pid}`;
+  let viewer = null;
+  try {
+    execFileSync("tmux", ["new-session", "-d", "-s", src, "-n", "instA", "sh"], { timeout: 5000 });
+    execFileSync("tmux", ["new-window", "-t", `=${src}`, "-n", "instB", "sh"], { timeout: 5000 });
+    const r = openTerm({ session: src, window: "instA" }, {
+      preflight: (target) => execFileSync("tmux", ["list-panes", "-t", target], { stdio: "ignore", timeout: 5000 }),
+      tmux: (args) => execFileSync("tmux", args, { stdio: "ignore", timeout: 5000 }),
+      tmuxOut: (args) => execFileSync("tmux", args, { encoding: "utf8", timeout: 5000 }).trim(),
+      spawnPty: (target) => ({ target }),
+    });
+    viewer = r.viewer;
+    // prefix and key-table are locked
+    const opts = spawnSync("tmux", ["show-options", "-t", viewer], { encoding: "utf8", timeout: 5000 }).stdout;
+    assert.match(opts, /prefix None/, "prefix disabled");
+    assert.match(opts, /key-table oasdesk-locked/, "nonexistent key table");
+    // attempt window-management via the (disabled) prefix path: C-b n / C-b l /
+    // C-b c / C-b 1 — with prefix None these are raw bytes to the pane, not commands
+    for (const keys of [["C-b", "n"], ["C-b", "l"], ["C-b", "c"], ["C-b", "1"]]) {
+      spawnSync("tmux", ["send-keys", "-t", `=${viewer}`, ...keys], { timeout: 5000 });
+    }
+    const wins = spawnSync("tmux", ["list-windows", "-t", `=${viewer}`, "-F", "#{window_name}"], { encoding: "utf8", timeout: 5000 }).stdout.trim().split("\n");
+    assert.deepEqual(wins, ["instA"], "no nav/new escaped the linked window (no new/other windows)");
+    // teardown: killing the viewer spares the source and both its windows
+    r.killViewer();
+    viewer = null;
+    const windows = spawnSync("tmux", ["list-windows", "-t", `=${src}`, "-F", "#{window_name}"], { encoding: "utf8", timeout: 5000 }).stdout;
+    assert.ok(windows.includes("instA") && windows.includes("instB"), "source windows survive viewer kill");
+  } finally {
+    if (viewer) spawnSync("tmux", ["kill-session", "-t", `=${viewer}`], { timeout: 5000 });
+    spawnSync("tmux", ["kill-session", "-t", `=${src}`], { timeout: 5000 });
+  }
+});
+
+test("live tmux: viewer construction works under a nonzero base-index (isolated server)", (t) => {
+  // reviewer-linkview regression: with base-index 1 the placeholder is not
+  // at index 0 — window-id-based construction must not care. Isolated tmux
+  // server (-S socket) so the user's real server/options are untouched.
+  const probe = spawnSync("tmux", ["-V"], { encoding: "utf8" });
+  if (probe.error || probe.status !== 0) return t.skip("tmux not available");
+  const sock = `/tmp/oasbi-${process.pid}.sock`;
+  const T = (args, out = false) => {
+    const r = spawnSync("tmux", ["-S", sock, ...args], { encoding: "utf8", timeout: 5000 });
+    if (r.status !== 0) throw new Error(`tmux ${args[0]} failed: ${r.stderr}`);
+    return out ? r.stdout.trim() : undefined;
+  };
+  try {
+    T(["new-session", "-d", "-s", "boot", "sh"]);        // boot the server
+    T(["set-option", "-g", "base-index", "1"]);           // the customization that broke fixed indices
+    T(["new-session", "-d", "-s", "src", "-n", "instA", "sh"]);
+    T(["new-window", "-t", "=src", "-n", "instB", "sh"]);
+    assert.equal(T(["list-windows", "-t", "=src", "-F", "#{window_index} #{window_name}"], true).split("\n")[0], "1 instA",
+      "base-index 1 active: first window at index 1");
+
+    const r = openTerm({ session: "src", window: "instA" }, {
+      preflight: (target) => T(["list-panes", "-t", target]),
+      tmux: (args) => T(args),
+      tmuxOut: (args) => T(args, true),
+      spawnPty: (target) => ({ target }),
+    });
+    const wins = T(["list-windows", "-t", `=${r.viewer}`, "-F", "#{window_name}"], true).split("\n");
+    assert.deepEqual(wins, ["instA"], "viewer contains ONLY the linked window despite base-index 1");
+    r.killViewer();
+    assert.ok(T(["list-windows", "-t", "=src", "-F", "#{window_name}"], true).includes("instA"), "source intact");
+  } finally {
+    spawnSync("tmux", ["-S", sock, "kill-server"], { timeout: 5000 });
+    spawnSync("rm", ["-f", sock], { timeout: 5000 });
   }
 });

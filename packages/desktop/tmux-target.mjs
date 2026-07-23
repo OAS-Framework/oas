@@ -54,27 +54,35 @@ export function viewerPrefix(pid) {
 }
 
 /**
- * The term:open sequence with a per-tab GROUPED viewer session — target
- * anchoring, preflight, viewer creation, exact window selection, pty spawn —
- * with injectable dependencies so the ORDER and the cleanup contract are
- * testable.
+ * The term:open sequence with a per-tab LINKED-WINDOW viewer session —
+ * target anchoring, preflight, viewer creation, pty spawn — with injectable
+ * dependencies so the ORDER and the cleanup contract are testable.
  *
- * WHY a grouped session: the pty client previously joined the DURABLE
- * session directly and therefore followed its current-window selection —
- * when any other client changed the selected window, every open desktop
- * terminal silently switched to it while its tab label still claimed the
- * original instance (steady-state wrong-agent keystrokes). A session
- * grouped to the durable one (`tmux new-session -t <durable>`) shares its
- * windows but owns an INDEPENDENT current-window selection; each tab gets
- * its own viewer session pinned to its exact window.
+ * WHY a linked window (not session grouping): grouping isolates the
+ * current-window SELECTION but shares window MEMBERSHIP — when the selected
+ * source window dies (routine retire!), tmux auto-selects a sibling in the
+ * viewer, and viewer-side key bindings can navigate to sibling windows;
+ * both silently steer the tab to ANOTHER AGENT under a stale label. The
+ * viewer is therefore an independent ephemeral session containing ONLY a
+ * link to the exact requested window:
+ *   1. create placeholder session (unique unpredictable oasdesk- name);
+ *   2. link-window the =-anchored exact source window in;
+ *   3. kill the placeholder window — the link is the sole window;
+ *   4. lock the viewer: prefix/prefix2 None + a nonexistent key-table, so
+ *      no tmux window-management key can leave the linked window (normal
+ *      pane interaction is raw input to the pty and unaffected).
+ * Destroying the source window then TERMINATES the viewer (its only window
+ * is gone → pty exits → the tab shows "session ended") — verified
+ * empirically; it can never activate a sibling.
  *
  * Cleanup contract: kill ONLY the viewer session (=-anchored, unique name);
- * the durable session and its windows are never touched.
+ * killing the viewer never kills the linked source window (link refcount).
  *
  * @param {{ session: string, window?: string|number, cols?: number, rows?: number }} spec
  * @param {object} io
  * @param {(target: string) => void} io.preflight   throws if the exact source target is absent
  * @param {(args: string[]) => void} io.tmux        run a tmux command (throws on failure)
+ * @param {(args: string[]) => string} io.tmuxOut    run a tmux command, return trimmed stdout
  * @param {(target: string, cols: number, rows: number) => any} io.spawnPty
  * @param {() => string} [io.uniqueName]            viewer session name (default: prefix+pid+counter+random)
  * @returns {{ target: string, viewer: string, pty: any,
@@ -90,19 +98,30 @@ export function openTerm(spec, io) {
   }
   const viewer = io.uniqueName ? io.uniqueName()
     : `${viewerPrefix(process.pid)}${++viewerSeq}-${Math.random().toString(36).slice(2, 8)}`;
-  // Grouped viewer session: shares the durable session's windows, owns its
-  // own current-window selection. Select the exact window IN THE VIEWER, so
-  // no other client's selection can ever move this tab.
-  io.tmux(["new-session", "-d", "-s", viewer, "-t", `=${spec.session}`]);
+  // 1. placeholder session — exists only to receive the link. Capture the
+  //    placeholder's window ID: fixed indices (0/9) break under a custom
+  //    base-index (review linkview — base-index 1 made kill-window :0 fail
+  //    and every open reject); window IDs are index-agnostic.
+  const placeholderId = io.tmuxOut(["new-session", "-d", "-s", viewer, "-P", "-F", "#{window_id}"]);
   const killViewer = () => io.tmux(["kill-session", "-t", `=${viewer}`]);
   try {
-    if (spec.window !== undefined && spec.window !== null) {
-      io.tmux(["select-window", "-t", `=${viewer}:=${String(spec.window)}`]);
-    }
+    if (!/^@\d+$/.test(placeholderId)) throw new Error(`unexpected window id "${placeholderId}"`);
+    // 2. link the EXACT source window (anchored); bare "viewer:" lets tmux
+    //    pick a free index regardless of base-index
+    io.tmux(["link-window", "-s", target, "-t", `=${viewer}:`]);
+    // 3. drop the placeholder BY ID — the linked window is now the ONLY window
+    io.tmux(["kill-window", "-t", placeholderId]);
+    // 4. lock the viewer's key handling: no prefix → no window-management
+    //    bindings (next/last/new/select-window) can run; a nonexistent
+    //    key-table inerts root-table bindings too. (set-option targets
+    //    don't accept '=' — the unique random name cannot prefix-collide.)
+    io.tmux(["set-option", "-t", viewer, "prefix", "None"]);
+    io.tmux(["set-option", "-t", viewer, "prefix2", "None"]);
+    io.tmux(["set-option", "-t", viewer, "key-table", "oasdesk-locked"]);
     const pty = io.spawnPty(`=${viewer}`, Math.max(20, Number(spec.cols) || 80), Math.max(5, Number(spec.rows) || 24));
     return { target, viewer, pty, killViewer };
   } catch (e) {
-    // window selection or pty spawn failed — do not leak the viewer session
+    // link/lock/pty failure — do not leak the viewer session
     try { killViewer(); } catch { /* best-effort */ }
     throw e;
   }
