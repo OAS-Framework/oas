@@ -198,12 +198,17 @@ export async function mount(el, ctx) {
     const a = (loadAgents.list || []).find((x) => x.name === name);
     desc.textContent = a?.description || "";
     status(`Loading ${name}…`);
+    // House generation-token pattern (see diff.mjs owns()): BOTH completion
+    // paths check ownership — an earlier request's rejection must not replace
+    // a later selection's rendered brain (round-4 review @3ebfc47), and the
+    // selected name is bound in too so completion can't paint a stale agent.
+    const owns = () => myGen === gen && root && sel.value === name;
     try {
       const d = await json(await ctx.api(`/api/brain/${encodeURIComponent(name)}${wsQuery()}`));
-      if (myGen !== gen || !root) return; // stale request or unmounted
+      if (!owns()) return; // superseded, unmounted, or selection moved on
       if (d.error) { status(d.error); return; }
-      if (sel.value === name) renderBrain(body, d, ctx); // stale-response guard
-    } catch (e) { if (myGen === gen && root) status(`Failed to load brain: ${e.message || e}`); }
+      renderBrain(body, d, ctx);
+    } catch (e) { if (owns()) status(`Failed to load brain: ${e.message || e}`); }
   };
 
   // Workspace-aware agent loading: /api/agents is ws-scoped, and the shared
@@ -229,7 +234,9 @@ export async function mount(el, ctx) {
     await load(sel.value, myGen);
   }
 
-  sel.addEventListener("change", () => load(sel.value, gen));
+  // every selection is a NEW generation — reusing the current gen lets a
+  // prior request's late completion (success OR error) win over this one
+  sel.addEventListener("change", () => load(sel.value, ++gen));
   unsubWs = onWorkspaceChange(() => loadAgents());
   await loadAgents();
 }

@@ -183,3 +183,68 @@ test("diff: a response landing after dispose never renders", async () => {
   await Promise.race([mountP, new Promise((r) => setTimeout(r, 30))]);
   assert.ok(!el.innerHTML.includes("post-dispose"), "post-dispose response never rendered");
 });
+
+test("brain: stale rejection cannot replace a newer selection's rendered brain", async () => {
+  const { JSDOM } = await import("jsdom");
+  const dom = new JSDOM("<!doctype html><body><div id=el></div>", { url: "http://127.0.0.1/" });
+  // brain.mjs builds DOM via the global document
+  const g = globalThis;
+  const saved = { document: g.document, window: g.window, localStorage: g.localStorage };
+  g.document = dom.window.document; g.window = dom.window; g.localStorage = dom.window.localStorage;
+  try {
+    const brain = await import("../renderer/views/brain.mjs");
+    const el = dom.window.document.getElementById("el");
+    const inflight = []; // { pathname, resolve, reject }
+    const mkBrain = (agent) => ({ agent, description: "", agentsRoot: "/r",
+      soul: { agentsMd: null, skills: [], knowledge: { index: null, tree: [] } },
+      instances: [{ instance: `${agent}-inst`, home: `/h/${agent}`, running: false,
+                    agentsMd: null, skills: [], state: null, task: null, notes: [] }] });
+    const ctx = {
+      api: (pathname) => {
+        if (pathname.startsWith("/api/agents"))
+          return Promise.resolve({ agents: [{ name: "agent-a", description: "" }, { name: "agent-b", description: "" }] });
+        return new Promise((resolve, reject) => inflight.push({ pathname, resolve, reject }));
+      },
+      openFile: () => {}, openTerminal: () => {},
+    };
+    const mountP = brain.mount(el, ctx);
+    await new Promise((r) => setTimeout(r, 10));
+    assert.equal(inflight.length, 1, "initial brain request (agent-a) in flight");
+    const reqA = inflight.shift();
+    // user selects agent-b while agent-a's request is still pending
+    const sel = el.querySelector("select");
+    sel.value = "agent-b";
+    sel.dispatchEvent(new dom.window.Event("change"));
+    await new Promise((r) => setTimeout(r, 10));
+    assert.equal(inflight.length, 1, "agent-b request in flight");
+    const reqB = inflight.shift();
+    // B renders first...
+    reqB.resolve(mkBrain("agent-b"));
+    await new Promise((r) => setTimeout(r, 10));
+    assert.ok(el.innerHTML.includes("agent-b-inst"), "agent-b brain rendered");
+    // ...then A REJECTS late — the round-4 race: the stale error must not
+    // replace agent-b's rendered brain
+    reqA.reject(new Error("boom-stale-a"));
+    await new Promise((r) => setTimeout(r, 10));
+    assert.ok(el.innerHTML.includes("agent-b-inst"), "agent-b render survives the stale rejection");
+    assert.ok(!el.innerHTML.includes("boom-stale-a"), "stale error never painted");
+    // reversed SUCCESS order too: stale success must not clobber either
+    sel.value = "agent-a";
+    sel.dispatchEvent(new dom.window.Event("change"));
+    sel.value = "agent-b";
+    sel.dispatchEvent(new dom.window.Event("change"));
+    await new Promise((r) => setTimeout(r, 10));
+    assert.equal(inflight.length, 2, "two selection requests in flight");
+    const [oldA, newB] = inflight.splice(0, 2);
+    newB.resolve(mkBrain("agent-b"));
+    await new Promise((r) => setTimeout(r, 10));
+    oldA.resolve(mkBrain("agent-a"));
+    await new Promise((r) => setTimeout(r, 10));
+    assert.ok(el.innerHTML.includes("agent-b-inst"), "newer selection survives stale success");
+    assert.ok(!el.innerHTML.includes("agent-a-inst"), "stale success never rendered");
+    await Promise.race([mountP, new Promise((r) => setTimeout(r, 30))]);
+    brain.unmount();
+  } finally {
+    g.document = saved.document; g.window = saved.window; g.localStorage = saved.localStorage;
+  }
+});
