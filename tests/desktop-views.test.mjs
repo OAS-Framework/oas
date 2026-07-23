@@ -218,12 +218,15 @@ test("ws generation: a spawn begun in workspace A completing after a switch to B
   const { doSpawn } = await import(new URL("../packages/desktop/renderer/views/spawn.mjs", import.meta.url).href);
   const opened = [];
   let release;
+  const panelWith = (names) => ({ ok: true, status: 200, json: async () => ({ instances: names.map((n) => ({ instance: n })) }) });
   const ctx = {
-    api: () => new Promise((ok) => { release = () => ok({ ok: true, status: 200, json: async () => ({ instance: "dev-1", launched: true }) }); }),
+    api: (pathname) => pathname.startsWith("/api/panel")
+      ? Promise.resolve(panelWith(["dev-1"]))          // roster already caught up
+      : new Promise((ok) => { release = () => ok({ ok: true, status: 200, json: async () => ({ instance: "dev-1", launched: true }) }); }),
     openTerminal: (name) => opened.push(name),
   };
   const fields = { ftask: { value: "t" }, fpurpose: { value: "" }, fspawn: { disabled: false, textContent: "" }, fstatus: { textContent: "" } };
-  const s = { ctx, selAgent: { name: "dev", agentsRoot: "/a" }, q: (cls) => fields[cls], spawnOp: 0 };
+  const s = { ctx, selAgent: { name: "dev", agentsRoot: "/a" }, q: (cls) => fields[cls], spawnOp: 0, waitOpts: { delayMs: 0, tries: 3 } };
   const prevWs = common.currentWorkspace();
   try {
     // in-flight spawn survives a workspace switch: must NOT auto-open
@@ -251,11 +254,13 @@ test("spawn op token: a stale workspace-A spawn completing during an in-flight B
   const releases = [];
   const respond = (instance) => ({ ok: true, status: 200, json: async () => ({ instance, launched: true }) });
   const ctx = {
-    api: () => new Promise((ok) => releases.push(ok)),
+    api: (pathname) => pathname.startsWith("/api/panel")
+      ? Promise.resolve({ ok: true, status: 200, json: async () => ({ instances: [{ instance: "inst-A" }, { instance: "inst-B" }] }) })
+      : new Promise((ok) => releases.push(ok)),
     openTerminal: (name) => opened.push(name),
   };
   const fields = { ftask: { value: "task-A" }, fpurpose: { value: "" }, fspawn: { disabled: false, textContent: "" }, fstatus: { textContent: "" } };
-  const s = { ctx, selAgent: { name: "dev", agentsRoot: "/a" }, q: (cls) => fields[cls], spawnOp: 0 };
+  const s = { ctx, selAgent: { name: "dev", agentsRoot: "/a" }, q: (cls) => fields[cls], spawnOp: 0, waitOpts: { delayMs: 0, tries: 3 } };
   const prevWs = common.currentWorkspace();
   try {
     // spawn 1 dispatched in wsA
@@ -291,11 +296,11 @@ test("spawn op token: a stale spawn ERROR never overwrites the active spawn's st
   const { doSpawn } = await import(new URL("../packages/desktop/renderer/views/spawn.mjs", import.meta.url).href);
   const releases = [];
   const ctx = {
-    api: () => new Promise((ok, err) => releases.push({ ok, err })),
+    api: (pathname) => pathname.startsWith("/api/panel") ? Promise.resolve({ ok: true, status: 200, json: async () => ({ instances: [{ instance: "inst-2" }] }) }) : new Promise((ok, err) => releases.push({ ok, err })),
     openTerminal: () => {},
   };
   const fields = { ftask: { value: "" }, fpurpose: { value: "" }, fspawn: { disabled: false, textContent: "" }, fstatus: { textContent: "" } };
-  const s = { ctx, selAgent: { name: "dev", agentsRoot: "/a" }, q: (cls) => fields[cls], spawnOp: 0 };
+  const s = { ctx, selAgent: { name: "dev", agentsRoot: "/a" }, q: (cls) => fields[cls], spawnOp: 0, waitOpts: { delayMs: 0, tries: 3 } };
   const prevWs = common.currentWorkspace();
   try {
     common.setWorkspace("wsA");
@@ -309,6 +314,85 @@ test("spawn op token: a stale spawn ERROR never overwrites the active spawn's st
     await spawn2;
     assert.match(fields.fstatus.textContent, /Spawned inst-2/);
     assert.equal(fields.fspawn.disabled, false);
+  } finally {
+    common.setWorkspace(prevWs);
+  }
+});
+
+test("stale snapshot: spawn waits for the instance to appear in /api/panel before auto-opening the terminal", async () => {
+  const common = await import(new URL("../packages/desktop/renderer/views/common.mjs", import.meta.url).href);
+  const { doSpawn } = await import(new URL("../packages/desktop/renderer/views/spawn.mjs", import.meta.url).href);
+  const opened = [];
+  let panelCalls = 0;
+  const panel = (names) => ({ ok: true, status: 200, json: async () => ({ instances: names.map((n) => ({ instance: n })) }) });
+  const ctx = {
+    // background snapshot lags: first two polls miss the new instance, third has it
+    api: (pathname) => pathname.startsWith("/api/panel")
+      ? Promise.resolve(panel(++panelCalls >= 3 ? ["old-1", "dev-new"] : ["old-1"]))
+      : Promise.resolve({ ok: true, status: 200, json: async () => ({ instance: "dev-new", launched: true }) }),
+    openTerminal: (name) => opened.push(name),
+  };
+  const fields = { ftask: { value: "" }, fpurpose: { value: "" }, fspawn: { disabled: false, textContent: "" }, fstatus: { textContent: "" } };
+  const s = { ctx, selAgent: { name: "dev", agentsRoot: "/a" }, q: (cls) => fields[cls], spawnOp: 0, waitOpts: { delayMs: 0, tries: 10 } };
+  const prevWs = common.currentWorkspace();
+  try {
+    common.setWorkspace("wsA");
+    await doSpawn(s);
+    assert.equal(panelCalls, 3, "must poll until the snapshot includes the new instance");
+    assert.deepEqual(opened, ["dev-new"], "auto-open fires only after the roster knows the instance");
+  } finally {
+    common.setWorkspace(prevWs);
+  }
+});
+
+test("stale snapshot: if the roster never catches up, spawn reports instead of opening an unresolvable terminal", async () => {
+  const common = await import(new URL("../packages/desktop/renderer/views/common.mjs", import.meta.url).href);
+  const { doSpawn } = await import(new URL("../packages/desktop/renderer/views/spawn.mjs", import.meta.url).href);
+  const opened = [];
+  const ctx = {
+    api: (pathname) => pathname.startsWith("/api/panel")
+      ? Promise.resolve({ ok: true, status: 200, json: async () => ({ instances: [{ instance: "old-1" }] }) })
+      : Promise.resolve({ ok: true, status: 200, json: async () => ({ instance: "dev-new", launched: true }) }),
+    openTerminal: (name) => opened.push(name),
+  };
+  const fields = { ftask: { value: "" }, fpurpose: { value: "" }, fspawn: { disabled: false, textContent: "" }, fstatus: { textContent: "" } };
+  const s = { ctx, selAgent: { name: "dev", agentsRoot: "/a" }, q: (cls) => fields[cls], spawnOp: 0, waitOpts: { delayMs: 0, tries: 3 } };
+  const prevWs = common.currentWorkspace();
+  try {
+    common.setWorkspace("wsA");
+    await doSpawn(s);
+    assert.deepEqual(opened, [], "never call openTerminal with an instance the roster cannot resolve");
+    assert.match(fields.fstatus.textContent, /catching up/, "user is told where to find the instance");
+    assert.equal(fields.fspawn.disabled, false, "button unlocks after the wait gives up");
+  } finally {
+    common.setWorkspace(prevWs);
+  }
+});
+
+test("stale snapshot: a workspace switch during the roster wait aborts the auto-open", async () => {
+  const common = await import(new URL("../packages/desktop/renderer/views/common.mjs", import.meta.url).href);
+  const { doSpawn } = await import(new URL("../packages/desktop/renderer/views/spawn.mjs", import.meta.url).href);
+  const opened = [];
+  let panelCalls = 0;
+  const ctx = {
+    api: (pathname) => {
+      if (!pathname.startsWith("/api/panel"))
+        return Promise.resolve({ ok: true, status: 200, json: async () => ({ instance: "dev-new", launched: true }) });
+      panelCalls++;
+      if (panelCalls === 2) common.setWorkspace("wsB"); // switch mid-wait
+      // the instance only appears AFTER the switch has happened
+      const names = panelCalls >= 3 ? [{ instance: "dev-new" }] : [];
+      return Promise.resolve({ ok: true, status: 200, json: async () => ({ instances: names }) });
+    },
+    openTerminal: (name) => opened.push(name),
+  };
+  const fields = { ftask: { value: "" }, fpurpose: { value: "" }, fspawn: { disabled: false, textContent: "" }, fstatus: { textContent: "" } };
+  const s = { ctx, selAgent: { name: "dev", agentsRoot: "/a" }, q: (cls) => fields[cls], spawnOp: 0, waitOpts: { delayMs: 0, tries: 5 } };
+  const prevWs = common.currentWorkspace();
+  try {
+    common.setWorkspace("wsA");
+    await doSpawn(s);
+    assert.deepEqual(opened, [], "ws switched during the wait: opening now would resolve in the wrong workspace");
   } finally {
     common.setWorkspace(prevWs);
   }
