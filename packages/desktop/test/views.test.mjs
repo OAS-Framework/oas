@@ -299,3 +299,60 @@ test("brain: a selection during an in-flight roster refresh cannot cancel it", a
     g.document = saved.document; g.window = saved.window; g.localStorage = saved.localStorage;
   }
 });
+
+test("brain: roster failure re-enables the selector; a stale failure cannot unlock a newer refresh", async () => {
+  const { JSDOM } = await import("jsdom");
+  const dom = new JSDOM("<!doctype html><body><div id=el></div>", { url: "http://127.0.0.1/" });
+  const g = globalThis;
+  const saved = { document: g.document, window: g.window, localStorage: g.localStorage };
+  g.document = dom.window.document; g.window = dom.window; g.localStorage = dom.window.localStorage;
+  try {
+    const brain = await import("../renderer/views/brain.mjs");
+    const common = await import("../renderer/views/common.mjs");
+    const el = dom.window.document.getElementById("el");
+    const rosterInflight = []; // { resolve, reject }
+    let rosterCalls = 0;
+    const ctx = {
+      api: (pathname) => {
+        if (pathname.startsWith("/api/agents")) {
+          rosterCalls++;
+          if (rosterCalls === 1) return Promise.resolve({ agents: [{ name: "a1" }] });
+          return new Promise((resolve, reject) => rosterInflight.push({ resolve, reject }));
+        }
+        return Promise.resolve({ agent: "a1", description: "", agentsRoot: "/r",
+          soul: { agentsMd: null, skills: [], knowledge: { index: null, tree: [] } }, instances: [] });
+      },
+      openFile: () => {}, openTerminal: () => {},
+    };
+    await brain.mount(el, ctx);
+    const sel = el.querySelector("select");
+    // CURRENT roster refresh fails → selector must come back
+    common.setWorkspace("ws-fail");
+    await new Promise((r) => setTimeout(r, 10));
+    assert.ok(sel.disabled, "selector locked during the refresh");
+    rosterInflight.shift().reject(new Error("roster down"));
+    await new Promise((r) => setTimeout(r, 10));
+    assert.ok(!sel.disabled, "current-request failure re-enables the selector");
+    assert.ok(el.innerHTML.includes("roster down"), "failure surfaced");
+    // STALE failure must NOT unlock a newer in-flight refresh
+    common.setWorkspace("ws-a");
+    await new Promise((r) => setTimeout(r, 10));
+    const staleReq = rosterInflight.shift();
+    common.setWorkspace("ws-b"); // newer refresh supersedes; selector locked for it
+    await new Promise((r) => setTimeout(r, 10));
+    const newerReq = rosterInflight.shift();
+    assert.ok(sel.disabled, "selector locked for the newer refresh");
+    staleReq.reject(new Error("stale boom"));
+    await new Promise((r) => setTimeout(r, 10));
+    assert.ok(sel.disabled, "stale failure does not unlock the newer refresh");
+    assert.ok(!el.innerHTML.includes("stale boom"), "stale error never painted");
+    newerReq.resolve({ agents: [{ name: "b1" }] });
+    await new Promise((r) => setTimeout(r, 10));
+    assert.ok(!sel.disabled, "newer refresh completes and unlocks");
+    assert.equal(sel.value, "b1");
+    brain.unmount();
+    common.setWorkspace("");
+  } finally {
+    g.document = saved.document; g.window = saved.window; g.localStorage = saved.localStorage;
+  }
+});

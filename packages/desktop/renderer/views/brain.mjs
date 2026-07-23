@@ -226,7 +226,15 @@ export async function mount(el, ctx) {
     try {
       const d = await json(await ctx.api(`/api/agents${wsQuery()}`));
       agents = (d.agents || []).filter((a, i, arr) => arr.findIndex((x) => x.name === a.name) === i);
-    } catch (e) { if (myRoster === rosterGen && root) status(`Failed to load agents: ${e.message || e}`); return; }
+    } catch (e) {
+      // Current-request failure must re-enable the selector (nothing remains
+      // in flight); a STALE failure must not unlock a newer refresh's lock.
+      if (myRoster === rosterGen && root) {
+        sel.disabled = false;
+        status(`Failed to load agents: ${e.message || e}`);
+      }
+      return;
+    }
     if (myRoster !== rosterGen || !root) return;
     loadAgents.list = agents;
     sel.innerHTML = "";
