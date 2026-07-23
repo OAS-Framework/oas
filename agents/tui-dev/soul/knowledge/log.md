@@ -2,6 +2,10 @@
 
 ## 2026-07-23
 
+- **Update**: [desktop-terminal-direct-attach.md](desktop-terminal-direct-attach.md)
+  — merged the exact-match attach-target lesson so node-pty attach uses validated `=session:=window` targets instead of unanchored prefix-matchable `session:window`.
+- **Creation**: [anchor-tmux-attach-targets.md](anchor-tmux-attach-targets.md)
+  — promoted the lesson that every desktop-constructed tmux `-t` target must be `=`-anchored and component-validated so stale rosters fail loudly instead of attaching keystrokes to the wrong window.
 - **Triage**: dropped the aweb awakening coda from node-test-recursion-worktrees.md because it described transient messaging-layer behavior, not durable tui-dev desktop-shell knowledge.
 - **Update**: [testing-pure-functions-fake-snapshots.md](testing-pure-functions-fake-snapshots.md)
   — replaced the bare full-repo `node --test` suggestion with the pinned-glob test-script rule from the node test recursion lesson.
