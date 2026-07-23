@@ -16,6 +16,7 @@ import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { apiUrl, apiInit } from "./api-url.mjs";
+import { tmuxAttachTarget } from "./tmux-target.mjs";
 
 const require = createRequire(import.meta.url);
 const pty = require("node-pty");
@@ -143,8 +144,11 @@ let nextPtyId = 1;
 
 ipcMain.handle("term:open", (e, { session, window: win, cols, rows }) => {
   guard(e);
-  if (typeof session !== "string" || !/^[\w@%.:-]+$/.test(session)) throw new Error("term:open: bad session name");
-  const target = win !== undefined && win !== null ? `${session}:${win}` : session;
+  // Exact-match anchored target (=session:=window): tmux -t prefix-matches
+  // by default, so a stale roster + gone window would otherwise attach to a
+  // similarly named LIVE window — keystrokes into the wrong agent. With the
+  // anchor tmux errors out instead; the renderer shows "could not attach".
+  const target = tmuxAttachTarget(session, win);
   const id = nextPtyId++;
   // Direct attach: tmux stays the durable session host; the pty is a viewer.
   const p = pty.spawn("tmux", ["attach-session", "-t", target], {
