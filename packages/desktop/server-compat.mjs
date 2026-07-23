@@ -76,12 +76,16 @@ export async function selectServer(io) {
  * @param {(from: number) => Promise<number>} io.freePort
  * @param {(port: number) => void} io.spawnServer
  * @param {(msg: string) => void} [io.log]
+ * @param {(io: object) => Promise<object>} [io.select]  the selection
+ *        function — defaults to selectServer; injectable so consumer tests
+ *        can supply arbitrary decisions (incl. arbitrary reason text) and
+ *        prove the caller keys on portOccupied, never on wording
  * @returns {Promise<{ spawned: boolean, port: number, wsId: string|null }>}
  *   wsId is null when spawned (the caller verifies the new server's
  *   workspace during its readiness wait).
  */
 export async function ensureServerOnPort(io) {
-  const choice = await selectServer(io);
+  const choice = await (io.select || selectServer)(io);
   if (choice.action === "reuse") return { spawned: false, port: io.port, wsId: choice.wsId };
   let port = io.port;
   if (choice.portOccupied) {

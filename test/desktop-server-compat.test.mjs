@@ -114,43 +114,68 @@ test("spawn decisions carry the portOccupied discriminator (not reason strings)"
 });
 
 // ensureServerOnPort: the CONSUMER of the discriminator (review srvcompat3 —
-// proving the emitter is not enough; these fail if the caller reverts to
-// reason-string matching or stops moving ports).
-function ensureIo(choiceIo, port, calls) {
+// proving the emitter is not enough; review srvcompat4 — the decision is
+// INJECTED with arbitrary reason text so a consumer keying on any reason
+// wording, e.g. the old `reason !== "no server on the port"`, fails these).
+function ensureIo(choice, port, calls) {
   return {
-    ...choiceIo, port,
+    select: async () => choice,   // arbitrary decision, arbitrary wording
+    port,
     freePort: async (from) => { calls.push(["freePort", from]); return from + 7; },
     spawnServer: (p) => calls.push(["spawn", p]),
     log: () => {},
   };
 }
-const chooser = (choice) => ({
-  // io that makes selectServer return exactly `choice`
-  panelWorkspaces: async () => (choice.action === "reuse" || choice.portOccupied ? [{ id: "/w", name: "w" }] : null),
-  matchWorkspace: () => (choice.action === "reuse" || choice.reason?.includes("incompatible") ? "/w" : null),
-  probeVersion: async () => (choice.action === "reuse" ? { ok: true, body: LOCAL } : { ok: false, status: 404, body: null }),
-  local: LOCAL,
-});
 
 test("ensureServerOnPort: occupied decision moves ports and spawns there — regardless of reason text", async () => {
+  // Reason text deliberately says the magic free-port phrase: a consumer
+  // comparing reason strings would keep the port; the discriminator moves it.
   const calls = [];
-  const r = await ensureServerOnPort(ensureIo(chooser({ action: "spawn", portOccupied: true, reason: "incompatible (whatever wording)" }), 4820, calls));
+  const r = await ensureServerOnPort(ensureIo({ action: "spawn", portOccupied: true, reason: "no server on the port" }, 4820, calls));
   assert.deepEqual(calls, [["freePort", 4821], ["spawn", 4828]], "moved off the occupied port before spawning");
   assert.deepEqual(r, { spawned: true, port: 4828, wsId: null });
 });
 
-test("ensureServerOnPort: free port spawns in place (no freePort call)", async () => {
+test("ensureServerOnPort: free port spawns in place (no freePort call) — regardless of reason text", async () => {
+  // Inverse trap: an occupied-sounding reason on a free-port decision.
   const calls = [];
-  const r = await ensureServerOnPort(ensureIo(chooser({ action: "spawn", portOccupied: false }), 4820, calls));
+  const r = await ensureServerOnPort(ensureIo({ action: "spawn", portOccupied: false, reason: "incompatible (wording trap)" }, 4820, calls));
   assert.deepEqual(calls, [["spawn", 4820]], "kept the free port");
   assert.equal(r.port, 4820);
 });
 
 test("ensureServerOnPort: reuse neither spawns nor moves", async () => {
   const calls = [];
-  const r = await ensureServerOnPort(ensureIo(chooser({ action: "reuse" }), 4820, calls));
+  const r = await ensureServerOnPort(ensureIo({ action: "reuse", wsId: "/w" }, 4820, calls));
   assert.deepEqual(calls, [], "no effects on reuse");
   assert.deepEqual(r, { spawned: false, port: 4820, wsId: "/w" });
+});
+
+test("ensureServerOnPort defaults to the real selectServer when no select is injected", async () => {
+  // Keeps the production wiring covered: end-to-end against a fake matching
+  // server through the DEFAULT selection path.
+  const server = createServer((req, res) => {
+    res.writeHead(200, { "content-type": "application/json" });
+    req.url.startsWith("/api/panel")
+      ? res.end(JSON.stringify({ workspaces: [{ id: "/w", name: "w" }], instances: [] }))
+      : res.end(JSON.stringify({ capability: LOCAL.capability, version: LOCAL.version }));
+  });
+  await new Promise((ok) => server.listen(0, "127.0.0.1", ok));
+  const url = `http://127.0.0.1:${server.address().port}`;
+  const calls = [];
+  try {
+    const r = await ensureServerOnPort({
+      panelWorkspaces: async () => (await (await fetch(`${url}/api/panel`)).json()).workspaces,
+      probeVersion: async () => { const v = await fetch(`${url}/api/version`); return { ok: v.ok, status: v.status, body: await v.json() }; },
+      matchWorkspace: (ws) => ws[0]?.id || null,
+      local: LOCAL,
+      port: 4820,
+      freePort: async (from) => { calls.push(["freePort", from]); return from; },
+      spawnServer: (p) => calls.push(["spawn", p]),
+    });
+    assert.deepEqual(r, { spawned: false, port: 4820, wsId: "/w" }, "real selection path reuses the matching server");
+    assert.deepEqual(calls, []);
+  } finally { server.close(); }
 });
 
 test("REAL oas-web serves /api/version matching its oas.json → reuse through the seam", async (t) => {
