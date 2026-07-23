@@ -15,7 +15,10 @@ import { createPalette, isPaletteShortcut } from "./palette.mjs";
 import { createViewLifecycle } from "./view-lifecycle.mjs";
 import { reserveKey, whenKeyFree } from "./tab-keys.mjs";
 import { createTerminalTab } from "./terminal-tab.mjs";
-import { terminalTabsForWorkspace, tabVisibleInContext } from "./workspace-tabs.mjs";
+import {
+  terminalTabsForWorkspace, tabVisibleInContext, canActivateTab,
+  fallbackTabForContext, terminalOpenOwnsWorkspace,
+} from "./workspace-tabs.mjs";
 
 const desk = window.oasDesktop;
 initTheme();
@@ -251,8 +254,11 @@ function addTab({ title, key, kind = "artifact", workspace = null, onClose, onSh
 }
 
 function activateTab(id) {
-  activeTab = id;
   const current = tabs.get(id);
+  // Hidden is not security: reject cross-workspace terminal activation at
+  // the mutation boundary before its pane can become active/receive input.
+  if (!canActivateTab(current, currentWorkspace())) return false;
+  activeTab = id;
   if (current?.kind === "terminal") {
     setSidebarMode("instances");
     setNavActive("instances");
@@ -267,6 +273,7 @@ function activateTab(id) {
     t.paneEl.classList.toggle("active", tid === id);
   }
   tabs.get(id)?.onShow?.();
+  return true;
 }
 
 function closeTab(id) {
@@ -283,8 +290,8 @@ function closeTab(id) {
   t.paneEl.remove();
   tabs.delete(id);
   if (activeTab === id) {
-    const rest = [...tabs.keys()];
-    if (rest.length) activateTab(rest[rest.length - 1]);
+    const fallback = fallbackTabForContext(tabs, sidebarMode, currentWorkspace());
+    if (fallback) activateTab(fallback[0]);
     else if (t.kind === "terminal") showInstances();
     else { activeTab = null; showTabLayer(false); if (stage) setNavActive(stage.name); }
   }
@@ -355,7 +362,17 @@ async function openTerminalTab(instance) {
 
 async function openTerminalTabInner(instance, ws, key) {
   // Resolve the tmux target from the roster of the selected workspace.
-  const panel = await api(`/api/panel${ws ? `?ws=${encodeURIComponent(ws)}` : ""}`);
+  const owns = () => terminalOpenOwnsWorkspace(ws, currentWorkspace());
+  let panel;
+  try {
+    panel = await api(`/api/panel${ws ? `?ws=${encodeURIComponent(ws)}` : ""}`);
+  } catch (e) {
+    if (!owns()) return; // stale rejection belongs to the old workspace
+    throw e;
+  }
+  // Workspace changed while /api/panel was in flight: discard BEFORE addTab
+  // (addTab auto-activates, so a late A open could otherwise receive B input).
+  if (!owns()) return;
   const inst = panel.instances.find((i) => i.instance === instance);
   if (!inst) return alert(`unknown instance "${instance}"`);
   if (!inst.running || !inst.tmux?.session) return alert(`"${instance}" has no live tmux session`);

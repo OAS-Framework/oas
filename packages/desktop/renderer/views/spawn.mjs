@@ -65,7 +65,9 @@ export function mount(el, ctx) {
     s.sel = null;
     s.selAgent = null;
     s.q("souls-grid").innerHTML = '<div class="loading-block"><span class="spinner"></span> Loading agents…</div>';
-    refresh(s, true);
+    // No force flag: if a newer B poll paints a B spawn form before this
+    // request resolves, the late switch refresh must respect that owner.
+    refresh(s);
   });
   refresh(s);
   s.timers.push(setInterval(() => refresh(s), 8000));
@@ -81,7 +83,7 @@ export function unmount() {
 }
 
 /* Exported for the deferred cross-workspace regression. */
-export async function refresh(s, forceRender = false) {
+export async function refresh(s) {
   const myGen = workspaceGeneration();       // capture at dispatch
   let souls, panel;
   try {
@@ -95,7 +97,7 @@ export async function refresh(s, forceRender = false) {
   if (!s.alive || myGen !== workspaceGeneration()) return;
   s.souls = souls;
   renderWorkspaceSelect(s.q("wssel"), panel.workspaces, panel.workspace?.id || "");
-  renderGrid(s, forceRender);
+  renderGrid(s);
 }
 
 function matches(s, a) {
@@ -104,12 +106,12 @@ function matches(s, a) {
   return [a.name, a.description, a.repoName].some((v) => String(v || "").toLowerCase().includes(t));
 }
 
-function renderGrid(s, force = false) {
+function renderGrid(s) {
   const grid = s.q("souls-grid");
-  // Same-workspace polling must not replace a form that owns an in-flight
-  // mutation. A workspace switch passes force=true after invalidating that
-  // operation, so stale A UI can never suppress B's roster.
-  if (!force && grid.querySelector?.(".soul-form button:disabled")) return;
+  // Polling (including a delayed switch-triggered refresh) must never replace
+  // a newer form that owns an in-flight mutation. Workspace switching already
+  // removes A synchronously before dispatching B's refresh.
+  if (grid.querySelector?.(".soul-form button:disabled")) return;
   grid.innerHTML = "";
   const list = s.souls.agents.filter((a) => matches(s, a));
   const spawnable = s.souls.agents.filter((a) => a.work !== "attached").length;

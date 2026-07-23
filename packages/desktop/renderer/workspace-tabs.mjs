@@ -11,3 +11,15 @@ export function tabVisibleInContext(tab, mode, ws) {
   if (mode === "souls") return tab.kind === "brain" || tab.kind === "file";
   return false;
 }
+
+export function canActivateTab(tab, ws) {
+  return !!tab && (tab.kind !== "terminal" || tab.workspace === ws);
+}
+
+export function fallbackTabForContext(entries, mode, ws) {
+  return [...entries].filter(([, tab]) => tabVisibleInContext(tab, mode, ws)).at(-1) || null;
+}
+
+export function terminalOpenOwnsWorkspace(capturedWs, currentWs) {
+  return capturedWs === currentWs;
+}

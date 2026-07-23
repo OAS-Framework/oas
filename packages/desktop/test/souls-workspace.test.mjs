@@ -72,3 +72,76 @@ test("Soul roster: switching A→B during a hanging spawn removes A form and age
     if (oldWindow === undefined) delete globalThis.window; else globalThis.window = oldWindow;
   }
 });
+
+
+test("Soul roster: delayed switch refresh cannot erase a newer B spawn form", async () => {
+  const dom = new JSDOM("<!doctype html><html><head></head><body><div id=host></div></body></html>", { url: "http://localhost" });
+  const oldDocument = globalThis.document;
+  const oldWindow = globalThis.window;
+  const oldSetInterval = globalThis.setInterval;
+  globalThis.document = dom.window.document;
+  globalThis.window = dom.window;
+  let poll;
+  globalThis.setInterval = (fn) => { poll = fn; return { fake: true }; };
+
+  const common = await import("../renderer/views/common.mjs");
+  const spawn = await import("../renderer/views/spawn.mjs");
+  const previousWs = common.currentWorkspace();
+  const delayedSwitch = [];
+  let bGets = 0;
+  let releaseBSpawn;
+  const opened = [];
+  const agent = (name) => ({
+    name, agentsRoot: `/${name}/agents`, description: name, runtime: "pi",
+    work: "workspace", repo: true, repoName: name,
+  });
+  const bodyFor = (pathname, ws) => pathname.startsWith("/api/agents")
+    ? { agents: [agent(`${ws}-soul`)] }
+    : { instances: [], workspace: { id: ws }, workspaces: [{ id: "wsA", name: "A" }, { id: "wsB", name: "B" }] };
+  const ctx = {
+    api(pathname, opts = {}) {
+      if (opts.method === "POST") return new Promise((ok) => { releaseBSpawn = ok; });
+      const ws = pathname.includes("ws=wsB") ? "wsB" : "wsA";
+      if (ws === "wsB" && bGets++ < 2) {
+        return new Promise((ok) => delayedSwitch.push(() => ok(bodyFor(pathname, ws))));
+      }
+      return Promise.resolve(bodyFor(pathname, ws));
+    },
+    openTerminal: (name) => opened.push(name),
+  };
+
+  try {
+    common.setWorkspace("wsA");
+    spawn.mount(dom.window.document.getElementById("host"), ctx);
+    await tick(); await tick();
+    common.setWorkspace("wsB"); // switch refresh's two GETs now hang
+    assert.equal(delayedSwitch.length, 2);
+
+    poll();                    // newer normal B refresh resolves first
+    await tick(); await tick();
+    assert.match(dom.window.document.body.textContent, /wsB-soul/);
+    dom.window.document.querySelector(".spawn-act").click();
+    dom.window.document.querySelector(".fspawn").click();
+    await tick();
+    const ownedForm = dom.window.document.querySelector(".soul-form");
+    const ownedButton = ownedForm.querySelector(".fspawn");
+    assert.equal(ownedButton.disabled, true, "newer B spawn owns the rendered form");
+
+    delayedSwitch.forEach((release) => release()); // older B refresh lands last
+    await tick(); await tick();
+    assert.equal(dom.window.document.querySelector(".soul-form"), ownedForm,
+      "delayed switch refresh preserves newer B form node");
+    assert.equal(ownedButton.disabled, true, "delayed refresh cannot unlock/replace B mutation UI");
+
+    releaseBSpawn({ instance: "inst-B", launched: true });
+    await tick(); await tick();
+    assert.deepEqual(opened, ["inst-B"]);
+  } finally {
+    spawn.unmount();
+    common.setWorkspace(previousWs);
+    globalThis.setInterval = oldSetInterval;
+    dom.window.close();
+    if (oldDocument === undefined) delete globalThis.document; else globalThis.document = oldDocument;
+    if (oldWindow === undefined) delete globalThis.window; else globalThis.window = oldWindow;
+  }
+});
