@@ -33,3 +33,32 @@ export function serverCompatible(versionResponse, local) {
   }
   return { compatible: true, reason: "matches local checkout" };
 }
+
+/**
+ * The server-selection decision — the seam main.mjs::ensureServer runs, with
+ * injectable probes so the reuse/spawn choice is testable end-to-end
+ * (review srvcompat: fake-server tests that re-implement the decision leave
+ * the production gate unprotected).
+ *
+ * @param {object} io
+ * @param {() => Promise<Array<{id:string,name:string}>|null>} io.panelWorkspaces
+ * @param {() => Promise<{ok:boolean,status?:number,body?:any}|null>} io.probeVersion
+ * @param {(workspaces: Array<{id:string}>) => string|null} io.matchWorkspace
+ * @param {{capability:string,version:string}} io.local
+ * @returns {Promise<{ action: "reuse", wsId: string } |
+ *                    { action: "spawn", reason: string }>}
+ */
+export async function selectServer(io) {
+  const existing = await io.panelWorkspaces();
+  if (!existing) return { action: "spawn", reason: "no server on the port" };
+  const wsId = io.matchWorkspace(existing);
+  if (!wsId) {
+    return { action: "spawn", reason: `serves ${existing.map((w) => w.name).join(", ")} — not the requested workspace` };
+  }
+  // Workspace coverage is necessary but NOT sufficient: an older installed
+  // oas-web answers /api/panel yet lacks the desktop endpoints. Reuse only a
+  // server that identifies as THIS checkout via /api/version.
+  const compat = serverCompatible(await io.probeVersion(), io.local);
+  if (!compat.compatible) return { action: "spawn", reason: `incompatible (${compat.reason})` };
+  return { action: "reuse", wsId };
+}

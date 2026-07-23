@@ -9,7 +9,8 @@ import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { serverCompatible } from "../packages/desktop/server-compat.mjs";
+import { serverCompatible, selectServer } from "../packages/desktop/server-compat.mjs";
+import { spawn } from "node:child_process";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const LOCAL = (() => {
@@ -35,10 +36,27 @@ test("network failure, wrong capability, and version mismatch are incompatible",
   assert.equal(serverCompatible({ ok: true, body: null }, LOCAL).compatible, false);
 });
 
-test("fake older server: /api/panel answers, /api/version 404s → incompatible end-to-end", async () => {
-  // Simulates the real-world trigger (an older installed panel on the port):
-  // workspace probe passes, version probe 404s — the desktop must decide to
-  // spawn its own server instead of reusing.
+// End-to-end through the PRODUCTION seam (selectServer, exactly what
+// ensureServer runs) against fake servers — re-implementing the decision in
+// the test would leave the real gate unprotected (review srvcompat).
+async function selectAgainst(url) {
+  const panelWorkspaces = async () => {
+    try {
+      const r = await fetch(`${url}/api/panel`);
+      return r.ok ? (await r.json()).workspaces || [] : null;
+    } catch { return null; }
+  };
+  const probeVersion = async () => {
+    try {
+      const r = await fetch(`${url}/api/version`);
+      let body = null; try { body = await r.json(); } catch { /* non-JSON */ }
+      return { ok: r.ok, status: r.status, body };
+    } catch { return null; }
+  };
+  return selectServer({ panelWorkspaces, probeVersion, matchWorkspace: (ws) => ws[0]?.id || null, local: LOCAL });
+}
+
+test("fake older server: /api/panel answers, /api/version 404s → selectServer says spawn", async () => {
   const server = createServer((req, res) => {
     if (req.url.startsWith("/api/panel")) {
       res.writeHead(200, { "content-type": "application/json" });
@@ -49,35 +67,62 @@ test("fake older server: /api/panel answers, /api/version 404s → incompatible 
     res.end(JSON.stringify({ error: "not found" }));
   });
   await new Promise((ok) => server.listen(0, "127.0.0.1", ok));
-  const url = `http://127.0.0.1:${server.address().port}`;
   try {
-    const panel = await fetch(`${url}/api/panel`);
-    assert.equal(panel.ok, true, "older server passes the workspace probe");
-    const v = await fetch(`${url}/api/version`);
-    let body = null; try { body = await v.json(); } catch { /* ignore */ }
-    const r = serverCompatible({ ok: v.ok, status: v.status, body }, LOCAL);
-    assert.equal(r.compatible, false, "…but must NOT be reused");
-  } finally {
-    server.close();
-  }
+    const choice = await selectAgainst(`http://127.0.0.1:${server.address().port}`);
+    assert.equal(choice.action, "spawn", "older server must not be reused");
+    assert.match(choice.reason, /older oas-web/);
+  } finally { server.close(); }
 });
 
-test("fake current server: /api/version matches local oas.json → reuse", async () => {
+test("fake matching server → selectServer says reuse with the matched workspace", async () => {
   const server = createServer((req, res) => {
-    if (req.url.startsWith("/api/version")) {
-      res.writeHead(200, { "content-type": "application/json" });
+    res.writeHead(200, { "content-type": "application/json" });
+    if (req.url.startsWith("/api/panel")) {
+      res.end(JSON.stringify({ workspaces: [{ id: "/tmp/ws", name: "ws" }], instances: [] }));
+    } else if (req.url.startsWith("/api/version")) {
       res.end(JSON.stringify({ capability: LOCAL.capability, version: LOCAL.version }));
-      return;
-    }
-    res.writeHead(404); res.end();
+    } else { res.end("{}"); }
   });
   await new Promise((ok) => server.listen(0, "127.0.0.1", ok));
-  const url = `http://127.0.0.1:${server.address().port}`;
   try {
+    const choice = await selectAgainst(`http://127.0.0.1:${server.address().port}`);
+    assert.deepEqual(choice, { action: "reuse", wsId: "/tmp/ws" });
+  } finally { server.close(); }
+});
+
+test("no server on the port → spawn", async () => {
+  const choice = await selectAgainst("http://127.0.0.1:1"); // nothing listens
+  assert.equal(choice.action, "spawn");
+  assert.equal(choice.reason, "no server on the port");
+});
+
+test("REAL oas-web serves /api/version matching its oas.json → reuse through the seam", async (t) => {
+  // Boots the actual capabilities/oas-web/bin/oas-web.mjs — removing the
+  // /api/version route (or breaking its identity payload) fails THIS test.
+  const free = await new Promise((ok, bad) => {
+    const s = createServer();
+    s.once("error", bad);
+    s.listen(0, "127.0.0.1", () => { const p = s.address().port; s.close(() => ok(p)); });
+  });
+  const bin = join(ROOT, "capabilities", "oas-web", "bin", "oas-web.mjs");
+  const child = spawn(process.execPath, [bin, "start", "--port", String(free), "--dir", ROOT], { stdio: ["ignore", "pipe", "pipe"] });
+  const url = `http://127.0.0.1:${free}`;
+  try {
+    // wait for the server to answer (max ~10s) — readiness via /api/panel,
+    // NOT /api/version: the route under test must not gate the skip, or
+    // removing it would skip this test instead of failing it.
+    let up = false;
+    for (let i = 0; i < 40 && !up; i++) {
+      try { up = (await fetch(`${url}/api/panel`, { signal: AbortSignal.timeout(500) })).ok; }
+      catch { await new Promise((ok) => setTimeout(ok, 250)); }
+    }
+    if (!up) return t.skip("oas-web did not come up (environment)");
     const v = await fetch(`${url}/api/version`);
-    const r = serverCompatible({ ok: v.ok, status: v.status, body: await v.json() }, LOCAL);
-    assert.equal(r.compatible, true);
+    assert.equal(v.ok, true, "real /api/version answers");
+    assert.deepEqual(await v.json(), LOCAL, "identity matches oas.json");
+    const choice = await selectAgainst(url);
+    assert.equal(choice.action, "reuse", "the real current server is reused");
   } finally {
-    server.close();
+    child.kill();
   }
 });

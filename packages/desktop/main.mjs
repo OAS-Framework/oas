@@ -17,7 +17,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { apiUrl, apiInit } from "./api-url.mjs";
 import { openTerm } from "./tmux-target.mjs";
-import { serverCompatible } from "./server-compat.mjs";
+import { selectServer } from "./server-compat.mjs";
 
 const require = createRequire(import.meta.url);
 const pty = require("node-pty");
@@ -98,23 +98,14 @@ function spawnServer(onPort) {
 }
 
 async function ensureServer() {
-  // A healthy server on the port is only usable if it actually serves OUR
-  // workspace — otherwise `--dir B` against a server for workspace A would
-  // silently show (and type into!) the wrong agents.
-  const existing = await panelWorkspaces();
-  if (existing) {
-    const id = matchWorkspace(existing);
-    // Workspace coverage is necessary but NOT sufficient: an older installed
-    // oas-web answers /api/panel yet lacks the desktop endpoints (/api/brain,
-    // /api/file, /api/diff) — Brain would 404. Reuse only a server that
-    // identifies as THIS checkout via /api/version.
-    const compat = id ? serverCompatible(await probeVersion(), localServerIdentity()) : null;
-    if (id && compat.compatible) { wsId = id; return { spawned: false }; }
-    // wrong workspace or incompatible — leave that server alone and start
-    // our own on the next free port (deterministic scan)
-    console.log(id
-      ? `oas-desktop: server on ${port} is incompatible (${compat.reason}) — starting a dedicated one`
-      : `oas-desktop: server on ${port} serves ${existing.map((w) => w.name).join(", ")}, not ${WORKSPACE} — starting a dedicated one`);
+  // Selection seam (server-compat.mjs): reuse only a server that covers OUR
+  // workspace AND identifies as this checkout via /api/version; anything
+  // else — wrong workspace, older/foreign server — gets left alone and we
+  // spawn our own on the next free port.
+  const choice = await selectServer({ panelWorkspaces, probeVersion, matchWorkspace, local: localServerIdentity() });
+  if (choice.action === "reuse") { wsId = choice.wsId; return { spawned: false }; }
+  if (choice.reason !== "no server on the port") {
+    console.log(`oas-desktop: server on ${port} — ${choice.reason} — starting a dedicated one`);
     port = await freePort(port + 1);
   }
   spawnServer(port);
