@@ -577,3 +577,48 @@ test("oas-web diff synthesis: untracked symlinks render link text, FIFOs are ski
   // swap-in guard: a statSync-based implementation would follow the symlink
   assert.ok(src.includes("lstatSync") || src.includes("io.lstatSync"), "implementation lstat's entries");
 });
+
+// ---- tmux target anchoring: prefix-match hazard (reviewer-death bug class) ----
+
+test("oas-web tmux targets: exact-match anchoring fails closed for reads AND writes", (t) => {
+  const src = extractBlock(join(CAP, "bin", "oas-web.mjs"), "TMUXTGT");
+  const tmuxTarget = new Function(`${src}; return tmuxTarget;`)();
+  // component validation: separator/anchor injection rejected
+  assert.equal(tmuxTarget({ tmux: { session: "s1", window: "reviewer-1" } }), "=s1:=reviewer-1");
+  for (const bad of ["a:b", "a=b", "", "a b"]) {
+    assert.throws(() => tmuxTarget({ tmux: { session: bad, window: "w" } }), `session "${bad}" rejected`);
+    assert.throws(() => tmuxTarget({ tmux: { session: "s", window: bad } }), `window "${bad}" rejected`);
+  }
+  // live half: reviewer-1 ABSENT, reviewer-15abc PRESENT — the unanchored
+  // target would prefix-match the live window; the anchored one must error.
+  const session = `oaswebtgt${process.pid}`;
+  try {
+    execFileSync("tmux", ["new-session", "-d", "-s", session, "-n", "reviewer-15abc"], { timeout: 4000 });
+  } catch { t.skip("tmux unavailable"); return; }
+  try {
+    const anchored = tmuxTarget({ tmux: { session, window: "reviewer-1" } });
+    const unanchored = `${session}:reviewer-1`;
+    // sanity: the hazard is real — unanchored prefix-match hits the live window
+    const hit = execFileSync("tmux", ["display-message", "-p", "-t", unanchored, "#{window_name}"],
+      { encoding: "utf8", timeout: 4000 }).trim();
+    assert.equal(hit, "reviewer-15abc", "unanchored target prefix-matches the wrong live window");
+    // read path fails closed
+    assert.throws(() => execFileSync("tmux", ["capture-pane", "-p", "-t", anchored], { stdio: "pipe", timeout: 4000 }),
+      "anchored capture-pane errors instead of exposing the wrong pane");
+    assert.throws(() => execFileSync("tmux", ["list-panes", "-t", anchored, "-F", "#{pane_width}"], { stdio: "pipe", timeout: 4000 }),
+      "anchored list-panes (paneInfo path) errors");
+    // NOTE display-message -p -t <missing> silently falls back to a default
+    // context instead of erroring — that's why paneInfo uses list-panes.
+    // write path fails closed
+    assert.throws(() => execFileSync("tmux", ["send-keys", "-t", anchored, "-H", "78"], { stdio: "pipe", timeout: 4000 }),
+      "anchored send-keys errors instead of typing into the wrong window");
+    assert.throws(() => execFileSync("tmux", ["send-keys", "-t", anchored, "C-c"], { stdio: "pipe", timeout: 4000 }),
+      "anchored interrupt errors");
+    // the exact-name window still works end to end
+    const ok = tmuxTarget({ tmux: { session, window: "reviewer-15abc" } });
+    execFileSync("tmux", ["send-keys", "-t", ok, "-H", "23"], { timeout: 4000 }); // harmless '#'
+    assert.ok(execFileSync("tmux", ["capture-pane", "-p", "-t", ok], { encoding: "utf8", timeout: 4000 }) !== undefined);
+  } finally {
+    try { execFileSync("tmux", ["kill-session", "-t", `=${session}`], { timeout: 4000 }); } catch { /* already gone */ }
+  }
+});
