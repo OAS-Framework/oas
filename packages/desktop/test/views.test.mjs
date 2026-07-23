@@ -127,3 +127,41 @@ test("markdown: sanitizeHtml strips scripts/handlers and normalizes every anchor
   assert.ok(fa, "fragment anchor survives");
   assert.equal(fa.getAttribute("target"), null, "fragment link is not externalized");
 });
+
+test("diff: stale slow response cannot overwrite a newer render (generation guard)", async () => {
+  const { JSDOM } = await import("jsdom");
+  const dom = new JSDOM("<!doctype html><body><div id=el></div>");
+  const el = dom.window.document.getElementById("el");
+  // Requests resolve manually so the test controls completion ORDER. (The
+  // loading screen removes the toggles, so overlapping generations arise from
+  // a request still in flight when the mount is superseded/disposed.)
+  const inflight = []; // { staged, resolve }
+  const mkData = (tag, staged) => ({ repo: "/r", branch: tag, staged, files: [], diff: "" });
+  const ctx = {
+    instance: "inst-x",
+    api: (pathname) => new Promise((resolve) => inflight.push({ staged: /staged=1/.test(pathname), resolve })),
+    openFile: () => {}, openTerminal: () => {},
+  };
+  const mountP = dv.mount(el, ctx);
+  await new Promise((r) => setTimeout(r, 10));
+  inflight.shift().resolve(mkData("initial", false));
+  const dispose = await mountP;
+  const btn = (label) => [...el.querySelectorAll("button")].find((b) => b.textContent === label);
+  // toggle to staged, resolve, then toggle back — leaving the worktree
+  // request SLOW (unresolved)
+  btn("show staged").dispatchEvent(new dom.window.Event("click"));
+  await new Promise((r) => setTimeout(r, 10));
+  inflight.shift().resolve(mkData("staged-view", true));
+  await new Promise((r) => setTimeout(r, 10));
+  assert.ok(el.innerHTML.includes("staged-view"), "staged render displayed");
+  btn("show worktree").dispatchEvent(new dom.window.Event("click"));
+  await new Promise((r) => setTimeout(r, 10));
+  const slow = inflight.shift();
+  assert.equal(slow.staged, false, "slow worktree request in flight");
+  // the mount is disposed (tab closed / superseded) while the request is
+  // still in flight; its late completion must be discarded, not rendered
+  if (typeof dispose === "function") dispose(); else dv.unmount();
+  slow.resolve(mkData("stale-late", false));
+  await new Promise((r) => setTimeout(r, 10));
+  assert.ok(!el.innerHTML.includes("stale-late"), "response landing after dispose never renders");
+});
