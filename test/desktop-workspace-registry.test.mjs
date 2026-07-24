@@ -315,3 +315,36 @@ test("executor: restore is readiness-aware — refresh retried until the restore
   assert.ok(state.refreshCalls > restoredUpAfter, "kept probing the restored server until it answered");
   assert.equal(state.refreshOk, 1, "advertised state rebuilt exactly once, from the ANSWERING restored server");
 });
+
+test("executor: a THROWING staged replacement still restores previousDirs and returns stable server-error", async () => {
+  // round-3 finished-product review: replaceServer(stagedDirs) ran before
+  // the try/finally — a spawnChild failure after the old child was stopped
+  // skipped rollback, rejected the IPC promise (transport error instead of
+  // a domain result), and left the app server-less with invalidated trust.
+  const state = { dirs: ["/w/base"], replacements: [], refreshes: 0 };
+  let call = 0;
+  const io = {
+    getDirs: () => [...state.dirs],
+    commitDirs: (d) => { state.dirs = d; },
+    commitRecent: () => { state.recentCommitted = true; },
+    replaceServer: async (d) => {
+      call++;
+      if (call === 1) throw new Error("spawn ENOENT"); // the STAGED replacement fails
+      state.replacements.push([...d]);                 // the restore succeeds
+    },
+    probeVersion: async () => ({ ok: true, body: {} }),
+    isCompatible: () => true,
+    advertises: async () => true,
+    refreshAdvertised: async () => { state.refreshes++; return true; },
+    delay: async () => {},
+    attempts: 2,
+  };
+  const run = createAddExecutor(io);
+  const r = await run({ id: "/w/new", path: "/w/new" }, () => true); // must RESOLVE, not reject
+  assert.equal(r.ok, false);
+  assert.equal(r.code, "server-error", "stable domain result, not a transport rejection");
+  assert.deepEqual(state.dirs, ["/w/base"], "nothing committed");
+  assert.equal(state.recentCommitted, undefined, "recents untouched");
+  assert.deepEqual(state.replacements, [["/w/base"]], "final replacement RESTORED previousDirs");
+  assert.equal(state.refreshes, 1, "trust state rebuilt from the restored server");
+});

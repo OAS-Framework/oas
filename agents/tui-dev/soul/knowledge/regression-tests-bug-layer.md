@@ -1,9 +1,9 @@
 ---
 type: Lesson
 title: Regression tests must exercise the layer that had the bug
-description: A regression test only pins a bug if it executes the code layer whose ordering or guard was wrong; extract that layer behind injectable dependencies, assert order, and mutation-check by reverting the fix before claiming coverage.
+description: A regression test only pins a bug if it executes the code layer whose ordering or guard was wrong; for composition roots, move invariant-bearing lines into importable modules and leave entry points as one-line bindings.
 tags: [testing, regression, desktop, composition, mutation]
-timestamp: 2026-07-23
+timestamp: 2026-07-24
 ---
 
 A reviewer found a terminal ordering regression test that exercised
@@ -20,6 +20,15 @@ buggy sequence with injectable dependencies and assert the order directly:
 preflight, and only then spawn. A failed preflight records preflight only and no
 spawn; a successful path uses the same anchored target through the ordered
 steps.
+
+Later workspace-add review rounds made the same failure sharper in `main.mjs`:
+tests reimplemented `serverOwned = !!child || transition` or used a test-local
+`spawnServer` wrapper instead of importing production wiring, so deleting the
+production line still left them green. The fix shape was to move even tiny
+invariants into `createServerAdapter` in `server-host.mjs`: `setPort(onPort)`
+happens before `host.start`, `replace` forwards `getPort()`, and `main.mjs`
+shrinks to one-line bindings such as `const spawnServer = (p, d) =>
+serverAdapter.spawnServer(p, d)`.
 
 The durable fix shape is to extract the composition itself behind injectable
 dependencies, leaving the shell entry point thin. For the desktop terminal,
@@ -43,6 +52,11 @@ regression must execute F's code or an extraction of it. Testing only a helper F
 calls proves the helper, not the composition that misordered it. Corollary: code
 that cannot be extracted into a testable unit is where ordering bugs will keep
 hiding; extraction is part of the fix, not just test enablement.
+
+For Electron main-process composition roots, if a review finding names a line in
+`main.mjs`, the fix is not only that line. Move the invariant into a module the
+tests import, and leave the composition root with bindings so trivial that
+reverting them breaks an import rather than preserving a silent reimplementation.
 
 This complements the [async lifecycle lesson](async-mount-close-race.md): the
 lifecycle primitive can be correct while its caller still violates the ownership

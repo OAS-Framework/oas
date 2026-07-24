@@ -2,6 +2,8 @@
 
 ## 2026-07-24
 
+- **Update**: [regression-tests-bug-layer.md](regression-tests-bug-layer.md)
+  — merged the composition-root lesson from tui-dev-desktop-shell notes: move every invariant-bearing `main.mjs` line into importable modules so regression tests cannot pass through local reimplementations.
 - **Creation**: [privileged-state-transitions-transactions.md](privileged-state-transitions-transactions.md)
   — promoted the lesson that privileged desktop mutations need serialization, staged effects, identity/readiness verification, post-success commit, restore-on-failure, and child-process ownership guards.
 - **Update**: [desktop-workspace-add-privileged-contract.md](desktop-workspace-add-privileged-contract.md)
