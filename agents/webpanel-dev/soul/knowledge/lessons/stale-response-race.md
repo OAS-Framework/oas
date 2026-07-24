@@ -47,7 +47,10 @@ Later reviews found the same class in workspace-sensitive sibling paths:
 4. **Action degradation on mismatch**: stale paints should be discarded; stale
    spawn completions should degrade to a status message such as "spawned in the
    previous workspace — switch back to open" rather than auto-opening a
-   terminal in the current workspace.
+   terminal in the current workspace. Even when the workspace is still current,
+   post-spawn terminal opens must first wait for the workspace-scoped panel
+   roster to include the instance; see [Wait for the roster snapshot before
+   post-spawn instance actions](/lessons/post-spawn-roster-snapshot-lag.md).
 5. **Cache invalidation**: selecting a different instance, clearing the
    selection, or switching workspaces must also clear instance-local caches
    such as `lastChatSig` and `pendingSends`, so optimistic local state cannot
