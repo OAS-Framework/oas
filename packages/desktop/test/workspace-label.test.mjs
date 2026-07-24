@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
-import { createWorkspaceLabel, bindWorkspaceSelect } from "../renderer/workspace-label.mjs";
+import { workspaceChoiceLabels, createWorkspaceLabel, bindWorkspaceSelect } from "../renderer/workspace-label.mjs";
 
 const deferred = () => {
   let resolve;
@@ -36,6 +36,27 @@ test("workspace label reset clears text and invalidates an in-flight response", 
   label.reset();
   assert.equal(select.selectedOptions[0].textContent, "Resolving…");
   assert.equal(stale({ id: "stale", name: "stale" }, []), false);
+  dom.window.close();
+});
+
+test("workspace selector disambiguates same-name workspaces with team and full ID", () => {
+  const choices = [
+    { id: "/org-a/oas", name: "oas", team: { name: "alpha" } },
+    { id: "/org-b/oas", name: "oas", team: { name: "beta" } },
+    { id: "/org-c/docs", name: "docs", team: { name: "beta" } },
+  ];
+  assert.deepEqual(workspaceChoiceLabels(choices), [
+    "oas — alpha · /org-a/oas",
+    "oas — beta · /org-b/oas",
+    "docs",
+  ]);
+  const dom = new JSDOM(`<!doctype html><body><select id="ws"></select></body>`);
+  const select = dom.window.document.getElementById("ws");
+  createWorkspaceLabel(select).begin()(choices[1], choices);
+  assert.equal(select.options[0].textContent, "oas — alpha · /org-a/oas");
+  assert.equal(select.options[1].textContent, "oas — beta · /org-b/oas");
+  assert.equal(select.options[0].title, "/org-a/oas");
+  assert.equal(select.value, "/org-b/oas");
   dom.window.close();
 });
 

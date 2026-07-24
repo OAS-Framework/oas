@@ -134,7 +134,7 @@ const STYLE = `
 .mdv .hanchor { position: absolute; left: -22px; top: 0; color: var(--accent);
                 text-decoration: none; font-weight: 400; }
 .mdv a { color: var(--accent); }
-.mdv pre.md-code { position: relative; padding: 13px 15px; border-radius: 8px; overflow-x: auto;
+.mdv pre.md-code { position: relative; padding: 36px 15px 13px; border-radius: 8px; overflow-x: auto;
                    background: var(--md-code-bg); border: 1px solid var(--md-rule); }
 .mdv pre.md-code .md-copy { position: absolute; top: 6px; right: 6px; border: 1px solid var(--border);
                             background: var(--surface); color: var(--muted); border-radius: 6px;

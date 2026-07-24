@@ -1,5 +1,17 @@
 // Generation-owned workspace selector updates. Each roster request begins an
 // operation; only the latest operation may commit server-resolved options.
+export function workspaceChoiceLabels(choices) {
+  const base = choices.map((choice) => choice.name
+    || String(choice.id || "").split("/").filter(Boolean).at(-1)
+    || "Workspace");
+  const counts = new Map(base.map((name) => [name, base.filter((candidate) => candidate === name).length]));
+  return choices.map((choice, index) => {
+    if (counts.get(base[index]) === 1) return base[index];
+    const team = choice.team?.name ? `${choice.team.name} · ` : "";
+    return `${base[index]} — ${team}${choice.id}`;
+  });
+}
+
 export function createWorkspaceLabel(element) {
   let generation = 0;
   const render = (workspace, workspaces = []) => {
@@ -15,12 +27,14 @@ export function createWorkspaceLabel(element) {
       element.title = "Resolving active workspace";
       return;
     }
-    for (const choice of choices) {
+    const labels = workspaceChoiceLabels(choices);
+    choices.forEach((choice, index) => {
       const option = element.ownerDocument.createElement("option");
       option.value = choice.id;
-      option.textContent = choice.name || String(choice.id || "").split("/").filter(Boolean).at(-1) || "Workspace";
+      option.textContent = labels[index];
+      option.title = String(choice.id || "");
       element.append(option);
-    }
+    });
     element.value = id;
     element.title = id ? `Active workspace: ${id}` : "Select active workspace";
   };

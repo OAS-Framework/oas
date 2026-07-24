@@ -45,6 +45,8 @@ test("markdown heading links and code-copy controls remain keyboard focusable", 
   assert.equal(copy.tabIndex, 0, "copy button participates in native tab order");
   assert.notEqual(doc.defaultView.getComputedStyle(anchor).visibility, "hidden");
   assert.notEqual(doc.defaultView.getComputedStyle(copy).visibility, "hidden");
+  assert.ok(parseFloat(doc.defaultView.getComputedStyle(copy.closest("pre")).paddingTop) >= 36,
+    "code block reserves a non-overlapping toolbar row for its visible copy button");
   anchor.focus();
   assert.equal(doc.activeElement, anchor);
   copy.focus();
