@@ -114,6 +114,9 @@ function doctorJson(dir) {
     retiredLocks: Object.entries(readCapabilityLocks(ctx))
       .filter(([id]) => RETIRED_CAPABILITIES[id])
       .map(([id, lock]) => ({ id, file: lock._file, reason: RETIRED_CAPABILITIES[id] })),
+    retiredArtifacts: Object.entries(mans)
+      .filter(([id]) => RETIRED_CAPABILITIES[id])
+      .map(([id, m]) => ({ id, dir: m._dir, origin: m._origin, reason: RETIRED_CAPABILITIES[id] })),
     composedInstructions: composition?.text,
     instructionBlocks: composition?.blocks,
   }, null, 2));
@@ -182,7 +185,10 @@ function doctor(dir) {
   for (const [name, m] of Object.entries(capabilityManifests(ctx))) {
     const missing = capabilityMissingRequires(name, ctx);
     console.log(`  ${name.padEnd(16)} layer: ${(m.layer || "additive").padEnd(10)} origin: ${m._origin}${missing.length ? `  (missing: ${missing.map((x) => x.command).join(", ")})` : ""}`);
-    if (RETIRED_CAPABILITIES[name]) console.log(`             WARNING: stale artifact of a retired capability — ${RETIRED_CAPABILITIES[name]}; also delete ${shortPath(m._dir)}`);
+    if (RETIRED_CAPABILITIES[name]) {
+      const installed = String(m._origin).startsWith("installed:");
+      console.log(`             WARNING: artifact of a retired capability — ${RETIRED_CAPABILITIES[name]}${installed ? `; also delete ${shortPath(m._dir)}` : ` (origin ${m._origin}: remove its declaration; the source tree at ${shortPath(m._dir)} is yours to keep or drop)`}`);
+    }
   }
   const locks = readCapabilityLocks(ctx);
   const mans = capabilityManifests(ctx);

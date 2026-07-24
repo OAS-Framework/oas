@@ -737,5 +737,33 @@ test("retired oas.web: a STALE INSTALLED ARTIFACT never bypasses the retirement 
   assert.doesNotMatch(restore.stdout, /ok\s+oas\.web/, "no 'ok' for a retired capability's stale artifact");
   // doctor's acquired listing flags the stale artifact with the deletion hint
   const doctor = spawnSync(process.execPath, [CLI, "doctor", repo], { encoding: "utf8" });
-  assert.match(doctor.stdout, /oas\.web[\s\S]*WARNING: stale artifact of a retired capability[\s\S]*delete/, "doctor names the stale installed copy");
+  assert.match(doctor.stdout, /oas\.web[\s\S]*WARNING: artifact of a retired capability[\s\S]*also delete/, "doctor names the stale installed copy with delete guidance");
+});
+
+test("retired oas.web: non-installed origins and source-manifest retirement are handled safely", () => {
+  const base = temp();
+  // owned origin: doctor warns WITHOUT destructive delete guidance
+  const repo = join(base, "repo"); mkdirSync(repo);
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive: {}\n");
+  write(join(repo, ".agents", "capabilities", "owned", "oas-web", "oas.json"),
+    JSON.stringify({ capability: "oas.web", version: "0.9.6", description: "owned copy" }));
+  const doc = spawnSync(process.execPath, [CLI, "doctor", repo], { encoding: "utf8" });
+  assert.match(doc.stdout, /WARNING: artifact of a retired capability/, "owned retired artifact is flagged");
+  assert.match(doc.stdout, /remove its declaration/, "non-installed origin gets declaration guidance");
+  assert.doesNotMatch(doc.stdout, /also delete/, "no delete instruction for an owned source tree");
+  // doctor --json reports the artifact in retiredArtifacts
+  const docJson = spawnSync(process.execPath, [CLI, "doctor", repo, "--json"], { encoding: "utf8" });
+  const dj = JSON.parse(docJson.stdout);
+  assert.equal(dj.retiredArtifacts?.[0]?.id, "oas.web", "doctor --json lists the retired artifact");
+  assert.match(dj.retiredArtifacts[0].origin, /^owned:/, "artifact record carries the origin");
+  // local-path acquisition of a package whose MANIFEST declares a retired id is rejected and cleaned up
+  const src = join(base, "ext-pkg"); mkdirSync(src);
+  write(join(src, "oas.json"), JSON.stringify({ capability: "oas.web", version: "0.9.9", description: "external" }));
+  const target = join(base, "target"); mkdirSync(target);
+  write(join(target, "oas-config.yaml"), "capabilities:\n  additive: {}\n");
+  const inst = spawnSync(process.execPath, [CLI, "install", src, "--dir", target], { encoding: "utf8" });
+  assert.notEqual(inst.status, 0, "path install of a retired-manifest package fails");
+  assert.match(inst.stderr, /declares capability "oas\.web".*retired/s, "failure names the manifest's retired id");
+  assert.equal(existsSync(join(target, ".agents", "capabilities", "installed", "ext-pkg")), false, "destination artifact removed");
+  assert.equal(existsSync(join(target, "oas-lock.json")), false, "no lock entry written");
 });
