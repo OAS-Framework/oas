@@ -15,7 +15,7 @@ const SRV = join(ROOT, "packages", "desktop", "server", "oas-web.mjs");
 
 /** A fake `oas` that speaks Desktop CLI API v1 exactly. It logs its argv/cwd
  * so assertions can verify the adapter's invocation shape. */
-function fakeCli(dir, { version = "0.18.0", desktopApi = 1 } = {}) {
+function fakeCli(dir, { version = "0.18.0", desktopApi = 1, probeExit = 0, probeHangMs = 0 } = {}) {
   const log = join(dir, "cli-calls.jsonl");
   const js = join(dir, "oas.cjs");
   const bin = join(dir, "oas");
@@ -24,7 +24,10 @@ const argv = process.argv.slice(2);
 appendFileSync(${JSON.stringify(log)}, JSON.stringify({ argv, cwd: process.cwd() }) + "\\n");
 if (argv[0] === "version" && argv.includes("--json")) {
   process.stdout.write(JSON.stringify({ schemaVersion: 1, name: "@oas-framework/oas", version: ${JSON.stringify(version)}, desktopApi: ${JSON.stringify(desktopApi)} }));
-  process.exit(0);
+  // Liar modes (review 0b83988): print a VALID probe, then exit nonzero or
+  // hang past the probe timeout — either must be rejected by discovery.
+  if (${JSON.stringify(probeHangMs)} > 0) { setTimeout(() => process.exit(0), ${JSON.stringify(probeHangMs)}); }
+  else process.exit(${JSON.stringify(probeExit)});
 }
 if (argv[0] === "spawn" && argv.includes("--json")) {
   const agent = argv[1];
@@ -104,6 +107,31 @@ test("desktop server: incompatible CLI → status carries per-candidate diagnost
     assert.equal(r.status, 503);
     assert.equal((await r.json()).code, "cli-unavailable");
   } finally { proc.kill(); }
+});
+
+test("desktop server: a CLI that prints a valid probe but exits nonzero (or hangs) is REJECTED (review 0b83988)", async () => {
+  // exercises the PRODUCTION probeBin callback: err && stdout must reject.
+  const dir1 = mkdtempSync(join(tmpdir(), "oas-cliliar-"));
+  const liar = fakeCli(dir1, { probeExit: 1 });     // valid probe on stdout, exit 1
+  const { proc, port } = await startServer({ OAS_DESKTOP_OAS_BIN: liar.bin, PATH: "/nonexistent", SHELL: "/bin/false" });
+  try {
+    const s = await (await fetch(`http://127.0.0.1:${port}/api/cli/reprobe`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })).json();
+    assert.equal(s.ok, false, `nonzero-exit liar accepted: ${JSON.stringify(s)}`);
+    const tried = s.tried.find((t) => t.path === liar.real);
+    assert.ok(tried, "liar recorded in diagnostics");
+    assert.match(tried.reason, /probe failed/, "rejected as a probe failure, not by payload");
+  } finally { proc.kill(); }
+  // timeout case: valid probe printed, process hangs past the 8s probe timeout.
+  // The server kills it (killSignal SIGKILL) and the candidate must reject.
+  const dir2 = mkdtempSync(join(tmpdir(), "oas-clihang-"));
+  const hanger = fakeCli(dir2, { probeHangMs: 20000 });
+  const r2 = await startServer({ OAS_DESKTOP_OAS_BIN: hanger.bin, PATH: "/nonexistent", SHELL: "/bin/false" });
+  try {
+    const s2 = await (await fetch(`http://127.0.0.1:${r2.port}/api/cli/reprobe`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })).json();
+    assert.equal(s2.ok, false, `hanging liar accepted: ${JSON.stringify(s2)}`);
+    const tried2 = s2.tried.find((t) => t.path === hanger.real);
+    assert.ok(tried2 && /probe failed/.test(tried2.reason), "timeout rejected as probe failure");
+  } finally { r2.proc.kill(); }
 });
 
 test("desktop server: spawn routes through the CLI with --dir/--task-file argv; harvest fixes cwd to the instance home", async () => {

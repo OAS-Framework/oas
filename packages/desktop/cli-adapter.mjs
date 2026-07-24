@@ -114,7 +114,11 @@ export async function cliSpawn(bin, { agent, workspaceDir, task, ...opts }, io =
     return { schemaVersion: 1, ok: false, error: { code: e.code || "E_BAD_ARGS", message: e.message } };
   }
   const { file, cleanup } = writeTaskFile(task ?? "", io);
-  argv[argv.indexOf("__TASKFILE__")] = file;
+  // Replace the placeholder POSITIONALLY — the slot after --task-file —
+  // never by value search: an agent literally named "__TASKFILE__" would
+  // occupy an earlier argv slot and indexOf would clobber the agent name
+  // instead (review 0b83988).
+  argv[argv.indexOf("--task-file") + 1] = file;
   try {
     return await runJson(bin, argv, { cwd: workspaceDir, exec: io.exec, timeout: io.timeout });
   } finally { cleanup(); }

@@ -619,9 +619,14 @@ function brainData(agentName, wsId) {
 
 /* OASWEB_FILEGUARD_BEGIN — path-traversal guard for /api/file, extracted by
    tests. A requested path is readable ONLY if its realpath (symlinks resolved)
-   sits under one of the allowed roots — realpaths themselves — so `..`
-   segments, sneaky prefixes (/root-evil vs /root) and symlink escapes all
-   fail closed. */
+   sits under one of the allowed roots. CONTRACT: allowedRoots are
+   PRE-CANONICALIZED strings captured at admission time — the guard must
+   NEVER re-resolve them (review 9db1e81: re-running realpathSync on a root
+   at use time re-opened the admission-to-use TOCTOU — a dir→symlink swap
+   between fileRoots() and this check made root and request resolve into the
+   same outside target). Only the REQUESTED path is canonicalized here; `..`
+   segments, sneaky prefixes (/root-evil vs /root) and request-side symlink
+   escapes all fail closed against the immutable root strings. */
 function underRoot(realPath, realRoot) {
   return realPath === realRoot || realPath.startsWith(realRoot.endsWith(sep) ? realRoot : realRoot + sep);
 }
@@ -629,9 +634,7 @@ function resolveGuardedFile(requested, allowedRoots) {
   if (typeof requested !== "string" || !requested.startsWith("/")) return { error: "path must be absolute", code: 400 };
   let real;
   try { real = realpathSync(resolve(requested)); } catch { return { error: "no such file", code: 404 }; }
-  const roots = [];
-  for (const r of allowedRoots) { try { roots.push(realpathSync(r)); } catch { /* skip missing */ } }
-  if (!roots.some((root) => underRoot(real, root))) return { error: "path outside allowed roots", code: 403 };
+  if (!allowedRoots.some((root) => underRoot(real, root))) return { error: "path outside allowed roots", code: 403 };
   return { real };
 }
 /* OASWEB_FILEGUARD_END */
@@ -641,35 +644,36 @@ const FILE_MAX_BYTES = 2 * 1024 * 1024;
 
 /** Allowed roots for /api/file: every agents root of every workspace (agent
  * homes — souls, instances, knowledge) plus the known instances' work trees
- * and repos (the brain/markdown viewers open files there too). */
+ * and repos (the brain/markdown viewers open files there too).
+ * EVERY returned root is canonicalized HERE, exactly once — the guard
+ * compares against these immutable strings without re-resolving (see the
+ * FILEGUARD contract above): a dir→symlink swap after this admission
+ * changes nothing the guard consults. */
 function fileRoots() {
-  const roots = workspaces().flatMap((w) => w.roots);
+  const roots = [];
+  const admit = (p) => { try { roots.push(realpathSync(p)); } catch { /* absent — skip */ } };
+  for (const w of workspaces()) for (const r of w.roots) admit(r);
   // Local souls live in the scope-level local-agents/ SIBLING of each agents
   // root — their soul/knowledge/instance files must be viewable too.
-  // SECURITY: the sibling dir is UNTRUSTED workspace content — if it is a
-  // symlink, resolveGuardedFile would canonicalize it and authorize its
-  // TARGET (e.g. local-agents -> /tmp/anywhere widens the file API to an
-  // arbitrary directory). Add it only when it is a REAL directory whose
-  // canonical parent is the canonical workspace scope.
-  for (const r of [...roots]) {
-    const base = reader.localAgentsDirOf(r);
-    try {
-      if (!lstatSync(base).isDirectory()) continue;          // symlink or non-dir: reject (lstat does NOT follow)
-      // TOCTOU + tautology fix (review ac366f9): canonicalize the CANDIDATE
-      // itself and require the canonical base's parent to be the canonical
-      // scope — comparing dirname(base) to dirname(r) is true by
-      // construction and checks nothing. Push the IMMUTABLE realpath so a
-      // dir→symlink swap after this check cannot be re-resolved later by
-      // resolveGuardedFile into a different target.
-      const realBase = realpathSync(base);
-      if (dirname(realBase) !== realpathSync(dirname(r))) continue;
-      roots.push(realBase);
-    } catch { /* absent — no local souls here */ }
+  // SECURITY: the sibling dir is UNTRUSTED workspace content — admit it only
+  // when lstat (non-following) shows a REAL directory whose canonical parent
+  // is the canonical workspace scope; what gets pushed is the canonical
+  // string, immutable from here on.
+  for (const w of workspaces()) {
+    for (const r of w.roots) {
+      const base = reader.localAgentsDirOf(r);
+      try {
+        if (!lstatSync(base).isDirectory()) continue;        // symlink or non-dir: reject (lstat does NOT follow)
+        const realBase = realpathSync(base);
+        if (dirname(realBase) !== realpathSync(dirname(r))) continue;
+        roots.push(realBase);
+      } catch { /* absent — no local souls here */ }
+    }
   }
   for (const d of snapshot.byWs.values()) {
     for (const i of d.instances) {
-      if (i.home) { roots.push(i.home); roots.push(join(i.home, "work")); } // <home>/work = the work tree (i.work is the MODE)
-      if (i.repo) roots.push(i.repo);
+      if (i.home) { admit(i.home); admit(join(i.home, "work")); } // <home>/work = the work tree (i.work is the MODE)
+      if (i.repo) admit(i.repo);
     }
   }
   return roots;

@@ -207,7 +207,81 @@ test("desktop server: /api/brain returns the contract shape with absolute paths"
   } finally { proc.kill(); }
 });
 
+test("desktop server: harvestHome rejects out-of-layout homes independently of roster derivation (review 0b83988)", async () => {
+  // Defense-in-depth isolation: the roster pins home to the enumerated
+  // directory, but the ENDPOINT's own containment must also hold — a
+  // tampered snapshot or future roster regression must not reach the CLI.
+  // Exercise the extracted block directly with hostile inst objects.
+  const { mkdtempSync, mkdirSync, realpathSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { dirname, basename } = await import("node:path");
+  const src = extractBlock(SRV, "HARVESTHOME");
+  const scope = mkdtempSync(join(tmpdir(), "oasweb-hh-"));
+  const root = join(scope, "agents");
+  const goodHome = join(root, "dev", "instances", "dev-1");
+  mkdirSync(goodHome, { recursive: true });
+  const localHome = join(scope, "local-agents", "loc", "instances", "loc-1");
+  mkdirSync(localHome, { recursive: true });
+  const outside = mkdtempSync(join(tmpdir(), "oasweb-hh-outside-"));
+  mkdirSync(join(outside, "instances", "evil-1"), { recursive: true });
+  const harvestHome = new Function("realpathSync", "basename", "dirname", "join", "workspaces", "reader",
+    `${src}; return harvestHome;`)(
+    realpathSync, basename, dirname, join,
+    () => [{ roots: [root] }],
+    { localAgentsDirOf: (r) => join(dirname(r), "local-agents") });
+  // in-layout homes resolve (agents root and the local-agents sibling)
+  assert.equal(harvestHome({ instance: "dev-1", home: goodHome }), realpathSync(goodHome), "agents-root home accepted");
+  assert.equal(harvestHome({ instance: "loc-1", home: localHome }), realpathSync(localHome), "local-agents sibling home accepted");
+  // hostile shapes ALL reject regardless of what the roster said
+  assert.equal(harvestHome({ instance: "evil-1", home: join(outside, "instances", "evil-1") }), null, "foreign instances layout rejected");
+  assert.equal(harvestHome({ instance: "dev-1", home: outside }), null, "non-instances directory rejected");
+  assert.equal(harvestHome({ instance: "other-name", home: goodHome }), null, "basename/instance mismatch rejected");
+  assert.equal(harvestHome({ instance: "dev-1", home: join(scope, "nope", "instances", "dev-1") }), null, "unknown base rejected");
+  assert.equal(harvestHome({ instance: "dev-1" }), null, "missing home rejected");
+  assert.equal(harvestHome({ instance: "dev-1", home: 42 }), null, "non-string home rejected");
+});
+
 // ---- /api/agents + /api/spawn: roster of spawnable souls incl. capability agents ----
+
+test("desktop server: /api/brain never returns skills from symlinks escaping a capability package (e2e, review 0b83988)", async () => {
+  const { mkdtempSync, mkdirSync, writeFileSync, symlinkSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  // Workspace with an OWNED capability whose agent soul dir contains a
+  // skills tree where one SKILL.md is a symlink OUT of the package — the
+  // exact escape reviewer-ae3e199 reproduced against brainData's
+  // soulDir/skills walk (TOP-SECRET frontmatter leaked into soul.skills).
+  const scope = mkdtempSync(join(tmpdir(), "oasweb-brainesc-"));
+  writeFileSync(join(scope, "outside-skill.md"), "---\nname: leaked-skill\ndescription: TOP-SECRET-SOUL-SKILL\n---\n# s\n");
+  const capDir = join(scope, ".agents", "capabilities", "owned", "esc");
+  mkdirSync(join(capDir, "agents", "helper", "skills", "good"), { recursive: true });
+  mkdirSync(join(capDir, "agents", "helper", "skills", "sneaky"), { recursive: true });
+  writeFileSync(join(scope, "oas-config.yaml"), "name: t\ncapabilities:\n  additive:\n    esc.cap: {}\n");
+  writeFileSync(join(capDir, "oas.json"), JSON.stringify({
+    capability: "esc.cap", version: "1.0.0", description: "x", agents: ["agents/helper"],
+  }));
+  writeFileSync(join(capDir, "agents", "helper", "soul.yaml"), "name: helper\ndescription: h\n");
+  writeFileSync(join(capDir, "agents", "helper", "AGENTS.md"), "# helper\n");
+  writeFileSync(join(capDir, "agents", "helper", "skills", "good", "SKILL.md"), "---\nname: good-skill\ndescription: ok\n---\n# g\n");
+  symlinkSync(join(scope, "outside-skill.md"), join(capDir, "agents", "helper", "skills", "sneaky", "SKILL.md"));
+  mkdirSync(join(scope, "agents"), { recursive: true });
+  const port = 4000 + Math.floor(Math.random() * 2000);
+  const proc = spawn(process.execPath, [SRV, "start", "--port", String(port), "--dir", scope], { stdio: "ignore" });
+  try {
+    let up = false;
+    for (let i = 0; i < 40 && !up; i++) {
+      await new Promise((r) => setTimeout(r, 100));
+      try { await fetch(`http://127.0.0.1:${port}/api/panel`); up = true; } catch { /* retry */ }
+    }
+    assert.ok(up, "server came up");
+    const d = await (await fetch(`http://127.0.0.1:${port}/api/brain/helper`)).json();
+    assert.ok(d.soul, "capability agent resolves a brain");
+    const names = d.soul.skills.map((s) => s.name);
+    assert.ok(!names.includes("leaked-skill"), `escaping SKILL.md symlink never surfaces (got: ${names.join(", ")})`);
+    assert.ok(!JSON.stringify(d).includes("TOP-SECRET"), "no leaked frontmatter anywhere in the brain payload");
+    assert.ok(names.includes("good-skill"), "contained skill still resolves (containment, not blanket removal)");
+  } finally { proc.kill(); }
+});
+
 
 test("desktop server: /api/agents lists persistent AND capability-defined agents; /api/spawn validates", async () => {
   // CI runs from a bare checkout where .agents/capabilities/installed/ is
@@ -270,12 +344,47 @@ test("desktop server: file guard: traversal, prefix-sneak, and symlink escapes f
   writeFileSync(join(evil, "secret"), "no");
   writeFileSync(join(base, "outside"), "no");
   symlinkSync(join(base, "outside"), join(root, "link"));
-  assert.ok(resolveGuardedFile(join(root, "ok.md"), [root]).real, "in-root file allowed");
-  assert.equal(resolveGuardedFile(join(root, "..", "outside"), [root]).code, 403, "dotdot traversal rejected");
-  assert.equal(resolveGuardedFile(join(evil, "secret"), [root]).code, 403, "prefix-sneak sibling rejected");
-  assert.equal(resolveGuardedFile(join(root, "link"), [root]).code, 403, "symlink escape rejected");
-  assert.equal(resolveGuardedFile("relative/path", [root]).code, 400, "relative path rejected");
-  assert.equal(resolveGuardedFile(join(root, "missing"), [root]).code, 404, "missing file is 404");
+  // CONTRACT (review 9db1e81): roots are PRE-CANONICALIZED at admission;
+  // the guard never re-resolves them.
+  const realRoot = realpathSync(root);
+  assert.ok(resolveGuardedFile(join(root, "ok.md"), [realRoot]).real, "in-root file allowed");
+  assert.equal(resolveGuardedFile(join(root, "..", "outside"), [realRoot]).code, 403, "dotdot traversal rejected");
+  assert.equal(resolveGuardedFile(join(evil, "secret"), [realRoot]).code, 403, "prefix-sneak sibling rejected");
+  assert.equal(resolveGuardedFile(join(root, "link"), [realRoot]).code, 403, "symlink escape rejected");
+  assert.equal(resolveGuardedFile("relative/path", [realRoot]).code, 400, "relative path rejected");
+  assert.equal(resolveGuardedFile(join(root, "missing"), [realRoot]).code, 404, "missing file is 404");
+});
+
+test("desktop server: file guard never re-resolves roots — a dir→symlink swap AFTER admission cannot re-target them (review 9db1e81)", async () => {
+  const { mkdtempSync, writeFileSync, mkdirSync, symlinkSync, rmSync, realpathSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { sep, resolve } = await import("node:path");
+  const src = extractBlock(SRV, "FILEGUARD");
+  const resolveGuardedFile = new Function("realpathSync", "resolve", "sep",
+    `${src}; return resolveGuardedFile;`)(realpathSync, resolve, sep);
+  // The reviewer's exact reproduction: capture the canonical root at
+  // admission time, swap the directory for a symlink to a secret dir, THEN
+  // run the guard. Because the guard consults only the captured canonical
+  // string, the request (which now resolves into the secret dir) falls
+  // outside it and must 403.
+  const base = mkdtempSync(join(tmpdir(), "oasweb-swap-"));
+  const secret = mkdtempSync(join(tmpdir(), "oasweb-swap-secret-"));
+  writeFileSync(join(secret, "secret.md"), "TOCTOU-SECRET");
+  const la = join(base, "local-agents"); mkdirSync(la);
+  writeFileSync(join(la, "real.md"), "legit");
+  const admittedRealBase = realpathSync(la);            // fileRoots-style admission capture
+  // sanity pre-swap: legit file serves through the admitted root
+  assert.ok(resolveGuardedFile(join(la, "real.md"), [admittedRealBase]).real, "pre-swap file allowed");
+  // THE SWAP happens between admission and guarded resolution
+  rmSync(la, { recursive: true, force: true });
+  symlinkSync(secret, la);
+  for (const p of [join(la, "secret.md"), join(secret, "secret.md")]) {
+    const r = resolveGuardedFile(p, [admittedRealBase]);
+    assert.equal(r.code, 403, `post-swap request rejected (${p}) — got ${JSON.stringify(r)}`);
+  }
+  // mutation guard: the extracted source must not canonicalize roots at use
+  assert.ok(!/allowedRoots\)\s*\{[\s\S]*realpathSync\(r\)/.test(src) && !src.includes("for (const r of allowedRoots) { try { roots.push(realpathSync"),
+    "guard source must not re-resolve allowed roots");
 });
 
 test("desktop server: /api/file serves guarded text files with markdown flag", async () => {

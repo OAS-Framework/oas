@@ -169,6 +169,123 @@ test("spawn view: PENDING probe disables card-less; SETTLED unknown/unavailable 
 });
 
 
+test("spawn view: form open under a VERIFIED CLI closes on the unavailable transition; a retained stale submit cannot dispatch (review 0b83988)", async () => {
+  const doc = dom();
+  globalThis.document = doc;
+  try {
+    const sp = await import("../renderer/views/spawn.mjs");
+    const agents = [{ name: "dev", description: "d", kind: "persistent", work: "worktree", runtime: "pi", repo: "/r", repoName: "r", agentsRoot: "/ws/agents", workspace: "/ws" }];
+    const state = { cliPayload: payload(true), posts: [] };
+    const ctx = {
+      api: async (pathname, opts) => ({
+        ok: true, status: 200,
+        json: async () => {
+          if (pathname.startsWith("/api/agents")) return { workspace: { id: "/ws", name: "ws" }, agents };
+          if (pathname.startsWith("/api/panel")) return { workspace: { id: "/ws", name: "ws" }, workspaces: [{ id: "/ws", name: "ws" }], instances: [] };
+          if (pathname === "/api/cli") return state.cliPayload;
+          if (pathname === "/api/spawn") { state.posts.push(opts); return { spawned: true, instance: "dev-x", launched: false }; }
+          return {};
+        },
+      }),
+      openTerminal: () => {}, openBrain: () => {},
+    };
+    cs.resetCliStateForTests();
+    await cs.refreshCli(ctx);                     // VERIFIED
+    const el = doc.createElement("div"); doc.body.append(el);
+    sp.mount(el, ctx);
+    await new Promise((r) => setTimeout(r, 20));
+    // open the form under a verified CLI — legitimately
+    el.querySelector(".spawn-act").dispatchEvent(new doc.defaultView.Event("click"));
+    const form = el.querySelector(".soul-form");
+    assert.ok(form, "form opens under a verified CLI");
+    // RETAIN the stale submit before the transition — its click listener
+    // stays live on the detached node, exactly like a queued user click.
+    const staleSubmit = form.querySelector(".fspawn");
+    assert.ok(staleSubmit, "submit button captured");
+    // CLI flips to unavailable → the form-preservation bypass must repaint
+    state.cliPayload = payload(false);
+    await cs.refreshCli(ctx);
+    await new Promise((r) => setTimeout(r, 20));
+    assert.equal(el.querySelector(".soul-form"), null, "open form removed on the unavailable transition (bypass, review d7becaf)");
+    assert.equal(el.querySelectorAll(".cli-card").length, 1, "card painted");
+    // fire the RETAINED (now-detached) submit — the listener still runs;
+    // only the doSpawn submit-time gate stops the dispatch.
+    staleSubmit.dispatchEvent(new doc.defaultView.Event("click"));
+    await new Promise((r) => setTimeout(r, 30));
+    assert.equal(state.posts.length, 0, "stale submit path never dispatched /api/spawn (doSpawn gate)");
+    // control: the SAME stale handle DOES dispatch once re-verified —
+    // proving the gate (not node detachment) is what blocked it. Restore
+    // the selection the transition cleared, as doSpawn reads s.selAgent.
+    state.cliPayload = payload(true);
+    await cs.refreshCli(ctx);
+    await new Promise((r) => setTimeout(r, 20));
+    el.querySelector(".spawn-act").dispatchEvent(new doc.defaultView.Event("click")); // reselect (fresh form)
+    staleSubmit.dispatchEvent(new doc.defaultView.Event("click"));                    // STALE handle fires
+    await new Promise((r) => setTimeout(r, 30));
+    assert.equal(state.posts.length, 1, "control: the stale handle dispatches when verified — the gate was the blocker");
+    sp.unmount();
+  } finally {
+    delete globalThis.document;
+  }
+});
+
+test("doSpawn gate isolation: selection still set + CLI unavailable → no dispatch (review 0b83988)", async () => {
+  // The realistic race the render-time bypass cannot cover: the CLI flips
+  // unavailable but the view listener has not yet repainted (or a stale
+  // closure retains the old state object with selAgent SET). Only the
+  // doSpawn submit-time gate blocks the POST here — deleting the gate
+  // makes this test dispatch.
+  const doc = dom();
+  globalThis.document = doc;
+  try {
+    const sp = await import("../renderer/views/spawn.mjs");
+    const posts = [];
+    const ctx = {
+      api: async (pathname, opts) => ({
+        ok: true, status: 200,
+        json: async () => {
+          if (pathname === "/api/spawn") { posts.push(opts); return { spawned: true, instance: "dev-x" }; }
+          if (pathname === "/api/cli") return payload(false);           // KNOWN unavailable
+          if (pathname.startsWith("/api/panel")) return { workspace: { id: "/ws" }, workspaces: [], instances: [] };
+          return {};
+        },
+      }),
+      openTerminal: () => {},
+    };
+    cs.resetCliStateForTests();
+    await cs.refreshCli(ctx);                                           // settled unavailable
+    assert.equal(cs.cliAvailable(), false);
+    // fabricated state exactly as a stale closure would hold it: selection SET
+    const grid = doc.createElement("div"); grid.className = "souls-grid"; doc.body.append(grid);
+    const s = {
+      ctx, alive: true, spawnOp: 0, sel: "dev", filterText: "",
+      selAgent: { name: "dev", agentsRoot: "/ws/agents" },
+      souls: { agents: [] },
+      q: () => grid,
+      waitOpts: { tries: 1, delayMs: 1, sleep: async () => {} },
+    };
+    const btn = doc.createElement("button");
+    const status = doc.createElement("span");
+    await sp.doSpawn(s, { btn, status, task: () => "t", purpose: () => "", clear: () => {} });
+    assert.equal(posts.length, 0, "submit-time gate blocked the dispatch despite a live selection");
+    assert.equal(s.sel, null, "gate invalidates the stale selection");
+    // control: same fabricated state dispatches once the CLI is verified
+    s.sel = "dev"; s.selAgent = { name: "dev", agentsRoot: "/ws/agents" };
+    const okCtx = { ...ctx, api: async (pathname, opts) => ({ ok: true, status: 200, json: async () => {
+      if (pathname === "/api/spawn") { posts.push(opts); return { spawned: true, instance: "dev-x" }; }
+      if (pathname === "/api/cli") return payload(true);
+      if (pathname.startsWith("/api/panel")) return { workspace: { id: "/ws" }, workspaces: [], instances: [{ instance: "dev-x" }] };
+      return {};
+    } }) };
+    s.ctx = okCtx;
+    await cs.refreshCli(okCtx);
+    await sp.doSpawn(s, { btn, status, task: () => "t", purpose: () => "", clear: () => {} });
+    assert.equal(posts.length, 1, "control: gate open under a verified CLI — the gate was the blocker");
+  } finally {
+    delete globalThis.document;
+  }
+});
+
 test("spawn view: no compatible CLI disables every spawn button and shows ONE card; reads stay rendered", async () => {
   const doc = dom();
   globalThis.document = doc; // spawn.mjs builds DOM via the global document

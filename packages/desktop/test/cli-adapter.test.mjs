@@ -131,6 +131,16 @@ test("cliSpawn: contaminated stdout resolves with E_CLI_PROTOCOL; timeout with E
   assert.equal(env.error.code, "E_CLI_TIMEOUT");
 });
 
+test("cliSpawn: an agent literally named __TASKFILE__ cannot collide with the placeholder (review 0b83988)", async () => {
+  let seen = null;
+  const exec = fakeExec((bin, argv) => { seen = argv; return { stdout: OK({ instance: "x" }) }; });
+  await cliSpawn("/abs/oas", { agent: "__TASKFILE__", workspaceDir: "/ws", task: "t" }, { exec });
+  assert.equal(seen[1], "__TASKFILE__", "agent name slot untouched");
+  const tf = seen[seen.indexOf("--task-file") + 1];
+  assert.notEqual(tf, "__TASKFILE__", "the --task-file slot got the real temp path");
+  assert.ok(tf.includes("oas-desktop-task-"), `task file is the mkdtemp path (${tf})`);
+});
+
 test("cliHarvest: runs `okf harvest --json` with cwd fixed to the given instance home", async () => {
   let seen = null;
   const exec = fakeExec((bin, argv, opts) => {
