@@ -3,7 +3,7 @@ type: Lesson
 title: Shared-form async actions need operation ownership tokens
 description: When one form can start overlapping async operations, capture a per-operation token and guard every post-await mutation of that shared UI — success, error, field clearing, and finally control reset — so a stale completion cannot corrupt or re-enable a newer operation.
 tags: [oas-web, race-condition, forms, operation-token, spawn, gotcha]
-timestamp: 2026-07-22
+timestamp: 2026-07-24
 ---
 
 # The bug
@@ -36,6 +36,11 @@ The operation token is separate from the workspace generation described in
 workspace generation answers "is my workspace context still current?"; the form
 operation token answers "am I still the operation this form belongs to?" Async
 actions over shared UI may need both.
+
+The token starts at dispatch time; it does not protect typed-but-unsubmitted
+fields from being destroyed by a periodic DOM rebuild before any request exists.
+Open forms with uncommitted values also need the repaint barrier described in
+[Periodic repaints must not rebuild DOM under open forms](/lessons/poll-repaint-wipes-form-input.md).
 
 # Regression pattern
 
