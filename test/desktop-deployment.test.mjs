@@ -63,6 +63,77 @@ test("reader parity: souls and capability agents match the kernel", () => {
   }
 });
 
+// Unconditional parity on a CLEAN fixture: the live-repo test above may skip
+// when the checkout's lock state is skewed, so this synthetic deployment is
+// the parity proof that can never be skipped — the kernel MUST resolve here
+// and MUST agree with the reader on every read seam.
+test("reader parity (clean fixture, unconditional): kernel resolves and matches on every seam", () => {
+  const scope = mkdtempSync(join(tmpdir(), "oas-reader-clean-"));
+  // team deployment: scope config + two member repos with agents roots
+  writeFileSync(join(scope, "oas-config.yaml"), "name: clean-team\nteam:\n  name: clean-team\n");
+  mkdirSync(join(scope, "agents"), { recursive: true });
+  for (const repo of ["repo-a", "repo-b"]) {
+    mkdirSync(join(scope, repo, "agents"), { recursive: true });
+  }
+  // a persistent soul and a tmp soul in repo-a
+  const rootA = join(scope, "repo-a", "agents");
+  mkdirSync(join(rootA, "dev", "soul"), { recursive: true });
+  writeFileSync(join(rootA, "dev", "soul", "soul.yaml"), "name: dev\ndescription: developer soul\nkind: persistent\nwork: worktree\n");
+  mkdirSync(join(rootA, "local-agents", "scratch", "soul"), { recursive: true });
+  writeFileSync(join(rootA, "local-agents", "scratch", "soul", "soul.yaml"), "name: scratch\ndescription: tmp soul\n");
+  // an instance with metadata under dev
+  mkdirSync(join(rootA, "dev", "instances", "dev-1"), { recursive: true });
+  writeFileSync(join(rootA, "dev", "instances", "dev-1", "instance.json"),
+    JSON.stringify({ instance: "dev-1", agent: "dev", home: join(rootA, "dev", "instances", "dev-1") }));
+  // a capability package (owned store) declaring an agent soul
+  const capDir = join(scope, ".agents", "capabilities", "owned", "clean-cap");
+  mkdirSync(join(capDir, "agents", "helper"), { recursive: true });
+  writeFileSync(join(capDir, "oas.json"), JSON.stringify({
+    capability: "clean.cap", version: "1.0.0", description: "clean fixture capability",
+    agents: ["agents/helper"], skills: ["skills"],
+  }));
+  writeFileSync(join(capDir, "agents", "helper", "soul.yaml"), "name: helper\ndescription: capability helper\n");
+  writeFileSync(join(capDir, "agents", "helper", "AGENTS.md"), "# helper\n");
+  mkdirSync(join(capDir, "skills", "how-to"), { recursive: true });
+  writeFileSync(join(capDir, "skills", "how-to", "SKILL.md"), "---\nname: how-to\ndescription: d\n---\n# s\n");
+  writeFileSync(join(scope, "repo-a", "oas-config.yaml"),
+    "name: repo-a\ncapabilities:\n  additive:\n    clean.cap:\n      from: path:../.agents/capabilities/owned/clean-cap\n");
+
+  // Kernel MUST resolve on the clean fixture — no conditional escape here.
+  const k = core.resolveOasConfig(join(scope, "repo-a"));
+  const r = reader.resolveDeployment(join(scope, "repo-a"));
+  assert.ok(k.team, "kernel resolves the team on a clean fixture");
+  assert.ok(r.team, "reader resolves the team on a clean fixture");
+  assert.equal(r.team.scope, k.team.scope, "team scope parity");
+  assert.equal(r.team.name, k.team.name, "team name parity");
+  assert.deepEqual(reader.teamAgentRoots(r.team.scope), core.teamAgentRoots(k.team.scope), "agents roots parity");
+
+  // souls (persistent + tmp)
+  assert.deepEqual(
+    reader.listAgents(rootA).map((a) => `${a.kind}:${a.name}`).sort(),
+    core.listAgents(rootA).map((a) => `${a.kind}:${a.name}`).sort(),
+    "listAgents parity (kinds and names)");
+  assert.equal(reader.findAgent(rootA, "dev").name, core.findAgent(rootA, "dev").name, "findAgent parity");
+
+  // capability agents through the config chain + package store
+  const ctx = join(scope, "repo-a");
+  assert.deepEqual(
+    reader.listCapabilityAgents(ctx).map((c) => `${c.capability}:${c.name}`).sort(),
+    core.listCapabilityAgents(ctx).map((c) => `${c.capability}:${c.name}`).sort(),
+    "capability agents parity");
+  const mineHelper = reader.findCapabilityAgent(ctx, rootA, "helper");
+  const theirHelper = core.findCapabilityAgent(ctx, rootA, "helper");
+  assert.equal(mineHelper._soulDir, theirHelper._soulDir, "capability soul dir parity");
+  assert.equal(mineHelper._dir, theirHelper._dir, "capability instances home parity");
+  assert.deepEqual(reader.capabilitySkillDirs("clean.cap", ctx), core.capabilitySkillDirs("clean.cap", ctx), "skill dirs parity");
+
+  // instances
+  assert.deepEqual(
+    reader.listInstances(rootA).map((a) => ({ name: a.name, instances: a.instances.map((i) => i.instance).sort() })).sort((x, y) => x.name.localeCompare(y.name)),
+    core.listInstances(rootA).map((a) => ({ name: a.name, instances: a.instances.map((i) => i.instance).sort() })).sort((x, y) => x.name.localeCompare(y.name)),
+    "listInstances parity");
+});
+
 test("reader parity: listInstances shape matches the kernel", () => {
   const root = reader.findAgentsRoot(ROOT);
   assert.ok(root, "agents root found");
