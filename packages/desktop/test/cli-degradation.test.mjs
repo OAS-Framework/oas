@@ -102,56 +102,67 @@ test("cli-status: a cached unavailable state transitions to UNKNOWN on an invali
   assert.equal(cs.cliAvailable(), false, "unknown is not 'available' — it is uncommitted");
 });
 
-test("spawn view: UNKNOWN state disables spawn WITHOUT the card; unavailable adds the card (frozen contract)", async () => {
+test("spawn view: PENDING probe disables card-less; SETTLED unknown/unavailable always shows the recovery card (binding UX)", async () => {
   const doc = dom();
   globalThis.document = doc;
   try {
     const sp = await import("../renderer/views/spawn.mjs");
     const agents = [{ name: "dev", description: "d", kind: "persistent", work: "worktree", runtime: "pi", repo: "/r", repoName: "r", agentsRoot: "/ws/agents", workspace: "/ws" }];
-    // /api/cli answers a LEGACY shape first → state resolves to UNKNOWN
-    const state = { cliPayload: { legacy: true }, posts: [] };
+    // /api/cli HANGS first (probe pending), then answers legacy garbage
+    // (settled unknown), then unavailable, then compatible.
+    const state = { mode: "pending", posts: [], cliWaiters: [] };
     const ctx = {
-      api: async (pathname, opts) => ({
-        ok: true, status: 200,
-        json: async () => {
-          if (pathname.startsWith("/api/agents")) return { workspace: { id: "/ws", name: "ws" }, agents };
-          if (pathname.startsWith("/api/panel")) return { workspace: { id: "/ws", name: "ws" }, workspaces: [{ id: "/ws", name: "ws" }], instances: [] };
-          if (pathname === "/api/cli") return state.cliPayload;
-          if (pathname === "/api/spawn") { state.posts.push(opts); return { spawned: true, instance: "dev-x" }; }
-          return {};
-        },
-      }),
+      api: (pathname, opts) => {
+        if (pathname === "/api/cli" && state.mode === "pending") {
+          return new Promise((ok) => state.cliWaiters.push(ok)); // never settles while pending
+        }
+        return Promise.resolve({
+          ok: true, status: 200,
+          json: async () => {
+            if (pathname.startsWith("/api/agents")) return { workspace: { id: "/ws", name: "ws" }, agents };
+            if (pathname.startsWith("/api/panel")) return { workspace: { id: "/ws", name: "ws" }, workspaces: [{ id: "/ws", name: "ws" }], instances: [] };
+            if (pathname === "/api/cli") return state.mode === "legacy" ? { legacy: true } : state.mode === "bad" ? payload(false) : payload(true);
+            if (pathname === "/api/spawn") { state.posts.push(opts); return { spawned: true, instance: "dev-x" }; }
+            return {};
+          },
+        });
+      },
       openTerminal: () => {}, openBrain: () => {},
     };
+    // reset shared state to truly-pending: a hanging refresh keeps cli null
+    cs.resetCliStateForTests();
     const el = doc.createElement("div"); doc.body.append(el);
     sp.mount(el, ctx);
     await new Promise((r) => setTimeout(r, 20));
-    // FROZEN CONTRACT: unknown does NOT render capable — spawn disabled,
-    // but no card yet (the launch probe resolves in ms; the card is for
-    // KNOWN incompatibility).
+    // TRANSIENT probe-pending: disabled, card-less is acceptable
     const spawnBtn = el.querySelector(".spawn-act");
     assert.ok(spawnBtn, "spawn button renders");
-    assert.equal(spawnBtn.disabled, true, "unknown state disables spawn (mutations need a VERIFIED CLI)");
-    assert.equal(el.querySelectorAll(".cli-card").length, 0, "no degradation card while merely unknown");
+    assert.equal(spawnBtn.disabled, true, "pending probe disables spawn (mutations need a VERIFIED CLI)");
     spawnBtn.dispatchEvent(new doc.defaultView.Event("click"));
-    assert.equal(el.querySelector(".soul-form"), null, "no form opens while unknown");
-    // the probe lands UNAVAILABLE → the card appears, buttons stay disabled
-    state.cliPayload = payload(false);
+    assert.equal(el.querySelector(".soul-form"), null, "no form opens while pending");
+    // SETTLED unknown (legacy/malformed payload) → card MUST appear
+    state.mode = "legacy";
     await cs.refreshCli(ctx);
     await new Promise((r) => setTimeout(r, 20));
-    assert.equal(el.querySelectorAll(".cli-card").length, 1, "known-unavailable shows the card");
+    assert.equal(el.querySelectorAll(".cli-card").length, 1, "settled unknown shows the recovery card (binding UX)");
     assert.ok([...el.querySelectorAll(".spawn-act")].every((b) => b.disabled), "spawn stays disabled");
-    // doSpawn re-check: even a stale direct call cannot dispatch
+    // SETTLED unavailable → card stays, still disabled
+    state.mode = "bad";
+    await cs.refreshCli(ctx);
+    await new Promise((r) => setTimeout(r, 20));
+    assert.equal(el.querySelectorAll(".cli-card").length, 1, "known-unavailable keeps the card");
     assert.equal(state.posts.length, 0, "no spawn was ever dispatched");
     // recovery: a compatible probe re-enables and opens forms again
-    state.cliPayload = payload(true);
+    state.mode = "good";
     await cs.refreshCli(ctx);
     await new Promise((r) => setTimeout(r, 20));
+    assert.equal(el.querySelectorAll(".cli-card").length, 0, "card clears on recovery");
     const btn2 = el.querySelector(".spawn-act");
     assert.ok(btn2 && !btn2.disabled, "verified CLI re-enables spawn");
     btn2.dispatchEvent(new doc.defaultView.Event("click"));
     assert.ok(el.querySelector(".soul-form"), "form opens once the CLI is verified");
     sp.unmount();
+    state.cliWaiters.forEach((ok) => ok({ ok: false, status: 599, json: async () => ({}) })); // release hangs
   } finally {
     delete globalThis.document;
   }

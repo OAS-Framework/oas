@@ -15,31 +15,38 @@ import { escapeHtml, apiJson, postJson } from "./common.mjs";
 export const INSTALL_COMMAND = "npm install -g @oas-framework/oas@0.18.0";
 export const DOCS_URL = "https://github.com/OAS-Framework/oas/blob/main/docs/desktop-cli-api.md";
 
-let cli = null;              // last GET /api/cli payload (null = UNKNOWN — not yet probed)
+let cli = null;              // last GET /api/cli payload (null = probe not yet settled)
+let settledUnknown = false;  // a response ARRIVED but was unclassifiable (older backend, garbage)
 const listeners = new Set();
 
 export function cliStatus() { return cli; }
 /** Mutations are enabled ONLY on a verified compatible CLI (coordinator
- * directive — frozen contract): unknown does NOT render capable; it renders
- * disabled without the degradation card (the probe resolves in ms at
- * launch). Known-unavailable additionally shows the card. */
+ * directive — frozen contract): anything else renders disabled. The card
+ * distinction is transient-vs-settled (coordinator UX clarification):
+ * only PROBE-PENDING (no response yet) may be card-less — every SETTLED
+ * non-ok state (incompatible, absent endpoint, malformed payload, failed
+ * binary, unclassifiable) shows the actionable Choose/Retry/docs/install
+ * card so users always have a recovery path. */
 export function cliAvailable() { return !!cli?.ok; }
-export function cliKnownUnavailable() { return !!cli && !cli.ok; }
+export function cliKnownUnavailable() { return (!!cli && !cli.ok) || settledUnknown; }
 export function onCliChange(fn) { listeners.add(fn); return () => listeners.delete(fn); }
+/** Test seam: return to the pristine probe-pending state. */
+export function resetCliStateForTests() { cli = null; settledUnknown = false; emit(); }
 function emit() { for (const fn of [...listeners]) { try { fn(cli); } catch { /* listener errors stay local */ } } }
 
 /** Refresh from GET /api/cli (cheap — server-side cached probe state). */
 export async function refreshCli(ctx) {
   try {
     const d = await apiJson(ctx, "/api/cli");
-    // Only a real status payload counts. A successful response WITHOUT the
-    // status shape (older server, garbage) transitions to UNKNOWN (null) —
-    // including clearing a cached ok:false. Unknown renders DISABLED but
-    // card-less (frozen contract: mutations require a verified compatible
-    // CLI; the stale card must still not persist over garbage). Only
-    // NETWORK failure keeps the last state (no UI flapping).
+    // A response ARRIVED — the probe is SETTLED either way:
+    //   status shape        → that state (ok / known-unavailable + card);
+    //   anything else       → settled-unknown (older backend / garbage):
+    //                         disabled AND carded — users need recovery;
+    //                         "disabled with no card forever" is not
+    //                         acceptable (binding UX clarification).
     cli = d && typeof d.ok === "boolean" ? d : null;
-  } catch { /* server unreachable — keep last state */ }
+    settledUnknown = !cli;
+  } catch { /* server unreachable — keep last state (transient; no flapping) */ }
   emit();
   return cli;
 }
@@ -48,7 +55,8 @@ export async function refreshCli(ctx) {
 export async function reprobeCli(ctx, bin) {
   try {
     const d = await postJson(ctx, "/api/cli/reprobe", bin ? { bin } : {});
-    cli = d && typeof d.ok === "boolean" ? d : null;   // same unknown semantics
+    cli = d && typeof d.ok === "boolean" ? d : null;   // same settled semantics
+    settledUnknown = !cli;
   } catch { /* keep last state */ }
   emit();
   return cli;
