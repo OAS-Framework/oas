@@ -1,6 +1,10 @@
 # Knowledge Log
 
 ## 2026-07-24
+* **Update**: skills/pr-review — final handback now waits for reviewer-driven merges to settle and binds approval to the current PR head, remote ref, exact-head check run, and expected-head guard.
+* **Creation**: [Final PR handback requires reviewer-driven merges to be settled](/lessons/final-handback-requires-settled-reviewer-merges.md) — a green handed-back SHA can go stale if reviewer nits advance the PR; approval must bind to the actual stable head and its check run.
+* **Update**: skills/capability-source-reinstall — added source-kernel deployment verification and missing-artifact/stale-lock recovery without bypassing integrity.
+* **Creation**: [A source-kernel update can expose missing locked capability artifacts](/lessons/source-kernel-update-can-expose-missing-capability-artifacts.md) — after linking a local source kernel as the active CLI, run doctor in each deployment and repair lock/artifact drift via explicit path reinstall plus renewed trust.
 * **Delivery**: PR #19 merged as `9b39ee7` after three maintainer rounds — OAS Desktop now owns the panel backend; oas.web, `oas pane`, and `lib/control-pane` are retired; explicit spawn lineage and traversal-safe instance lookup landed. The [delivery log](/stewardship/delivery-log.md) records all gate evidence and both RETURNs. Release remains blocked on desktop installers and the installed-CLI mutation boundary.
 * **Creation**: [Instance-name filesystem lookups must reject path traversal before joining](/lessons/instance-name-filesystem-containment.md) — instance-home helpers must validate the instance-name argument and enforce immediate-child containment before existence checks or destructive lifecycle operations.
 * **Update**: [Desktop panel succession](/decisions/desktop-panel-succession.md) clarifies the PR #19 merge gate versus the desktop distribution release gate: the self-owned server may retain its direct adjacent-core bridge at merge as explicit release-blocking debt, but installed-CLI mutations and observation-only no-OAS behavior remain mandatory before release.

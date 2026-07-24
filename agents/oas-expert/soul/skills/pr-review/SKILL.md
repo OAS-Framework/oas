@@ -106,6 +106,13 @@ BEFORE retiring — it is the last gate of the review.
   check `gh pr view <n> --json mergeable` immediately before handback; consider
   sequencing or fast-tracking re-review for same-capability stacks. See
   `knowledge/lessons/pr-return-staleness-fast-capability-cadence.md`.
+- **Final handback can be stale while reviewer nits are still landing**: a
+  green exact SHA from the coordinator does not prove the merge head if an
+  in-flight reviewer can still add a test-only fix or regression. Treat
+  handback as final only after all reviewer-driven merges are settled; before
+  verdict and merge, compare the PR API head, remote branch/ref, required check
+  run's `headSha`, and the merge command's expected-head guard. See
+  `knowledge/lessons/final-handback-requires-settled-reviewer-merges.md`.
 - **Same GitHub account as PR author**: `gh pr review --approve` and
   `gh pr review --request-changes` can fail with the same-account GitHub block
   when the maintainer and author share the `gh` account. Record the APPROVE or

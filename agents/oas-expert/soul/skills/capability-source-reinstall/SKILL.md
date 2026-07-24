@@ -39,6 +39,12 @@ tree, so it can silently re-lock the old published version.
 
 - Path installs are not marketplace-trusted; forgetting `oas trust` leaves
   executable hooks/commands disabled.
+- After linking a local framework checkout as the active CLI, `oas doctor` in
+  each target deployment is the verifier. A layer may have a lock but no
+  installed artifact; if bare restore refuses because the current marketplace
+  bytes do not match the old lock integrity, remove only that stale lock entry,
+  install from the explicit local package path, renew trust for the new
+  integrity, and run doctor again. Do not bypass integrity checking.
 - A manifest path that exists only in the globally installed package can make
   the capability appear installed while instances silently lose those skills.
 - Reinstalling by ID after local edits usually proves only that the published
