@@ -205,6 +205,27 @@ function spawnForm(s, a) {
      another agent, and a late completion must not touch a form it no longer
      owns. Only the currently active operation may mutate UI — success,
      error, and finally paths alike. */
+/* After a spawn, the roster SNAPSHOT lags: /api/panel is refreshed by a
+   background collector only every ~3s, so the new instance is usually not
+   in it yet — and the shell's openTerminal resolves instances from that
+   same endpoint, so opening immediately yields "unknown instance". Poll the
+   selected workspace's panel until the instance appears (ownership- and
+   generation-gated), then hand off. Exported for the stale-snapshot
+   regression. delayMs is injectable so tests run without real waits. */
+export async function waitForInstanceInPanel(s, name, isCurrent, { tries = 20, delayMs = 700, sleep } = {}) {
+  const wait = sleep || ((ms) => new Promise((ok) => setTimeout(ok, ms)));
+  for (let i = 0; i < tries; i++) {
+    if (!isCurrent()) return false;          // ws switched / superseded: stop
+    try {
+      const panel = await apiJson(s.ctx, `/api/panel${wsQuery()}`);
+      if (!isCurrent()) return false;
+      if ((panel.instances || []).some((x) => x.instance === name)) return true;
+    } catch { /* transient — keep polling */ }
+    await wait(delayMs);
+  }
+  return false;                              // snapshot never caught up: no auto-open
+}
+
 export async function doSpawn(s, ui) {
   const a = s.selAgent;
   if (!a) return;
@@ -239,6 +260,14 @@ export async function doSpawn(s, ui) {
     }
     if (!owns()) return;                     // superseded — leave the form alone
     ui.clear();
+    ui.status.textContent = `Spawned ${d.instance}${d.launched ? " — session running" : ""}. Waiting for the roster…`;
+    // The panel snapshot lags spawns by up to a collector cycle; opening the
+    // terminal before the instance is in /api/panel makes the shell resolve
+    // "unknown instance". Wait for it, still gated by ownership + workspace.
+    const current = () => owns() && myGen === workspaceGeneration();
+    const visible = await waitForInstanceInPanel(s, d.instance, current, s.waitOpts);
+    if (!current()) return;
+    if (!visible) { ui.status.textContent = `Spawned ${d.instance} — roster is catching up; open it from the Instances view.`; return; }
     ui.status.textContent = `Spawned ${d.instance}${d.launched ? " — session running" : ""}. Opening terminal…`;
     s.ctx.openTerminal(d.instance);
   } catch (e) {

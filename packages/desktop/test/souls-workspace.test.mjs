@@ -90,6 +90,7 @@ test("Soul roster: delayed switch refresh cannot erase a newer B spawn form", as
   const delayedSwitch = [];
   let bGets = 0;
   let releaseBSpawn;
+  let spawned = false;         // after the spawn POST resolves, the roster "catches up"
   const opened = [];
   const agent = (name) => ({
     name, agentsRoot: `/${name}/agents`, description: name, runtime: "pi",
@@ -97,7 +98,8 @@ test("Soul roster: delayed switch refresh cannot erase a newer B spawn form", as
   });
   const bodyFor = (pathname, ws) => pathname.startsWith("/api/agents")
     ? { agents: [agent(`${ws}-soul`)] }
-    : { instances: [], workspace: { id: ws }, workspaces: [{ id: "wsA", name: "A" }, { id: "wsB", name: "B" }] };
+    : { instances: spawned ? [{ instance: "inst-B" }] : [],
+        workspace: { id: ws }, workspaces: [{ id: "wsA", name: "A" }, { id: "wsB", name: "B" }] };
   const ctx = {
     api(pathname, opts = {}) {
       if (opts.method === "POST") return new Promise((ok) => { releaseBSpawn = ok; });
@@ -134,7 +136,8 @@ test("Soul roster: delayed switch refresh cannot erase a newer B spawn form", as
     assert.equal(ownedButton.disabled, true, "delayed refresh cannot unlock/replace B mutation UI");
 
     releaseBSpawn({ instance: "inst-B", launched: true });
-    await tick(); await tick();
+    spawned = true;            // panel snapshot now includes the new instance
+    await tick(); await tick(); await tick();
     assert.deepEqual(opened, ["inst-B"]);
   } finally {
     spawn.unmount();
