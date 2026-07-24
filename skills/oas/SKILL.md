@@ -42,7 +42,10 @@ oas create <name> [--description ...] [--type <agent-type>] [--repo ...] [--work
 # workspace mode = cross-repo coordinator: ./work is the whole team scope; read
 # all member repos, edit none; soul knowledge updates arrive as PRs to the
 # soul's home repo via `oas okf harvest`
-oas spawn <agent> [--task ...] [--purpose ...] [--no-launch] [--json]
+oas spawn <agent> [--task ...] [--purpose ...] [--parent <instance>] [--no-launch] [--json]
+# lineage is explicit: agents spawning sub-agents MUST pass --parent "$OAS_INSTANCE"
+# (or their own instance name); without --parent the spawn is operator-origin and
+# appears top-level. Attached-mode spawns nest under the work-tree owner automatically.
 # when config declares team:, spawn/retire also resolve souls and instances
 # defined in sibling repos of the team scope (unique match wins; the instance
 # homes with its owning repo, works in that repo, resolves that repo's config)

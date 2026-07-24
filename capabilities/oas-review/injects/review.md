@@ -32,7 +32,7 @@ oas spawn reviewer --work attached --work-dir "$PWD/work" \
   another oas-expert instance is live:
 
   ```bash
-  oas spawn oas-expert --purpose "pr<n>" \
+  oas spawn oas-expert --purpose "pr<n>" --parent "$OAS_INSTANCE" \
     --task "Maintainer review of PR #<n>: run your pr-review gates. You own this PR to its terminal outcome — on RETURN stay alive and idle for my fixed-mail, re-review, repeat; on merge/close record the delivery in your stewardship knowledge and retire yourself. Report verdicts to <your-instance> by aweb mail."
   ```
 

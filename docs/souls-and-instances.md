@@ -114,6 +114,13 @@ OAS agents can run `oas spawn` when their instructions or the
 human ask them to create another expert instance. The spawned agent is another
 full OAS instance, with its own soul, home, worktree, and lifecycle.
 
+Spawn lineage is **explicit**: `oas spawn --parent <instance>` records the
+named instance as `parentInstance` (and `spawnOrigin: instance`); attached-mode
+spawns without `--parent` nest under the owner of the shared work tree. Any
+other spawn — including one from a shell that inherited an agent's environment
+variables — is operator-origin and appears top-level. Agents spawning
+sub-agents should pass `--parent "$OAS_INSTANCE"`.
+
 If the workspace has a messaging integration such as aweb, spawned instances
 can also receive identities and coordinate with each other automatically. The
 task layer can provide shared work state while messaging provides conversation.
