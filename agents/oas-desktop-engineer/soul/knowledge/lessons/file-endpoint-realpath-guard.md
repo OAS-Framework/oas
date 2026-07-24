@@ -9,7 +9,7 @@ timestamp: 2026-07-22
 # The guard shape
 
 `/api/file` uses `resolveGuardedFile` (marker block `OASWEB_FILEGUARD` in
-`bin/oas-web.mjs`) to compare canonical filesystem locations, not raw strings:
+`packages/desktop/server/oas-web.mjs`) to compare canonical filesystem locations, not raw strings:
 
 1. reject non-absolute requested paths with HTTP 400;
 2. `realpath` the requested file, so missing files fail with HTTP 404 and

@@ -62,6 +62,12 @@ The backend lives in `packages/desktop/server/` (migrated from the retired
   [the scoped snapshot lookup lesson](/lessons/workspace-scoped-snapshot-lookups.md)).
   FRAMEWORK_ROOT resolution belongs to the app: `main.mjs` resolves the kernel
   and the bundled server must not assume a capability-install path.
+  **The direct import of `lib/core.mjs` via FRAMEWORK_ROOT is transitional
+  migration debt**, not a durable boundary: per the desktop-succession
+  decision, operational OAS mutations belong behind a compatible installed
+  `oas ... --json` CLI, with observation-only degradation when no compatible
+  OAS install exists. Do not extend the direct-core bridge; retire it when
+  the CLI boundary lands.
   Roster instance
   objects expose `work` as the work mode, not a filesystem path; endpoints that
   need a work tree derive `<home>/work` from `inst.home` (see

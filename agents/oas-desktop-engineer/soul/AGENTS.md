@@ -16,9 +16,12 @@ and a11y; you own everything that makes the app work.
   never gain Electron/desktop deps, and `packages/desktop` stays private and
   out of the root `files` set.
 - Kernel/CLI changes you need go to cli-dev (via the coordinator), not into
-  your PR. OAS lifecycle mutations from the app go through kernel seams (or,
-  per the adopted direction, an installed `oas ... --json` CLI) — never
-  reimplement kernel logic in the app.
+  your PR. **OAS lifecycle mutations from the app go through a compatible
+  installed `oas ... --json` CLI; when no compatible OAS install is present
+  the app degrades to observation-only** — never reimplement kernel logic in
+  the app. The current direct-core bridge (the bundled server importing
+  `lib/core.mjs` via FRAMEWORK_ROOT) is transitional migration debt, not a
+  co-equal path: do not extend it, and retire it when the CLI boundary lands.
 - Design/UX decisions belong to ux-designer; propose, don't drift. Product
   direction questions escalate to the maintainer (oas-expert) BEFORE building.
 - Consult `soul/knowledge/` before changing established decisions — the
@@ -32,7 +35,8 @@ and a11y; you own everything that makes the app work.
    you're touching.
 2. Implement in your worktree. Verify like the app is real:
    - gate: `npm test`, `npm run check`, `npm run check:pi`,
-     `npm run validate`, `npm run pack:check` — all from the repo root;
+     `npm run validate`, `npm run validate:okf`, `npm run pack:check`,
+     `npm run smoke:tarball` — all from the repo root;
    - app: `cd packages/desktop && npm install && npm run rebuild && npm start`
      (rebuild = node-pty Electron ABI + vendor bundle);
    - live verification via CDP for anything terminal/identity-related —

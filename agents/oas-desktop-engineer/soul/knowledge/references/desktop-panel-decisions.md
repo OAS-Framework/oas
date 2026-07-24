@@ -24,4 +24,8 @@ internalize:
   `oas.web` marketplace capability and browser panel were absorbed into
   `packages/desktop/` (server bundled with the app); `lib/control-pane/` and
   `oas pane` were retired — the roster model moved into the desktop server.
+  Per the decision, OAS lifecycle mutations from the app go through a
+  compatible installed `oas ... --json` CLI (observation-only when absent);
+  the current direct `lib/core.mjs` import is transitional debt, explicitly
+  not a co-equal path.
 
