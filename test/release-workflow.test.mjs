@@ -111,3 +111,61 @@ test("desktop package scripts invoked by the workflow exist and run", () => {
     Object.keys(desktopPkg.devDependencies || {}).some((d) => d.includes("electron-builder")) || /electron-builder/.test(desktopPkg.scripts.dist),
     "dist script is electron-builder packaging");
 });
+
+test("electron-builder declares a filesystem-safe Linux executableName (AppImage/DEB name guard)", () => {
+  // Without a safe executableName, electron-builder derives it from the
+  // SCOPED package name "@oas-framework/desktop" → "@oas-frameworkdesktop",
+  // whose "@"/"/" fail the Linux AppImage/DEB build ("characters that cannot
+  // be safely used in file paths"). This guards that regressing.
+  const cfg = readFileSync(new URL("../packages/desktop/electron-builder.config.cjs", import.meta.url), "utf8");
+  const m = cfg.match(/executableName:\s*["']([^"']+)["']/);
+  assert.ok(m, "electron-builder.config.cjs must declare an executableName (Linux name safety)");
+  const name = m[1];
+  // filesystem-safe: no scoped-name metacharacters, path separators, or spaces
+  assert.match(name, /^[a-z0-9][a-z0-9._-]*$/, `executableName "${name}" must be filesystem-safe (lowercase alnum/._- only)`);
+  assert.ok(!/[@/\\ ]/.test(name), `executableName "${name}" must not contain @ / \\ or spaces`);
+});
+
+test("release desktop-build matrix does not fail-fast (one leg must not mask the others)", () => {
+  // The Linux leg failing fast previously CANCELLED the mac legs, hiding
+  // whether they built. Each matrix leg must report independently.
+  const desktopJob = yml.indexOf("desktop-build:");
+  assert.ok(desktopJob > 0, "desktop-build job present");
+  const nextJob = yml.indexOf("\n  publish:", desktopJob);
+  const jobText = yml.slice(desktopJob, nextJob > 0 ? nextJob : undefined);
+  assert.match(jobText, /fail-fast:\s*false/, "desktop-build matrix sets fail-fast: false");
+});
+
+test("build-installers workflow is VERIFY-ONLY (no publish/release/tag surface)", () => {
+  const bi = readFileSync(new URL("../.github/workflows/build-installers.yml", import.meta.url), "utf8");
+  // zero publish surface — the whole point is installer evidence without any release action
+  assert.ok(!/npm publish/.test(bi), "must not npm publish");
+  assert.ok(!/gh release|actions\/create-release|softprops\/action-gh-release/.test(bi), "must not create a GitHub Release");
+  assert.ok(!/npm version|git tag|GITHUB_REF_NAME/.test(bi), "must not tag or bump versions");
+  assert.ok(!/NPM_TOKEN|NODE_AUTH_TOKEN/.test(bi), "must not reference publish tokens");
+  assert.ok(!/attest-build-provenance/.test(bi), "no attestation (that's the release job)");
+  // read-only permissions
+  assert.match(bi, /permissions:\s*\n\s*contents:\s*read/, "permissions: contents: read only");
+  // same 3-leg matrix as the release desktop-build, fail-fast:false
+  assert.match(bi, /fail-fast:\s*false/, "independent per-leg evidence");
+  for (const leg of ["macos-14", "macos-13", "ubuntu-latest"]) {
+    assert.ok(bi.includes(leg), `matrix includes ${leg}`);
+  }
+  // it does build + smoke
+  assert.match(bi, /npm run dist\b/, "builds installers");
+  assert.match(bi, /npm run dist:smoke/, "runs the installed-artifact smoke");
+  assert.match(bi, /upload-artifact/, "uploads the distributables for inspection");
+});
+
+test("build-installers workflow: own concurrency group (never release.yml's), no tag-push trigger", () => {
+  const bi = readFileSync(new URL("../.github/workflows/build-installers.yml", import.meta.url), "utf8");
+  // must not collide with a real release run
+  assert.ok(!/group:\s*release\b/.test(bi), "must NOT reuse release.yml's concurrency group: release");
+  assert.match(bi, /concurrency:\s*\n\s*group:\s*build-installers/, "declares its own build-installers concurrency group");
+  // triggered by PR + manual only, never by a tag push (that is release.yml)
+  assert.ok(!/on:\s*[\s\S]*push:\s*[\s\S]*tags/.test(bi), "must not trigger on tag push (release.yml owns tags)");
+  assert.match(bi, /workflow_dispatch:/, "manual trigger present");
+  assert.match(bi, /pull_request:/, "pull_request trigger present");
+  // its job name must not be the release matrix job name
+  assert.ok(!/^\s*desktop-build:/m.test(bi), "distinct job name from release.yml's desktop-build");
+});

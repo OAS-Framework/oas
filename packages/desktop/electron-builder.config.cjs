@@ -1,8 +1,8 @@
-// OAS Desktop — electron-builder configuration (v0.18.0 public matrix).
+// OAS Desktop — electron-builder configuration (v0.18.2 public matrix).
 //
 // Contract (desktop-dist): macOS arm64/x64 DMG+ZIP, Linux x64 AppImage+DEB,
 // artifacts named oas-desktop-* under packages/desktop/dist/ (the release
-// workflow uploads `desktop-<os>-<arch>` from that glob). 0.18.0 ships
+// workflow uploads `desktop-<os>-<arch>` from that glob). 0.18.2 ships
 // UNSIGNED and NOT notarized — no credentials exist; certificate
 // auto-discovery is disabled (CSC_IDENTITY_AUTO_DISCOVERY=false in CI and
 // identity:null here so local builds behave identically). Linux declares
@@ -60,12 +60,19 @@ module.exports = {
     //   npm run dist -- --x64   on an arm64 runner.
     target: ["dmg", "zip"],
     category: "public.app-category.developer-tools",
-    // UNSIGNED (0.18.0): no Developer ID exists. identity:null disables
+    // UNSIGNED (0.18.2): no Developer ID exists. identity:null disables
     // signing entirely — release notes and docs state the Gatekeeper
     // implications; nothing may claim signing or notarization.
     identity: null,
   },
   linux: {
+    // Filesystem-safe binary/package name. WITHOUT this, electron-builder
+    // derives executableName from the SCOPED package name
+    // "@oas-framework/desktop" → "@oas-frameworkdesktop", which contains
+    // "@"/"/" and FAILS the AppImage/DEB build ('characters that cannot be
+    // safely used in file paths') — the v0.18.x Linux leg never went green
+    // without it. Scoped to linux so the mac .app stays "OAS Desktop.app".
+    executableName: "oas-desktop",
     target: ["AppImage", "deb"],
     category: "Development",
     // tmux is a hard runtime prerequisite (terminal attach path).
@@ -75,6 +82,11 @@ module.exports = {
   },
   deb: {
     depends: ["tmux"],
+    // electron-builder requires a DEB maintainer + project homepage; without
+    // them the deb target fails AFTER the AppImage builds (surfaced by the
+    // build-installers CI). homepage is read from packages/desktop
+    // package.json; the maintainer is set explicitly here.
+    maintainer: "OAS Framework <maintainers@oas-framework.dev>",
   },
   dmg: {
     // default layout; no code that would require signing

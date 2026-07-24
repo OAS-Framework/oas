@@ -1,0 +1,87 @@
+name: Build Installers (verify-only)
+
+# Real green Linux+mac installer evidence on PR / on demand — WITHOUT any
+# publish surface. The release matrix (release.yml desktop-build) only runs
+# on a tag push, so installers were never built in PR CI; the Linux AppImage
+# executableName blocker was therefore only caught by a failed real release.
+# This job builds every matrix leg and uploads the artifacts to eyeball their
+# names, permanently closing that blind spot. It ships nothing: no package
+# upload, no GitHub release, no tag, no version bump.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "packages/desktop/**"
+      - ".github/workflows/**"
+
+# Verify-only: read the repo, write nothing. No publish/release/attestation
+# permissions exist here (contents: read is all upload-artifact needs).
+permissions:
+  contents: read
+
+# Own concurrency group — must NOT reuse the release workflow's concurrency
+# group, so a build-verify run can never collide with or cancel a real
+# release. Superseded runs on the same ref are cancelled to avoid pile-up.
+concurrency:
+  group: build-installers-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-installers:
+    strategy:
+      # One leg's failure must NOT cancel the others — the whole point is
+      # independent green/red evidence per platform.
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14          # macOS arm64: DMG + ZIP
+            arch: arm64
+          - os: macos-13          # macOS x64: DMG + ZIP
+            arch: x64
+          - os: ubuntu-latest     # Linux x64: AppImage + DEB
+            arch: x64
+    runs-on: ${{ matrix.os }}
+    env:
+      # Unsigned/not notarized — disable certificate discovery (same as the
+      # release matrix). No signing secrets are referenced here.
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # (No xvfb / display needed: the build-verify smoke runs the static
+      # inventory + node-pty ABI checks, not the packaged GUI launch — that
+      # needs an interactive windowserver an unsigned app can't get on CI
+      # runners and is verified out of band.)
+      - name: Install deps (root + packages/desktop)
+        run: |
+          npm ci
+          npm --prefix packages/desktop ci
+
+      - name: Build unsigned installers
+        working-directory: packages/desktop
+        run: npm run dist
+
+      # Installed-artifact smoke, BUILD-VERIFY mode: inventory (artifact names
+      # + plausible sizes) + node-pty under the packaged Electron ABI. The
+      # packaged GUI LAUNCH is skipped (OAS_SMOKE_BUILD_VERIFY authorizes the
+      # skip under CI) — it needs a display unsigned apps don't get on CI
+      # runners; the installer BUILD + native-module ABI are the meaningful
+      # evidence here.
+      - name: Installed-artifact smoke (build-verify)
+        working-directory: packages/desktop
+        env:
+          OAS_SMOKE_SKIP_LAUNCH: "1"
+          OAS_SMOKE_BUILD_VERIFY: "1"
+        run: npm run dist:smoke
+
+      # Upload the distributables so the produced AppImage/DEB/DMG/ZIP names
+      # can be eyeballed (proves the executableName/package naming is clean).
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installers-${{ matrix.os }}-${{ matrix.arch }}
+          path: packages/desktop/dist/oas-desktop-*
+          if-no-files-found: error
