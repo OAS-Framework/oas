@@ -301,7 +301,7 @@ test("desktop server: /api/agents lists persistent AND capability-defined agents
     assert.ok(Array.isArray(d.agents) && d.agents.length, "agents listed");
     for (const a of d.agents) {
       assert.ok(a.name && a.agentsRoot, "each agent has name and agentsRoot");
-      assert.ok(["persistent", "tmp", "capability"].includes(a.kind), `known kind (${a.kind})`);
+      assert.ok(["persistent", "local", "capability"].includes(a.kind), `known kind (${a.kind})`);
     }
     // capability-defined agents (e.g. oas.review's reviewer) must appear — the
     // CLI can spawn them via findCapabilityAgent, so the panel must offer them.

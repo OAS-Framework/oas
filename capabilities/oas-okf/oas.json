@@ -1,10 +1,10 @@
 {
   "capability": "oas.okf",
   "command": "okf",
-  "version": "1.3.3",
+  "version": "1.4.0",
   "compatibility": { "oas": ">=0.6.2" },
   "layer": "knowledge",
-  "description": "Knowledge layer via OKF: soul bundles, instance memory (STATE.md/log.md/notes/), continuous post-commit harvest into the soul, craft + memory skills, validator.",
+  "description": "Knowledge layer via OKF: soul bundles, instance memory (STATE.md/log.md/notes/), continuous post-commit harvest into the soul (commit, PR, or direct-edit for local souls), craft + memory skills, validator.",
   "requires": [],
   "skills": [
     "skills"

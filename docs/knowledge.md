@@ -35,8 +35,11 @@ With `knowledge: okf`, the integration creates two memory spaces.
 The instance does not promote its own notes. It captures them, and after
 committing with pending notes it runs `oas okf harvest` (its okf injection
 carries this instruction), which spawns a **memory-harvest** agent. That
-harvester judges the notes, updates the soul, commits the promotion, and
-retires.
+harvester judges the notes and updates the soul; the delivery matches the
+soul's custody — a commit on the instance's branch for repo-resident souls,
+a PR to the soul's home repo for workspace-mode souls, and **direct edits
+with no commit** for local souls (their `local-agents/` home is
+uncommitted by contract). Then it retires.
 
 ## Capture and judgment
 

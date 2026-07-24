@@ -80,6 +80,10 @@ jobs:
       - name: Test capability resolution and package commands
         run: |
           npm run check
+          # Root `npm test` discovers packages/desktop suites (jsdom/marked
+          # imports) — install its dev deps like PR CI does; Electron binary
+          # is not needed for tests.
+          (cd packages/desktop && ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm ci)
           npm test
 
       - name: Sanity-check tarballs

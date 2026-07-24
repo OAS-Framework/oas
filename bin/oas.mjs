@@ -26,7 +26,7 @@ import {
   resolveOasConfig, resolveWorkMode, composeInstanceAgentsMd, parseYamlNested, packagedInject, teamAgentRoots,
   findTeamAgent, findTeamInstance, findCapabilityAgent, findInstanceHome, listCapabilityAgents, workspaceOf,
   ensureRoot, findRoot, findAgent, listAgents, listInstances, listAgentDefs, createAgent as coreCreateAgent,
-  spawnInstance, retireInstance, upsertTmpAgent, defaultRepo,
+  spawnInstance, retireInstance, upsertLocalAgent, defaultRepo,
 } from "../lib/core.mjs";
 
 const args = process.argv.slice(2);
@@ -95,7 +95,7 @@ function doctorComposition(ctx, soulName) {
   const root = findRoot(ctx);
   const agent = root && findAgent(root, soulName);
   if (!agent) throw new Error(`unknown soul "${soulName}" for doctor composition`);
-  return composeInstanceAgentsMd(join(agent._dir, "soul"), ctx, agent.name, agent.work || "checkout");
+  return composeInstanceAgentsMd(join(agent._dir, "soul"), ctx, agent.name, agent.work || "checkout", agent.kind);
 }
 function doctorJson(dir) {
   const ctx = resolve(dir || process.cwd());
@@ -616,7 +616,7 @@ function status() {
   console.log(`oas status — agents root ${shortPath(root)}\n`);
   if (data.length === 0) { console.log("  (no agents — create one with `oas create <name>`)"); return; }
   for (const a of data) {
-    console.log(`  ${a.name}${a.kind === "tmp" ? " (local)" : ""}  [work: ${a.work || "checkout"}, repo: ${a.repo || "?"}]`);
+    console.log(`  ${a.name}${a.kind === "local" ? " (local)" : ""}  [work: ${a.work || "checkout"}, repo: ${a.repo || "?"}]`);
     if (a.description) console.log(`      ${a.description}`);
     for (const i of a.instances) {
       console.log(`      • ${i.instance}  ${i.running ? "RUNNING" : "idle"}  (branch ${i.branch || "?"}, ${i.work || "?"})`);
@@ -640,7 +640,7 @@ function statusTeam() {
     console.log(`  ${shortPath(root)}`);
     if (!agents.length) { console.log("    (no agents)"); continue; }
     for (const a of agents) {
-      console.log(`    ${a.name}${a.kind === "tmp" ? " (local)" : ""}${a.description ? `  — ${a.description}` : ""}`);
+      console.log(`    ${a.name}${a.kind === "local" ? " (local)" : ""}${a.description ? `  — ${a.description}` : ""}`);
       for (const i of a.instances) console.log(`      • ${i.instance}  ${i.running ? "RUNNING" : "idle"}`);
     }
   }
@@ -678,14 +678,14 @@ function spawnCmd() {
       note(`(cross-repo: soul "${name}" found at ${shortPath(root)} — instance homes there)`);
     }
   }
-  // tmp agents: create/update from raw instructions or a single-file def
+  // local agents: create/update from raw instructions or a single-file def
   if (instrFile || defFile || !agent) {
     if (!agent && !instrFile && !defFile) {
       const def = listAgentDefs(process.cwd()).find((d) => d.name === name);
       if (!def) bail("E_UNKNOWN_AGENT", `unknown agent "${name}" (known: ${listAgents(root).map((a) => a.name).join(", ") || "none"}; importable defs: ${listAgentDefs(process.cwd()).map((d) => d.name).join(", ") || "none"}) — pass --instructions-file or --def-file to create a local agent`);
-      agent = upsertTmpAgent(root, { name: def.name, file: def.path, repo: flag("repo"), work: flag("work"), runtime: flag("runtime"), model: flag("model") });
-    } else if (!agent || agent.kind === "tmp") {
-      agent = upsertTmpAgent(root, {
+      agent = upsertLocalAgent(root, { name: def.name, file: def.path, repo: flag("repo"), work: flag("work"), runtime: flag("runtime"), model: flag("model") });
+    } else if (!agent || agent.kind === "local") {
+      agent = upsertLocalAgent(root, {
         name, file: defFile, instructions: instrFile ? readFileSync(instrFile, "utf8") : undefined,
         repo: flag("repo"), work: flag("work"), runtime: flag("runtime"), model: flag("model"),
       });
@@ -761,16 +761,25 @@ async function paneCmd() {
 
 function createCmd() {
   const name = args[1];
-  if (!name || name.startsWith("--")) die("usage: oas create <name> [--description <d>] [--type <agent-type>] [--repo <r>] [--work worktree|checkout|attached|workspace] [--runtime pi|claude] [--model <m>] [--instructions-file <f>]");
-  const root = ensureRoot(flag("dir") || process.cwd());
+  if (!name || name.startsWith("--")) die("usage: oas create <name> [--local] [--description <d>] [--type <agent-type>] [--repo <r>] [--work worktree|checkout|attached|workspace] [--runtime pi|claude] [--model <m>] [--instructions-file <f>]");
+  const local = args.includes("--local");
+  const startDir = flag("dir") || process.cwd();
+  // --local can BOOTSTRAP a deployment: with no agents/ or local-agents/ yet,
+  // anchor at the enclosing git repo (else the start dir) — people can use OAS
+  // with local agents alone.
+  let root = findRoot(startDir);
+  if (!root) {
+    if (!local) root = ensureRoot(startDir); // keeps the pointed error for committed souls
+    else root = join(defaultRepo(startDir) || resolve(startDir), "agents");
+  }
   const instrFile = flag("instructions-file");
   const r = coreCreateAgent(root, {
-    name, description: flag("description"), type: flag("type"), repo: flag("repo") || defaultRepo(process.cwd()),
+    name, local, description: flag("description"), type: flag("type"), repo: flag("repo") || defaultRepo(process.cwd()),
     work: flag("work"), runtime: flag("runtime"), model: flag("model"),
     instructions: instrFile ? readFileSync(instrFile, "utf8") : undefined,
   });
   if (args.includes("--json")) { console.log(JSON.stringify(r, null, 2)); return; }
-  console.log(`Created agent "${r.agent}" — soul at ${shortPath(r.soul)}`);
+  console.log(`Created ${r.kind === "local" ? "LOCAL agent (uncommitted — soul lives in local-agents/, gitignored)" : "agent"} "${r.agent}" — soul at ${shortPath(r.soul)}`);
   console.log(`Edit ${shortPath(join(r.soul, "AGENTS.md"))} to define its role, then: oas spawn ${r.agent} --task "..."`);
 }
 
@@ -1028,12 +1037,13 @@ Usage:
                                             Desktop CLI API v1 probe payload
   oas status [--json]                       agents, souls, running instances
   oas status --team [--json]                whole-team roster across the team scope's repos
-  oas create <name> [--description <d>]     create a persistent agent soul
-      [--repo <r>] [--work <mode>] [--runtime pi|claude] [--model <m>]
-      [--instructions-file <f>]
+  oas create <name> [--local]               create an agent soul; --local = full
+      [--description <d>] [--repo <r>]      soul under local-agents/ (uncommitted,
+      [--work <mode>] [--runtime pi|claude] gitignored; same memory + lifecycle)
+      [--model <m>] [--instructions-file <f>]
   oas spawn <agent> [--task <text>]         spawn an instance (tmux; --no-launch
       [--purpose <slug>] [--repo <r>]       = scaffold only); --instructions-file/
-      [--parent <instance>]                 --def-file creates a local (tmp) agent;
+      [--parent <instance>]                 --def-file creates a local agent;
       [--work worktree|checkout|attached|workspace]  --parent nests under an existing
       [--work-dir <owner-work>] [--runtime pi|claude] [--model <m>] [--branch <b>]  instance (default: top-level)
       [--instructions-file <f>|--def-file <f>] [--no-launch] [--json]

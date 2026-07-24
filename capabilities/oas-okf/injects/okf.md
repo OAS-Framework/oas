@@ -50,6 +50,11 @@ delivers the update **as a PR to that repo**, never a direct push and never
 a commit into member repos. Your job is unchanged: write notes, commit
 nothing yourself, call the harvester.
 
+**Local-soul instances**: your soul is uncommitted by design (it lives in
+`local-agents/`, gitignored). The harvester edits your soul directly — no
+commit, no PR. Your job is still unchanged: write notes, commit your WORK
+normally, call the harvester.
+
 The okf skill you loaded at session start also governs writing: notes,
 concepts, index.md, and log.md follow its format craft (concepts,
 frontmatter, index/log discipline, validation). Re-read the relevant section

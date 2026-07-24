@@ -944,3 +944,82 @@ test("traversal names are rejected: --parent and retire cannot reach outside ins
     assert.ok(!existsSync(real.home));
   });
 });
+
+test("local souls: --local creates a full gitignored soul beside agents/, with memory and injection", () => {
+  const base = temp(); const repo = join(base, "repo"); gitRepo(repo);
+  const env = { ...process.env, PATH: fakeRuntimes(base), PI_AGENTS_TMUX_SESSION: "oas-test-nosuch" }; delete env.PI_AGENTS_ROOT;
+  // Bootstrap: NO agents/ dir exists — --local must still work (all-local scopes).
+  let r = spawnSync(process.execPath, [CLI, "create", "helper", "--local", "--description", "Local helper.", "--dir", repo], { cwd: repo, encoding: "utf8", env });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /LOCAL agent/);
+  // Soul lives at <scope>/local-agents/<name>/soul — sibling of agents/, not nested.
+  const soulDir = join(repo, "local-agents", "helper", "soul");
+  assert.ok(existsSync(join(soulDir, "soul.yaml")), "local soul scaffolded at scope level");
+  assert.ok(!existsSync(join(repo, "agents", "local-agents")), "not nested inside agents/");
+  assert.match(readFileSync(join(soulDir, "soul.yaml"), "utf8"), /kind: local/);
+  // Gitignore injected exactly once, and git actually ignores the tree.
+  assert.match(readFileSync(join(repo, ".gitignore"), "utf8"), /local-agents\//);
+  const ignored = spawnSync("git", ["-C", repo, "check-ignore", "local-agents"], { encoding: "utf8" });
+  assert.equal(ignored.status, 0, "git ignores local-agents/");
+  r = spawnSync(process.execPath, [CLI, "create", "helper2", "--local", "--dir", repo], { cwd: repo, encoding: "utf8", env });
+  assert.equal(r.status, 0, r.stderr);
+  const gi = readFileSync(join(repo, ".gitignore"), "utf8");
+  assert.equal(gi.match(/local-agents\//g).length, 1, "gitignore entry not duplicated");
+  // Roster sees local souls (root resolves through the sibling layout).
+  return import("../lib/core.mjs").then((core) => {
+    const root = core.ensureRoot(repo);
+    const agents = core.listAgents(root);
+    const helper = agents.find((a) => a.name === "helper");
+    assert.ok(helper, "local soul listed");
+    assert.equal(helper.kind, "local");
+    // Spawn: full memory scaffold (STATE.md via oas-okf would need the layer —
+    // kernel-level checks here: local-soul injection composed, soul symlinked).
+    const oldPath = process.env.PATH; process.env.PATH = fakeRuntimes(base);
+    try {
+      const res = core.spawnInstance(root, helper, { instance: "helper-1", launch: false, repo });
+      assert.match(readFileSync(join(res.home, "AGENTS.md"), "utf8"), /Local soul \(uncommitted\)/);
+      assert.equal(JSON.parse(readFileSync(join(res.home, "instance.json"), "utf8")).kind, "local");
+      // findInstanceHome + retire see sibling local-agents homes.
+      assert.ok(core.findInstanceHome(root, "helper-1"), "instance home found");
+      core.retireInstance(root, "helper-1", { tmuxSession: "oas-test-nosuch" });
+      assert.ok(!existsSync(res.home));
+    } finally { process.env.PATH = oldPath; }
+  });
+});
+
+test("local souls get memory scaffolding from oas-okf; capability agents stay memory-less and skip the okf injection", () => {
+  const base = temp(); const { repo, root } = fixtureSoul(base);
+  // Bind oas.okf from the real package tree (owned copy so no lock needed).
+  const okfSrc = resolve(new URL("../capabilities/oas-okf", import.meta.url).pathname);
+  const dest = join(repo, ".agents", "capabilities", "owned", "oas-okf");
+  mkdirSync(dirname(dest), { recursive: true });
+  execFileSync("cp", ["-R", okfSrc, dest]);
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  layers:\n    knowledge:\n      capability: oas.okf\n      global: true\n");
+  capability(repo, "rev", { capability: "acme.rev", agents: ["agents/reviewer"] }, {
+    "agents/reviewer/soul.yaml": "name: reviewer\nkind: capability\nwork: checkout\nruntime: pi\ndescription: Reviewer.\n",
+    "agents/reviewer/AGENTS.md": "# Reviewer\n",
+  });
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  layers:\n    knowledge:\n      capability: oas.okf\n      global: true\n  additive:\n    acme.rev:\n      global: true\n");
+  return import("../lib/core.mjs").then((core) => {
+    const oldPath = process.env.PATH; process.env.PATH = fakeRuntimes(base);
+    try {
+      // Local soul: full memory scaffold + okf injection.
+      const local = core.upsertLocalAgent(root, { name: "scratch", instructions: "# scratch\n", repo });
+      assert.equal(local.kind, "local");
+      assert.ok(local._dir.includes(join(base, "local-agents")) || local._dir.includes("local-agents"), "homes under local-agents/");
+      const res = core.spawnInstance(root, local, { instance: "scratch-1", launch: false, repo });
+      assert.ok(existsSync(join(res.home, "STATE.md")), "local soul instance gets STATE.md");
+      assert.ok(existsSync(join(res.home, "notes")), "and notes/");
+      const agentsMd = readFileSync(join(res.home, "AGENTS.md"), "utf8");
+      assert.match(agentsMd, /Knowledge: OKF/);
+      assert.match(agentsMd, /Local soul \(uncommitted\)/);
+      // Capability agent: no memory files, no okf injection block.
+      const cap = core.findCapabilityAgent(repo, root, "reviewer");
+      const rev = core.spawnInstance(root, { ...cap, repo }, { instance: "reviewer-1", launch: false });
+      assert.ok(!existsSync(join(rev.home, "STATE.md")), "capability agent gets no STATE.md");
+      assert.doesNotMatch(readFileSync(join(rev.home, "AGENTS.md"), "utf8"), /Knowledge: OKF/);
+      core.retireInstance(root, "scratch-1", { tmuxSession: "oas-test-nosuch" });
+      core.retireInstance(root, "reviewer-1", { tmuxSession: "oas-test-nosuch" });
+    } finally { process.env.PATH = oldPath; }
+  });
+});

@@ -167,7 +167,7 @@ their souls while still alive. Retirement is a knowledge no-op.
 
 The harvester itself is an agent like any other: oas-okf ships its soul
 definition and materializes it on first harvest as a **local (gitignored)
-soul** under `agents/local-agents/memory-harvest/` — integration
+soul** under `local-agents/memory-harvest/` (beside `agents/`) — integration
 infrastructure, not a roster member. It is also fully replaceable: craft
 your own harvester soul and override the okf `injection` in your
 config to point instances at it. The loop is a convention, not a mechanism
