@@ -2,7 +2,6 @@
 /**
  * oas — the OAS command line.
  *
- *   oas pane                               open the live Control Pane TUI
  *   oas doctor [dir] [--json]              show the resolved config with origins
  *   oas install <name|url|path> [...]      acquire + exact-lock a capability
  *   oas trust <capability>                approve locked executable surfaces
@@ -172,6 +171,7 @@ function doctor(dir) {
   const locks = readCapabilityLocks(ctx);
   const mans = capabilityManifests(ctx);
   for (const [id, lock] of Object.entries(locks)) {
+    if (id === "oas.web") { console.log(`  WARNING: oas.web is locked in ${shortPath(lock._file)} but the capability was retired — the OAS Desktop app (packages/desktop) replaced the web panel; remove the lock entry and any config activation`); continue; }
     if (!mans[id]) console.log(`  WARNING: ${id} is locked in ${shortPath(lock._file)} but not acquired — run \`oas install\``);
   }
   for (const [id, m] of Object.entries(mans)) {
@@ -691,10 +691,7 @@ function retireCmd() {
 }
 
 async function paneCmd() {
-  const root = ensureRoot(flag("dir") || process.cwd());
-  const { startControlPane } = await import("../lib/control-pane/tui.mjs");
-  try { await startControlPane(root, { theme: flag("theme") }); }
-  catch (error) { die(error.message || String(error)); }
+  die("`oas pane` has been retired — the OAS Desktop app (packages/desktop) is the control panel now.");
 }
 
 function createCmd() {
@@ -919,7 +916,6 @@ else {
 Usage:
   oas status [--json]                       agents, souls, running instances
   oas status --team [--json]                whole-team roster across the team scope's repos
-  oas pane [--dir <dir>] [--theme dark|solarized]  open Control Pane, the live agent TUI
   oas create <name> [--description <d>]     create a persistent agent soul
       [--repo <r>] [--work <mode>] [--runtime pi|claude] [--model <m>]
       [--instructions-file <f>]

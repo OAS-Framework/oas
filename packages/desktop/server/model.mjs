@@ -1,7 +1,12 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { basename, join } from "node:path";
-import { listInstances } from "../core.mjs";
+
+// The roster model lives with the desktop server, outside the kernel tree.
+// The kernel seam (core.listInstances) is injected by the server after it
+// resolves FRAMEWORK_ROOT — a static relative import would break here.
+let listInstances = () => { throw new Error("model.mjs: initModel(core) must be called before collectControlPane"); };
+export function initModel(core) { listInstances = core.listInstances; }
 
 function exec(command, args, options = {}) {
   try {

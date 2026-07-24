@@ -1,7 +1,7 @@
 // Regression coverage for the desktop app's privileged API proxy URL shaping
 // (packages/desktop/api-url.mjs) — findings from review de5141c:
 //   1. protocol-relative / backslash pathnames must not steer the privileged
-//      fetch off the loopback oas-web origin;
+//      fetch off the loopback backend origin;
 //   2. a caller-supplied ?ws= must not override the verified workspace on a
 //      shared server.
 import { test } from "node:test";

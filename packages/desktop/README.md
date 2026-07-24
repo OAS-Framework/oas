@@ -13,13 +13,13 @@ package; its dependencies (electron, node-pty, xterm) live here only.
 cd packages/desktop
 npm install          # postinstall bundles renderer/vendor/highlight.mjs (esbuild)
 npm run rebuild      # rebuild node-pty against the Electron ABI (first install / electron upgrade)
-npm start            # launches the app; connects to oas-web on 127.0.0.1:4820 or spawns it
+npm start            # launches the app; connects to the backend server on 127.0.0.1:4820 or spawns the bundled one
 ```
 
 Flags/env:
 - `--dir <workspace>` / `OAS_DESKTOP_DIR` — the OAS workspace the panel shows
   (default: this repo's root).
-- `OAS_DESKTOP_PORT` — oas-web server port (default 4820).
+- `OAS_DESKTOP_PORT` — backend server port (default 4820).
 
 ## UX and architecture
 
@@ -39,10 +39,14 @@ Diff and Jira UI are intentionally dormant: their modules/API support stay in
 this private package, but the shell exposes no navigation, tabs, or inline
 cards for them.
 
-- `main.mjs` — Electron main: server management (connect-or-spawn oas-web),
+- `main.mjs` — Electron main: server management (connect-or-spawn the bundled server),
   IPC `api` proxy, node-pty terminals (`tmux attach-session -t <target>`).
   Closing a terminal tab kills the pty ONLY — tmux sessions are the durable
   hosts and always survive.
+- `server/oas-web.mjs` — the bundled zero-dependency backend: a loopback-only
+  `node:http` server exposing the `/api/*` surface (roster, spawn, brain,
+  session capture, keys, file, diff). `server/model.mjs` is the roster
+  collector. Binds 127.0.0.1 only — it can type into your terminals.
 - `preload.cjs` — contextBridge surface (`window.oasDesktop`); renderer runs
   with contextIsolation on, nodeIntegration off.
 - `renderer/shell.mjs` — contextual single sidebar, stage host, artifact-tab

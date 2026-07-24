@@ -25,7 +25,6 @@
   "exports": {
     ".": "./lib/core.mjs",
     "./core": "./lib/core.mjs",
-    "./control-pane": "./lib/control-pane/model.mjs",
     "./package.json": "./package.json"
   },
   "files": [

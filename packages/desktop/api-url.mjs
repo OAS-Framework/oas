@@ -6,14 +6,14 @@
  * Build the URL the main process will fetch for a renderer api() call.
  *
  * SECURITY: the renderer (or anything that reaches the preload bridge) must
- * never be able to steer the privileged fetch off the loopback oas-web
+ * never be able to steer the privileged fetch off the loopback backend
  * origin. `new URL("//host/x", base)` — and the backslash variant
  * "/\\host/x", which WHATWG URL normalizes the same way — would resolve to a
  * DIFFERENT origin, so the resolved origin is checked, not just the input
  * shape.
  *
  * @param {string} pathname  must start with "/" and stay on `base`'s origin
- * @param {string} base      the oas-web server origin, e.g. http://127.0.0.1:4820
+ * @param {string} base      the backend server origin, e.g. http://127.0.0.1:4820
  * @param {string|null} wsId verified workspace id — pinned onto
  *                           workspace-scoped endpoints unless the caller
  *                           selects a workspace the server itself advertises

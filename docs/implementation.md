@@ -15,12 +15,12 @@ Claude's config home to the instance-local view.
 | Path | Purpose |
 |---|---|
 | `lib/core.mjs` | Souls, instances, config/target resolver, capability discovery, composition, locks/trust, hooks. |
-| `lib/control-pane/` | Control Pane's runtime-neutral current-state model and isolated ANSI frontend. |
-| `bin/oas.mjs` | Agent lifecycle, Control Pane, config, acquisition/trust/activation, doctor, and operational command dispatch. |
+| `bin/oas.mjs` | Agent lifecycle, config, acquisition/trust/activation, doctor, and operational command dispatch. |
 | `capabilities/` | Bundled additive packages and layer integrations, each with `oas.json`. |
 | `skills/` | Kernel/bootstrap and package-authoring skills. |
 | `injects/` | Kernel and work-mode instruction sources. |
 | `packages/pi/` | Thin pi adapter. |
+| `packages/desktop/` | OAS Desktop — the Electron control panel and its bundled zero-dependency backend server (private, not published). |
 | `test/` | Capability resolver/composition/security lifecycle tests. |
 | `agents/` | The framework's own portable expert souls. |
 
@@ -29,9 +29,11 @@ Capability discovery has one layout: each config scope's `.agents/capabilities/`
 and `owned/` (authored at that scope, config-owned trusted; committed where
 the scope is a git repo, plain scope-durable files elsewhere).
 
-`oas pane` opens the live, read-only [Control Pane](control-pane.md). Its model
-uses plain OAS metadata/files plus git and tmux; no pi APIs cross into the
-feature, so the same CLI surface works for pi and Claude instances.
+The live control panel is the OAS Desktop app (`packages/desktop/`): an
+Electron shell over a bundled zero-dependency localhost server that uses
+plain OAS metadata/files plus git and tmux; no pi APIs cross into the
+feature, so the same surface works for pi and Claude instances. (`oas pane`
+and the `oas.web` browser panel were retired in its favor.)
 
 ## Instance layout
 

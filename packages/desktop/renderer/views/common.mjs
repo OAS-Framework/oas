@@ -38,7 +38,7 @@ export function postJson(ctx, pathname, body) {
 }
 
 /* ── workspace switching (?ws=) ──
-   The oas-web server scopes /api/panel and /api/agents by workspace id.
+   The backend server scopes /api/panel and /api/agents by workspace id.
    The selected workspace is shared across views and persisted, so switching
    in one view switches everywhere. Views subscribe to react to changes made
    elsewhere (e.g. a shell-level switcher can call setWorkspace too). */

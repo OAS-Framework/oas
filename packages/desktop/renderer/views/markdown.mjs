@@ -9,7 +9,7 @@
  * files re-open through ctx.openFile; plain non-markdown text files render
  * read-only with syntax highlighting (same view, cheap win).
  *
- * Data source: GET /api/file?path=<abs> on the oas-web server via ctx.api.
+ * Data source: GET /api/file?path=<abs> on the backend server via ctx.api.
  */
 import { Marked } from "marked";
 import hljs from "highlight.js";

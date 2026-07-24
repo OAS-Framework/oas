@@ -3,7 +3,7 @@
  *
  * Contract (desktop-app): ES module exporting mount(el, ctx) / unmount(),
  * where ctx = { api(pathname, opts), openFile(path), openTerminal(instance) }.
- * Data comes from GET /api/brain/<agent> (see capabilities/oas-web/bin/oas-web.mjs);
+ * Data comes from GET /api/brain/<agent> (see packages/desktop/server/oas-web.mjs);
  * every artifact is an absolute path opened through ctx.openFile → the shell's
  * markdown viewer. No frameworks — plain DOM, panel design tokens (var(--*)).
  */

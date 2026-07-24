@@ -1,10 +1,10 @@
 # oas desktop — renderer views (webpanel-dev)
 
-Ports of the oas-web browser panel's functionality as desktop renderer views,
+Ports of the retired browser panel's functionality as desktop renderer views,
 per the desktop-app contract: each view is a plain ES module exporting
 `mount(el, ctx)` / `unmount()`, where `ctx = { api(pathname, opts),
 openFile(path), openTerminal(instance) }` is provided by the shell.
-No frameworks, no dependencies; data comes from the existing oas-web HTTP API.
+No frameworks, no dependencies; data comes from the bundled backend HTTP API.
 
 ## Views (`views/`)
 
@@ -33,11 +33,11 @@ light, WCAG AA); views style themselves against tokens only, scoped under
 `harness.html` supplies a stub `ctx` and tab chrome for ALL views — including
 the Markdown and Diff tabs (they prompt for a file path / instance name;
 `ctx.openFile` routes into the markdown view); `harness-server.mjs`
-serves it and proxies `/api/*` to a running oas-web server (same-origin, so
+serves it and proxies `/api/*` to a running backend server (same-origin, so
 GETs and guarded POSTs both work exactly as in the real shell):
 
 ```sh
-node capabilities/oas-web/bin/oas-web.mjs start --port 4821 --dir <workspace>
+node packages/desktop/server/oas-web.mjs start --port 4821 --dir <workspace>
 node packages/desktop/renderer/harness-server.mjs --port 4899 --api http://127.0.0.1:4821
 open "http://127.0.0.1:4899/"
 ```

@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 /**
- * oas-web — local web control panel ("the Slack of the agents").
+ * OAS desktop backend server — the app's local control-panel API.
  *
- *   oas web start [--port <n>] [--dir <agents-root-context>] [--open]
+ *   node oas-web.mjs start [--port <n>] [--dir <agents-root-context>]
  *
- * A zero-dependency localhost HTTP server:
- *   GET  /                          the panel UI (single HTML file)
+ * A zero-dependency localhost HTTP server (spawned by the Electron main
+ * process; the desktop renderer is its only client):
  *   GET  /api/panel                 roster JSON (instances, git, task, tmux state)
  *   GET  /api/agents                available agents (souls) per workspace root
  *   POST /api/spawn                 { agent, agentsRoot, task?, purpose? } → spawn an instance
@@ -24,7 +24,7 @@
  * feel of sitting at the agent's terminal; identical for pi and claude runs.
  */
 import { createServer } from "node:http";
-import { execFile, execFileSync, execSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, statSync, realpathSync, lstatSync, readlinkSync } from "node:fs";
 import { basename, dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -32,15 +32,16 @@ import { homedir } from "node:os";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
-/** Kernel root: in-tree (../../..) or resolved via `oas root` for marketplace installs. */
+/** Kernel root: the app is in-tree at packages/desktop/server → repo root is
+ * three levels up. OAS_DESKTOP_FRAMEWORK_ROOT overrides for packaged builds
+ * where the app resolves the kernel itself. */
 const FRAMEWORK_ROOT = (() => {
+  const env = process.env.OAS_DESKTOP_FRAMEWORK_ROOT;
+  if (env && existsSync(join(env, "lib", "core.mjs"))) return resolve(env);
   const rel = join(HERE, "..", "..", "..");
   if (existsSync(join(rel, "lib", "core.mjs"))) return rel;
-  try {
-    const root = execSync("oas root", { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 15000 }).trim();
-    if (root && existsSync(join(root, "lib", "core.mjs"))) return root;
-  } catch { /* fall through */ }
-  return rel;
+  console.error(`oas-desktop server: cannot find the OAS kernel (lib/core.mjs) at ${rel} — set OAS_DESKTOP_FRAMEWORK_ROOT`);
+  process.exit(1);
 })();
 
 const args = process.argv.slice(2);
@@ -55,12 +56,13 @@ const flagAll = (name) => args.flatMap((a, i) => (a === `--${name}` && args[i + 
 // collect --dir ...` so the expensive synchronous roster collection runs in a
 // child and never blocks the event loop (see the snapshot refresher below).
 if (sub !== "start" && sub !== "collect") {
-  console.error("usage: oas web start [--port <n>] [--dir <workspace>]... [--open]  (repeat --dir for multiple workspaces)");
+  console.error("usage: oas-web.mjs start [--port <n>] [--dir <workspace>]...  (repeat --dir for multiple workspaces)");
   process.exit(1);
 }
 
 const core = await import(pathToFileURL(join(FRAMEWORK_ROOT, "lib", "core.mjs")).href);
-const model = await import(pathToFileURL(join(FRAMEWORK_ROOT, "lib", "control-pane", "model.mjs")).href);
+const model = await import(pathToFileURL(join(HERE, "model.mjs")).href);
+model.initModel(core);
 
 /** Workspaces in view. Each --dir registers one (repeatable); no --dir means
  * the cwd. Every context resolves to its team scope (or config scope) so the
@@ -690,11 +692,14 @@ function synthUntracked(cwd, untracked, files, io) {
 /* OASWEB_UNTRACKED_END */
 
 // ---- HTTP ----
-const UI = readFileSync(join(HERE, "..", "ui", "panel.html"), "utf8");
 // Identity for compatibility probes (GET /api/version): the desktop app must
-// not reuse an OLDER installed oas-web that answers /api/panel but lacks the
-// desktop endpoints (/api/brain, /api/file, /api/diff...).
-const MANIFEST = JSON.parse(readFileSync(join(HERE, "..", "oas.json"), "utf8"));
+// not reuse an OLDER server that answers /api/panel but lacks the
+// desktop endpoints (/api/brain, /api/file, /api/diff...). The bundled
+// server's identity is the desktop package's name and version.
+const MANIFEST = (() => {
+  const p = JSON.parse(readFileSync(join(HERE, "..", "package.json"), "utf8"));
+  return { capability: p.name, version: p.version };
+})();
 const send = (res, code, body, type = "application/json") => {
   const data = type === "application/json" ? JSON.stringify(body) : body;
   res.writeHead(code, { "content-type": `${type}; charset=utf-8`, "cache-control": "no-store" });
@@ -724,7 +729,6 @@ const server = createServer(async (req, res) => {
     if (!originOk) return send(res, 403, { error: "forbidden origin" });
   }
   try {
-    if (req.method === "GET" && path === "/") return send(res, 200, UI, "text/html");
     if (req.method === "GET" && path === "/api/version") {
       return send(res, 200, { capability: MANIFEST.capability, version: MANIFEST.version });
     }
@@ -797,17 +801,16 @@ const server = createServer(async (req, res) => {
 
 server.on("error", (e) => {
   if (e.code === "EADDRINUSE") {
-    console.error(`oas web: port ${port} is already in use — an oas web server is likely already running (open http://127.0.0.1:${port}).`);
-    console.error(`Use --port <n> for a second panel, or stop the old one: pkill -f "oas-web.mjs start"`);
+    console.error(`oas-desktop server: port ${port} is already in use — a desktop backend is likely already running.`);
+    console.error(`Use --port <n> for a second server, or stop the old one: pkill -f "packages/desktop/server/oas-web.mjs start"`);
     process.exit(1);
   }
   throw e;
 });
 server.listen(port, "127.0.0.1", () => {
   const addr = `http://127.0.0.1:${port}`;
-  console.log(`oas web — panel at ${addr}  (workspaces: ${workspaces().map((w) => w.name).join(", ") || "none"})`);
+  console.log(`oas-desktop server — API at ${addr}  (workspaces: ${workspaces().map((w) => w.name).join(", ") || "none"})`);
   console.log("Bound to 127.0.0.1 only. This process can type into your agent terminals — do not expose it.");
-  if (flag("open")) { try { execFileSync(process.platform === "darwin" ? "open" : "xdg-open", [addr], { stdio: "ignore" }); } catch { /* best-effort */ } }
 });
 refreshSnapshot();                       // initial roster snapshot, off-thread
 setInterval(refreshSnapshot, 3000).unref(); // keep it fresh; child skipped if one is running
