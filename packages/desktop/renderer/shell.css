@@ -56,7 +56,10 @@ body {
 .ctx-disclosure.empty { visibility: hidden; pointer-events: none; }
 .ctx-guides { position: absolute; inset: 0 auto 0 0; pointer-events: none; }
 .ctx-guide { position: absolute; top: -2px; bottom: -2px; width: 1px; background: var(--border); }
-.ctx-guide:last-child::after { content: ""; position: absolute; left: 0; top: 19px; width: 7px; height: 1px; background: var(--border); }
+.ctx-guide.end { bottom: 50%; }
+.ctx-guide.branch::after, .ctx-guide.end::after {
+  content: ""; position: absolute; left: 0; top: 21px; width: 7px; height: 1px; background: var(--border);
+}
 .ctx-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
 .ctx-dot.on { background: var(--ok); box-shadow: 0 0 0 2px color-mix(in srgb, var(--ok) 18%, transparent); }
 .ctx-dot.off { border: 1.5px solid var(--faint); background: transparent; }
@@ -113,10 +116,6 @@ body {
    Keep horizontal gutters here—not on .term-wrap—or it allocates columns wider
    than the visible terminal and the screen overflows the right edge. */
 .term-wrap .xterm { width: 100%; height: 100%; padding: 0 32px; }
-.instance-landing { height: 100%; display: grid; place-items: center; padding: 32px; text-align: center; color: var(--muted); }
-.instance-landing .big { display: block; font-size: 36px; color: var(--faint); margin-bottom: 10px; }
-.instance-landing h2 { margin: 0 0 5px; color: var(--fg); font-size: 16px; font-weight: 600; }
-.instance-landing p { margin: 0; font-size: 13px; }
 .term-banner {
   position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
   background: var(--term-bg); color: var(--warn); font-size: 15px; z-index: 5;

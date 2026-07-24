@@ -6,6 +6,30 @@ export function hasInstanceChildren(instances, instance) {
   return instances.some((candidate) => candidate.parentInstance === instance);
 }
 
+/** VS Code-style guide segments for one row in a flattened parent-first tree.
+ * `continue` is an ancestor/sibling vertical; `branch` has a later sibling and
+ * an elbow; `end` is the final sibling, stopping at its elbow; `none` suppresses
+ * an exhausted ancestor line through deeper descendants. */
+export function treeGuideSegments(items, item) {
+  const byName = new Map(items.map((candidate) => [candidate.instance, candidate]));
+  const chain = [];
+  const seen = new Set();
+  let cursor = item;
+  while (cursor?.parentInstance && byName.has(cursor.parentInstance) && !seen.has(cursor.instance)) {
+    seen.add(cursor.instance);
+    chain.unshift(cursor);
+    cursor = byName.get(cursor.parentInstance);
+  }
+  return chain.map((branch, index) => {
+    const at = items.indexOf(branch);
+    const hasLaterSibling = items.slice(at + 1)
+      .some((candidate) => candidate.parentInstance === branch.parentInstance);
+    const current = index === chain.length - 1;
+    if (!current) return hasLaterSibling ? "continue" : "none";
+    return hasLaterSibling ? "branch" : "end";
+  });
+}
+
 /** Include matching instances plus their ancestor paths, in source order. */
 export function filterInstanceTree(instances, query) {
   const needle = String(query || "").trim().toLowerCase();
