@@ -2,6 +2,8 @@
 
 ## 2026-07-24
 
+- **Creation**: [desktop-workspace-add-privileged-contract.md](desktop-workspace-add-privileged-contract.md)
+  — promoted the privileged workspace-add contract: bounded deterministic suggestions, provenance-gated adds, app-owned server replacement only, readiness identity checks, tmux-backed terminal continuity, and stale-completion generations.
 - **Update**: [desktop-terminal-direct-attach.md](desktop-terminal-direct-attach.md)
   — linked the direct tmux attach decision to the provisioned locked-table rule so terminal viewers preserve scrollback while blocking window navigation.
 - **Fix**: [desktop-terminal-link-window-viewer-isolation.md](desktop-terminal-link-window-viewer-isolation.md)
