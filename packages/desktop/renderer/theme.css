@@ -229,4 +229,3 @@
 .oas-view .kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; font-size: 12.5px; }
 .oas-view .kv .k { color: var(--muted); }
 .oas-view .kv .v { color: var(--fg); word-break: break-all; }
-
