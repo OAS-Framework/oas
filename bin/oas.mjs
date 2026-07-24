@@ -182,6 +182,7 @@ function doctor(dir) {
   for (const [name, m] of Object.entries(capabilityManifests(ctx))) {
     const missing = capabilityMissingRequires(name, ctx);
     console.log(`  ${name.padEnd(16)} layer: ${(m.layer || "additive").padEnd(10)} origin: ${m._origin}${missing.length ? `  (missing: ${missing.map((x) => x.command).join(", ")})` : ""}`);
+    if (RETIRED_CAPABILITIES[name]) console.log(`             WARNING: stale artifact of a retired capability — ${RETIRED_CAPABILITIES[name]}; also delete ${shortPath(m._dir)}`);
   }
   const locks = readCapabilityLocks(ctx);
   const mans = capabilityManifests(ctx);
@@ -365,6 +366,7 @@ function install() {
   const src = args[1];
   const dir = resolve(flag("dir") || process.cwd());
   if (!src || src.startsWith("--")) { restore(dir); return; }
+  if (RETIRED_CAPABILITIES[src]) die(`${RETIRED_CAPABILITIES[src]}`);
   const known = capabilityManifest(src, dir);
   if (known) {
     console.log(`Already acquired capability ${known.capability} (${known.version || "unversioned"}); not activated or updated.`);

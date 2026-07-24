@@ -713,3 +713,29 @@ test("retired oas.web: config, install, and lock paths all give actionable migra
   assert.equal(dj2.retiredLocks?.[0]?.id, "oas.web", "doctor --json lists the stale retired lock");
   assert.match(dj2.retiredLocks[0].reason, /Remove the oas\.web entry/, "JSON lock report carries the fix");
 });
+
+test("retired oas.web: a STALE INSTALLED ARTIFACT never bypasses the retirement diagnostics", () => {
+  // The migration's own upgrade state: the user hasn't deleted the stale
+  // installed copy yet. Presence must not short-circuit retirement.
+  const base = temp(); const repo = join(base, "repo"); mkdirSync(repo);
+  const staleDir = join(repo, ".agents", "capabilities", "installed", "oas-web");
+  write(join(staleDir, "oas.json"), JSON.stringify({ capability: "oas.web", version: "0.9.6", description: "stale web panel copy" }));
+  write(join(repo, "oas-lock.json"), JSON.stringify({ capabilities: { "oas.web": { version: "0.9.6", integrity: "sha256-x", source: "marketplace:oas-web@0.9.6" } } }));
+  // config activation with the artifact present still throws the retirement guidance
+  write(join(repo, "oas-config.yaml"), `capabilities:\n  additive:\n    oas.web:\n      global: true\n`);
+  assert.throws(() => resolveOasConfig(repo), /retired[\s\S]*OAS Desktop app[\s\S]*Remove the oas\.web entry/,
+    "stale artifact does not let config activation succeed");
+  // explicit install with the artifact present must not exit "Already acquired"
+  const inst = spawnSync(process.execPath, [CLI, "install", "oas.web", "--dir", repo], { encoding: "utf8" });
+  assert.notEqual(inst.status, 0, "explicit install of a retired id fails even when an artifact is present");
+  assert.match(inst.stderr, /retired.*OAS Desktop app/s);
+  assert.doesNotMatch(inst.stdout, /Already acquired/, "presence does not short-circuit retirement");
+  // bare install must report RETIRED, never ok/present
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive: {}\n");
+  const restore = spawnSync(process.execPath, [CLI, "install", "--dir", repo], { encoding: "utf8" });
+  assert.match(restore.stdout, /RETIRED\s+oas\.web/s, "lock restore reports RETIRED despite the present artifact");
+  assert.doesNotMatch(restore.stdout, /ok\s+oas\.web/, "no 'ok' for a retired capability's stale artifact");
+  // doctor's acquired listing flags the stale artifact with the deletion hint
+  const doctor = spawnSync(process.execPath, [CLI, "doctor", repo], { encoding: "utf8" });
+  assert.match(doctor.stdout, /oas\.web[\s\S]*WARNING: stale artifact of a retired capability[\s\S]*delete/, "doctor names the stale installed copy");
+});
