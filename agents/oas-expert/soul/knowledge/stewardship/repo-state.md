@@ -64,10 +64,14 @@ than letting the file grow stale.
 
 ## In flight
 
-- `feature/desktop-app` at 8619eef (2026-07-24): final integration/review loop
-  before its feature PR. It adds the private Electron app under
-  `packages/desktop/` using oas.web as an explicitly transitional in-tree
-  backend. A separate fresh maintainer instance will review the PR.
+- PR #19 (`feature/desktop-app`) at 4dd2c12 (2026-07-24): maintainer round 1
+  RETURNED. Direction is accepted; correctness/mergeability is blocked by red
+  PR CI because the root test glob includes private desktop suites while the
+  workflow installs only root dependencies (8 missing-jsdom/marked failures).
+  Coordinator is to install desktop dependencies in CI, merge current main,
+  and return the exact green head. The branch adds the private Electron app
+  under `packages/desktop/` using oas.web as an explicitly transitional
+  in-tree backend.
 - Desktop succession follow-ups being briefed: standalone installer/release
   distribution, stability-gated oas.web + `oas pane` sunset, and migration into
   a durable desktop-engineer soul. Binding architecture is recorded in the
