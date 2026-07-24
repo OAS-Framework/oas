@@ -2,8 +2,16 @@
 type: Decision
 title: Control Pane v3 card architecture
 description: The Control Pane v3 redesign replaces the list+inspector split with a single identity-rail card stack, in-place expansion, variable-height scrolling, and full-screen zoom.
+status: superseded
 tags: [control-pane, design, tui]
+timestamp: 2026-07-24
 ---
+
+# Supersession
+
+The [desktop panel succession decision](/decisions/desktop-panel-succession.md)
+supersedes this TUI architecture as the continuing panel baseline. The concept
+remains a historical design and migration source.
 
 # Context
 

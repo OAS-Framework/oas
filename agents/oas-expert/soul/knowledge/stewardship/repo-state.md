@@ -3,7 +3,7 @@ type: Reference
 title: Repo state — the living picture of the OAS repo
 description: Always-current snapshot of what is on main, what is in flight (PRs, features, running instances), recent deliveries, and open threads. Every oas-expert instance updates the relevant subsection whenever it changes that reality (merge, release, spawn, retire, delivery).
 tags: [stewardship, repo-state, living]
-timestamp: 2026-07-22
+timestamp: 2026-07-24
 ---
 
 # Repo state — the living picture
@@ -64,7 +64,14 @@ than letting the file grow stale.
 
 ## In flight
 
-- (none)
+- `feature/desktop-app` at 8619eef (2026-07-24): final integration/review loop
+  before its feature PR. It adds the private Electron app under
+  `packages/desktop/` using oas.web as an explicitly transitional in-tree
+  backend. A separate fresh maintainer instance will review the PR.
+- Desktop succession follow-ups being briefed: standalone installer/release
+  distribution, stability-gated oas.web + `oas pane` sunset, and migration into
+  a durable desktop-engineer soul. Binding architecture is recorded in the
+  [desktop panel succession decision](/decisions/desktop-panel-succession.md).
 
 ## Recent deliveries
 

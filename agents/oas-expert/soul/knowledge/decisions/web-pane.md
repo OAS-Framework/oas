@@ -1,13 +1,20 @@
 ---
 type: Decision
 title: Web pane — browser control panel as the oas.web marketplace capability
-status: accepted
+status: superseded
 description: A local web control panel ("Slack of the agents") ships as the oas.web marketplace capability contributing `oas web` — a localhost Node server (no deps beyond node) reusing lib/control-pane/model.mjs; xterm-style session views via tmux capture-pane polling; talking to an agent types directly into its tmux session (send-keys), NOT via aweb — the interaction model is "you are at the agent's terminal"; Jira epic + roster panel via acli when the instance has jira meta. Electron rejected; Tauri/app-mode deferred as packaging.
 tags: [web, control-pane, ui, capability, tmux, jira]
-timestamp: 2026-07-17
+timestamp: 2026-07-24
 ---
 
 Decided with the founder, 2026-07-17.
+
+# Supersession
+
+The [desktop panel succession decision](/decisions/desktop-panel-succession.md)
+supersedes this concept's continuing product and capability-packaging direction.
+This concept remains the historical source for the localhost trust boundary,
+tmux-direct interaction, and backend behavior migrated into desktop.
 
 # What it is
 

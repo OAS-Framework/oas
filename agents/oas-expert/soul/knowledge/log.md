@@ -1,5 +1,10 @@
 # Knowledge Log
 
+## 2026-07-24
+* **Creation**: [Desktop succeeds the web and terminal panels as a standalone product](/decisions/desktop-panel-succession.md) — the Electron app becomes the sole panel and GitHub-Release product; its package owns the backend, installed `oas ... --json` gates administration, no-OAS mode observes existing deployments, and a stability-gated N/N+1 release sequence retires oas.web and oas pane after soul knowledge succession.
+* **Deprecation**: the [web pane](/decisions/web-pane.md), [standalone TUI](/decisions/control-pane-live-standalone-tui.md), [card architecture](/decisions/control-pane-v3-card-architecture.md), and [visual language](/decisions/control-pane-visual-language.md) decisions are retained as historical migration sources but superseded for continuing product direction by the desktop succession decision.
+* **Update**: the [roadmap](/roadmap/next-steps.md) now leads with desktop succession and renames the telemetry thread for the successor; [repo state](/stewardship/repo-state.md) records the feature integration and three follow-up briefs in flight.
+
 ## 2026-07-23
 * **Update**: skills/pr-review — added window-gone/no-verdict triage: check all-mail history and session logs before diagnosing a vanished reviewer as killed.
 * **Creation**: [Vanished agent window + no verdict — completed-but-event-dropped vs killed](/lessons/window-gone-completed-vs-killed-triage.md) — a vanished tmux window with no verdict awakening can mean clean self-retirement plus a channel delivery fault; distinguish it from an external kill via `aw mail inbox --show-all` and the session log tail.

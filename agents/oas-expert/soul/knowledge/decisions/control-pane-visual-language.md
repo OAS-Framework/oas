@@ -2,8 +2,16 @@
 type: Decision
 title: Control Pane visual language
 description: Design decisions from the Control Pane redesign: soul badges, branch chips, tree glyphs, three-line rows, and the feedback that drove them.
+status: superseded
 tags: [control-pane, design, tui]
+timestamp: 2026-07-24
 ---
+
+# Supersession
+
+The [desktop panel succession decision](/decisions/desktop-panel-succession.md)
+supersedes this TUI language as the continuing product baseline. The concept
+remains a historical design and migration source.
 
 # Context
 
