@@ -18,7 +18,7 @@ function fakeChild() {
 function makeHost(over = {}) {
   const state = { spawned: [], invalidations: 0 };
   const host = createServerHost({
-    spawnChild: (dirs) => { const c = fakeChild(); c.dirs = dirs; state.spawned.push(c); return c; },
+    spawnChild: (dirs, port) => { const c = fakeChild(); c.dirs = dirs; c.port = port; state.spawned.push(c); return c; },
     onInvalidate: () => { state.invalidations++; },
     forceKillMs: 50,
     ...over,
@@ -84,4 +84,32 @@ test("stop() kills and clears; owned() false afterwards", () => {
   assert.equal(stopped, c);
   assert.equal(host.owned(), false);
   assert.ok(c.killed.length >= 1);
+});
+
+test("occupied-port branch: the freshly selected port reaches the spawned child (real composition)", async () => {
+  // review wsadd4: main.mjs's spawnServer discarded onPort after the host
+  // extraction — on the occupied/incompatible path ensureServerOnPort picks
+  // a free port and calls spawnServer(newPort) BEFORE reassigning the
+  // module-level port, so the child launched on the OLD port. Model main's
+  // exact wiring: a module-level port, a spawnServer wrapper committing
+  // onPort, composed through the REAL ensureServerOnPort + createServerHost.
+  const { ensureServerOnPort } = await import("../packages/desktop/server-compat.mjs");
+  let modulePort = 4820;
+  const { state, host } = makeHost();
+  const spawnServer = (onPort) => { modulePort = onPort; return host.start(["/w/base"], onPort); };
+  const r = await ensureServerOnPort({
+    // occupied by an incompatible server:
+    panelWorkspaces: async () => [{ id: "/w/base", name: "base" }],
+    matchWorkspace: () => "/w/base",
+    probeVersion: async () => ({ ok: false, status: 404, body: null }),
+    local: { capability: "oas.web", version: "1" },
+    port: modulePort,
+    freePort: async (from) => from + 3,      // picks 4824
+    spawnServer,
+    log: () => {},
+  });
+  assert.equal(r.spawned, true);
+  assert.equal(r.port, 4824, "selection reported the new port");
+  assert.equal(state.spawned[0].port, 4824, "child launched on the NEW port, not the occupied one");
+  assert.equal(modulePort, 4824, "module port committed before spawn — probes and proxy agree");
 });

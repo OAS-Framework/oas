@@ -15,7 +15,7 @@
 //    state at transition start via onInvalidate() — stale entries from the
 //    outgoing server must never validate anything.
 export function createServerHost(io) {
-  // io: spawnChild(dirs) -> child (kill(sig?), once/on("exit", cb));
+  // io: spawnChild(dirs, port) -> child (kill(sig?), once/on("exit", cb));
   //     onInvalidate() -> void (clear advertised/trust caches)
   let child = null;
   let transition = false;
@@ -30,12 +30,12 @@ export function createServerHost(io) {
     owned: () => !!child || transition,
     inTransition: () => transition,
     current: () => child,
-    /** Start the first child (no predecessor). */
-    start(dirs) {
-      return adopt(io.spawnChild(dirs));
+    /** Start the first child (no predecessor) on `port`. */
+    start(dirs, port) {
+      return adopt(io.spawnChild(dirs, port));
     },
-    /** Stop the owned child (awaiting real exit) and start one with `dirs`. */
-    async replace(dirs) {
+    /** Stop the owned child (awaiting real exit) and start one with `dirs` on `port`. */
+    async replace(dirs, port) {
       transition = true;
       io.onInvalidate(); // trust state belongs to the outgoing server
       try {
@@ -48,7 +48,7 @@ export function createServerHost(io) {
             try { old.kill(); } catch { clearTimeout(t); done(); }
           });
         }
-        adopt(io.spawnChild(dirs));
+        adopt(io.spawnChild(dirs, port));
       } finally {
         transition = false;
       }

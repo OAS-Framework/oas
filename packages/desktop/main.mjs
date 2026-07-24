@@ -44,10 +44,10 @@ const workspaceDirs = [WORKSPACE];
 // Server host (server-host.mjs): owns the child lifecycle, the ownership-
 // through-transition invariant, and trust-state invalidation on replace.
 const serverHost = createServerHost({
-  spawnChild: (dirs) => {
+  spawnChild: (dirs, onPort) => {
     const bin = join(REPO_ROOT, "capabilities", "oas-web", "bin", "oas-web.mjs");
-    if (!existsSync(bin)) throw new Error(`oas-web server not found at ${bin} and no usable server on port ${port}`);
-    const child = spawn(process.execPath, [bin, "start", "--port", String(port), ...dirs.flatMap((d) => ["--dir", d])], {
+    if (!existsSync(bin)) throw new Error(`oas-web server not found at ${bin} and no usable server on port ${onPort}`);
+    const child = spawn(process.execPath, [bin, "start", "--port", String(onPort), ...dirs.flatMap((d) => ["--dir", d])], {
       stdio: ["ignore", "pipe", "pipe"],
       cwd: WORKSPACE,
     });
@@ -108,13 +108,18 @@ async function freePort(from) {
 }
 
 function spawnServer(onPort, dirs = workspaceDirs) {
-  return serverHost.start(dirs);
+  // ensureServerOnPort selects the port BEFORE assigning the module-level
+  // `port` — commit it here so the child, readiness probes, and the API
+  // proxy all agree (review wsadd4: the extraction discarded onPort and the
+  // child launched against the old occupied port).
+  port = onPort;
+  return serverHost.start(workspaceDirs === dirs ? [...dirs] : dirs, onPort);
 }
 
 /** Replace the owned server — the host owns exit-await/ownership/trust
- * invariants; this wrapper just binds the dirs. */
+ * invariants; this wrapper binds the dirs and the CURRENT port. */
 async function replaceServer(dirs) {
-  await serverHost.replace(dirs);
+  await serverHost.replace(dirs, port);
 }
 
 async function ensureServer() {
