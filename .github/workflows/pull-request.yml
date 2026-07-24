@@ -23,9 +23,22 @@ jobs:
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            packages/desktop/package-lock.json
 
       - name: Install supported-node dependencies
         run: npm ci
+
+      - name: Install desktop package dependencies
+        # Root `npm test` discovers packages/desktop suites (jsdom/marked/
+        # dompurify imports). The Electron binary is not needed for tests —
+        # skip its download; postinstall builds the renderer vendor bundle
+        # (esbuild) as part of ci.
+        run: npm ci
+        working-directory: packages/desktop
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
 
       - name: Unit and integration tests
         run: npm test
