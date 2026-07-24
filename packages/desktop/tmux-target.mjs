@@ -141,6 +141,11 @@ export function openTerm(spec, io) {
     io.tmux(["set-option", "-t", viewer, "prefix", "None"]);
     io.tmux(["set-option", "-t", viewer, "prefix2", "None"]);
     io.tmux(["set-option", "-t", viewer, "key-table", "oasdesk-locked"]);
+    // key tables are SERVER-GLOBAL and bind-key only replaces its own key —
+    // a stale/custom binding in oasdesk-locked (from an older app run or a
+    // user's config) would survive into every viewer. Clear the app-owned
+    // table first, then install exactly the allow-list.
+    io.tmux(["unbind-key", "-a", "-q", "-T", "oasdesk-locked"]);
     for (const binding of LOCKED_TABLE_BINDINGS) {
       io.tmux(["bind-key", "-T", "oasdesk-locked", ...binding]);
     }
