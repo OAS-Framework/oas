@@ -106,6 +106,7 @@ export function createWorkspaceSwitcher({
       button.setAttribute("role", "radio");
       button.setAttribute("aria-checked", String(selectedId === id));
       button.tabIndex = selectedId === id || (!selectedIsVisible && index === 0) ? 0 : -1;
+      button.disabled = adding;
       button.title = id;
       const radio = document.createElement("span");
       radio.className = "ws-radio";
@@ -127,6 +128,7 @@ export function createWorkspaceSwitcher({
       }
       button.append(radio, copy);
       button.addEventListener("click", () => {
+        if (adding) return;
         selected = candidate;
         confirm.disabled = false;
         renderSuggestions(id);
@@ -146,6 +148,8 @@ export function createWorkspaceSwitcher({
     browse.disabled = value;
     cancel.disabled = value;
     closeButton.disabled = value;
+    modalSearch.disabled = value;
+    for (const suggestion of suggestionsEl.querySelectorAll(".ws-suggestion")) suggestion.disabled = value;
     confirm.disabled = value || !selected;
   };
   const closeModal = (restore = true) => {
@@ -199,6 +203,7 @@ export function createWorkspaceSwitcher({
     ? `${result.reason || "That workspace is no longer suggested."} Use Browse… to choose it explicitly.`
     : result?.reason || fallback;
   const onBrowse = async () => {
+    if (adding) return;
     const token = ++modalGeneration;
     const previousStatus = status.textContent;
     setAdding(true);
@@ -217,7 +222,7 @@ export function createWorkspaceSwitcher({
     }
   };
   const onConfirm = async () => {
-    if (!selected) return;
+    if (!selected || adding) return;
     const token = ++modalGeneration;
     const choice = selected;
     setAdding(true);
@@ -262,7 +267,7 @@ export function createWorkspaceSwitcher({
     items[next].focus();
   };
   const onSuggestionKey = (event) => {
-    if (!["ArrowDown", "ArrowUp", "ArrowRight", "ArrowLeft", "Home", "End"].includes(event.key)) return;
+    if (adding || !["ArrowDown", "ArrowUp", "ArrowRight", "ArrowLeft", "Home", "End"].includes(event.key)) return;
     const target = event.target.closest?.(".ws-suggestion");
     if (!target) return;
     event.preventDefault();

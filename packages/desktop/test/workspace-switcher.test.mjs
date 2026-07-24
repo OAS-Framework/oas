@@ -170,11 +170,13 @@ test("not-suggested failure explicitly points to the picker", async () => {
   dom.window.close();
 });
 
-test("pending add cannot be dismissed and successful completion always reconciles", async () => {
+test("pending add is single-flight, cannot be dismissed, and always reconciles", async () => {
   const addGate = deferred();
+  const C = { id: "/org-c/tools", path: "/org-c/tools", name: "tools" };
+  const mutationCalls = [];
   const { dom, document, selected, controller } = setup({
-    discoverSuggestions: async () => ({ suggestions: [A] }),
-    addWorkspace: () => addGate.promise,
+    discoverSuggestions: async () => ({ stale: false, suggestions: [A, C] }),
+    addWorkspace: (path) => { mutationCalls.push(path); return addGate.promise; },
   });
   controller.begin()(B, [B]);
   await controller.openModal();
@@ -185,6 +187,14 @@ test("pending add cannot be dismissed and successful completion always reconcile
   assert.equal(dialog.getAttribute("aria-busy"), "true");
   assert.equal(document.getElementById("ws-cancel").disabled, true);
   assert.equal(document.getElementById("ws-dialog-close").disabled, true);
+  assert.equal(document.getElementById("ws-suggestion-search").disabled, true);
+  const suggestionButtons = [...document.querySelectorAll(".ws-suggestion")];
+  assert.deepEqual(suggestionButtons.map((button) => button.disabled), [true, true]);
+  suggestionButtons[1].click();
+  suggestionButtons[0].dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+  document.getElementById("ws-confirm").dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+  assert.deepEqual(mutationCalls, ["/org-a/oas"], "busy UI and handler guard enforce one mutation");
+  assert.equal(document.querySelector('.ws-suggestion[aria-checked="true"]').dataset.workspaceId, "/org-a/oas");
   dialog.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
   modal.dispatchEvent(new dom.window.MouseEvent("mousedown", { bubbles: true }));
   assert.equal(modal.hidden, false, "Escape and backdrop cannot abandon an in-flight mutation");

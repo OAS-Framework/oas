@@ -128,7 +128,10 @@ body {
                  border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--fg);
                  font: inherit; text-align: left; cursor: pointer; }
 .ws-suggestion:hover, .ws-suggestion:focus-visible { background: var(--surface-2); outline: 0; }
+.ws-suggestion:disabled { cursor: default; }
+.ws-suggestion:disabled:hover { background: transparent; }
 .ws-suggestion[aria-checked="true"] { border-color: var(--accent); background: var(--sel); }
+.ws-suggestion[aria-checked="true"]:disabled:hover { background: var(--sel); }
 .ws-radio { width: 14px; height: 14px; margin-top: 2px; border: 1px solid var(--muted); border-radius: 50%; }
 .ws-suggestion[aria-checked="true"] .ws-radio { border: 4px solid var(--accent); }
 .ws-suggestion-copy { min-width: 0; }
