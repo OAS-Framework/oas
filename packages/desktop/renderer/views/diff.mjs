@@ -81,18 +81,19 @@ const STYLE = `
 .dfv-head button { font: inherit; cursor: pointer; }
 .dfv-files { list-style: none; margin: 0 0 16px; padding: 0; font-family: -apple-system, "Segoe UI", sans-serif; font-size: 13px; }
 .dfv-files li { padding: 2px 4px; cursor: pointer; border-radius: 4px; display: flex; gap: 8px; }
-.dfv-files li:hover { background: #8881; }
+.dfv-files li:hover { background: var(--surface-2); }
 .dfv-files .st { width: 1.2em; text-align: center; font-weight: 700; }
-.dfv-files .st-A { color: #2a2; } .dfv-files .st-D { color: #c33; } .dfv-files .st-M, .dfv-files .st-R { color: #b80; }
-.dfv-files .plus { color: #2a2; } .dfv-files .minus { color: #c33; }
-.dfv-file { margin-bottom: 20px; border: 1px solid #8883; border-radius: 6px; overflow: hidden; }
-.dfv-file > .fname { padding: 6px 10px; background: #8881; font-weight: 600; }
+.dfv-files .st-A { color: var(--ok); } .dfv-files .st-D { color: var(--danger); }
+.dfv-files .st-M, .dfv-files .st-R { color: var(--warn); }
+.dfv-files .plus { color: var(--ok); } .dfv-files .minus { color: var(--danger); }
+.dfv-file { margin-bottom: 20px; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.dfv-file > .fname { padding: 6px 10px; background: var(--surface-2); font-weight: 600; }
 .dfv table { border-collapse: collapse; width: 100%; table-layout: fixed; }
 .dfv td { padding: 0 8px; vertical-align: top; white-space: pre-wrap; word-break: break-all; }
-.dfv td.no { width: 3.5em; text-align: right; opacity: .5; user-select: none; white-space: nowrap; }
-.dfv tr.add td.code, .dfv td.cell-add { background: rgba(80, 200, 100, .14); }
-.dfv tr.del td.code, .dfv td.cell-del { background: rgba(230, 80, 80, .13); }
-.dfv tr.hunk td { background: #8882; opacity: .7; padding: 2px 8px; }
+.dfv td.no { width: 3.5em; text-align: right; color: var(--muted); user-select: none; white-space: nowrap; }
+.dfv tr.add td.code, .dfv td.cell-add,
+.dfv tr.del td.code, .dfv td.cell-del { background: var(--surface-2); }
+.dfv tr.hunk td { background: var(--sel); color: var(--fg); padding: 2px 8px; }
 .dfv .hljs { background: transparent; }
 `;
 

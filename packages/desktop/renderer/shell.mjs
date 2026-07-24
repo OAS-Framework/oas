@@ -6,7 +6,7 @@
 // The shell owns tabs/navigation and provides ctx. The full roster (with
 // chat transcript, spawn, jira) lives in the ported views — the shell chrome
 // stays a thin rail so nothing is duplicated.
-import { currentWorkspace, groupInstances, adoptWorkspace, onWorkspaceChange } from "./views/common.mjs";
+import { currentWorkspace, setWorkspace, groupInstances, adoptWorkspace, onWorkspaceChange } from "./views/common.mjs";
 import {
   initTheme, toggleTheme, xtermTheme, onThemeChange,
   terminalTypography, setTerminalFontSize, setTerminalFontFamily, onTerminalTypographyChange,
@@ -16,8 +16,10 @@ import { createViewLifecycle } from "./view-lifecycle.mjs";
 import { reserveKey, whenKeyFree } from "./tab-keys.mjs";
 import { createTerminalTab } from "./terminal-tab.mjs";
 import { createTabChrome, tabKeyAction, focusAfterLastTab } from "./tab-a11y.mjs";
+import { createIntentGate, prepareOwnedOpen } from "./open-intent.mjs";
+import { createWorkspaceSwitcher } from "./workspace-switcher.mjs";
 import {
-  collapseKey, hasInstanceChildren, filterInstanceTree, instanceVisibleInTree,
+  collapseKey, hasInstanceChildren, instanceRepoLabel, treeGuideSegments, filterInstanceTree, instanceVisibleInTree,
   captureTreeRenderState, configureDisclosure, rosterResponseOwns,
 } from "./instance-tree.mjs";
 import {
@@ -42,7 +44,9 @@ const ctx = {
   openBrain: (agent) => openBrainTab(agent),
   // additive shell affordance (views feature-detect it): switch the STAGE
   // to a named sidebar view (stage views are not tabs — see below).
-  openView: (name) => name === "instances" ? showInstances() : showStage(name),
+  openView: (name) => name === "instances"
+    ? contextRosterEl?.querySelector(".ctx-filter")?.focus()
+    : showStage(name),
 };
 
 // ── stage: the sidebar-driven main surface ──────────────────────────
@@ -120,6 +124,17 @@ let contextFilter = "";
 let contextInstances = [];
 let contextWorkspace = "";
 const collapsedInstances = new Set();
+const desktopBridge = window.oasDesktop;
+const unavailableWorkspaceService = () => Promise.reject(new Error("Workspace discovery is not available in this desktop service yet."));
+const workspaceLabel = createWorkspaceSwitcher({
+  document,
+  selectWorkspace: setWorkspace,
+  // Feature-detected while tui-dev lands the approved privileged contract.
+  // The final adapter names are intentionally isolated to these three lines.
+  discoverSuggestions: desktopBridge.workspaceSuggestions || unavailableWorkspaceService,
+  addWorkspace: desktopBridge.workspaceAdd || unavailableWorkspaceService,
+  pickWorkspace: desktopBridge.workspacePick || unavailableWorkspaceService,
+});
 
 function initContextRoster() {
   contextRosterEl = document.getElementById("instance-roster");
@@ -139,6 +154,7 @@ function setSidebarMode(mode) {
 async function refreshContextRoster() {
   if (!contextRosterEl) return;
   const myGen = ++contextRosterGen;
+  const commitWorkspaceLabel = workspaceLabel.begin();
   const ws = currentWorkspace();
   const owns = (responseWs = ws) => rosterResponseOwns({
     dispatchWorkspace: ws,
@@ -158,6 +174,7 @@ async function refreshContextRoster() {
   const resolvedWs = panel.workspace?.id || ws;
   if (!owns(resolvedWs)) return;
   if (!currentWorkspace() && resolvedWs) adoptWorkspace(resolvedWs);
+  commitWorkspaceLabel(panel.workspace, panel.workspaces);
   contextWorkspace = resolvedWs;
   contextInstances = panel.instances || [];
   renderContextRoster(contextInstances);
@@ -195,15 +212,17 @@ function renderContextRoster(instances) {
         const hasChildren = hasInstanceChildren(instances, i.instance);
         const collapsed = collapsedInstances.has(key);
 
-        // One guide per REAL ancestry depth — not a one-level .child class.
+        // VS Code-style ancestry guides: exhausted ancestor branches vanish;
+        // the final sibling stops at its elbow instead of implying another row.
         const guides = document.createElement("span");
         guides.className = "ctx-guides";
-        for (let d = 0; d < (i.depth || 0); d++) {
+        treeGuideSegments(items, i).forEach((segment, d) => {
+          if (segment === "none") return;
           const guide = document.createElement("span");
-          guide.className = "ctx-guide";
+          guide.className = `ctx-guide ${segment}`;
           guide.style.left = `${10 + d * 14}px`;
           guides.append(guide);
-        }
+        });
         const disclosure = document.createElement("button");
         disclosure.type = "button";
         disclosure.className = `ctx-disclosure${hasChildren ? "" : " empty"}`;
@@ -236,8 +255,9 @@ function renderContextRoster(instances) {
         name.className = "ctx-name";
         name.textContent = i.instance;
         const meta = document.createElement("span");
-        meta.className = "ctx-meta";
-        meta.textContent = i.task || i.agent || "";
+        meta.className = "ctx-meta ctx-repo-label";
+        meta.textContent = instanceRepoLabel(i);
+        meta.title = `Repository: ${meta.textContent}`;
         copy.append(name, meta);
         row.append(dot, copy);
         row.addEventListener("click", () => openTerminalTab(i.instance));
@@ -249,28 +269,16 @@ function renderContextRoster(instances) {
   restoreTreeState();
 }
 
-async function showInstances() {
+function showTerminalContext() {
   setSidebarMode("instances");
-  setNavActive("instances");
   refreshContextRoster();
   const openTerms = terminalTabsForWorkspace(tabs, currentWorkspace());
   if (openTerms.length) { activateTab(openTerms.at(-1)[0]); return; }
+  // With the tree permanently visible there is no standalone Instances stage.
+  // Closing/switching away from the last terminal restores the prior surface.
+  setSidebarMode(stage?.name === "spawn" ? "souls" : "overview");
   showTabLayer(false);
-  if (stage?.name === "instances") return;
-  const myOp = ++stageOp;
-  const prev = stage;
-  stage = null;
-  if (prev) {
-    try { await prev.life.close(); } catch (e) { console.error(e); }
-    prev.el.remove();
-  }
-  if (myOp !== stageOp) return;
-  const el = document.createElement("div");
-  el.className = "instance-landing";
-  el.innerHTML = `<div><span class="big">⌁</span><h2>Select an instance</h2><p>Choose a running instance from the sidebar to open its live terminal.</p></div>`;
-  stageHost.innerHTML = "";
-  stageHost.append(el);
-  stage = { name: "instances", el, life: { close: async () => {} } };
+  setNavActive(stage?.name || "hierarchy");
 }
 
 // ── tabs ──────────────────────────────────────────────────────────────────
@@ -279,6 +287,7 @@ const tabhost = document.getElementById("tabhost");
 const tabs = new Map(); // id -> { tabEl, triggerEl, closeEl, paneEl, title, key, onClose, onShow }
 let nextTabId = 1;
 let activeTab = null;
+const brainIntents = createIntentGate();
 
 /** key: optional dedup key — activating an existing tab instead of opening a
  * twin. View modules keep module-level state (they are singletons by design),
@@ -324,7 +333,7 @@ function activateTab(id) {
   activeTab = id;
   if (current?.kind === "terminal") {
     setSidebarMode("instances");
-    setNavActive("instances");
+    setNavActive(null);
     refreshContextRoster();
   } else if (current?.kind === "brain") {
     setSidebarMode("souls");
@@ -362,7 +371,7 @@ function closeTab(id, restoreFocus = false) {
       activateTab(fallback[0]);
       if (restoreFocus) fallback[1].triggerEl.focus();
     } else if (t.kind === "terminal") {
-      showInstances();
+      showTerminalContext();
       if (restoreFocus) focusAfterLastTab("terminal", {
         instancesEntry: contextRosterEl?.querySelector(".ctx-filter"),
       });
@@ -381,18 +390,25 @@ function closeTab(id, restoreFocus = false) {
 
 // ── view host: load ./views/<name>.mjs, mount into a tab ─────────────────
 async function openBrainTab(agent) {
-  // brain.mjs is intentionally one live mount: selecting another soul
-  // replaces the previous brain tab instead of accumulating stale selectors.
+  // brain.mjs is intentionally one live mount. Each click supersedes every
+  // earlier async open BEFORE waiting for deferred cleanup/module loading.
+  const owns = brainIntents.begin();
   for (const [id, t] of tabs) if (t.kind === "brain") closeTab(id);
-  return openViewTab("brain", `◈ ${agent}`, { agent }, "view:brain", "brain");
+  return openViewTab("brain", `◈ ${agent}`, { agent }, "view:brain", "brain", owns);
 }
 
-async function openViewTab(name, title, extra = {}, key = `view:${name}`, kind = name === "markdown" ? "file" : "artifact") {
-  // A reopen during a closed tab's deferred cleanup queues here — never dropped.
-  await whenKeyFree(key);
+async function openViewTab(name, title, extra = {}, key = `view:${name}`,
+  kind = name === "markdown" ? "file" : "artifact", owns = () => true) {
   let mod;
-  try { mod = await import(`./views/${name}.mjs`); }
-  catch (e) {
+  try {
+    mod = await prepareOwnedOpen({
+      owns,
+      waitForKey: () => whenKeyFree(key),
+      load: () => import(`./views/${name}.mjs`),
+    });
+    if (!mod) return;
+  } catch (e) {
+    if (!owns()) return;
     const made = addTab({ title: `${title} (missing)`, key });
     if (made) made.paneEl.innerHTML = `<div class="placeholder"><h2>${name}</h2><div>view module failed to load: ${e.message}</div></div>`;
     return;
@@ -414,17 +430,20 @@ async function openViewTab(name, title, extra = {}, key = `view:${name}`, kind =
   made.paneEl.append(el);
   try {
     await life.mounted(el, { ...ctx, ...extra });
+    if (!owns()) return;
   }
-  catch (e) { el.innerHTML = `<div class="placeholder"><h2>${name}</h2><div>mount failed: ${e.message}</div></div>`; }
+  catch (e) {
+    if (owns()) el.innerHTML = `<div class="placeholder"><h2>${name}</h2><div>mount failed: ${e.message}</div></div>`;
+  }
 }
 
 // ── integrated terminal tab (the shell's own flagship view) ──────────────
 const pendingTerms = new Set(); // keys reserved while a roster fetch is in flight
 async function openTerminalTab(instance) {
-  // Terminal always enters the Instances context: one shell sidebar with the
-  // compact recursive roster, terminal alone in the main area.
+  // A tree selection opens its terminal directly; there is no standalone
+  // Instances destination now that the persistent roster is always present.
   setSidebarMode("instances");
-  setNavActive("instances");
+  setNavActive(null);
   refreshContextRoster();
   // Honor the views' workspace bus: an instance selected in a secondary
   // (server-advertised) workspace must resolve against THAT roster, and a
@@ -509,13 +528,12 @@ async function openTerminalTabInner(instance, ws, key) {
 }
 
 // ── nav rail ──────────────────────────────────────────────────────────────
-// Three first-class surfaces (human directive): the agent hierarchy (home),
-// souls browse+spawn, and agent brains — plus the instance transcript list.
+// Two first-class navigation surfaces: hierarchy and soul roster. Instances
+// live permanently below them; selecting one opens its terminal artifact.
 // Diff and Jira surfaces are intentionally NOT wired (modules stay dormant
 // in the tree per the coordinator's directive).
 const NAV = [
   { name: "hierarchy", label: "Active overview", icon: "⌘", title: "Active overview" },
-  { name: "instances", label: "Instances", icon: "◉", title: "Instances" },
   { name: "spawn", label: "Soul roster", icon: "✦", title: "Soul roster" },
 ];
 const navEl = document.getElementById("nav");
@@ -527,7 +545,7 @@ for (const v of NAV) {
   b.innerHTML = `<span class="icon"></span><span class="label"></span>`;
   b.querySelector(".icon").textContent = v.icon;
   b.querySelector(".label").textContent = v.label;
-  b.addEventListener("click", () => v.name === "instances" ? showInstances() : showStage(v.name));
+  b.addEventListener("click", () => showStage(v.name));
   navEl.append(b);
 }
 
@@ -552,7 +570,6 @@ const palette = createPalette({
   openTerminal: (name) => openTerminalTab(name),
   commands: [
     { label: "View: Active overview", run: () => showStage("hierarchy") },
-    { label: "View: Instances", run: () => showInstances() },
     { label: "View: Soul roster", run: () => showStage("spawn") },
     { label: "Theme: toggle light/dark", run: () => toggleTheme() },
     { label: "Terminal: increase font size", run: () => setTerminalFontSize(terminalTypography().fontSize + 1) },
@@ -573,20 +590,17 @@ window.addEventListener("keydown", (e) => {
   }
 });
 
-document.getElementById("ws-name").textContent = "";
-api("/api/panel").then((p) => {
-  document.getElementById("ws-name").textContent = p.workspace?.name ? `· ${p.workspace.name}` : "";
-}).catch(() => {});
-
 // Persistent recursive instance tree: always available below the three nav
 // surfaces, with no second/contextual sidebar and no width jump.
 initContextRoster();
 onWorkspaceChange(() => {
   contextRosterGen++;
+  brainIntents.invalidate();
+  workspaceLabel.reset();
   contextInstances = [];
   contextWorkspace = currentWorkspace();
   updateContextTabs();
-  if (sidebarMode === "instances") showInstances();
+  if (sidebarMode === "instances") showTerminalContext();
   else refreshContextRoster();
 });
 setInterval(() => refreshContextRoster(), 4000);

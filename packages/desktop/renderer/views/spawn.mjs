@@ -22,7 +22,7 @@ const CSS = `
              padding: 14px 16px; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 8px;
              text-align: left; font: inherit; color: var(--fg); }
 .soul-card:hover { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); }
-.soul-card.attached { opacity: .72; }
+.soul-card.attached { border-style: dashed; background: var(--surface-2); }
 .soul-card.open { border-color: var(--accent); background: var(--sel); }
 .soul-card .sname { font-weight: 650; font-size: 13.5px; display: flex; align-items: center; gap: 8px; }
 .soul-card .sname .glyph { color: var(--accent); }

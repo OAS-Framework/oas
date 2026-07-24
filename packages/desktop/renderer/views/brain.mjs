@@ -47,7 +47,7 @@ const CSS = `
 .brain-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); flex: none; }
 .brain-dot.on { background: var(--ok); }
 .brain-status { padding: 48px 24px; color: var(--muted); text-align: center; font-size: 13.5px; }
-.brain-status .big { font-size: 32px; display: block; margin-bottom: 12px; opacity: .5; }
+.brain-status .big { font-size: 32px; display: block; margin-bottom: 12px; color: var(--faint); }
 `;
 
 function card(title, count, innerEl) {
