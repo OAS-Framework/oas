@@ -220,21 +220,30 @@ test("capability dispatch --json: broken manifests and malformed command values 
   assert.notEqual(r.status, 0);
   const doc1 = parseOnly(r.stdout); // throws if stdout is empty or contaminated
   assert.equal(doc1.ok, false);
-  assert.ok(["E_CAPABILITY_BROKEN", "E_CONFIG_BROKEN"].includes(doc1.error.code), doc1.error.code);
+  // Manifest discovery failures are deliberately classified E_CAPABILITY_BROKEN
+  // — assert the exact code so a classification regression cannot pass.
+  assert.equal(doc1.error.code, "E_CAPABILITY_BROKEN");
 
-  // Reviewer repro 2: a manifest command value that is not a string
-  // (commands: { ping: 42 }) — previously crashed at .split() with no envelope.
+  // Reviewer repro 2: manifest command values that are declared but invalid —
+  // non-string (42), empty string, and falsy non-strings (0/false/null) must
+  // all be E_CAPABILITY_BROKEN, never E_UNKNOWN_COMMAND (the key IS declared).
   const base2 = temp(); const { repo: repo2 } = fixtureSoul(base2);
   const dir = join(repo2, ".agents", "capabilities", "owned", "ops");
   write(join(repo2, "oas-config.yaml"), "name: fixture\n");
-  write(join(dir, "oas.json"), JSON.stringify({ capability: "acme.ops", command: "ops", version: "1.0.0", compatibility: { oas: ">=0.6.2" }, description: "Ops.", commands: { ping: 42 } }));
   const home2 = join(base2, "instance"); mkdirSync(home2);
   write(join(home2, "instance.json"), JSON.stringify({ repo: repo2, capabilities: [{ id: "acme.ops" }] }));
-  r = spawnSync(process.execPath, [CLI, "ops", "ping", "--json"], { cwd: home2, encoding: "utf8", env: { ...process.env, PI_AGENT_HOME: home2 } });
+  for (const bad of [42, "", 0, false, null]) {
+    write(join(dir, "oas.json"), JSON.stringify({ capability: "acme.ops", command: "ops", version: "1.0.0", compatibility: { oas: ">=0.6.2" }, description: "Ops.", commands: { ping: bad } }));
+    r = spawnSync(process.execPath, [CLI, "ops", "ping", "--json"], { cwd: home2, encoding: "utf8", env: { ...process.env, PI_AGENT_HOME: home2 } });
+    assert.notEqual(r.status, 0, `commands.ping=${JSON.stringify(bad)} exits nonzero`);
+    const doc2 = parseOnly(r.stdout);
+    assert.equal(doc2.error.code, "E_CAPABILITY_BROKEN", `commands.ping=${JSON.stringify(bad)} → E_CAPABILITY_BROKEN (got ${doc2.error.code})`);
+    assert.match(doc2.error.message, /non-empty string/);
+  }
+  // …while a genuinely undeclared subcommand stays E_UNKNOWN_COMMAND.
+  r = spawnSync(process.execPath, [CLI, "ops", "undeclared", "--json"], { cwd: home2, encoding: "utf8", env: { ...process.env, PI_AGENT_HOME: home2 } });
   assert.notEqual(r.status, 0);
-  const doc2 = parseOnly(r.stdout);
-  assert.equal(doc2.error.code, "E_CAPABILITY_BROKEN");
-  assert.match(doc2.error.message, /non-empty string/);
+  assert.equal(parseOnly(r.stdout).error.code, "E_UNKNOWN_COMMAND");
 });
 
 test("oas okf harvest --json end-to-end through the CLI dispatcher", () => {

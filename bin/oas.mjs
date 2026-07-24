@@ -827,7 +827,10 @@ function capabilityCommand() {
     if (!trust.trusted) bail("E_CAPABILITY_BLOCKED", `${m.capability} executable command is blocked: ${trust.reason}`);
     const sub = args[1];
     const cmds = Object.keys(m.commands);
-    if (!sub || !m.commands[sub]) {
+    // Distinguish an ABSENT key from a declared-but-invalid value: a manifest
+    // entry of "" / 0 / false / null is a broken capability, not an unknown
+    // command (it is listed in cmds).
+    if (!sub || !Object.prototype.hasOwnProperty.call(m.commands, sub)) {
       if (JSON_MODE) jsonFail("E_UNKNOWN_COMMAND", `oas ${cmd}: ${sub ? `unknown command "${sub}"` : "missing command"} — commands: ${cmds.join(", ") || "(none)"}`);
       console.error(`oas ${cmd} — commands: ${cmds.join(", ") || "(none)"}`);
       process.exit(sub ? 1 : 0);
