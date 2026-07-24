@@ -1,7 +1,7 @@
 ---
 type: Lesson
 title: Release workflow static tests pin sequencing by string position
-description: A cheap, robust way to regression-test a GitHub Actions release workflow's binding ordering guarantees (exact-tag checkout, build-before-publish, GH-Release-after-npm, bump coverage) is a node:test file asserting indexOf ordering and regexes over the raw YAML.
+description: A cheap, robust way to regression-test a GitHub Actions release workflow's binding ordering guarantees is a node:test file asserting indexOf ordering and regexes over raw YAML, but script references still need spawned package-script tests.
 tags: [release, ci, tests, workflow]
 timestamp: 2026-07-24
 ---
@@ -24,3 +24,10 @@ PR covering all three manifests. Instead of executing the workflow, a static
 
 This catches accidental reorderings in review-time edits without needing act
 or a real tag. Keep step names stable — the tests key on them.
+
+Static text assertions cannot prove that package scripts named by the workflow
+exist. A workflow can pass YAML regex tests while invoking `npm test` or
+`npm run dist` in a package that has no such script. Cover those references
+with a test that actually spawns the package script, and mutation-check the
+test before trusting it: break the script or script name and confirm the test
+fails.
