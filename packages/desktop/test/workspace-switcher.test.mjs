@@ -137,6 +137,38 @@ test("picker success uses its completed add result and picker cancellation is si
   dom.window.close();
 });
 
+test("picker cancellation does not orphan an in-flight discovery loading state", async () => {
+  const discovery = deferred();
+  const { dom, document, controller } = setup({
+    discoverSuggestions: () => discovery.promise,
+    pickWorkspace: async () => ({ ok: false, code: "cancelled", reason: "not rendered" }),
+  });
+  controller.begin()(B, [B]);
+  const opening = controller.openModal();
+  document.getElementById("ws-browse").click();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(document.querySelector(".ws-dialog").getAttribute("aria-busy"), "false");
+  assert.equal(document.getElementById("ws-dialog-status").textContent, "Finding OAS workspaces…",
+    "loading remains truthful while the still-owned discovery is pending");
+  discovery.resolve({ stale: false, suggestions: [A] });
+  await opening;
+  assert.equal(document.getElementById("ws-dialog-status").textContent, "1 suggested workspace");
+  assert.equal(document.querySelector(".ws-suggestion").dataset.workspaceId, "/org-a/oas");
+  dom.window.close();
+});
+
+test("same-generation stale discovery settles to a neutral idle state", async () => {
+  const { dom, document, controller } = setup({
+    discoverSuggestions: async () => ({ stale: true, suggestions: [] }),
+  });
+  controller.begin()(B, [B]);
+  await controller.openModal();
+  assert.equal(document.getElementById("ws-dialog-status").textContent, "No current workspace suggestions.");
+  assert.equal(document.getElementById("ws-dialog-status").classList.contains("error"), false);
+  assert.equal(document.querySelector(".ws-dialog").getAttribute("aria-busy"), "false");
+  dom.window.close();
+});
+
 test("resolved add domain failure renders prose and never switches", async () => {
   const { dom, document, selected, controller } = setup({
     discoverSuggestions: async () => ({ stale: false, suggestions: [A] }),

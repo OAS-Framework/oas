@@ -27,8 +27,9 @@ export function createWorkspaceSwitcher({
   const modalSearch = q("ws-suggestion-search"), suggestionsEl = q("ws-suggestions");
   const status = q("ws-dialog-status"), confirm = q("ws-confirm"), browse = q("ws-browse");
   const cancel = q("ws-cancel"), closeButton = q("ws-dialog-close");
-  let generation = 0, modalGeneration = 0, activeId = "", workspaces = [], suggestions = [], selected = null;
-  let adding = false;
+  let generation = 0, modalGeneration = 0, discoveryGeneration = 0;
+  let activeId = "", workspaces = [], suggestions = [], selected = null;
+  let adding = false, discoveryState = { message: "", error: false };
 
   const setStatus = (message = "", error = false) => {
     status.textContent = message;
@@ -142,6 +143,11 @@ export function createWorkspaceSwitcher({
     if (!visible.length && !status.textContent) setStatus("No matching OAS workspaces found.");
   };
 
+  const paintDiscoveryState = () => {
+    setStatus(discoveryState.message, discoveryState.error);
+    renderSuggestions();
+  };
+
   const setAdding = (value) => {
     adding = value;
     dialog.setAttribute("aria-busy", String(value));
@@ -155,6 +161,7 @@ export function createWorkspaceSwitcher({
   const closeModal = (restore = true) => {
     if (adding) return false;
     modalGeneration++;
+    discoveryGeneration++;
     modal.hidden = true;
     selected = null;
     confirm.disabled = true;
@@ -164,26 +171,35 @@ export function createWorkspaceSwitcher({
   const openModal = async () => {
     if (adding) return;
     closeMenu();
-    const token = ++modalGeneration;
+    modalGeneration++;
+    const discoveryToken = ++discoveryGeneration;
     modal.hidden = false;
     modalSearch.value = "";
     suggestions = [];
     selected = null;
+    discoveryState = { message: "Finding OAS workspaces…", error: false };
     setAdding(false);
-    suggestionsEl.replaceChildren();
-    setStatus("Finding OAS workspaces…");
+    paintDiscoveryState();
     modalSearch.focus();
     try {
       const result = await discoverSuggestions();
-      if (token !== modalGeneration || result?.stale) return;
-      const found = Array.isArray(result) ? result : (result?.suggestions || []);
-      const added = new Set(workspaces.map((workspace) => workspace.id));
-      suggestions = found.filter((candidate) => candidateId(candidate) && !added.has(candidateId(candidate)));
-      setStatus(suggestions.length ? `${suggestions.length} suggested workspace${suggestions.length === 1 ? "" : "s"}` : "No additional OAS workspaces were discovered.");
-      renderSuggestions();
+      if (discoveryToken !== discoveryGeneration || modal.hidden) return;
+      if (result?.stale) {
+        discoveryState = { message: "No current workspace suggestions.", error: false };
+      } else {
+        const found = Array.isArray(result) ? result : (result?.suggestions || []);
+        const added = new Set(workspaces.map((workspace) => workspace.id));
+        suggestions = found.filter((candidate) => candidateId(candidate) && !added.has(candidateId(candidate)));
+        discoveryState = {
+          message: suggestions.length ? `${suggestions.length} suggested workspace${suggestions.length === 1 ? "" : "s"}` : "No additional OAS workspaces were discovered.",
+          error: false,
+        };
+      }
+      if (!adding) paintDiscoveryState();
     } catch (error) {
-      if (token !== modalGeneration) return;
-      setStatus(error?.message || "Could not discover OAS workspaces.", true);
+      if (discoveryToken !== discoveryGeneration || modal.hidden) return;
+      discoveryState = { message: error?.message || "Could not discover OAS workspaces.", error: true };
+      if (!adding) paintDiscoveryState();
     }
   };
 
@@ -205,19 +221,20 @@ export function createWorkspaceSwitcher({
   const onBrowse = async () => {
     if (adding) return;
     const token = ++modalGeneration;
-    const previousStatus = status.textContent;
     setAdding(true);
     setStatus("Choose an OAS workspace folder…");
     try {
       const result = await pickWorkspace();
       if (token !== modalGeneration) return;
       setAdding(false);
-      if (result?.code === "cancelled") { setStatus(previousStatus); return; }
+      if (result?.code === "cancelled") { paintDiscoveryState(); return; }
       if (resolvedMutation(result)) return;
+      discoveryGeneration++;
       setStatus(mutationFailureMessage(result, "Could not use that folder."), true);
     } catch (error) {
       if (token !== modalGeneration) return;
       setAdding(false);
+      discoveryGeneration++;
       setStatus(error?.message || "Could not use that folder.", true);
     }
   };
