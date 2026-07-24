@@ -1,6 +1,7 @@
 # Knowledge Log
 
 ## 2026-07-24
+* **Harvest**: merged pending note `desktop-succession-boundaries.md` into the existing [desktop succession decision](/decisions/desktop-panel-succession.md); no concept change was needed because the decision already carried the durable boundaries.
 * **Creation**: [Desktop succeeds the web and terminal panels as a standalone product](/decisions/desktop-panel-succession.md) — the Electron app becomes the sole panel and GitHub-Release product; its package owns the backend, installed `oas ... --json` gates administration, no-OAS mode observes existing deployments, and a stability-gated N/N+1 release sequence retires oas.web and oas pane after soul knowledge succession.
 * **Deprecation**: the [web pane](/decisions/web-pane.md), [standalone TUI](/decisions/control-pane-live-standalone-tui.md), [card architecture](/decisions/control-pane-v3-card-architecture.md), and [visual language](/decisions/control-pane-visual-language.md) decisions are retained as historical migration sources but superseded for continuing product direction by the desktop succession decision.
 * **Update**: the [roadmap](/roadmap/next-steps.md) now leads with desktop succession and renames the telemetry thread for the successor; [repo state](/stewardship/repo-state.md) records the feature integration and three follow-up briefs in flight.
