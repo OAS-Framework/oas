@@ -1,6 +1,8 @@
 # Knowledge Log
 
 ## 2026-07-24
+* **Creation**: promoted [bounded OS resources spawned per user action need a hard cap in the owning process](/lessons/terminal-resource-cap-in-owning-process.md) from the oas-desktop-engineer-desktop-dist notes.
+* **Update**: linked [desktop terminal direct attach](/decisions/desktop-terminal-direct-attach.md) to the main-process terminal resource cap lesson.
 * **Creation**: promoted [never launch packaged GUI apps from agent sessions on operator machines](/lessons/no-packaged-gui-launches-local.md) from the oas-desktop-engineer-desktop-dist notes.
 * **Update**: clarified [headless Electron verification](/lessons/electron-headless-verification.md) and [Electron smoke process reaping](/lessons/electron-smoke-process-group-reaping.md): packaged-app launch smoke is CI-only on operator machines, process-group reapers are not sufficient for local packaged GUI launches, and cleanup must be path-scoped until respawning orphans stay gone.
 * **Creation**: promoted [review loops need a scope ratchet](/lessons/review-loop-scope-ratchet.md) from the oas-desktop-engineer-desktop-dist notes.
