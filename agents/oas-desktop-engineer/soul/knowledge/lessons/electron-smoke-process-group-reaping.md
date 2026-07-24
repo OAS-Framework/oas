@@ -27,6 +27,9 @@ of the harness:
   and register it in a module-level set;
 - reap with `process.kill(-pid, "SIGKILL")` and retain direct `child.kill` as
   fallback;
+- keep the process group tracked until the reaper explicitly kills the group;
+  do not remove tracking just because the leader exits, because descendants can
+  survive in the same group;
 - install the reaper on `process.on("exit")`, SIGINT/SIGTERM/SIGHUP,
   `uncaughtException`, and `unhandledRejection`; exit-path coverage is the
   point, and `finally` is not enough;
@@ -38,6 +41,13 @@ Verification discipline: after both a PASS run and a forced-failure run
 Scope the grep to the worktree path; do not kill by app name because a real OAS
 Desktop from another checkout may be running. This is the same boundary as
 [scope destructive cleanup during live desktop testing](/lessons/pkill-scoping-discipline.md).
+
+Keep the reusable reaping path in `packages/desktop/scripts/proc-reaper.mjs` and
+cover it with fake- and real-process tests: a shell leader can exit while a
+`sleep` descendant survives, and the group kill must still reap that descendant.
+Avoid `execFileSync` in scripts whose signal handlers must stay live, because a
+synchronous child wait can prevent the JavaScript cleanup handlers from running
+when the harness receives a signal.
 
 Also: `execFileSync(..., { timeout })` sends SIGTERM by default. For Electron,
 which can ignore SIGTERM while wedged, pass `killSignal: "SIGKILL"`.
