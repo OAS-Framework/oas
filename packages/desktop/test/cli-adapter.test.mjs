@@ -11,6 +11,13 @@ import {
 const OK = (result) => JSON.stringify({ schemaVersion: 1, ok: true, result });
 const ERR = (code, message) => JSON.stringify({ schemaVersion: 1, ok: false, error: { code, message } });
 
+function fakeExec(handler) {
+  return (bin, argv, opts, cb) => {
+    const r = handler(bin, argv, opts);
+    process.nextTick(() => cb(r.err || null, r.stdout ?? ""));
+  };
+}
+
 test("parseEnvelope: accepts exactly the two contract shapes, rejects contamination", () => {
   assert.ok(parseEnvelope(OK({ instance: "dev-1" })));
   assert.ok(parseEnvelope(ERR("E_UNKNOWN_AGENT", "nope")));
@@ -36,9 +43,29 @@ test("spawnArgv: allowlisted args only — unknown renderer keys are dropped, ne
   assert.ok(!argv.includes("evil-1") && !argv.includes("sneaky") && !argv.includes("injection"));
 });
 
-test("spawnArgv: values stay separate argv entries — no shell, no interpolation", () => {
-  const argv = spawnArgv("dev", "/ws", "/t/TASK.md", { purpose: "a; rm -rf /" });
-  assert.equal(argv[argv.indexOf("--purpose") + 1], "a; rm -rf /", "hostile value is ONE argv entry");
+test("spawnArgv: option-shaped values are REJECTED, never forwarded (review 53a20c7)", () => {
+  // The CLI parser scans raw argv with includes()/indexOf() — an
+  // option-shaped VALUE would inject a real non-allowlisted token.
+  for (const opts of [
+    { purpose: "--no-launch" },
+    { repo: "--task-file" },
+    { model: "-x" },
+    { work: "--json" },          // also fails the enum
+    { runtime: "claude; rm" },   // fails the enum
+    { purpose: "a b" },          // fails the slug
+  ]) {
+    assert.throws(() => spawnArgv("dev", "/ws", "/t/TASK.md", opts), /invalid/, JSON.stringify(opts));
+  }
+  assert.throws(() => spawnArgv("--evil", "/ws", "/t/TASK.md", {}), /invalid agent name/);
+});
+
+test("cliSpawn: option-shaped values resolve as E_BAD_ARGS envelopes (never reach the CLI)", async () => {
+  let execCalled = false;
+  const exec = fakeExec(() => { execCalled = true; return { stdout: OK({}) }; });
+  const env = await cliSpawn("/abs/oas", { agent: "dev", workspaceDir: "/ws", purpose: "--no-launch" }, { exec });
+  assert.equal(env.ok, false);
+  assert.equal(env.error.code, "E_BAD_ARGS");
+  assert.equal(execCalled, false, "the CLI is never invoked with a rejected value");
 });
 
 test("writeTaskFile: file is 0600 from creation and cleanup removes the private dir", () => {
@@ -68,12 +95,6 @@ test("writeTaskFile: mode is set at open (wx + 0600), not chmod-after", () => {
   assert.equal(opened.mode, 0o600, "owner-only at open");
 });
 
-function fakeExec(handler) {
-  return (bin, argv, opts, cb) => {
-    const r = handler(bin, argv, opts);
-    process.nextTick(() => cb(r.err || null, r.stdout ?? ""));
-  };
-}
 
 test("cliSpawn: success envelope resolves with result; task file cleaned up after", async () => {
   let seen = null;

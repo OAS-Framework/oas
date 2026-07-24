@@ -28,8 +28,11 @@ export const PROBE_NAME = "@oas-framework/oas";
 // ---- acceptance --------------------------------------------------------
 
 export function parseSemver(v) {
-  const m = String(v || "").match(/^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/);
-  return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
+  // Capture prerelease presence: semver precedence puts 0.18.0-rc.1 BELOW
+  // 0.18.0, so a prerelease of the minimum version is OUTSIDE >=0.18.0.
+  const m = String(v || "").match(/^(\d+)\.(\d+)\.(\d+)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$/);
+  if (!m) return null;
+  return { nums: [Number(m[1]), Number(m[2]), Number(m[3])], prerelease: !!m[4] };
 }
 const cmp = (a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
 
@@ -41,7 +44,12 @@ export function acceptProbe(payload) {
   if (payload.desktopApi !== DESKTOP_API) return { ok: false, reason: `desktopApi ${payload.desktopApi ?? "missing"} (need ${DESKTOP_API})` };
   const v = parseSemver(payload.version);
   if (!v) return { ok: false, reason: `unparsable version "${payload.version}"` };
-  if (cmp(v, ACCEPT_RANGE.min) < 0 || cmp(v, ACCEPT_RANGE.maxExclusive) >= 0) {
+  // Prerelease policy: prereleases are NOT accepted. Precedence-wise
+  // 0.18.0-rc.1 < 0.18.0 (below the minimum), and a prerelease of any
+  // in-range version is not a released CLI — desktop 0.18 pairs with
+  // released 0.18.x only.
+  if (v.prerelease) return { ok: false, reason: `prerelease version ${payload.version} not accepted (need a released >=0.18.0 <0.19.0)` };
+  if (cmp(v.nums, ACCEPT_RANGE.min) < 0 || cmp(v.nums, ACCEPT_RANGE.maxExclusive) >= 0) {
     return { ok: false, reason: `version ${payload.version} outside >=0.18.0 <0.19.0` };
   }
   return { ok: true };
@@ -58,58 +66,79 @@ export function parseProbeStdout(stdout) {
 // ---- discovery -----------------------------------------------------------
 
 /**
- * Candidate absolute paths, in contract order, each tagged with its source.
+ * Candidate absolute paths as LAZY thunks in contract order, each tagged
+ * with its source. Sources are evaluated only when discovery reaches them
+ * (review 53a20c7: the npm-prefix and login-shell helpers cost seconds —
+ * they must not run when an earlier candidate already wins) and each
+ * expensive source is invoked AT MOST ONCE.
  * io = {
  *   persisted: () => string|null            — user-chosen absolute path
  *   env: Record<string,string|undefined>    — process env
  *   isExecutableFile: (p) => boolean        — X_OK regular file
- *   npmGlobalBin: () => string|null         — `npm prefix -g`/bin (may be slow/absent)
- *   loginShellWhich: () => string|null      — `$SHELL -l -c 'command -v oas'` w/ timeout
+ *   npmGlobalBin: () => string|null|Promise — npm prefix -g /bin (slow)
+ *   loginShellWhich: () => string|null|Promise — login-shell command -v (slow)
  * }
  */
-export function candidates(io) {
+export function candidateSources(io) {
+  const abs = (p) => (typeof p === "string" && p && isAbsolute(p) ? p : null);
+  const sources = [
+    { source: "persisted", paths: () => [abs(io.persisted?.())] },
+    // test/development only — never documented for end users
+    { source: "env", paths: () => [abs(io.env?.OAS_DESKTOP_OAS_BIN)] },
+    { source: "path", paths: () => String(io.env?.PATH || "").split(delimiter).filter(Boolean).map((dir) => abs(join(dir, "oas"))) },
+    { source: "npm-global", paths: async () => { const bin = await io.npmGlobalBin?.(); return [abs(bin && join(bin, "oas"))]; } },
+    { source: "login-shell", paths: async () => [abs(await io.loginShellWhich?.())] },
+  ];
+  return sources;
+}
+
+/** Eager candidate list — for tests/diagnostics only (evaluates everything). */
+export async function candidates(io) {
   const out = [];
-  const push = (path, source) => {
-    if (typeof path === "string" && path && isAbsolute(path)) out.push({ path, source });
-  };
-  push(io.persisted?.(), "persisted");
-  // test/development only — never documented for end users
-  push(io.env?.OAS_DESKTOP_OAS_BIN, "env");
-  for (const dir of String(io.env?.PATH || "").split(delimiter)) {
-    if (dir) push(join(dir, "oas"), "path");
+  for (const s of candidateSources(io)) {
+    for (const p of await s.paths()) if (p) out.push({ path: p, source: s.source });
   }
-  push(io.npmGlobalBin?.() && join(io.npmGlobalBin(), "oas"), "npm-global");
-  push(io.loginShellWhich?.(), "login-shell");
   return out;
 }
 
 /**
  * Discover the first acceptable CLI. `probe(path)` runs `<path> version
- * --json` (execFile, absolute binary, no shell) and returns { stdout } or
- * throws. Returns:
+ * --json` (execFile, absolute binary, no shell) and resolves { stdout } on
+ * CLEAN exit — it must REJECT on nonzero exit or timeout even when stdout
+ * looks valid (review 53a20c7: a binary that prints a plausible probe and
+ * then fails/hangs must never become the mutation binary). Sources are
+ * evaluated lazily: expensive helpers never run once a candidate wins.
+ * Returns:
  *   { ok:true,  bin, source, version }
  *   { ok:false, tried: [{path, source, reason}] }   — stable diagnostics
  */
 export async function discover(io, probe) {
   const tried = [];
   const seen = new Set();
-  for (const c of candidates(io)) {
-    let path = c.path;
-    try { path = io.canonicalize ? io.canonicalize(path) : path; } catch { /* keep as-is */ }
-    if (seen.has(path)) continue;
-    seen.add(path);
-    if (!io.isExecutableFile(path)) { tried.push({ path, source: c.source, reason: "not an executable file" }); continue; }
-    let payload = null;
-    try {
-      const r = await probe(path);
-      payload = parseProbeStdout(r.stdout);
-    } catch (e) {
-      tried.push({ path, source: c.source, reason: `probe failed: ${String(e.message || e).slice(0, 120)}` });
-      continue;
+  for (const src of candidateSources(io)) {
+    let paths = [];
+    try { paths = (await src.paths()).filter(Boolean); }
+    catch { continue; /* source itself failed — e.g. npm missing */ }
+    for (const raw of paths) {
+      let path = raw;
+      try { path = io.canonicalize ? io.canonicalize(path) : path; } catch { /* keep as-is */ }
+      if (seen.has(path)) continue;
+      seen.add(path);
+      if (!io.isExecutableFile(path)) { tried.push({ path, source: src.source, reason: "not an executable file" }); continue; }
+      let payload = null;
+      try {
+        const r = await probe(path);
+        payload = parseProbeStdout(r.stdout);
+      } catch (e) {
+        // Probe REJECTED (nonzero exit, timeout, spawn failure) — the
+        // candidate is out even if it printed a plausible payload first.
+        tried.push({ path, source: src.source, reason: `probe failed: ${String(e.message || e).slice(0, 120)}` });
+        continue;
+      }
+      const a = acceptProbe(payload);
+      if (a.ok) return { ok: true, bin: path, source: src.source, version: payload.version };
+      tried.push({ path, source: src.source, reason: a.reason, version: payload?.version });
     }
-    const a = acceptProbe(payload);
-    if (a.ok) return { ok: true, bin: path, source: c.source, version: payload.version };
-    tried.push({ path, source: c.source, reason: a.reason, version: payload?.version });
   }
   return { ok: false, tried };
 }

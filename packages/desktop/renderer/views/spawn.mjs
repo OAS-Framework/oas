@@ -127,6 +127,13 @@ function renderGrid(s) {
   // No dynamic selector: agent names are roster data and may contain selector
   // metacharacters (and this module's CSS constant shadows the global, so
   // CSS.escape is not available here). Compare dataset identity instead.
+  // EXCEPTION (review d7becaf): a CLI-unavailable transition BYPASSES form
+  // preservation — the launch race (form opened while CLI state was
+  // unknown, probe lands ok:false) must not leave a live submit behind a
+  // missing degradation card. The selection is invalidated so the rebuild
+  // shows the card and disabled buttons; doSpawn independently re-checks.
+  const noCli = cliStatus() && !cliAvailable();
+  if (noCli && s.sel) s.sel = null, s.selAgent = null;
   if (s.sel && [...(grid.querySelectorAll?.(".soul-card") || [])]
         .some((card) => card.dataset?.agent === s.sel && card.querySelector(".soul-form"))) return;
   grid.innerHTML = "";
@@ -259,6 +266,15 @@ export async function waitForInstanceInPanel(s, name, isCurrent, { tries = 20, d
 export async function doSpawn(s, ui) {
   const a = s.selAgent;
   if (!a) return;
+  // CLI gate at SUBMIT time (review d7becaf): a form opened during the
+  // unknown-state launch race must not dispatch after the probe lands
+  // unavailable — the render-time disable alone cannot cover a form that
+  // was already open.
+  if (cliStatus() && !cliAvailable()) {
+    s.sel = null; s.selAgent = null;
+    renderGrid(s); // repaints the degradation card + disabled buttons
+    return;
+  }
   // Legacy field interface (shared regression tests + old callers): adapt
   // s.q("ftask"|"fpurpose"|"fspawn"|"fstatus") into the ui seam.
   if (!ui) {

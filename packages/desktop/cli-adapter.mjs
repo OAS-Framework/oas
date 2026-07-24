@@ -39,14 +39,30 @@ export function parseEnvelope(stdout) {
   } catch { return null; }
 }
 
-/** Allowlisted optional spawn args → argv pairs. Unknown keys are DROPPED. */
+/** Allowlisted optional spawn args → argv pairs. Unknown keys are DROPPED.
+ * SECURITY (review 53a20c7): values are also SHAPE-VALIDATED — the CLI
+ * parser scans raw argv with includes()/indexOf(), so an option-shaped
+ * value like purpose="--no-launch" would inject a real non-allowlisted
+ * token. Reject any value with a leading '-'; constrain each field to its
+ * domain. Rejection THROWS (E_BAD_ARGS shape) so a hostile value can never
+ * silently degrade into different spawn behavior. */
+const SPAWN_ARG_RULES = {
+  purpose: { flag: "--purpose", re: /^[a-z0-9][a-z0-9-]*$/i },              // instance-name slug
+  repo:    { flag: "--repo",    re: /^[^-][^\0]*$/ },                       // path — anything not option-shaped
+  work:    { flag: "--work",    re: /^(worktree|checkout|attached|workspace)$/ },
+  runtime: { flag: "--runtime", re: /^(pi|claude)$/ },
+  model:   { flag: "--model",   re: /^[^-][^\0]*$/ },                       // model pattern — not option-shaped
+};
 export function spawnArgv(agent, workspaceDir, taskFile, opts = {}) {
-  const argv = ["spawn", String(agent), "--dir", String(workspaceDir), "--task-file", String(taskFile)];
-  const allow = { purpose: "--purpose", repo: "--repo", work: "--work", runtime: "--runtime", model: "--model" };
-  for (const [key, flag] of Object.entries(allow)) {
+  const agentName = String(agent);
+  if (agentName.startsWith("-")) { const e = new Error(`invalid agent name "${agentName}"`); e.code = "E_BAD_ARGS"; throw e; }
+  const argv = ["spawn", agentName, "--dir", String(workspaceDir), "--task-file", String(taskFile)];
+  for (const [key, rule] of Object.entries(SPAWN_ARG_RULES)) {
     const v = opts[key];
     if (v === undefined || v === null || v === "") continue;
-    argv.push(flag, String(v));
+    const s = String(v);
+    if (!rule.re.test(s)) { const e = new Error(`invalid ${key} value`); e.code = "E_BAD_ARGS"; throw e; }
+    argv.push(rule.flag, s);
   }
   argv.push("--json");
   return argv;
@@ -90,9 +106,17 @@ function runJson(bin, argv, { cwd, exec = execFile, timeout = ENVELOPE_TIMEOUT_M
  * Domain results RESOLVE (never reject) with the envelope — stable codes.
  */
 export async function cliSpawn(bin, { agent, workspaceDir, task, ...opts }, io = {}) {
+  let argv;
+  try { argv = spawnArgv(agent, workspaceDir, "__TASKFILE__", opts); }
+  catch (e) {
+    // Validation failures resolve as domain errors (stable codes), never throw
+    // — the endpoint maps them like CLI envelope failures.
+    return { schemaVersion: 1, ok: false, error: { code: e.code || "E_BAD_ARGS", message: e.message } };
+  }
   const { file, cleanup } = writeTaskFile(task ?? "", io);
+  argv[argv.indexOf("__TASKFILE__")] = file;
   try {
-    return await runJson(bin, spawnArgv(agent, workspaceDir, file, opts), { cwd: workspaceDir, exec: io.exec, timeout: io.timeout });
+    return await runJson(bin, argv, { cwd: workspaceDir, exec: io.exec, timeout: io.timeout });
   } finally { cleanup(); }
 }
 

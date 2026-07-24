@@ -346,6 +346,7 @@ export function findCapabilityAgent(contextDir, root, name) {
       kind: "capability", capability: c.capability,
       _dir: join(localAgentsDirOf(root), name), // instances home locally (scope's local-agents/)
       _soulDir: c.soulDir,
+      _packageDir: c._packageDir,               // owning package — consumers apply per-file containment
     };
   }
   return undefined;
@@ -392,15 +393,17 @@ export function listInstances(root, tmuxSession = DEFAULT_TMUX_SESSION) {
         if (existsSync(metaPath)) {
           const parsed = JSON.parse(readFileSync(metaPath, "utf8"));
           // Semantic validation, not just parseability: JSON.parse("null")
-          // and arrays/scalars are valid JSON but not instance metadata —
-          // merge OVER the fallback so instance/home are always present.
-          if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-            meta = { ...fallback, ...parsed };
-            if (typeof meta.instance !== "string" || !meta.instance) meta.instance = fallback.instance;
-            if (typeof meta.home !== "string" || !meta.home) meta.home = fallback.home;
-          }
+          // and arrays/scalars are valid JSON but not instance metadata.
+          if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) meta = { ...fallback, ...parsed };
         }
       } catch { /* broken metadata — show the bare instance */ }
+      // SECURITY (review 53a20c7 blocker): instance.json is WORKSPACE DATA —
+      // a crafted file could point `home` at any directory and steer
+      // privileged consumers (the harvest endpoint runs the CLI with
+      // cwd=home). identity and home are DIRECTORY-DERIVED, always —
+      // metadata may add fields but never relocate the instance.
+      meta.instance = fallback.instance;
+      meta.home = fallback.home;
       return { ...meta, running: windows.includes(meta.instance) };
     });
   };

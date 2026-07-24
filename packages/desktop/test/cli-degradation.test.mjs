@@ -90,6 +90,64 @@ test("cliCard without a picker hook disables Choose but keeps Retry/docs usable"
   dispose();
 });
 
+test("cli-status: a cached unavailable state transitions to UNKNOWN on an invalid/legacy payload (review d7becaf)", async () => {
+  // unavailable → legacy/garbage response → unknown → mutation UI ENABLED
+  const state = { get: payload(false), post: payload(false), reprobes: [] };
+  await cs.refreshCli(jsonCtx(state));
+  assert.equal(cs.cliAvailable(), false);
+  assert.ok(cs.cliStatus(), "unavailable state cached");
+  state.get = { some: "legacy-shape" };            // older server: no boolean ok
+  await cs.refreshCli(jsonCtx(state));
+  assert.equal(cs.cliStatus(), null, "invalid payload transitions to unknown — stale unavailable NOT kept");
+  assert.equal(cs.cliAvailable(), false, "unknown is not 'available' — it is uncommitted");
+});
+
+test("spawn view: launch race — form opened while UNKNOWN closes and disables when the probe lands unavailable (review d7becaf)", async () => {
+  const doc = dom();
+  globalThis.document = doc;
+  try {
+    const sp = await import("../renderer/views/spawn.mjs");
+    const agents = [{ name: "dev", description: "d", kind: "persistent", work: "worktree", runtime: "pi", repo: "/r", repoName: "r", agentsRoot: "/ws/agents", workspace: "/ws" }];
+    // /api/cli answers a LEGACY shape first (state stays unknown), then unavailable
+    const state = { cliPayload: { legacy: true }, posts: [] };
+    const ctx = {
+      api: async (pathname, opts) => ({
+        ok: true, status: 200,
+        json: async () => {
+          if (pathname.startsWith("/api/agents")) return { workspace: { id: "/ws", name: "ws" }, agents };
+          if (pathname.startsWith("/api/panel")) return { workspace: { id: "/ws", name: "ws" }, workspaces: [{ id: "/ws", name: "ws" }], instances: [] };
+          if (pathname === "/api/cli") return state.cliPayload;
+          if (pathname === "/api/spawn") { state.posts.push(opts); return { spawned: true, instance: "dev-x" }; }
+          return {};
+        },
+      }),
+      openTerminal: () => {}, openBrain: () => {},
+    };
+    const el = doc.createElement("div"); doc.body.append(el);
+    sp.mount(el, ctx);
+    await new Promise((r) => setTimeout(r, 20));
+    // state is UNKNOWN → spawn is possible; user opens the form
+    const spawnBtn = el.querySelector(".spawn-act");
+    assert.ok(spawnBtn && !spawnBtn.disabled, "unknown state leaves spawn enabled");
+    spawnBtn.dispatchEvent(new doc.defaultView.Event("click"));
+    assert.ok(el.querySelector(".soul-form"), "form opened during the unknown window");
+    // the initial probe now lands UNAVAILABLE
+    state.cliPayload = payload(false);
+    await cs.refreshCli(ctx);
+    await new Promise((r) => setTimeout(r, 20));
+    // the transition must bypass form preservation: card shown, form gone
+    assert.equal(el.querySelector(".soul-form"), null, "open form closed on the unavailable transition");
+    assert.equal(el.querySelectorAll(".cli-card").length, 1, "degradation card appears");
+    assert.ok([...el.querySelectorAll(".spawn-act")].every((b) => b.disabled), "spawn buttons disabled");
+    // and even a STALE handle to the old form cannot dispatch: doSpawn re-checks
+    assert.equal(state.posts.length, 0, "no spawn was ever dispatched");
+    sp.unmount();
+  } finally {
+    delete globalThis.document;
+  }
+});
+
+
 test("spawn view: no compatible CLI disables every spawn button and shows ONE card; reads stay rendered", async () => {
   const doc = dom();
   globalThis.document = doc; // spawn.mjs builds DOM via the global document

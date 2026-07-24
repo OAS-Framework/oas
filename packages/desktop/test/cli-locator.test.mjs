@@ -38,10 +38,20 @@ test("acceptProbe: API version is authoritative — a 0.18.x CLI without desktop
 });
 
 test("parseSemver handles pre-release/build suffixes and rejects garbage", () => {
-  assert.deepEqual(parseSemver("0.18.0"), [0, 18, 0]);
-  assert.deepEqual(parseSemver("0.18.1-rc.1"), [0, 18, 1]);
+  assert.deepEqual(parseSemver("0.18.0"), { nums: [0, 18, 0], prerelease: false });
+  assert.deepEqual(parseSemver("0.18.1-rc.1"), { nums: [0, 18, 1], prerelease: true });
+  assert.deepEqual(parseSemver("0.18.0+build.5"), { nums: [0, 18, 0], prerelease: false });
   assert.equal(parseSemver("v0.18.0"), null);
   assert.equal(parseSemver(""), null);
+});
+
+test("acceptProbe: prereleases are rejected — 0.18.0-rc.1 precedes 0.18.0 (review 53a20c7)", () => {
+  for (const v of ["0.18.0-rc.1", "0.18.0-0", "0.18.5-beta.2", "0.19.0-rc.1"]) {
+    const r = acceptProbe(PROBE(v));
+    assert.equal(r.ok, false, v);
+    assert.match(r.reason, /prerelease/, v);
+  }
+  assert.equal(acceptProbe(PROBE("0.18.0+build.7")).ok, true, "build metadata does not affect precedence");
 });
 
 test("parseProbeStdout: only a single JSON object passes", () => {
@@ -51,14 +61,14 @@ test("parseProbeStdout: only a single JSON object passes", () => {
   assert.equal(parseProbeStdout('"just-a-string"'), null);
 });
 
-test("candidates: contract discovery order — persisted, env, PATH, npm-global, login-shell", () => {
+test("candidates: contract discovery order — persisted, env, PATH, npm-global, login-shell", async () => {
   const io = {
     persisted: () => "/chosen/oas",
     env: { OAS_DESKTOP_OAS_BIN: "/env/oas", PATH: ["/p1", "/p2"].join(delimiter) },
     npmGlobalBin: () => "/npmg/bin",
     loginShellWhich: () => "/login/oas",
   };
-  assert.deepEqual(candidates(io), [
+  assert.deepEqual(await candidates(io), [
     { path: "/chosen/oas", source: "persisted" },
     { path: "/env/oas", source: "env" },
     { path: "/p1/oas", source: "path" },
@@ -68,14 +78,56 @@ test("candidates: contract discovery order — persisted, env, PATH, npm-global,
   ]);
 });
 
-test("candidates: relative and empty entries are dropped (absolute executables only)", () => {
+test("candidates: relative and empty entries are dropped (absolute executables only)", async () => {
   const io = {
     persisted: () => "relative/oas",
     env: { OAS_DESKTOP_OAS_BIN: "", PATH: "" },
     npmGlobalBin: () => null,
     loginShellWhich: () => undefined,
   };
-  assert.deepEqual(candidates(io), []);
+  assert.deepEqual(await candidates(io), []);
+});
+
+test("discover: expensive sources are LAZY and at-most-once — never invoked when an earlier candidate wins (review 53a20c7)", async () => {
+  let npmCalls = 0, shellCalls = 0;
+  const io = {
+    persisted: () => "/chosen/oas",
+    env: { PATH: "" },
+    isExecutableFile: () => true,
+    canonicalize: (p) => p,
+    npmGlobalBin: () => { npmCalls++; return "/npmg/bin"; },
+    loginShellWhich: () => { shellCalls++; return "/login/oas"; },
+  };
+  const r = await discover(io, async () => ({ stdout: JSON.stringify(PROBE()) }));
+  assert.equal(r.ok, true);
+  assert.equal(r.bin, "/chosen/oas");
+  assert.equal(npmCalls, 0, "npm helper never runs when the persisted candidate wins");
+  assert.equal(shellCalls, 0, "login-shell helper never runs when the persisted candidate wins");
+  // full-failure sweep: each expensive source runs exactly once
+  const io2 = {
+    env: { PATH: "" },
+    isExecutableFile: () => false,
+    npmGlobalBin: () => { npmCalls++; return "/npmg/bin"; },
+    loginShellWhich: () => { shellCalls++; return "/login/oas"; },
+  };
+  await discover(io2, async () => ({ stdout: "" }));
+  assert.equal(npmCalls, 1, "npm helper invoked exactly once on a full sweep");
+  assert.equal(shellCalls, 1, "login-shell helper invoked exactly once on a full sweep");
+});
+
+test("discover: a probe that REJECTS is never accepted, even with plausible stdout beforehand (review 53a20c7)", async () => {
+  // The server's probeBin rejects on ANY execFile error (nonzero exit,
+  // timeout) — discover must record the rejection, not accept the payload.
+  const io = {
+    persisted: () => "/liar/oas",
+    env: { PATH: "" },
+    isExecutableFile: () => true,
+    canonicalize: (p) => p,
+  };
+  const probe = async () => { const e = new Error("exit 1 (printed probe then failed)"); throw e; };
+  const r = await discover(io, probe);
+  assert.equal(r.ok, false);
+  assert.match(r.tried[0].reason, /probe failed/);
 });
 
 test("discover: first ACCEPTABLE candidate wins — earlier rejects are recorded diagnostics", async () => {

@@ -207,23 +207,24 @@ const cliIo = {
     catch { return false; }
   },
   canonicalize: (p) => realpathSync(p),
-  npmGlobalBin: () => {
-    try {
-      const prefix = execFileSync("npm", ["prefix", "-g"], { encoding: "utf8", timeout: 5000 }).trim();
-      return prefix ? join(prefix, "bin") : null;
-    } catch { return null; }
-  },
-  loginShellWhich: () => {
-    try {
-      const sh = process.env.SHELL || "/bin/sh";
-      const out = execFileSync(sh, ["-l", "-c", "command -v oas"], { encoding: "utf8", timeout: 5000 }).trim();
-      return out && out.startsWith("/") ? out : null;
-    } catch { return null; }
-  },
+  // Slow sources — ASYNC (never block the serving event loop; review
+  // 53a20c7) and evaluated lazily/at-most-once by the locator's source
+  // ordering (they only run when every earlier candidate failed).
+  npmGlobalBin: () => new Promise((ok) => {
+    execFile("npm", ["prefix", "-g"], { encoding: "utf8", timeout: 5000, shell: false },
+      (err, stdout) => ok(err ? null : (String(stdout).trim() ? join(String(stdout).trim(), "bin") : null)));
+  }),
+  loginShellWhich: () => new Promise((ok) => {
+    const sh = process.env.SHELL || "/bin/sh";
+    execFile(sh, ["-l", "-c", "command -v oas"], { encoding: "utf8", timeout: 5000, shell: false },
+      (err, stdout) => { const out = String(stdout || "").trim(); ok(!err && out.startsWith("/") ? out : null); });
+  }),
 };
+// Probe: REJECT on any execFile error — nonzero exit or timeout with
+// plausible stdout must never yield the mutation binary (review 53a20c7).
 const probeBin = (path) => new Promise((ok, bad) => {
-  execFile(path, ["version", "--json"], { encoding: "utf8", timeout: 8000, shell: false },
-    (err, stdout) => (err && !stdout ? bad(err) : ok({ stdout })));
+  execFile(path, ["version", "--json"], { encoding: "utf8", timeout: 8000, shell: false, killSignal: "SIGKILL" },
+    (err, stdout) => (err ? bad(err) : ok({ stdout })));
 });
 async function reprobeCli(chosen) {
   if (chosen) chosenBin = chosen;
@@ -294,6 +295,37 @@ function findInstance(name, wsId) {
   return undefined;
 }
 /* OASWEB_FINDINST_END */
+
+/* OASWEB_HARVESTHOME_BEGIN — privileged-cwd containment, extracted by tests.
+   The harvest CLI runs with cwd = the instance home. That home must be
+   DERIVED and VERIFIED, never trusted from roster data: canonicalize it and
+   require <...>/instances/<name> whose grandparent agents base is one of
+   this server's workspace roots or their local-agents siblings. */
+function harvestHome(inst) {
+  if (!inst?.home || typeof inst.home !== "string") return null;
+  let real;
+  try { real = realpathSync(inst.home); } catch { return null; }
+  // shape: <agentDir>/instances/<instanceName>
+  if (basename(real) !== String(inst.instance)) return null;
+  const instancesDir = dirname(real);
+  if (basename(instancesDir) !== "instances") return null;
+  const agentDir = dirname(instancesDir);
+  const base = dirname(agentDir); // agents root or a local-agents base
+  const allowed = [];
+  for (const w of workspaces()) {
+    for (const r of w.roots) {
+      allowed.push(r);
+      allowed.push(reader.localAgentsDirOf(r));
+      allowed.push(join(r, "local-agents"));   // legacy nested
+      allowed.push(join(r, "tmp-agents"));
+    }
+  }
+  for (const a of allowed) {
+    try { if (realpathSync(a) === base) return real; } catch { /* absent base */ }
+  }
+  return null;
+}
+/* OASWEB_HARVESTHOME_END */
 
 /* OASWEB_TMUXTGT_BEGIN — exact-match anchored tmux target, extracted by
    tests. tmux -t targets are PREFIX-matched by default: in the 3s
@@ -530,7 +562,12 @@ function brainData(agentName, wsId) {
     return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
   };
   /* OASWEB_BRAINSKILLS_END */
-  const localSkills = listSkills(join(soulDir, "skills"));
+  // Skills under the soul dir. For CAPABILITY agents soulDir is PACKAGE-OWNED
+  // (untrusted content): the walk must apply per-file containment or a
+  // symlinked SKILL.md inside agents/helper/skills/ escapes the package
+  // (review ae3e199) — same boundary as the manifest skill trees below.
+  const soulContained = def._packageDir ? (f) => reader.containsPackageFile(def._packageDir, f) : undefined;
+  const localSkills = listSkills(join(soulDir, "skills"), soulContained);
   let packageSkills = [];
   if (def.capability) {
     try {
@@ -732,8 +769,15 @@ const server = createServer(async (req, res) => {
       const inst = findInstance(hm[1], url.searchParams.get("ws") || undefined);
       if (!inst) return send(res, 404, { error: `unknown instance "${hm[1]}"` });
       if (!cliState.ok) return send(res, 503, { error: "harvest requires a compatible installed oas CLI", code: "cli-unavailable" });
-      if (!inst.home || !existsSync(inst.home)) return send(res, 409, { error: "instance home not found on disk" });
-      const env = await adapter.cliHarvest(cliState.bin, inst.home);
+      // SECURITY (review 53a20c7): the roster derives home from the
+      // enumerated DIRECTORY (deployment.mjs never lets instance.json
+      // relocate it), and this endpoint re-verifies before executing:
+      // the canonical home must sit under a known agents root's <agent>/
+      // instances/ (or its local-agents sibling) — a tampered snapshot or
+      // future regression can never make the CLI run in an arbitrary cwd.
+      const home = harvestHome(inst);
+      if (!home) return send(res, 409, { error: "instance home not found or outside the workspace instances layout" });
+      const env = await adapter.cliHarvest(cliState.bin, home);
       if (!env.ok) return send(res, 502, { error: env.error.message || "harvest failed", code: env.error.code || "E_HARVEST_FAILED" });
       return send(res, 200, env.result);
     }

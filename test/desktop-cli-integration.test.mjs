@@ -155,3 +155,44 @@ test("desktop server: spawn routes through the CLI with --dir/--task-file argv; 
     assert.equal(h404.status, 404);
   } finally { proc.kill(); }
 });
+
+test("desktop server: hostile instance.json cannot steer the harvest cwd (review 53a20c7 blocker)", async () => {
+  const cliDir = mkdtempSync(join(tmpdir(), "oas-clihostile-"));
+  const { bin, calls } = fakeCli(cliDir);
+  // Workspace with an instance whose instance.json points home at an
+  // ARBITRARY directory — the roster and the endpoint must both pin the
+  // directory-derived home; the CLI must never run in the steered cwd.
+  const scope = realpathSync(mkdtempSync(join(tmpdir(), "oas-hostile-ws-")));
+  const steerTarget = realpathSync(mkdtempSync(join(tmpdir(), "oas-steer-target-")));
+  const instHome = join(scope, "agents", "dev", "instances", "dev-evil");
+  mkdirSync(join(scope, "agents", "dev", "soul"), { recursive: true });
+  writeFileSync(join(scope, "agents", "dev", "soul", "soul.yaml"), "name: dev\ndescription: d\n");
+  mkdirSync(instHome, { recursive: true });
+  writeFileSync(join(instHome, "instance.json"),
+    JSON.stringify({ instance: "dev-evil", agent: "dev", home: steerTarget }));
+  const { proc, port } = await startServer({ OAS_DESKTOP_OAS_BIN: bin, PATH: "/nonexistent", SHELL: "/bin/false" });
+  const proc2 = spawn(process.execPath, [SRV, "start", "--port", String(port + 1), "--dir", scope],
+    { stdio: "ignore", env: { ...process.env, OAS_DESKTOP_OAS_BIN: bin, PATH: "/nonexistent", SHELL: "/bin/false" } });
+  proc.kill(); // only the scope-scoped server matters here
+  try {
+    let up = false;
+    for (let i = 0; i < 40 && !up; i++) {
+      await new Promise((r) => setTimeout(r, 100));
+      try { await fetch(`http://127.0.0.1:${port + 1}/api/panel`); up = true; } catch { /* retry */ }
+    }
+    assert.ok(up, "scoped server came up");
+    await fetch(`http://127.0.0.1:${port + 1}/api/cli/reprobe`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+    // roster: home must be the DIRECTORY-derived one, not the steered target
+    const pd = await (await fetch(`http://127.0.0.1:${port + 1}/api/panel`)).json();
+    const evil = pd.instances.find((i) => i.instance === "dev-evil");
+    assert.ok(evil, "instance surfaces");
+    assert.equal(evil.home, instHome, "roster home is directory-derived, never instance.json's");
+    // harvest: runs in the real home — never in the steered directory
+    const hr = await fetch(`http://127.0.0.1:${port + 1}/api/harvest/dev-evil?ws=${encodeURIComponent(pd.workspace.id)}`, { method: "POST" });
+    assert.equal(hr.status, 200, JSON.stringify(await hr.clone().json()));
+    const harvestCall = calls().find((c) => c.argv[0] === "okf");
+    assert.ok(harvestCall, "harvest ran");
+    assert.equal(harvestCall.cwd, instHome, "cwd pinned to the enumerated directory");
+    assert.notEqual(harvestCall.cwd, steerTarget, "steered cwd never used");
+  } finally { proc2.kill(); }
+});

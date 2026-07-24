@@ -27,11 +27,13 @@ function emit() { for (const fn of [...listeners]) { try { fn(cli); } catch { /*
 export async function refreshCli(ctx) {
   try {
     const d = await apiJson(ctx, "/api/cli");
-    // Only a real status payload counts — an older server (or a test stub)
-    // answering something else must read as "unknown", never "unavailable":
-    // degrading mutations on bad data would disable Spawn against a fully
-    // capable backend.
-    if (d && typeof d.ok === "boolean") cli = d;
+    // Only a real status payload counts. A successful response WITHOUT the
+    // status shape (older server, garbage) transitions to UNKNOWN (null) —
+    // including clearing a cached ok:false — because unknown must read as
+    // capable (mixed-version contract; the server 503 is the fail-safe).
+    // Only NETWORK failure keeps the last state (transient unreachability
+    // must not flap the UI).
+    cli = d && typeof d.ok === "boolean" ? d : null;
   } catch { /* server unreachable — keep last state */ }
   emit();
   return cli;
@@ -41,7 +43,7 @@ export async function refreshCli(ctx) {
 export async function reprobeCli(ctx, bin) {
   try {
     const d = await postJson(ctx, "/api/cli/reprobe", bin ? { bin } : {});
-    if (d && typeof d.ok === "boolean") cli = d;
+    cli = d && typeof d.ok === "boolean" ? d : null;   // same unknown semantics
   } catch { /* keep last state */ }
   emit();
   return cli;
