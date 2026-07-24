@@ -154,6 +154,22 @@ test("resolved add domain failure renders prose and never switches", async () =>
   dom.window.close();
 });
 
+test("not-suggested failure explicitly points to the picker", async () => {
+  const { dom, document, controller } = setup({
+    discoverSuggestions: async () => ({ stale: false, suggestions: [A] }),
+    addWorkspace: async () => ({ ok: false, code: "not-suggested", reason: "This suggestion expired." }),
+  });
+  controller.begin()(B, [B]);
+  await controller.openModal();
+  document.querySelector(".ws-suggestion").click();
+  document.getElementById("ws-confirm").click();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(document.getElementById("ws-dialog-status").textContent,
+    "This suggestion expired. Use Browse… to choose it explicitly.");
+  assert.equal(document.getElementById("ws-modal").hidden, false);
+  dom.window.close();
+});
+
 test("pending add cannot be dismissed and successful completion always reconciles", async () => {
   const addGate = deferred();
   const { dom, document, selected, controller } = setup({

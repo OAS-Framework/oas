@@ -195,6 +195,9 @@ export function createWorkspaceSwitcher({
     if (result?.code === "superseded") { setStatus(""); return true; }
     return false;
   };
+  const mutationFailureMessage = (result, fallback) => result?.code === "not-suggested"
+    ? `${result.reason || "That workspace is no longer suggested."} Use Browse… to choose it explicitly.`
+    : result?.reason || fallback;
   const onBrowse = async () => {
     const token = ++modalGeneration;
     const previousStatus = status.textContent;
@@ -206,7 +209,7 @@ export function createWorkspaceSwitcher({
       setAdding(false);
       if (result?.code === "cancelled") { setStatus(previousStatus); return; }
       if (resolvedMutation(result)) return;
-      setStatus(result?.reason || "Could not use that folder.", true);
+      setStatus(mutationFailureMessage(result, "Could not use that folder."), true);
     } catch (error) {
       if (token !== modalGeneration) return;
       setAdding(false);
@@ -224,7 +227,7 @@ export function createWorkspaceSwitcher({
       if (token !== modalGeneration) return;
       setAdding(false);
       if (resolvedMutation(result)) return;
-      setStatus(result?.reason || "Could not add that workspace.", true);
+      setStatus(mutationFailureMessage(result, "Could not add that workspace."), true);
     } catch (error) {
       if (token !== modalGeneration) return;
       setAdding(false);
