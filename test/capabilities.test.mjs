@@ -768,3 +768,33 @@ test("--parent accepts capability-defined parent instances homing under local-ag
     } finally { process.env.PATH = oldPath; }
   });
 });
+
+test("lineage is deployment-local: --parent from an unrelated deployment is rejected", () => {
+  const base = temp();
+  // Deployment A: the caller's instance lives here.
+  const a = fixtureSoul(base);
+  // Deployment B: a separate repo + agents root (oas-support's --dir <repo> case).
+  const repoB = join(base, "other-repo"); gitRepo(repoB);
+  const rootB = join(repoB, "agents");
+  write(join(rootB, "expert", "soul", "soul.yaml"), `name: expert\nkind: persistent\nrepo: ${repoB}\nwork: checkout\nruntime: pi\n`);
+  write(join(rootB, "expert", "soul", "AGENTS.md"), "# expert\n");
+  mkdirSync(join(rootB, "expert", "instances"), { recursive: true });
+  const env = { ...process.env, PATH: fakeRuntimes(base), PI_AGENTS_TMUX_SESSION: "oas-test-nosuch" };
+  delete env.PI_AGENTS_ROOT;
+  // A real instance in deployment A…
+  let r = spawnSync(process.execPath, [CLI, "spawn", "dev", "--purpose", "caller", "--no-launch", "--json"], { cwd: a.repo, env, encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  const caller = JSON.parse(r.stdout.slice(r.stdout.indexOf("{")));
+  // …is NOT a valid parent when spawning into deployment B (its hierarchy
+  // cannot resolve foreign instances — cross-deployment spawns are operator-origin).
+  r = spawnSync(process.execPath, [CLI, "spawn", "expert", "--dir", repoB, "--parent", caller.instance, "--purpose", "x", "--no-launch"], { cwd: a.repo, env, encoding: "utf8" });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /does not match any known instance/);
+  // Without --parent the cross-deployment spawn lands top-level in B.
+  r = spawnSync(process.execPath, [CLI, "spawn", "expert", "--dir", repoB, "--task", "support question", "--purpose", "x", "--no-launch", "--json"], { cwd: a.repo, env, encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  const expert = JSON.parse(r.stdout.slice(r.stdout.indexOf("{")));
+  assert.equal(expert.spawnOrigin, "operator");
+  assert.equal(expert.parentInstance, undefined);
+  assert.match(readFileSync(join(expert.home, "TASK.md"), "utf8"), /support question/);
+});
