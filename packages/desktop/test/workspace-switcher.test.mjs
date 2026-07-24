@@ -17,15 +17,15 @@ const setup = (overrides = {}) => {
     document: dom.window.document,
     selectWorkspace: (id) => selected.push(id),
     discoverSuggestions: async () => [],
-    addWorkspace: async (candidate) => ({ workspace: candidate }),
-    pickWorkspace: async () => null,
+    addWorkspace: async (path) => ({ ok: true, workspace: { id: path, path, name: "workspace" } }),
+    pickWorkspace: async () => ({ ok: false, code: "cancelled", reason: "cancelled" }),
     ...overrides,
   });
   return { dom, document: dom.window.document, selected, controller };
 };
 
-const A = { id: "/org-a/oas", name: "oas", team: { name: "alpha" } };
-const B = { id: "/org-b/oas", name: "oas", team: { name: "beta" } };
+const A = { id: "/org-a/oas", path: "/org-a/oas", name: "oas", team: { name: "alpha" } };
+const B = { id: "/org-b/oas", path: "/org-b/oas", name: "oas", team: { name: "beta" } };
 
 test("workspace choice labels disambiguate duplicate names with team and canonical ID", () => {
   assert.deepEqual(workspaceChoiceLabels([A, B, { id: "/docs", name: "docs" }]), [
@@ -85,7 +85,7 @@ test("add workspace modal discovers, filters, selects and confirms a suggestion"
   const C = { id: "/org-c/tools", path: "/org-c/tools", name: "tools", team: { name: "gamma" }, reason: "Team-scope sibling" };
   const { dom, document, selected, controller } = setup({
     discoverSuggestions: async () => ({ suggestions: [A, C] }),
-    addWorkspace: async (candidate) => { calls.push(candidate.id); return { workspace: candidate, workspaces: [B, candidate] }; },
+    addWorkspace: async (path) => { calls.push(path); return { ok: true, workspace: C }; },
   });
   controller.begin()(B, [B]);
   document.getElementById("ws-trigger").click();
@@ -113,6 +113,47 @@ test("add workspace modal discovers, filters, selects and confirms a suggestion"
   dom.window.close();
 });
 
+test("picker success uses its completed add result and picker cancellation is silent", async () => {
+  const C = { id: "/org-c/tools", path: "/org-c/tools", name: "tools", team: { name: "gamma" } };
+  let pickResult = { ok: false, code: "cancelled", reason: "not rendered" };
+  const { dom, document, selected, controller } = setup({
+    discoverSuggestions: async () => ({ stale: false, suggestions: [A] }),
+    pickWorkspace: async () => pickResult,
+  });
+  controller.begin()(B, [B]);
+  await controller.openModal();
+  const before = document.getElementById("ws-dialog-status").textContent;
+  document.getElementById("ws-browse").click();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(document.getElementById("ws-modal").hidden, false);
+  assert.equal(document.getElementById("ws-dialog-status").textContent, before);
+  assert.deepEqual(selected, []);
+
+  pickResult = { ok: true, workspace: C };
+  document.getElementById("ws-browse").click();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(document.getElementById("ws-modal").hidden, true);
+  assert.deepEqual(selected, ["/org-c/tools"]);
+  dom.window.close();
+});
+
+test("resolved add domain failure renders prose and never switches", async () => {
+  const { dom, document, selected, controller } = setup({
+    discoverSuggestions: async () => ({ stale: false, suggestions: [A] }),
+    addWorkspace: async () => ({ ok: false, code: "foreign-server", reason: "This server is managed outside the app." }),
+  });
+  controller.begin()(B, [B]);
+  await controller.openModal();
+  document.querySelector(".ws-suggestion").click();
+  document.getElementById("ws-confirm").click();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(document.getElementById("ws-modal").hidden, false);
+  assert.equal(document.querySelector(".ws-dialog").getAttribute("aria-busy"), "false");
+  assert.equal(document.getElementById("ws-dialog-status").textContent, "This server is managed outside the app.");
+  assert.deepEqual(selected, []);
+  dom.window.close();
+});
+
 test("pending add cannot be dismissed and successful completion always reconciles", async () => {
   const addGate = deferred();
   const { dom, document, selected, controller } = setup({
@@ -131,7 +172,7 @@ test("pending add cannot be dismissed and successful completion always reconcile
   dialog.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
   modal.dispatchEvent(new dom.window.MouseEvent("mousedown", { bubbles: true }));
   assert.equal(modal.hidden, false, "Escape and backdrop cannot abandon an in-flight mutation");
-  addGate.resolve({ workspace: A, workspaces: [B, A] });
+  addGate.resolve({ ok: true, workspace: A });
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(modal.hidden, true);
   assert.deepEqual(selected, ["/org-a/oas"]);

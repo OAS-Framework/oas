@@ -171,7 +171,7 @@ export function createWorkspaceSwitcher({
     modalSearch.focus();
     try {
       const result = await discoverSuggestions();
-      if (token !== modalGeneration) return;
+      if (token !== modalGeneration || result?.stale) return;
       const found = Array.isArray(result) ? result : (result?.suggestions || []);
       const added = new Set(workspaces.map((workspace) => workspace.id));
       suggestions = found.filter((candidate) => candidateId(candidate) && !added.has(candidateId(candidate)));
@@ -183,21 +183,33 @@ export function createWorkspaceSwitcher({
     }
   };
 
+  const reconcileAddedWorkspace = (workspace) => {
+    const list = [...workspaces.filter((candidate) => candidate.id !== workspace.id), workspace];
+    render(workspace, list);
+    closeModal(false);
+    selectWorkspace(candidateId(workspace));
+    trigger.focus();
+  };
+  const resolvedMutation = (result) => {
+    if (result?.ok && result.workspace) { reconcileAddedWorkspace(result.workspace); return true; }
+    if (result?.code === "superseded") { setStatus(""); return true; }
+    return false;
+  };
   const onBrowse = async () => {
     const token = ++modalGeneration;
+    const previousStatus = status.textContent;
+    setAdding(true);
     setStatus("Choose an OAS workspace folder…");
     try {
-      const candidate = await pickWorkspace();
+      const result = await pickWorkspace();
       if (token !== modalGeneration) return;
-      if (!candidate) { setStatus("No folder selected."); return; }
-      const normalized = typeof candidate === "string" ? { id: candidate, path: candidate } : candidate;
-      if (!suggestions.some((item) => candidateId(item) === candidateId(normalized))) suggestions.unshift(normalized);
-      selected = normalized;
-      confirm.disabled = false;
-      setStatus("Folder validated. Review it, then add the workspace.");
-      renderSuggestions();
+      setAdding(false);
+      if (result?.code === "cancelled") { setStatus(previousStatus); return; }
+      if (resolvedMutation(result)) return;
+      setStatus(result?.reason || "Could not use that folder.", true);
     } catch (error) {
       if (token !== modalGeneration) return;
+      setAdding(false);
       setStatus(error?.message || "Could not use that folder.", true);
     }
   };
@@ -208,15 +220,11 @@ export function createWorkspaceSwitcher({
     setAdding(true);
     setStatus(`Adding ${candidateName(choice)}…`);
     try {
-      const result = await addWorkspace(choice);
+      const result = await addWorkspace(choice.path);
       if (token !== modalGeneration) return;
       setAdding(false);
-      const workspace = result?.workspace || choice;
-      const list = result?.workspaces || [...workspaces, workspace];
-      render(workspace, list);
-      closeModal(false);
-      selectWorkspace(candidateId(workspace));
-      trigger.focus();
+      if (resolvedMutation(result)) return;
+      setStatus(result?.reason || "Could not add that workspace.", true);
     } catch (error) {
       if (token !== modalGeneration) return;
       setAdding(false);
