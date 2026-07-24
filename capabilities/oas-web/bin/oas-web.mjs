@@ -167,6 +167,10 @@ function spawnAgent({ agent, agentsRoot, task, purpose }) {
   const r = core.spawnInstance(root, def, {
     purpose: purpose ? String(purpose) : undefined,
     task: task ? String(task) : "",
+    // Lineage: server-mediated spawns are OPERATOR-origin (a human clicked the
+    // button) — no `parent` is passed, and spawnInstance never reads ambient
+    // OAS_INSTANCE/PI_AGENT_INSTANCE (this server process may have inherited an
+    // agent's env from the shell it was born in; that is not parentage).
     repo: def.repo || core.defaultRepo(core.workspaceOf(root)) || undefined,
   });
   return { instance: r.instance, agent: r.agent, home: r.home, work: r.work,
