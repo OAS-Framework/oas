@@ -42,12 +42,12 @@ than letting the file grow stale.
 
 ## In flight
 
-- Desktop distribution work continues in the durable desktop-engineer soul.
-  Before any npm/GitHub release containing the removals, it must deliver
-  installers, remove repository-root/adjacent-core mutation assumptions in
-  favor of compatible installed `oas ... --json`, preserve observation-only
-  operation without a CLI, and ship the migration guidance. The binding gates
-  are recorded in the [desktop panel succession decision](/decisions/desktop-panel-succession.md).
+- `feature/desktop-dist` was cut at a154f0e on 2026-07-24. cli-dev-desktop-dist-2
+  owns the CLI/version/npm slice on `cli-dev/desktop-dist`;
+  oas-desktop-engineer-desktop-dist owns installers, app integration, pruning,
+  and parity on `oas-desktop-engineer/desktop-dist`. The frozen target is one
+  public `v0.18.0` tag publishing root/pi npm plus macOS arm64+x64 and Linux x64
+  Desktop assets. Binding gates are in the [public release contract](/decisions/desktop-public-release-contract.md).
 
 ## Recent deliveries
 
