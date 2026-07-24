@@ -2,8 +2,8 @@
 type: Concept
 title: Capability-defined agents resolve on declaration, with _soulDir/_dir split
 description: A capability manifest's agents array ships read-only souls inside the package that resolve wherever the capability is DECLARED in the config chain (not via per-soul binding), with instances homing under local-agents/ via the _dir/_soulDir split.
-tags: [capabilities, agents, findCapabilityAgent, _soulDir, spawn]
-timestamp: 2026-07-21
+tags: [capabilities, agents, findCapabilityAgent, findInstanceHome, _soulDir, spawn]
+timestamp: 2026-07-24
 ---
 
 # The mechanism
@@ -37,3 +37,8 @@ onto:
 - When adding features that enumerate agents (status, doctor), remember both
   populations: root souls via `listAgents(root)` and package agents via
   `listCapabilityAgents(contextDir)`.
+- When adding any by-name **instance** lookup, use exported
+  `findInstanceHome(root, name)` instead of iterating `listAgents(root)`.
+  Capability-defined agents home under `local-agents/<name>/instances/`
+  without a local `soul.yaml`, so `listAgents` alone cannot see their live
+  instances.

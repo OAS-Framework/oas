@@ -24,7 +24,7 @@ import {
   capabilityManifests, capabilityManifest, capabilityMissingRequires, capabilityIntegrity, capabilityTrust, capabilityExecutablePath,
   readCapabilityLocks, writeCapabilityLock,
   resolveOasConfig, resolveWorkMode, composeInstanceAgentsMd, parseYamlNested, packagedInject, teamAgentRoots,
-  findTeamAgent, findTeamInstance, findCapabilityAgent, listCapabilityAgents, workspaceOf,
+  findTeamAgent, findTeamInstance, findCapabilityAgent, findInstanceHome, listCapabilityAgents, workspaceOf,
   ensureRoot, findRoot, findAgent, listAgents, listInstances, listAgentDefs, createAgent as coreCreateAgent,
   spawnInstance, retireInstance, upsertTmpAgent, defaultRepo,
 } from "../lib/core.mjs";
@@ -642,7 +642,7 @@ function statusTeam() {
 
 function spawnCmd() {
   const name = args[1];
-  if (!name || name.startsWith("--")) die("usage: oas spawn <agent> [--task <text>|--task-file <f>] [--purpose <slug>] [--repo <r>] [--work worktree|checkout|attached|workspace] [--work-dir <owner-work>] [--runtime pi|claude] [--model <m>] [--branch <b>] [--instructions-file <f>|--def-file <f>] [--no-launch] [--json]");
+  if (!name || name.startsWith("--")) die("usage: oas spawn <agent> [--task <text>|--task-file <f>] [--purpose <slug>] [--parent <instance>] [--repo <r>] [--work worktree|checkout|attached|workspace] [--work-dir <owner-work>] [--runtime pi|claude] [--model <m>] [--branch <b>] [--instructions-file <f>|--def-file <f>] [--no-launch] [--json]");
   let root = ensureRoot(flag("dir") || process.cwd());
   let agent = findAgent(root, name);
   const instrFile = flag("instructions-file");
@@ -682,8 +682,25 @@ function spawnCmd() {
       die(`"${name}" is a persistent agent — spawn it without --instructions-file/--def-file`);
     }
   }
+  // Lineage is explicit: --parent names the parent instance (agents spawning
+  // sub-agents pass their own name, e.g. --parent "$OAS_INSTANCE"). Without it,
+  // the spawn is operator-origin and lands top-level — ambient env vars in the
+  // shell are never treated as parentage.
+  const parent = flag("parent");
+  if (parent !== undefined && (parent === true || !String(parent).trim())) die("--parent needs an instance name");
+  if (parent) {
+    // findInstanceHome also sees capability-defined agents' instance homes
+    // (local-agents/<name>/ without a local soul) — e.g. a reviewer passing
+    // --parent "$OAS_INSTANCE" from a capability agent.
+    if (!findInstanceHome(root, parent) && !findTeamInstance(flag("dir") || process.cwd(), parent)) die(`--parent "${parent}" does not match any known instance`);
+  }
+  const taskText = flag("task");
+  if (taskText === true) die("--task needs a value (use --task-file for long tasks)");
+  const taskFileFlag = flag("task-file");
+  if (taskFileFlag === true) die("--task-file needs a path");
+  if (taskFileFlag && !existsSync(taskFileFlag)) die(`--task-file not found: ${taskFileFlag}`);
   const r = spawnInstance(root, agent, {
-    purpose: flag("purpose"), task: flag("task"), taskFile: flag("task-file"),
+    purpose: flag("purpose"), task: taskText, taskFile: taskFileFlag, parent,
     repo: flag("repo") || agent.repo || defaultRepo(workspaceOf(root)) || defaultRepo(process.cwd()),
     work: flag("work"), workDir: flag("work-dir"), runtime: flag("runtime"), model: flag("model"), branch: flag("branch"),
     launch: !args.includes("--no-launch"),
@@ -945,8 +962,9 @@ Usage:
       [--instructions-file <f>]
   oas spawn <agent> [--task <text>]         spawn an instance (tmux; --no-launch
       [--purpose <slug>] [--repo <r>]       = scaffold only); --instructions-file/
-      [--work worktree|checkout|attached|workspace]  --def-file creates a local (tmp) agent
-      [--work-dir <owner-work>] [--runtime pi|claude] [--model <m>] [--branch <b>]
+      [--parent <instance>]                 --def-file creates a local (tmp) agent;
+      [--work worktree|checkout|attached|workspace]  --parent nests under an existing
+      [--work-dir <owner-work>] [--runtime pi|claude] [--model <m>] [--branch <b>]  instance (default: top-level)
       [--instructions-file <f>|--def-file <f>] [--no-launch] [--json]
                                             with team: declared, unknown local souls
                                             resolve across the team scope's repos

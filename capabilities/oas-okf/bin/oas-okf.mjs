@@ -208,7 +208,7 @@ _(the single next action — keep this current; a fresh session on any model res
       if (!soulRepo) skip("workspace-mode soul is not inside a git repo — nowhere to deliver a PR");
       const relSoul = realSoul.slice(soulRepo.length + 1);
       r = core.spawnInstance(root, agentDef, {
-        instance: harvName,
+        instance: harvName, parent: inst,
         repo: soulRepo, work: "worktree", branch: `memory-harvest/${slug}`, model: harvestModel,
         task: `Harvest the pending notes of live WORKSPACE-MODE instance "${inst}" (agent "${agName}") into its soul — delivered as a PR.\n\n- Source notes: ${notesDir} (${notes.join(", ")})\n- Your ./work is a dedicated worktree of the soul's home repo (${soulRepo}), branch memory-harvest/${slug}.\n- Soul knowledge bundle to update: ./work/${join(relSoul, "knowledge")}\n- Soul skills dir (for procedure-shaped notes): ./work/${join(relSoul, "skills")}\n- Follow your memory-harvest skill: promote/merge/drop each note, knowledge vs skill routing, index + log discipline, validate the bundle, DELETE processed notes from the source notes/ dir, commit once (prefixed "memory-harvest:").\n- Then push the branch and open a PR (\`git push -u origin memory-harvest/${slug}\` then \`gh pr create --fill\`). Do NOT merge it; the humans/owners of ${soulRepo} review soul changes. If gh is unavailable, push the branch and report the compare URL.\n- Finally run \`oas retire ${harvName} --self\` (keep the branch: --self only).`,
       });
@@ -220,7 +220,7 @@ _(the single next action — keep this current; a fresh session on any model res
         ? join(workDir, realSoul.slice(realRepo.length + 1))
         : realSoul;
       r = core.spawnInstance(root, agentDef, {
-        instance: harvName,
+        instance: harvName, parent: inst,
         repo: context, work: "attached", workDir, model: harvestModel,
         task: `Harvest the pending notes of live instance "${inst}" (agent "${agName}") into its soul.\n\n- Source notes: ${notesDir} (${notes.join(", ")})\n- Soul knowledge bundle to update: ${join(soulTarget, "knowledge")}\n- Soul skills dir (for procedure-shaped notes): ${join(soulTarget, "skills")}\n- You are ATTACHED to the instance's work tree (./work) — commit your promotions there as a single commit, prefixed "memory-harvest:".\n- Follow your memory-harvest skill: promote/merge/drop each note, knowledge vs skill routing, index + log discipline, validate the bundle, DELETE processed notes from the source notes/ dir (so they are not re-harvested), commit, then run \`oas retire ${harvName} --self\`.`,
       });

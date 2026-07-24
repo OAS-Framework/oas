@@ -767,3 +767,125 @@ test("retired oas.web: non-installed origins and source-manifest retirement are 
   assert.equal(existsSync(join(target, ".agents", "capabilities", "installed", "ext-pkg")), false, "destination artifact removed");
   assert.equal(existsSync(join(target, "oas-lock.json")), false, "no lock entry written");
 });
+
+test("spawn lineage is explicit: ambient env never sets parent; --parent and attached owner do", () => {
+  const base = temp(); const repo = join(base, "repo"); gitRepo(repo);
+  // Agents root inside the repo so the CLI resolves it from cwd.
+  const root = join(repo, "agents");
+  write(join(root, "dev", "soul", "soul.yaml"), `name: dev\nkind: persistent\nrepo: ${repo}\nwork: checkout\nruntime: pi\n`);
+  write(join(root, "dev", "soul", "AGENTS.md"), "# dev\n");
+  mkdirSync(join(root, "dev", "instances"), { recursive: true });
+  const env = { ...process.env, PATH: fakeRuntimes(base), PI_AGENTS_TMUX_SESSION: "oas-test-nosuch" };
+  delete env.PI_AGENTS_ROOT;
+  // 1. Env-polluted shell (a terminal opened inside an agent's tmux window) WITHOUT
+  //    --parent: operator origin, top-level, and the task still lands in TASK.md.
+  const polluted = { ...env, OAS_INSTANCE: "dev-existing", PI_AGENT_INSTANCE: "dev-existing" };
+  let r = spawnSync(process.execPath, [CLI, "spawn", "dev", "--task", "manual human task", "--purpose", "manual", "--no-launch", "--json"], { cwd: repo, env: polluted, encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  const manual = JSON.parse(r.stdout.slice(r.stdout.indexOf("{")));
+  assert.equal(manual.parentInstance, undefined);
+  assert.equal(manual.spawnOrigin, "operator");
+  assert.match(readFileSync(join(manual.home, "TASK.md"), "utf8"), /manual human task/);
+  // 2. --parent with an unknown instance is rejected before scaffolding.
+  r = spawnSync(process.execPath, [CLI, "spawn", "dev", "--parent", "no-such-instance", "--purpose", "bad", "--no-launch"], { cwd: repo, env, encoding: "utf8" });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /--parent "no-such-instance" does not match any known instance/);
+  // 3. Explicit --parent naming a real instance nests, and a --task-file task lands.
+  const tf = join(base, "task.md"); writeFileSync(tf, "task from a file\n");
+  r = spawnSync(process.execPath, [CLI, "spawn", "dev", "--parent", manual.instance, "--task-file", tf, "--purpose", "child", "--no-launch", "--json"], { cwd: repo, env, encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  const child = JSON.parse(r.stdout.slice(r.stdout.indexOf("{")));
+  assert.equal(child.parentInstance, manual.instance);
+  assert.equal(child.spawnOrigin, "instance");
+  assert.match(readFileSync(join(child.home, "TASK.md"), "utf8"), /task from a file/);
+  // 4. --task without a value fails loudly instead of writing a broken TASK.md.
+  r = spawnSync(process.execPath, [CLI, "spawn", "dev", "--task", "--purpose", "oops", "--no-launch"], { cwd: repo, env, encoding: "utf8" });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /--task needs a value/);
+  // 5. Kernel: attached mode still nests under the work-tree OWNER (no env, no parent).
+  const agent = findAgent(root, "dev");
+  const oldPath = process.env.PATH;
+  const oldInst = process.env.OAS_INSTANCE; const oldPiInst = process.env.PI_AGENT_INSTANCE;
+  process.env.PATH = fakeRuntimes(base);
+  process.env.OAS_INSTANCE = "dev-existing"; process.env.PI_AGENT_INSTANCE = "dev-existing";
+  try {
+    const attached = spawnInstance(root, agent, { instance: "dev-svc", work: "attached", workDir: join(manual.home, "work"), task: "attached task", launch: false });
+    assert.equal(attached.parentInstance, manual.instance, "attached fallback: work-tree owner is the parent");
+    assert.equal(attached.spawnOrigin, "instance");
+    assert.match(readFileSync(join(attached.home, "TASK.md"), "utf8"), /attached task/);
+    // 6. Kernel: explicit o.parent wins even for non-attached spawns; env is ignored.
+    const nested = spawnInstance(root, agent, { instance: "dev-sub", parent: manual.instance, task: "sub task", launch: false });
+    assert.equal(nested.parentInstance, manual.instance);
+    assert.equal(nested.spawnOrigin, "instance");
+    // 7. Kernel: no parent, no attached fallback → operator, despite polluted env.
+    const top = spawnInstance(root, agent, { instance: "dev-top", launch: false });
+    assert.equal(top.parentInstance, undefined);
+    assert.equal(top.spawnOrigin, "operator");
+    assert.match(readFileSync(join(top.home, "TASK.md"), "utf8"), /No task was provided/);
+  } finally {
+    process.env.PATH = oldPath;
+    if (oldInst === undefined) delete process.env.OAS_INSTANCE; else process.env.OAS_INSTANCE = oldInst;
+    if (oldPiInst === undefined) delete process.env.PI_AGENT_INSTANCE; else process.env.PI_AGENT_INSTANCE = oldPiInst;
+  }
+});
+
+test("--parent accepts capability-defined parent instances homing under local-agents/", () => {
+  const base = temp(); const { repo, root } = fixtureSoul(base);
+  capability(repo, "rev", { capability: "acme.rev", agents: ["agents/reviewer"] }, {
+    "agents/reviewer/soul.yaml": "name: reviewer\nkind: capability\nwork: checkout\nruntime: pi\ndescription: Reviewer.\n",
+    "agents/reviewer/AGENTS.md": "# Reviewer\n",
+  });
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.rev:\n      global: true\n");
+  return import("../lib/core.mjs").then((core) => {
+    const capAgent = core.findCapabilityAgent(repo, root, "reviewer");
+    const oldPath = process.env.PATH; process.env.PATH = fakeRuntimes(base);
+    try {
+      // Capability agent instance homes under <root>/local-agents/reviewer/instances/.
+      const parent = core.spawnInstance(root, { ...capAgent, repo }, { instance: "reviewer-abc", launch: false });
+      assert.ok(parent.home.includes(join("local-agents", "reviewer", "instances")));
+      // Kernel lookup sees it (this is what `oas spawn --parent` validates with).
+      assert.ok(core.findInstanceHome(root, "reviewer-abc"), "findInstanceHome sees capability-agent homes");
+      // Coordinator-style spawn: a capability-defined instance passes itself as
+      // --parent when spawning a child through the CLI.
+      const env = { ...process.env, PATH: fakeRuntimes(base), PI_AGENTS_TMUX_SESSION: "oas-test-nosuch" };
+      delete env.PI_AGENTS_ROOT;
+      const r = spawnSync(process.execPath, [CLI, "spawn", "dev", "--parent", "reviewer-abc", "--task", "child work", "--purpose", "child", "--no-launch", "--json"], { cwd: repo, env, encoding: "utf8" });
+      assert.equal(r.status, 0, r.stderr);
+      const child = JSON.parse(r.stdout.slice(r.stdout.indexOf("{")));
+      assert.equal(child.parentInstance, "reviewer-abc");
+      assert.equal(child.spawnOrigin, "instance");
+      assert.match(readFileSync(join(child.home, "TASK.md"), "utf8"), /child work/);
+      core.retireInstance(root, "reviewer-abc", { tmuxSession: "oas-test-nosuch" });
+    } finally { process.env.PATH = oldPath; }
+  });
+});
+
+test("lineage is deployment-local: --parent from an unrelated deployment is rejected", () => {
+  const base = temp();
+  // Deployment A: the caller's instance lives here.
+  const a = fixtureSoul(base);
+  // Deployment B: a separate repo + agents root (oas-support's --dir <repo> case).
+  const repoB = join(base, "other-repo"); gitRepo(repoB);
+  const rootB = join(repoB, "agents");
+  write(join(rootB, "expert", "soul", "soul.yaml"), `name: expert\nkind: persistent\nrepo: ${repoB}\nwork: checkout\nruntime: pi\n`);
+  write(join(rootB, "expert", "soul", "AGENTS.md"), "# expert\n");
+  mkdirSync(join(rootB, "expert", "instances"), { recursive: true });
+  const env = { ...process.env, PATH: fakeRuntimes(base), PI_AGENTS_TMUX_SESSION: "oas-test-nosuch" };
+  delete env.PI_AGENTS_ROOT;
+  // A real instance in deployment A…
+  let r = spawnSync(process.execPath, [CLI, "spawn", "dev", "--purpose", "caller", "--no-launch", "--json"], { cwd: a.repo, env, encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  const caller = JSON.parse(r.stdout.slice(r.stdout.indexOf("{")));
+  // …is NOT a valid parent when spawning into deployment B (its hierarchy
+  // cannot resolve foreign instances — cross-deployment spawns are operator-origin).
+  r = spawnSync(process.execPath, [CLI, "spawn", "expert", "--dir", repoB, "--parent", caller.instance, "--purpose", "x", "--no-launch"], { cwd: a.repo, env, encoding: "utf8" });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /does not match any known instance/);
+  // Without --parent the cross-deployment spawn lands top-level in B.
+  r = spawnSync(process.execPath, [CLI, "spawn", "expert", "--dir", repoB, "--task", "support question", "--purpose", "x", "--no-launch", "--json"], { cwd: a.repo, env, encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  const expert = JSON.parse(r.stdout.slice(r.stdout.indexOf("{")));
+  assert.equal(expert.spawnOrigin, "operator");
+  assert.equal(expert.parentInstance, undefined);
+  assert.match(readFileSync(join(expert.home, "TASK.md"), "utf8"), /support question/);
+});
