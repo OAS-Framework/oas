@@ -781,45 +781,54 @@ function createCmd() {
  * Kernel subcommands take precedence over capability namespaces.
  */
 function capabilityCommand() {
+  // JSON-aware boundary: in --json mode every dispatch failure — inactive or
+  // untrusted capability, duplicate namespace, unknown subcommand, broken
+  // metadata — must still emit exactly one envelope object on stdout.
+  const bail = (code, msg) => (JSON_MODE ? jsonFail(code, msg) : die(msg));
   let activeIds;
   let context = process.cwd();
   let teamCtx;
   const instanceHome = process.env.PI_AGENT_HOME || process.env.OAS_HOME;
   const metaFile = instanceHome && join(instanceHome, "instance.json");
-  if (metaFile && existsSync(metaFile)) {
-    const meta = JSON.parse(readFileSync(metaFile, "utf8"));
-    activeIds = (meta.capabilities || []).map((c) => c.id);
-    context = meta.repo || context;
-    // Team: the spawn-time snapshot, but fall back to live config — instances
-    // spawned before a team: block was declared have no snapshot.
-    teamCtx = meta.team || resolveOasConfig(context).team;
-  } else {
-    const resolved = resolveOasConfig(context, flag("soul"));
-    activeIds = resolved.capabilities.map((c) => c.id);
-    teamCtx = resolved.team;
-  }
+  try {
+    if (metaFile && existsSync(metaFile)) {
+      const meta = JSON.parse(readFileSync(metaFile, "utf8"));
+      activeIds = (meta.capabilities || []).map((c) => c.id);
+      context = meta.repo || context;
+      // Team: the spawn-time snapshot, but fall back to live config — instances
+      // spawned before a team: block was declared have no snapshot.
+      teamCtx = meta.team || resolveOasConfig(context).team;
+    } else {
+      const resolved = resolveOasConfig(context, flag("soul"));
+      activeIds = resolved.capabilities.map((c) => c.id);
+      teamCtx = resolved.team;
+    }
+  } catch (e) { bail("E_CONFIG_BROKEN", e.message || e); throw e; }
   const mans = Object.values(capabilityManifests(context)).filter((m) => m.command === cmd && m.commands);
   if (!mans.length) return false;
-  if (mans.length > 1) die(`duplicate operational command namespace "${cmd}": ${mans.map((m) => m.capability).join(", ")}`);
+  if (mans.length > 1) bail("E_DUPLICATE_NAMESPACE", `duplicate operational command namespace "${cmd}": ${mans.map((m) => m.capability).join(", ")}`);
   const m = mans[0];
-  if (!activeIds.includes(m.capability)) die(`${m.capability} command namespace is not active in the current context/instance`);
+  if (!activeIds.includes(m.capability)) bail("E_CAPABILITY_INACTIVE", `${m.capability} command namespace is not active in the current context/instance`);
   const trust = capabilityTrust(m, context);
-  if (!trust.trusted) die(`${m.capability} executable command is blocked: ${trust.reason}`);
+  if (!trust.trusted) bail("E_CAPABILITY_BLOCKED", `${m.capability} executable command is blocked: ${trust.reason}`);
   const sub = args[1];
   const cmds = Object.keys(m.commands);
   if (!sub || !m.commands[sub]) {
+    if (JSON_MODE) jsonFail("E_UNKNOWN_COMMAND", `oas ${cmd}: ${sub ? `unknown command "${sub}"` : "missing command"} — commands: ${cmds.join(", ") || "(none)"}`);
     console.error(`oas ${cmd} — commands: ${cmds.join(", ") || "(none)"}`);
     process.exit(sub ? 1 : 0);
   }
   const [script, ...rest] = m.commands[sub].split(/\s+/);
   let abs;
   try { abs = capabilityExecutablePath(m, script); }
-  catch (e) { die(e.message); }
-  if (!abs) die(`${cmd} ${sub}: script not found (${join(m._dir, script)})`);
+  catch (e) { bail("E_CAPABILITY_BROKEN", e.message); }
+  if (!abs) bail("E_CAPABILITY_BROKEN", `${cmd} ${sub}: script not found (${join(m._dir, script)})`);
   const r = spawnSync("node", [abs, ...rest, ...args.slice(2)], { stdio: "inherit", env: {
     ...process.env, OAS_CAPABILITY: m.capability,
     OAS_TEAM_NAME: teamCtx?.name || "", OAS_TEAM_ID: teamCtx?.id || "", OAS_TEAM_SCOPE: teamCtx?.scope || "",
   } });
+  // Child never ran (spawn error): nothing reached stdout — keep the envelope contract.
+  if (r.error) bail("E_CAPABILITY_BROKEN", `oas ${cmd} ${sub}: ${r.error.message || r.error}`);
   process.exit(r.status ?? 1);
 }
 
@@ -987,6 +996,9 @@ else if (cmd === "spawn") { try { spawnCmd(); } catch (e) { if (JSON_MODE) jsonF
 else if (cmd === "retire") retireCmd();
 else if (cmd === "create") createCmd();
 else if (cmd && !cmd.startsWith("--") && capabilityCommand()) { /* dispatched */ }
+// No matching kernel command or capability namespace: in --json mode the help
+// text must NOT contaminate stdout — still one envelope object, nonzero exit.
+else if (cmd && !cmd.startsWith("--") && JSON_MODE) jsonFail("E_UNKNOWN_COMMAND", `unknown command "${cmd}" — no kernel subcommand or active capability namespace matches`);
 else {
   console.log(`oas — Open Agent Specialization
 
