@@ -16,6 +16,8 @@ import { createViewLifecycle } from "./view-lifecycle.mjs";
 import { reserveKey, whenKeyFree } from "./tab-keys.mjs";
 import { createTerminalTab } from "./terminal-tab.mjs";
 import { createTabChrome, tabKeyAction, focusAfterLastTab } from "./tab-a11y.mjs";
+import { createIntentGate, prepareOwnedOpen } from "./open-intent.mjs";
+import { createWorkspaceLabel } from "./workspace-label.mjs";
 import {
   collapseKey, hasInstanceChildren, filterInstanceTree, instanceVisibleInTree,
   captureTreeRenderState, configureDisclosure, rosterResponseOwns,
@@ -120,6 +122,7 @@ let contextFilter = "";
 let contextInstances = [];
 let contextWorkspace = "";
 const collapsedInstances = new Set();
+const workspaceLabel = createWorkspaceLabel(document.getElementById("ws-name"));
 
 function initContextRoster() {
   contextRosterEl = document.getElementById("instance-roster");
@@ -139,6 +142,7 @@ function setSidebarMode(mode) {
 async function refreshContextRoster() {
   if (!contextRosterEl) return;
   const myGen = ++contextRosterGen;
+  const commitWorkspaceLabel = workspaceLabel.begin();
   const ws = currentWorkspace();
   const owns = (responseWs = ws) => rosterResponseOwns({
     dispatchWorkspace: ws,
@@ -158,6 +162,7 @@ async function refreshContextRoster() {
   const resolvedWs = panel.workspace?.id || ws;
   if (!owns(resolvedWs)) return;
   if (!currentWorkspace() && resolvedWs) adoptWorkspace(resolvedWs);
+  commitWorkspaceLabel(panel.workspace);
   contextWorkspace = resolvedWs;
   contextInstances = panel.instances || [];
   renderContextRoster(contextInstances);
@@ -279,6 +284,7 @@ const tabhost = document.getElementById("tabhost");
 const tabs = new Map(); // id -> { tabEl, triggerEl, closeEl, paneEl, title, key, onClose, onShow }
 let nextTabId = 1;
 let activeTab = null;
+const brainIntents = createIntentGate();
 
 /** key: optional dedup key — activating an existing tab instead of opening a
  * twin. View modules keep module-level state (they are singletons by design),
@@ -381,18 +387,25 @@ function closeTab(id, restoreFocus = false) {
 
 // ── view host: load ./views/<name>.mjs, mount into a tab ─────────────────
 async function openBrainTab(agent) {
-  // brain.mjs is intentionally one live mount: selecting another soul
-  // replaces the previous brain tab instead of accumulating stale selectors.
+  // brain.mjs is intentionally one live mount. Each click supersedes every
+  // earlier async open BEFORE waiting for deferred cleanup/module loading.
+  const owns = brainIntents.begin();
   for (const [id, t] of tabs) if (t.kind === "brain") closeTab(id);
-  return openViewTab("brain", `◈ ${agent}`, { agent }, "view:brain", "brain");
+  return openViewTab("brain", `◈ ${agent}`, { agent }, "view:brain", "brain", owns);
 }
 
-async function openViewTab(name, title, extra = {}, key = `view:${name}`, kind = name === "markdown" ? "file" : "artifact") {
-  // A reopen during a closed tab's deferred cleanup queues here — never dropped.
-  await whenKeyFree(key);
+async function openViewTab(name, title, extra = {}, key = `view:${name}`,
+  kind = name === "markdown" ? "file" : "artifact", owns = () => true) {
   let mod;
-  try { mod = await import(`./views/${name}.mjs`); }
-  catch (e) {
+  try {
+    mod = await prepareOwnedOpen({
+      owns,
+      waitForKey: () => whenKeyFree(key),
+      load: () => import(`./views/${name}.mjs`),
+    });
+    if (!mod) return;
+  } catch (e) {
+    if (!owns()) return;
     const made = addTab({ title: `${title} (missing)`, key });
     if (made) made.paneEl.innerHTML = `<div class="placeholder"><h2>${name}</h2><div>view module failed to load: ${e.message}</div></div>`;
     return;
@@ -414,8 +427,11 @@ async function openViewTab(name, title, extra = {}, key = `view:${name}`, kind =
   made.paneEl.append(el);
   try {
     await life.mounted(el, { ...ctx, ...extra });
+    if (!owns()) return;
   }
-  catch (e) { el.innerHTML = `<div class="placeholder"><h2>${name}</h2><div>mount failed: ${e.message}</div></div>`; }
+  catch (e) {
+    if (owns()) el.innerHTML = `<div class="placeholder"><h2>${name}</h2><div>mount failed: ${e.message}</div></div>`;
+  }
 }
 
 // ── integrated terminal tab (the shell's own flagship view) ──────────────
@@ -573,16 +589,13 @@ window.addEventListener("keydown", (e) => {
   }
 });
 
-document.getElementById("ws-name").textContent = "";
-api("/api/panel").then((p) => {
-  document.getElementById("ws-name").textContent = p.workspace?.name ? `· ${p.workspace.name}` : "";
-}).catch(() => {});
-
 // Persistent recursive instance tree: always available below the three nav
 // surfaces, with no second/contextual sidebar and no width jump.
 initContextRoster();
 onWorkspaceChange(() => {
   contextRosterGen++;
+  brainIntents.invalidate();
+  workspaceLabel.reset();
   contextInstances = [];
   contextWorkspace = currentWorkspace();
   updateContextTabs();

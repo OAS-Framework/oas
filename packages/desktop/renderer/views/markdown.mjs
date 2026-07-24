@@ -123,43 +123,44 @@ function makeMarked(filePath) {
 }
 
 const STYLE = `
-.mdv-scroll { height: 100%; overflow-y: auto; background: var(--bg, #fff); color: var(--fg, #222); }
+.mdv-scroll { height: 100%; overflow-y: auto; background: var(--bg); color: var(--fg); }
 .mdv { max-width: 860px; margin: 0 auto; padding: 28px 36px 72px; font: 15px/1.7 -apple-system, "Segoe UI", sans-serif; }
 .mdv h1 { font-size: 1.7em; margin: 1.2em 0 .6em; }
 .mdv h2 { font-size: 1.35em; margin: 1.4em 0 .5em; }
 .mdv h3 { font-size: 1.12em; margin: 1.3em 0 .4em; }
 .mdv h1:first-child { margin-top: 0; }
-.mdv h1, .mdv h2 { border-bottom: 1px solid var(--md-rule, #8883); padding-bottom: .3em; }
+.mdv h1, .mdv h2 { border-bottom: 1px solid var(--md-rule); padding-bottom: .3em; }
 .mdv h1, .mdv h2, .mdv h3, .mdv h4 { position: relative; scroll-margin-top: 16px; }
-.mdv .hanchor { position: absolute; left: -22px; top: 0; opacity: 0; color: var(--accent, #4493f8);
+.mdv .hanchor { position: absolute; left: -22px; top: 0; visibility: hidden; color: var(--accent);
                 text-decoration: none; font-weight: 400; }
-.mdv h1:hover .hanchor, .mdv h2:hover .hanchor, .mdv h3:hover .hanchor, .mdv h4:hover .hanchor { opacity: .8; }
-.mdv a { color: var(--accent, #2f6fb2); }
+.mdv h1:hover .hanchor, .mdv h2:hover .hanchor, .mdv h3:hover .hanchor, .mdv h4:hover .hanchor,
+.mdv .hanchor:focus-visible { visibility: visible; }
+.mdv a { color: var(--accent); }
 .mdv pre.md-code { position: relative; padding: 13px 15px; border-radius: 8px; overflow-x: auto;
-                   background: var(--md-code-bg, #8881); border: 1px solid var(--md-rule, #8882); }
-.mdv pre.md-code .md-copy { position: absolute; top: 6px; right: 6px; opacity: 0; border: 1px solid var(--border, #ccc);
-                            background: var(--surface, #fff); color: var(--muted, #667); border-radius: 6px;
+                   background: var(--md-code-bg); border: 1px solid var(--md-rule); }
+.mdv pre.md-code .md-copy { position: absolute; top: 6px; right: 6px; visibility: hidden; border: 1px solid var(--border);
+                            background: var(--surface); color: var(--muted); border-radius: 6px;
                             font: 11px -apple-system, sans-serif; padding: 3px 9px; cursor: pointer; }
-.mdv pre.md-code:hover .md-copy { opacity: 1; }
-.mdv pre.md-code .md-copy:hover { color: var(--fg, #222); border-color: var(--accent, #4493f8); }
+.mdv pre.md-code:hover .md-copy, .mdv pre.md-code .md-copy:focus-visible { visibility: visible; }
+.mdv pre.md-code .md-copy:hover { color: var(--fg); border-color: var(--accent); }
 .mdv code { font: 13px/1.55 "SF Mono", ui-monospace, Menlo, monospace; }
-.mdv :not(pre) > code { background: var(--md-code-bg, #8881); padding: .15em .4em; border-radius: 4px; }
+.mdv :not(pre) > code { background: var(--md-code-bg); padding: .15em .4em; border-radius: 4px; }
 .mdv table { border-collapse: collapse; display: block; overflow-x: auto; }
-.mdv th, .mdv td { border: 1px solid var(--md-rule, #8883); padding: 5px 12px; }
-.mdv th { background: var(--md-code-bg, #8881); }
-.mdv blockquote { margin: 0; padding: 2px 1em; border-left: 3px solid var(--accent, #8885); opacity: .88; }
+.mdv th, .mdv td { border: 1px solid var(--md-rule); padding: 5px 12px; }
+.mdv th { background: var(--md-code-bg); }
+.mdv blockquote { margin: 0; padding: 2px 1em; border-left: 3px solid var(--accent); color: var(--muted); }
 .mdv img { max-width: 100%; border-radius: 6px; }
-.mdv hr { border: none; border-top: 1px solid var(--md-rule, #8883); margin: 24px 0; }
+.mdv hr { border: none; border-top: 1px solid var(--md-rule); margin: 24px 0; }
 .mdv li + li { margin-top: .18em; }
-.mdv .mdv-meta { font: 12px "SF Mono", ui-monospace, monospace; color: var(--muted, #888); margin-bottom: 18px;
+.mdv .mdv-meta { font: 12px "SF Mono", ui-monospace, monospace; color: var(--muted); margin-bottom: 18px;
                  display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
 .mdv .mdv-meta .crumb { word-break: break-all; }
-.mdv .mdv-error { color: var(--danger, #c33); }
-.mdv .mdv-loading { display: flex; align-items: center; gap: 10px; color: var(--muted, #888);
+.mdv .mdv-error { color: var(--danger); }
+.mdv .mdv-loading { display: flex; align-items: center; gap: 10px; color: var(--muted);
                     font: 13px -apple-system, sans-serif; padding: 48px 0; justify-content: center; }
 @keyframes mdv-spin { to { transform: rotate(360deg); } }
-.mdv .mdv-spinner { width: 14px; height: 14px; border: 2px solid var(--md-rule, #8883);
-                    border-top-color: var(--accent, #4493f8); border-radius: 50%;
+.mdv .mdv-spinner { width: 14px; height: 14px; border: 2px solid var(--md-rule);
+                    border-top-color: var(--accent); border-radius: 50%;
                     animation: mdv-spin .7s linear infinite; }
 `;
 
