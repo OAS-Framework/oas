@@ -3,7 +3,8 @@
 Pi runtime bridge for [OAS](https://github.com/OAS-Framework/oas).
 
 The runtime-neutral kernel and universal `oas` CLI live in
-`@oas-framework/oas`. This bridge registers no operational tools. It only:
+`@oas-framework/oas`. Publishes in lockstep with the kernel (same version
+from the same release tag). This bridge registers no operational tools. It only:
 
 - exposes `oas-getting-started` before an OAS workspace exists (the
   acquisition funnel);

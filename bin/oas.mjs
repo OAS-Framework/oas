@@ -36,6 +36,12 @@ const flag = (name) => {
   return i >= 0 ? (args[i + 1] && !args[i + 1].startsWith("--") ? args[i + 1] : true) : undefined;
 };
 const die = (msg) => { console.error(`oas: ${msg}`); process.exit(1); };
+// Desktop CLI API v1 (JSON mode): every `--json` failure is EXACTLY ONE JSON
+// object on stdout — { schemaVersion: 1, ok: false, error: { code, message } } —
+// with a nonzero exit; progress prose goes to stderr, never stdout.
+const JSON_MODE = args.includes("--json");
+const jsonFail = (code, message) => { console.log(JSON.stringify({ schemaVersion: 1, ok: false, error: { code, message: String(message) } })); process.exit(1); };
+const jsonOk = (result) => { console.log(JSON.stringify({ schemaVersion: 1, ok: true, result })); };
 
 /** Level of a directory: laptop (home), repo (.git), else workspace. */
 function levelOf(dir) {
@@ -641,9 +647,14 @@ function statusTeam() {
 }
 
 function spawnCmd() {
+  // JSON mode: contract envelope, stable error codes, stderr-only progress.
+  const bail = (code, msg) => (JSON_MODE ? jsonFail(code, msg) : die(msg));
+  const note = (msg) => (JSON_MODE ? console.error(msg) : console.log(msg));
   const name = args[1];
-  if (!name || name.startsWith("--")) die("usage: oas spawn <agent> [--task <text>|--task-file <f>] [--purpose <slug>] [--parent <instance>] [--repo <r>] [--work worktree|checkout|attached|workspace] [--work-dir <owner-work>] [--runtime pi|claude] [--model <m>] [--branch <b>] [--instructions-file <f>|--def-file <f>] [--no-launch] [--json]");
-  let root = ensureRoot(flag("dir") || process.cwd());
+  if (!name || name.startsWith("--")) bail("E_USAGE", "usage: oas spawn <agent> [--task <text>|--task-file <f>] [--purpose <slug>] [--parent <instance>] [--repo <r>] [--work worktree|checkout|attached|workspace] [--work-dir <owner-work>] [--runtime pi|claude] [--model <m>] [--branch <b>] [--instructions-file <f>|--def-file <f>] [--no-launch] [--json]");
+  let root;
+  try { root = ensureRoot(flag("dir") || process.cwd()); }
+  catch (e) { bail("E_NO_DEPLOYMENT", e.message || e); throw e; }
   let agent = findAgent(root, name);
   const instrFile = flag("instructions-file");
   const defFile = flag("def-file");
@@ -652,7 +663,7 @@ function spawnCmd() {
     const capAgent = findCapabilityAgent(flag("dir") || process.cwd(), root, name);
     if (capAgent) {
       agent = capAgent;
-      console.log(`(capability agent: "${name}" from ${capAgent.capability} — fresh soul, instances home locally)`);
+      note(`(capability agent: "${name}" from ${capAgent.capability} — fresh soul, instances home locally)`);
     }
   }
   if (!agent && !instrFile && !defFile) {
@@ -660,18 +671,18 @@ function spawnCmd() {
     // Unique match wins; the instance homes with its owning repo's agents root.
     const teamHit = findTeamAgent(flag("dir") || process.cwd(), name);
     const remote = (teamHit?.matches || []).filter((m) => resolve(m.root) !== resolve(root));
-    if (remote.length > 1) die(`soul "${name}" found in multiple team repos: ${remote.map((m) => shortPath(m.root)).join(", ")} — re-run with --dir <that repo>`);
+    if (remote.length > 1) bail("E_AMBIGUOUS_SOUL", `soul "${name}" found in multiple team repos: ${remote.map((m) => shortPath(m.root)).join(", ")} — re-run with --dir <that repo>`);
     if (remote.length === 1) {
       root = remote[0].root;
       agent = remote[0].agent;
-      console.log(`(cross-repo: soul "${name}" found at ${shortPath(root)} — instance homes there)`);
+      note(`(cross-repo: soul "${name}" found at ${shortPath(root)} — instance homes there)`);
     }
   }
   // tmp agents: create/update from raw instructions or a single-file def
   if (instrFile || defFile || !agent) {
     if (!agent && !instrFile && !defFile) {
       const def = listAgentDefs(process.cwd()).find((d) => d.name === name);
-      if (!def) die(`unknown agent "${name}" (known: ${listAgents(root).map((a) => a.name).join(", ") || "none"}; importable defs: ${listAgentDefs(process.cwd()).map((d) => d.name).join(", ") || "none"}) — pass --instructions-file or --def-file to create a local agent`);
+      if (!def) bail("E_UNKNOWN_AGENT", `unknown agent "${name}" (known: ${listAgents(root).map((a) => a.name).join(", ") || "none"}; importable defs: ${listAgentDefs(process.cwd()).map((d) => d.name).join(", ") || "none"}) — pass --instructions-file or --def-file to create a local agent`);
       agent = upsertTmpAgent(root, { name: def.name, file: def.path, repo: flag("repo"), work: flag("work"), runtime: flag("runtime"), model: flag("model") });
     } else if (!agent || agent.kind === "tmp") {
       agent = upsertTmpAgent(root, {
@@ -679,7 +690,7 @@ function spawnCmd() {
         repo: flag("repo"), work: flag("work"), runtime: flag("runtime"), model: flag("model"),
       });
     } else {
-      die(`"${name}" is a persistent agent — spawn it without --instructions-file/--def-file`);
+      bail("E_BAD_ARGS", `"${name}" is a persistent agent — spawn it without --instructions-file/--def-file`);
     }
   }
   // Lineage is explicit: --parent names the parent instance (agents spawning
@@ -687,25 +698,38 @@ function spawnCmd() {
   // the spawn is operator-origin and lands top-level — ambient env vars in the
   // shell are never treated as parentage.
   const parent = flag("parent");
-  if (parent !== undefined && (parent === true || !String(parent).trim())) die("--parent needs an instance name");
+  if (parent !== undefined && (parent === true || !String(parent).trim())) bail("E_BAD_ARGS", "--parent needs an instance name");
   if (parent) {
     // findInstanceHome also sees capability-defined agents' instance homes
     // (local-agents/<name>/ without a local soul) — e.g. a reviewer passing
     // --parent "$OAS_INSTANCE" from a capability agent.
-    if (!findInstanceHome(root, parent) && !findTeamInstance(flag("dir") || process.cwd(), parent)) die(`--parent "${parent}" does not match any known instance`);
+    if (!findInstanceHome(root, parent) && !findTeamInstance(flag("dir") || process.cwd(), parent)) bail("E_PARENT_NOT_FOUND", `--parent "${parent}" does not match any known instance`);
   }
   const taskText = flag("task");
-  if (taskText === true) die("--task needs a value (use --task-file for long tasks)");
+  if (taskText === true) bail("E_BAD_ARGS", "--task needs a value (use --task-file for long tasks)");
   const taskFileFlag = flag("task-file");
-  if (taskFileFlag === true) die("--task-file needs a path");
-  if (taskFileFlag && !existsSync(taskFileFlag)) die(`--task-file not found: ${taskFileFlag}`);
-  const r = spawnInstance(root, agent, {
-    purpose: flag("purpose"), task: taskText, taskFile: taskFileFlag, parent,
-    repo: flag("repo") || agent.repo || defaultRepo(workspaceOf(root)) || defaultRepo(process.cwd()),
-    work: flag("work"), workDir: flag("work-dir"), runtime: flag("runtime"), model: flag("model"), branch: flag("branch"),
-    launch: !args.includes("--no-launch"),
-  });
-  if (args.includes("--json")) { console.log(JSON.stringify(r, null, 2)); return; }
+  if (taskFileFlag === true) bail("E_BAD_ARGS", "--task-file needs a path");
+  if (taskFileFlag && !existsSync(taskFileFlag)) bail("E_BAD_ARGS", `--task-file not found: ${taskFileFlag}`);
+  let r;
+  try {
+    r = spawnInstance(root, agent, {
+      purpose: flag("purpose"), task: taskText, taskFile: taskFileFlag, parent,
+      repo: flag("repo") || agent.repo || defaultRepo(workspaceOf(root)) || defaultRepo(process.cwd()),
+      work: flag("work"), workDir: flag("work-dir"), runtime: flag("runtime"), model: flag("model"), branch: flag("branch"),
+      launch: !args.includes("--no-launch"),
+    });
+  } catch (e) { bail("E_SPAWN_FAILED", e.message || e); throw e; }
+  if (JSON_MODE) {
+    // Desktop CLI API v1 spawn result — a FIXED shape (see docs/desktop-cli-api.md).
+    jsonOk({
+      instance: r.instance, agent: r.agent, home: r.home, work: r.work,
+      branch: r.branch || null, launched: r.launched, warnings: r.warnings || [],
+      tmux: r.tmux || null, repo: r.repo || null, runtime: r.runtime || null,
+      model: r.model || null, parent: r.parentInstance || null,
+      spawnOrigin: r.spawnOrigin, attach: r.attach,
+    });
+    return;
+  }
   console.log(`Spawned ${r.instance} (${r.work}${r.branch ? `, branch ${r.branch}` : ""})${r.launched ? ` — tmux window "${r.tmux.window}"` : " — not launched"}`);
   console.log(`  home:   ${shortPath(r.home)}`);
   if (!r.launched) console.log(`  launch: (cd ${shortPath(r.home)} && ${r.command})`);
@@ -932,6 +956,17 @@ function updateCmd() {
   console.log(`\nUpdated to ${latest}. Now verify each deployment: run \`oas doctor\` at your workspace/repo scopes — it reports config spellings this version rejects, version skew, and missing requirements. Restart running pi sessions to pick up the new bridge.`);
 }
 
+// ---------- version (Desktop CLI API v1 probe) ----------
+function versionCmd() {
+  if (JSON_MODE) {
+    // EXACT Desktop API v1 probe payload — one JSON object, nothing else on
+    // stdout. Desktop accepts desktopApi === 1 and a compatible semver range.
+    console.log(JSON.stringify({ schemaVersion: 1, name: "@oas-framework/oas", version: OAS_VERSION, desktopApi: 1 }));
+    return;
+  }
+  console.log(`@oas-framework/oas ${OAS_VERSION} (desktop API v1)`);
+}
+
 // ---------- main ----------
 if (cmd === "doctor") {
   const doctorDir = args[1] && !args[1].startsWith("--") ? args[1] : undefined;
@@ -947,7 +982,8 @@ else if (cmd === "root") console.log(resolve(new URL("..", import.meta.url).path
 else if (cmd === "init") init();
 else if (cmd === "status") status();
 else if (cmd === "pane") await paneCmd();
-else if (cmd === "spawn") spawnCmd();
+else if (cmd === "version" || cmd === "--version" || cmd === "-v") versionCmd();
+else if (cmd === "spawn") { try { spawnCmd(); } catch (e) { if (JSON_MODE) jsonFail("E_SPAWN_FAILED", e.message || e); throw e; } }
 else if (cmd === "retire") retireCmd();
 else if (cmd === "create") createCmd();
 else if (cmd && !cmd.startsWith("--") && capabilityCommand()) { /* dispatched */ }
@@ -955,6 +991,8 @@ else {
   console.log(`oas — Open Agent Specialization
 
 Usage:
+  oas version [--json]                      kernel version; --json emits the
+                                            Desktop CLI API v1 probe payload
   oas status [--json]                       agents, souls, running instances
   oas status --team [--json]                whole-team roster across the team scope's repos
   oas create <name> [--description <d>]     create a persistent agent soul
