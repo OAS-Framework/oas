@@ -1,6 +1,7 @@
 # Knowledge Log
 
 ## 2026-07-24
+* **Creation**: [Instance-name filesystem lookups must reject path traversal before joining](/lessons/instance-name-filesystem-containment.md) — instance-home helpers must validate the instance-name argument and enforce immediate-child containment before existence checks or destructive lifecycle operations.
 * **Update**: [Desktop panel succession](/decisions/desktop-panel-succession.md) clarifies the PR #19 merge gate versus the desktop distribution release gate: the self-owned server may retain its direct adjacent-core bridge at merge as explicit release-blocking debt, but installed-CLI mutations and observation-only no-OAS behavior remain mandatory before release.
 * **Update**: [Desktop panel succession](/decisions/desktop-panel-succession.md) timing amended by direct human direction — PR #19 now completes the desktop-owned backend cut and immediately removes oas.web plus `oas pane`/`lib/control-pane` before the next release, superseding the same-day N/N+1 sunset plan. The removal is a documented breaking impact with config/lock diagnostics and migration guidance; merge may precede installer readiness, but release may not.
 * **Update**: the [roadmap](/roadmap/next-steps.md) and [repo state](/stewardship/repo-state.md) now reflect PR #19's expanded immediate-succession scope and mandatory full re-review.
