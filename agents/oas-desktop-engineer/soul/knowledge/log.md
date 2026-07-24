@@ -1,6 +1,7 @@
 # Knowledge Log
 
 ## 2026-07-24
+* **Creation**: promoted [fake CLI fixtures need absolute-path launchers under hostile PATH](/lessons/fake-cli-fixtures-hostile-path.md) from the oas-desktop-engineer-desktop-dist notes.
 * **Creation**: promoted [desktop deployment reader and mutation degradation after kernel bridge removal](/architecture/desktop-deployment-reader.md) from the oas-desktop-engineer-desktop-dist notes.
 * **Update**: merged the kernel bridge removal note into [desktop backend architecture](/architecture/desktop-backend-architecture.md), [spawn endpoint](/architecture/spawn-endpoint.md), [agent brain endpoint](/architecture/agent-brain-endpoint-and-view.md), [desktop panel decisions](/references/desktop-panel-decisions.md), [dormant surface removal inventory](/lessons/dormant-surface-removal-inventory.md), and [migrated roster model kernel seam injection](/lessons/migrated-roster-model-kernel-seam-injection.md).
 * **Creation**: promoted [dormant surface removal inventory](/lessons/dormant-surface-removal-inventory.md) from the oas-desktop-engineer-desktop-dist notes.
