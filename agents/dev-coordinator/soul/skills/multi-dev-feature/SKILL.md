@@ -24,8 +24,10 @@ Write one task brief per developer. Each brief must state:
   and never merge into the feature branch;
 - who the coordinator is (your instance alias) for questions/dependencies.
 
-Spawn each developer with `oas spawn <dev> --task-file <brief>` (worktree
-mode is their soul default). Sequence dependency-heavy parts first.
+Spawn each developer with `oas spawn <dev> --task-file <brief>
+--parent "$OAS_INSTANCE"` (worktree mode is their soul default) — lineage is
+explicit, so pass your own instance as the parent or they land as top-level
+operator roots. Sequence dependency-heavy parts first.
 
 ## 2. During development
 
@@ -61,7 +63,7 @@ fresh reviewer on the integrated diff:
 
 ```bash
 oas spawn reviewer --work attached --work-dir <integration-worktree> \
-  --purpose "<feature-short-sha>" \
+  --purpose "<feature-short-sha>" --parent "$OAS_INSTANCE" \
   --task "Review the merged feature diff origin/main..feature/<name>. Report to <your-instance> per your operating loop."
 ```
 
@@ -77,7 +79,7 @@ to the owning developer(s), re-merge, re-gate, re-review.
   maintainer instance** (even if another oas-expert is live):
 
   ```bash
-  oas spawn oas-expert --purpose "pr<n>" \
+  oas spawn oas-expert --purpose "pr<n>" --parent "$OAS_INSTANCE" \
     --task "Maintainer review of PR #<n> (feature/<name>): run your pr-review gates. You own this PR to its terminal outcome — on RETURN stay alive and idle for my fixed-mail, re-review, repeat; on merge/close record the delivery in your stewardship knowledge and retire yourself. Report verdicts to <your-instance> by aweb mail."
   ```
 

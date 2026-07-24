@@ -51,8 +51,12 @@ where your session runs):
 
 ```bash
 oas spawn oas-expert --dir <repo> --purpose <short-slug> \
+  --parent "$OAS_INSTANCE" \
   --task "<the user question, plus their workspace path and any config context>"
 ```
+
+(Drop `--parent` when you are a human running this from a plain shell —
+lineage is explicit, and only agent-initiated spawns should nest.)
 
 Include in the task briefing: the user's actual question, their workspace
 path, and relevant `oas doctor` output. The expert reads its soul knowledge

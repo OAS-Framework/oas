@@ -25,7 +25,7 @@ import {
   capabilityManifests, capabilityManifest, capabilityMissingRequires, capabilityIntegrity, capabilityTrust, capabilityExecutablePath,
   readCapabilityLocks, writeCapabilityLock,
   resolveOasConfig, resolveWorkMode, composeInstanceAgentsMd, parseYamlNested, packagedInject, teamAgentRoots,
-  findTeamAgent, findTeamInstance, findCapabilityAgent, listCapabilityAgents, workspaceOf,
+  findTeamAgent, findTeamInstance, findCapabilityAgent, findInstanceHome, listCapabilityAgents, workspaceOf,
   ensureRoot, findRoot, findAgent, listAgents, listInstances, listAgentDefs, createAgent as coreCreateAgent,
   spawnInstance, retireInstance, upsertTmpAgent, defaultRepo,
 } from "../lib/core.mjs";
@@ -665,8 +665,10 @@ function spawnCmd() {
   const parent = flag("parent");
   if (parent !== undefined && (parent === true || !String(parent).trim())) die("--parent needs an instance name");
   if (parent) {
-    const local = listAgents(root).some((a) => existsSync(join(a._dir, "instances", parent)));
-    if (!local && !findTeamInstance(flag("dir") || process.cwd(), parent)) die(`--parent "${parent}" does not match any known instance`);
+    // findInstanceHome also sees capability-defined agents' instance homes
+    // (local-agents/<name>/ without a local soul) — e.g. a reviewer passing
+    // --parent "$OAS_INSTANCE" from a capability agent.
+    if (!findInstanceHome(root, parent) && !findTeamInstance(flag("dir") || process.cwd(), parent)) die(`--parent "${parent}" does not match any known instance`);
   }
   const taskText = flag("task");
   if (taskText === true) die("--task needs a value (use --task-file for long tasks)");

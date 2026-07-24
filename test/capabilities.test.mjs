@@ -737,3 +737,34 @@ test("spawn lineage is explicit: ambient env never sets parent; --parent and att
     if (oldPiInst === undefined) delete process.env.PI_AGENT_INSTANCE; else process.env.PI_AGENT_INSTANCE = oldPiInst;
   }
 });
+
+test("--parent accepts capability-defined parent instances homing under local-agents/", () => {
+  const base = temp(); const { repo, root } = fixtureSoul(base);
+  capability(repo, "rev", { capability: "acme.rev", agents: ["agents/reviewer"] }, {
+    "agents/reviewer/soul.yaml": "name: reviewer\nkind: capability\nwork: checkout\nruntime: pi\ndescription: Reviewer.\n",
+    "agents/reviewer/AGENTS.md": "# Reviewer\n",
+  });
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.rev:\n      global: true\n");
+  return import("../lib/core.mjs").then((core) => {
+    const capAgent = core.findCapabilityAgent(repo, root, "reviewer");
+    const oldPath = process.env.PATH; process.env.PATH = fakeRuntimes(base);
+    try {
+      // Capability agent instance homes under <root>/local-agents/reviewer/instances/.
+      const parent = core.spawnInstance(root, { ...capAgent, repo }, { instance: "reviewer-abc", launch: false });
+      assert.ok(parent.home.includes(join("local-agents", "reviewer", "instances")));
+      // Kernel lookup sees it (this is what `oas spawn --parent` validates with).
+      assert.ok(core.findInstanceHome(root, "reviewer-abc"), "findInstanceHome sees capability-agent homes");
+      // Coordinator-style spawn: a capability-defined instance passes itself as
+      // --parent when spawning a child through the CLI.
+      const env = { ...process.env, PATH: fakeRuntimes(base), PI_AGENTS_TMUX_SESSION: "oas-test-nosuch" };
+      delete env.PI_AGENTS_ROOT;
+      const r = spawnSync(process.execPath, [CLI, "spawn", "dev", "--parent", "reviewer-abc", "--task", "child work", "--purpose", "child", "--no-launch", "--json"], { cwd: repo, env, encoding: "utf8" });
+      assert.equal(r.status, 0, r.stderr);
+      const child = JSON.parse(r.stdout.slice(r.stdout.indexOf("{")));
+      assert.equal(child.parentInstance, "reviewer-abc");
+      assert.equal(child.spawnOrigin, "instance");
+      assert.match(readFileSync(join(child.home, "TASK.md"), "utf8"), /child work/);
+      core.retireInstance(root, "reviewer-abc", { tmuxSession: "oas-test-nosuch" });
+    } finally { process.env.PATH = oldPath; }
+  });
+});
