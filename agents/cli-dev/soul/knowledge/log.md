@@ -2,6 +2,7 @@
 
 ## 2026-07-24
 
+* **Update**: [spawn-lineage-explicit-only](/decisions/spawn-lineage-explicit-only.md) records that lineage is deployment-local and cross-deployment spawn recipes must not pass `--parent`.
 * **Update**: [capability-defined-agents](/architecture/capability-defined-agents.md) records that by-name instance lookups must use `findInstanceHome(root, name)` so capability-agent homes under `local-agents/<name>/instances/` are included.
 * **Update**: [spawn-lineage-explicit-only](/decisions/spawn-lineage-explicit-only.md) records the grep-all-Markdown rule for migrating agent-facing `oas spawn` recipes when spawn semantics change.
 * **Creation**: [spawn-lineage-explicit-only](/decisions/spawn-lineage-explicit-only.md) records explicit-only spawn parentage and adds the Decisions section to the bundle index.

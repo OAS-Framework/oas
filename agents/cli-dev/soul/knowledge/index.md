@@ -12,7 +12,7 @@ read what the current task needs, not everything.
 
 ## Decisions
 
-* [decisions/spawn-lineage-explicit-only.md](decisions/spawn-lineage-explicit-only.md) - parentInstance now comes only from an explicit --parent/o.parent or the attached-mode workDir-owner fallback; OAS_INSTANCE/PI_AGENT_INSTANCE env vars are never consulted, because env inheritance is not evidence of intent.
+* [decisions/spawn-lineage-explicit-only.md](decisions/spawn-lineage-explicit-only.md) - parentInstance now comes only from an explicit --parent/o.parent inside the target deployment or the attached-mode workDir-owner fallback; env vars are never consulted, and cross-deployment spawns stay operator-origin.
 
 ## Architecture
 
