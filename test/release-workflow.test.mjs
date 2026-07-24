@@ -96,18 +96,18 @@ test("npm publication and GitHub Release are same-tag retryable (idempotent)", (
 test("desktop package scripts invoked by the workflow exist and run", () => {
   // The workflow's desktop-build job runs `npm test` and `npm run dist` in
   // packages/desktop — workflow text matching alone cannot catch a missing
-  // script. `test` is owned here and must exist AND run; `dist`/`dist:smoke`
-  // (electron-builder packaging producing dist/oas-desktop-*) are the Desktop
-  // owner's deliverable on this seam — tracked as required-by-release.
+  // script. `test` is owned here and must exist AND run. `dist`/`dist:smoke`
+  // are the Desktop owner's deliverable on this seam, but the release path is
+  // broken without them — so their presence is asserted UNCONDITIONALLY:
+  // this test stays red until the Desktop owner's electron-builder commit
+  // lands through the feature branch (coordinator-sequenced dependency).
   assert.equal(typeof desktopPkg.scripts.test, "string", "packages/desktop has a test script");
   const r = spawnSync("npm", ["test"], { cwd: new URL("../packages/desktop", import.meta.url).pathname, encoding: "utf8", timeout: 300000 });
   assert.equal(r.status, 0, `packages/desktop npm test failed:\n${r.stderr?.slice(-2000)}`);
-  // The dist seam is declared in the workflow; when the Desktop owner lands
-  // the dist script this assertion starts enforcing its presence.
   assert.match(yml, /npm run dist\b/, "workflow invokes npm run dist in packages/desktop");
-  if (desktopPkg.scripts.dist) {
-    assert.ok(
-      Object.keys(desktopPkg.devDependencies || {}).some((d) => d.includes("electron-builder")) || /electron-builder/.test(desktopPkg.scripts.dist),
-      "dist script is electron-builder packaging");
-  }
+  assert.equal(typeof desktopPkg.scripts.dist, "string",
+    "packages/desktop needs a dist script (electron-builder packaging producing dist/oas-desktop-*) — the release workflow runs `npm run dist` in every desktop matrix leg; this is the Desktop owner's deliverable, landed via feature/desktop-dist");
+  assert.ok(
+    Object.keys(desktopPkg.devDependencies || {}).some((d) => d.includes("electron-builder")) || /electron-builder/.test(desktopPkg.scripts.dist),
+    "dist script is electron-builder packaging");
 });

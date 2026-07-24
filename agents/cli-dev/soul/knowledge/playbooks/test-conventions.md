@@ -34,6 +34,10 @@ All kernel/CLI behavior tests live in `test/capabilities.test.mjs`
 
 - Config-chain discovery needs an `oas-config.yaml` at the level — a lock or
   installed store alone is invisible (see the init-acquisition lesson).
+- Capability fixture packages under `.agents/capabilities/` are discovered only
+  at config-chain levels; a bare git repo without `oas-config.yaml` can silently
+  hide a fixture and turn the assertion into `E_UNKNOWN_COMMAND` instead of
+  exercising manifest code.
 - Team/cross-repo tests: build a workspace with a `team:` config and two
   member repos each holding `agents/` — this caught the "instance names only
   unique per agent dir" bug.

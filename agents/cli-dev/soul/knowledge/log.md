@@ -1,6 +1,8 @@
 # Knowledge Log
 
 ## 2026-07-24
+* **Update**: [test-conventions](/playbooks/test-conventions.md) records that capability fixtures under `.agents/capabilities/` need an `oas-config.yaml` discovery level or tests can accidentally assert `E_UNKNOWN_COMMAND`.
+* **Update**: [json-envelope-dispatch-boundary](/lessons/json-envelope-dispatch-boundary.md) records the whole-dispatch try/catch pattern, `NOT_DISPATCHED` sentinel, manifest command validation, and stable dispatcher failure codes.
 * **Update**: [release-tag-driven-ci](/playbooks/release-tag-driven-ci.md) records idempotent same-tag retry rules for npm publication and GitHub Release asset publication.
 * **Update**: [release-workflow-static-tests](/lessons/release-workflow-static-tests.md) records the static-test blind spot around nonexistent package scripts and the need for spawned script tests plus mutation checks.
 * **Creation**: [json-envelope-dispatch-boundary](/lessons/json-envelope-dispatch-boundary.md) records that capability `--json` envelope contracts must cover dispatcher failures, spawn errors, module initialization, and end-to-end dispatch tests.
