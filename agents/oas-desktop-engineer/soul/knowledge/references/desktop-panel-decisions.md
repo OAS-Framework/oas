@@ -28,4 +28,3 @@ internalize:
   compatible installed `oas ... --json` CLI (observation-only when absent);
   the current direct `lib/core.mjs` import is transitional debt, explicitly
   not a co-equal path.
-

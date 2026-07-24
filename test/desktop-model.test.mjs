@@ -49,6 +49,3 @@ test("relativeAge chooses compact stable units", () => {
   assert.equal(relativeAge("2026-07-11T11:58:00Z", now), "2m");
   assert.equal(relativeAge("2026-07-09T11:00:00Z", now), "2d");
 });
-
-
-
