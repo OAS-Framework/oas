@@ -24,6 +24,23 @@ decisions/ and referenced from here.
 
 ---
 
+## PR #19 (round 3) — desktop succession + explicit spawn lineage (2026-07-24)
+- verdict: MERGED as `9b39ee7` — all four gates PASS at exact final head
+  `daa0b98`. Direction: desktop owns its backend and immediately retires
+  oas.web, `oas pane`, and `lib/control-pane`; the adjacent-core bridge is
+  explicitly release-blocking distribution debt, not a merge blocker.
+  Correctness/security: fresh expanded gate, scaffold probe, ownership and
+  lock checks passed; round-2 traversal was closed by generated-name syntax
+  validation plus realpath immediate-child containment, with regressions for
+  spawn-before-scaffold, retire-before-delete, canonical-soul survival, normal
+  lookup, and an escaping symlink. Mergeability: exact-head GitHub CI green,
+  current main ancestor, conflict-free merge-tree, and clean diff-check.
+- owner: dev-coordinator-1 · coordinator: dev-coordinator-1
+- taught us: a final handback is not final while reviewer nits are still being
+  merged; bind approval to the actual PR SHA and exact-head check run. The
+  release remains blocked until desktop installers and installed-CLI mutation
+  boundaries are operational.
+
 ## PR #19 (round 2) — expanded desktop succession + explicit spawn lineage (2026-07-24)
 - verdict: RETURNED — direction PASS against the amended immediate-cutover
   decision (direct-core bridge explicitly release-blocking debt); exact-head

@@ -16,6 +16,14 @@ than letting the file grow stale.
 
 ## On main
 
+- PR #19 merged 2026-07-24 as `9b39ee7`: OAS Desktop 0.1.0 private
+  package now owns the panel backend; oas.web, `oas pane`, and the public
+  control-pane export are retired with deterministic migration diagnostics.
+  Explicit spawn lineage/task delivery landed with traversal-safe shared
+  instance lookup (name syntax + realpath immediate-child containment).
+  Desktop release is still blocked on installer distribution and replacing
+  adjacent-core mutations with compatible installed-CLI JSON calls.
+
 - 2026-07-23 reviewer-deaths incident fixes (direct commits, incident
   response): b3eeed0 — retireInstance tmux kill-window targets `=`-anchored
   (tmux targets prefix-match; test fixture "reviewer-1" was killing live
@@ -24,66 +32,29 @@ than letting the file grow stale.
   checkouts, re-running stale unfixed suites) + CLI-subprocess spawn/retire
   tests export PI_AGENTS_TMUX_SESSION=oas-test-nosuch.
 
-- PR #17 merged 2026-07-22: oas.web 0.8.1 — visible, instant typing (echo
-  snap+burst client-side; server never collects — `oas-web.mjs collect`
-  child-process roster snapshot every 3s), /api/keys debug/failure paths
-  hardened to never expose payloads (keySendError + leak regression test);
-  two webpanel-dev lessons promoted.
-
-- PR #14 merged 2026-07-22: oas.web 0.8.0 — spawn-from-panel (/api/agents +
-  /api/spawn, agentsRoot allowlist, no-task default spawn, CLI-parity
-  capability-agent resolution, compat floor >=0.16.0 with regression test).
-
-- PR #16 merged 2026-07-22: oas.web 0.7.2 — fast session attach (instance-
-  registry 2.5s-TTL cache, single-round-trip paneInfo(), three-rung client
-  attach: cached frame → 120-line tail → gen-guarded deep backfill), unit
-  tests for both extracted blocks; webpanel-dev lesson concept promoted.
-
-- PR #13 merged 2026-07-22: oas.web 0.7.1 — 'cannot type' fix via logical
-  pane key routing (window-level router, editable-control exclusion, Cmd-B
-  vs Ctrl-B split), OASWEB_KEYROUTE regression test, webpanel-dev lesson
-  concept.
-
-- PR #12 merged 2026-07-22: oas.web 0.7.0 — terminal-unified input (no
-  composer, no /api/send), adaptBg near-neutral truecolor-bg fold + themed
-  ::selection, compact session header, collapsible sidebar + split panes.
-
-- PR #10 merged 2026-07-22: webpanel-dev soul doc nits from the PR #8
-  review fixed (renderer -J claim, paste-normalization direction).
-
-- PR #8 merged 2026-07-22: oas.web 0.6.0 terminal-faithful session view —
-  hand-rolled zero-dep ANSI/SGR renderer, /api/keys raw passthrough,
-  bracketed paste, POST Host/Origin loopback guard.
-- v0.17.2 line: multi-dev coordination discipline (aweb-first per-commit
-  reviewers, ephemeral service agents, lineage nesting), named TUI themes
-  (dark/solarized) with palette isolation + tmux splits, skill-load mandates
-  in all injections, coordinator maintainer-merge contract.
-- Capabilities at: oas.review 1.1.3, oas.okf 1.2.2, oas.aweb 1.5.1,
-  oas.web 0.8.1 (published marketplace carries review 1.1.2 and web 0.5.0
-  until next tag).
+- Earlier oas.web and Control Pane deliveries remain in the delivery log and
+  donor-soul knowledge as migration history; their product surfaces are no
+  longer present on main.
+- Framework source remains 0.17.6 pending a breaking successor release;
+  private Desktop is 0.1.0. Capabilities at: oas.review 1.1.6, oas.okf 1.3.1,
+  oas.aweb 1.5.1, oas.jira 1.0.0. Published artifacts remain on the prior
+  release until the desktop distribution gate is satisfied.
 
 ## In flight
 
-- PR #19 (`feature/desktop-app`) expanded final head `047acbb` received
-  maintainer round-2 RETURN. Direction, clean CI/full scratch gate, scaffold
-  probe, desktop ownership/removal, retirement diagnostics, and capability
-  lock integrity passed. Security/correctness blocker: shared
-  `findInstanceHome(root, name)` accepts path traversal — malformed `--parent
-  ../../dev/soul` is accepted, and the same argument to `oas retire` deletes
-  the canonical soul. Coordinator must harden name + immediate-child
-  containment, add spawn/retire regressions, clear two diff-check whitespace
-  errors, then return a new green head. The direct `lib/core.mjs` bridge is
-  allowed at merge only as explicit release-blocking distribution debt; no
-  release follows until the installed-CLI/no-OAS boundary, installer
-  distribution, and migration diagnostics are operational.
-- Desktop succession work continues in the durable desktop-engineer soul;
-  relevant TUI/web-panel knowledge must migrate before the old souls retire.
-  The amended binding architecture is recorded in the [desktop panel succession
-  decision](/decisions/desktop-panel-succession.md).
+- Desktop distribution work continues in the durable desktop-engineer soul.
+  Before any npm/GitHub release containing the removals, it must deliver
+  installers, remove repository-root/adjacent-core mutation assumptions in
+  favor of compatible installed `oas ... --json`, preserve observation-only
+  operation without a CLI, and ship the migration guidance. The binding gates
+  are recorded in the [desktop panel succession decision](/decisions/desktop-panel-succession.md).
 
 ## Recent deliveries
 
 - (record PR #, one-line scope, verdict, merge/close date)
+- PR #19 Desktop ownership cut + legacy panel retirement + explicit spawn
+  lineage/traversal hardening: MERGED 2026-07-24 after two RETURNs (see
+  delivery-log).
 - PR #17 oas.web 0.8.1 typing visibility/latency + /api/keys hardening:
   MERGED 2026-07-22 (see delivery-log).
 - PR #16 oas.web 0.7.2 fast session attach: MERGED 2026-07-22 (see
@@ -125,11 +96,9 @@ than letting the file grow stale.
 
 - Org-level GitHub Actions policy blocks CI bump-PRs — manual rescue each
   release until an org admin relaxes it.
-- Marketplace oas.review 1.1.2 vs repo 1.1.3, and oas.web 0.5.0 vs repo
-  0.8.1 — fold into next release/tag.
-- Branch CI fails the /api/agents "reviewer is listed" test in bare
-  checkouts (no .agents/capabilities/installed/) — pre-existing environment
-  gap seen on PR #14 and #17 branch runs; needs a CI fixture or test guard.
+- Published artifacts still predate PR #19. Do not tag the breaking successor
+  merely to close capability-version drift: desktop installers and the
+  installed-CLI/no-CLI boundary are mandatory release prerequisites.
 - webpanel-dev instance worktrees still hold deleted branches locally
   (webpanel-dev-1: feature/panel-refinements, fix/panel-key-routing,
   perf/fast-attach, debug/typing-live; webpanel-dev-spawn-from-panel:
