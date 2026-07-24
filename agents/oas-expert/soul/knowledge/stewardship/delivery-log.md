@@ -24,6 +24,23 @@ decisions/ and referenced from here.
 
 ---
 
+## PR #19 (round 1) — OAS Desktop transitional Electron app and oas.web bridge (2026-07-24)
+- verdict: RETURNED — direction PASS against the accepted desktop succession
+  decision; correctness/mergeability FAIL because required PR CI is red. The
+  root test script now includes `packages/**/*.test.mjs`, but
+  `.github/workflows/pull-request.yml` installs only root dependencies: 8
+  desktop suites fail in a clean runner on missing `jsdom`/`marked` (187/196
+  pass). Exact-head scratch gate after root + desktop installs reached 238/239;
+  the remaining macOS node-pty prebuild-helper permission failure cleared with
+  the README-required Electron rebuild, and the targeted real-wheel test then
+  passed. Check/check:pi/validate/OKF/pack/smoke all passed. Owner asked to make
+  CI install desktop dependencies, merge current main, and return a green
+  exact-head gate.
+- owner: dev-coordinator-1 · coordinator: dev-coordinator-1
+- taught us: once a root test glob includes a private nested package that is
+  not an npm workspace, root `npm ci` is not a complete CI environment; the
+  workflow must install that package's lockfile too.
+
 ## PR #17 — oas-web 0.8.1 typing visibility + latency (echo snap+burst, off-thread roster snapshot) (2026-07-22)
 - verdict: MERGED — all four gates green. Direction: right layer; the
   server-never-collects child-process snapshot is the correct fix for the

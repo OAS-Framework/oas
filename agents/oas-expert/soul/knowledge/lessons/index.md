@@ -1,5 +1,7 @@
 # Lessons
 
+* [Vanished agent window + no verdict — completed-but-event-dropped vs killed](window-gone-completed-vs-killed-triage.md) - After a subagent's tmux window disappears with no verdict mail event, do not assume it was killed; discriminate completed-but-channel-fault from external kill with `aw mail inbox --show-all` and the session log tail.
+* [Bare `node --test` recurses into agent worktrees — runs stale sibling test suites](bare-node-test-recurses-into-agent-worktrees.md) - Bare node --test with no path arguments walks the whole cwd tree except node_modules, including agents/*/instances/*/work checkouts; pin test scripts to explicit globs to avoid running stale sibling suites.
 * [tmux target prefix matching can kill foreign windows](tmux-target-exact-matching.md) - tmux `-t session:window` targets prefix-match unless anchored with `=`; exact `=<session>:=<window>` targets and nonexistent test sessions prevent retire tests from killing live siblings.
 * [Returned PRs can go stale under fast same-capability cadence](pr-return-staleness-fast-capability-cadence.md) - A PR returned only for merge conflicts can re-conflict before re-review when another PR on the same capability lands in between; handback should re-merge main and re-check mergeability.
 * [Scratch-worktree PR gates need dependencies and installed capabilities](scratch-worktree-pr-gate-environment.md) - Running the full OAS repo gate in a fresh git worktree fails environmentally unless you install devDependencies and provide the deployment's installed capabilities.

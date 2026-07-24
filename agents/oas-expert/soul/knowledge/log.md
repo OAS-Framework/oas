@@ -1,6 +1,16 @@
 # Knowledge Log
 
+## 2026-07-24
+* **Harvest**: merged pending note `desktop-succession-boundaries.md` into the existing [desktop succession decision](/decisions/desktop-panel-succession.md); no concept change was needed because the decision already carried the durable boundaries.
+* **Creation**: [Desktop succeeds the web and terminal panels as a standalone product](/decisions/desktop-panel-succession.md) — the Electron app becomes the sole panel and GitHub-Release product; its package owns the backend, installed `oas ... --json` gates administration, no-OAS mode observes existing deployments, and a stability-gated N/N+1 release sequence retires oas.web and oas pane after soul knowledge succession.
+* **Deprecation**: the [web pane](/decisions/web-pane.md), [standalone TUI](/decisions/control-pane-live-standalone-tui.md), [card architecture](/decisions/control-pane-v3-card-architecture.md), and [visual language](/decisions/control-pane-visual-language.md) decisions are retained as historical migration sources but superseded for continuing product direction by the desktop succession decision.
+* **Update**: the [roadmap](/roadmap/next-steps.md) now leads with desktop succession and renames the telemetry thread for the successor; [repo state](/stewardship/repo-state.md) records the feature integration and three follow-up briefs in flight.
+
 ## 2026-07-23
+* **Update**: skills/pr-review — added window-gone/no-verdict triage: check all-mail history and session logs before diagnosing a vanished reviewer as killed.
+* **Creation**: [Vanished agent window + no verdict — completed-but-event-dropped vs killed](/lessons/window-gone-completed-vs-killed-triage.md) — a vanished tmux window with no verdict awakening can mean clean self-retirement plus a channel delivery fault; distinguish it from an external kill via `aw mail inbox --show-all` and the session log tail.
+* **Update**: skills/pr-review — added the bare `node --test` discovery-scope gotcha for stale sibling worktrees and suspiciously high test counts.
+* **Creation**: [Bare `node --test` recurses into agent worktrees — runs stale sibling test suites](/lessons/bare-node-test-recurses-into-agent-worktrees.md) — bare `node --test` walks nested agent work checkouts; root test scripts must pin explicit globs to avoid running stale sibling suites.
 * **Update**: skills/pr-review — added the tmux target prefix-matching review gotcha for spawn/retire tests and exact `=<session>:=<window>` targeting.
 * **Creation**: [tmux target prefix matching can kill foreign windows](/lessons/tmux-target-exact-matching.md) — tmux `-t session:window` can prefix-match sibling windows; retire paths must use exact targets and tests must avoid real sessions.
 

@@ -73,6 +73,21 @@ BEFORE retiring — it is the last gate of the review.
 
 ## Operational gotchas
 
+- **Window gone + no verdict does not always mean killed**: if a spawned
+  reviewer/subagent's tmux window disappears and no verdict awakening arrives,
+  run one targeted `aw mail inbox --show-all` and inspect the session log tail
+  before diagnosing death. A verdict in all-mail history plus clean
+  `aw mail send` / `oas retire --self` means completed-but-channel-fault;
+  an abrupt mid-turn cutoff with no send/retire means externally killed. Do
+  not replace live awakenings with polling loops. See
+  `knowledge/lessons/window-gone-completed-vs-killed-triage.md`.
+- **Bare `node --test` can run stale sibling worktrees**: `node --test` with no
+  path arguments walks the whole current tree except `node_modules`. In OAS
+  deployment roots, `agents/*/instances/*/work` are nested repo checkouts, so a
+  bare test script can execute stale sibling suites. Treat suspiciously high
+  test counts as a discovery-scope smell, and pin package test scripts to
+  explicit globs. See
+  `knowledge/lessons/bare-node-test-recurses-into-agent-worktrees.md`.
 - **tmux target prefix matching can kill the reviewer**: tmux `-t session:window`
   targets prefix-match unless anchored; code or tests that exercise retire paths
   must use exact `=<session>:=<window>` targets, and tests must override the tmux

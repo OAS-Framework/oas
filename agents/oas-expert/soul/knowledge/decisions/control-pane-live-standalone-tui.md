@@ -2,9 +2,17 @@
 type: Decision
 title: Control Pane is a live standalone TUI
 description: OAS exposes its current agent constellation through `oas pane`, with a runtime-neutral data model and no historical reconstruction.
+status: superseded
 tags: [control-pane, tui, cli, instances]
-timestamp: 2026-07-11
+timestamp: 2026-07-24
 ---
+
+# Supersession
+
+The [desktop panel succession decision](/decisions/desktop-panel-succession.md)
+supersedes the TUI as OAS's continuing panel. This concept remains the
+historical source for the live-only, runtime-neutral model and truthful lineage
+semantics migrated into desktop.
 
 # Context
 

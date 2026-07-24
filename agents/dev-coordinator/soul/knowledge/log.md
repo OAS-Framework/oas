@@ -1,5 +1,10 @@
 # Knowledge Log
 
+## 2026-07-23
+* **Creation**: added [Concurrent harvests of one soul need owner reconciliation for knowledge conflicts](/lessons/concurrent-harvest-conflicts-one-soul.md) from dev-coordinator-1 note.
+* **Creation**: added [Reviewer deaths can come from tmux prefix-target kills](/lessons/reviewer-deaths-tmux-prefix-targets.md) from dev-coordinator-1 note.
+* **Update**: skills/multi-dev-feature — added gotchas for one-soul harvest conflicts and suspected dead reviewer recovery.
+
 ## 2026-07-22
 * **Creation**: added [Fix doc nits in notes before the harvest runs](/lessons/fix-note-errors-before-harvest.md) from dev-coordinator-1 note.
 * **Creation**: added [Retire developers without holding on docs-only follow-up PRs](/lessons/retire-dev-without-docs-pr.md) from dev-coordinator-1 note.
