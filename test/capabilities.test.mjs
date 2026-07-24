@@ -889,3 +889,40 @@ test("lineage is deployment-local: --parent from an unrelated deployment is reje
   assert.equal(expert.parentInstance, undefined);
   assert.match(readFileSync(join(expert.home, "TASK.md"), "utf8"), /support question/);
 });
+
+test("traversal names are rejected: --parent and retire cannot reach outside instances/", () => {
+  const base = temp(); const { repo, root, soul, agent } = fixtureSoul(base);
+  const env = { ...process.env, PATH: fakeRuntimes(base), PI_AGENTS_TMUX_SESSION: "oas-test-nosuch" };
+  delete env.PI_AGENTS_ROOT;
+  // A real instance to anchor the fixture (and prove normal lookups still work).
+  const oldPath = process.env.PATH; process.env.PATH = fakeRuntimes(base);
+  let real;
+  try { real = spawnInstance(root, agent, { instance: "dev-real", launch: false }); }
+  finally { process.env.PATH = oldPath; }
+  return import("../lib/core.mjs").then((core) => {
+    // Kernel: traversal / separator / dotted names never resolve…
+    for (const bad of ["../../dev/soul", "..", "dev/soul", "./dev-real", "dev-real/../../soul"]) {
+      assert.equal(core.findInstanceHome(root, bad), undefined, `rejected: ${bad}`);
+    }
+    // …while the plain name still does, as an immediate child of instances/.
+    assert.ok(core.findInstanceHome(root, "dev-real"));
+    // CLI spawn --parent with a traversal name fails BEFORE scaffolding.
+    const before = readdirSync(join(root, "dev", "instances"));
+    let r = spawnSync(process.execPath, [CLI, "spawn", "dev", "--parent", "../../dev/soul", "--purpose", "evil", "--no-launch"], { cwd: repo, env, encoding: "utf8" });
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /does not match any known instance/);
+    assert.deepEqual(readdirSync(join(root, "dev", "instances")), before, "no home scaffolded");
+    // CLI retire with a traversal name fails BEFORE any delete — the canonical soul survives.
+    r = spawnSync(process.execPath, [CLI, "retire", "../../dev/soul"], { cwd: repo, env, encoding: "utf8" });
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /no instance named/);
+    assert.ok(existsSync(join(soul, "soul.yaml")), "canonical soul.yaml survives");
+    assert.ok(existsSync(join(soul, "AGENTS.md")), "canonical AGENTS.md survives");
+    // Kernel retire with a traversal name also refuses.
+    assert.throws(() => core.retireInstance(root, "../../dev/soul", { tmuxSession: "oas-test-nosuch" }), /no instance named/);
+    assert.ok(existsSync(join(soul, "soul.yaml")));
+    // Real instance still retires normally.
+    core.retireInstance(root, "dev-real", { tmuxSession: "oas-test-nosuch" });
+    assert.ok(!existsSync(real.home));
+  });
+});

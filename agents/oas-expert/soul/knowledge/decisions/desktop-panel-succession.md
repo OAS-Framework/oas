@@ -135,6 +135,17 @@ outside the product promise and installer scope unless separately approved.
 The substantial scope change receives a fresh full maintainer review rather
 than inheriting approval from the transitional implementation.
 
+This subsection is the PR #19 **merge gate**, not the final distribution gate.
+A direct bridge from the in-tree desktop process to adjacent `lib/core.mjs` may
+remain at merge only as explicit, tracked, **release-blocking migration debt**.
+It does not satisfy the installed-CLI or no-OAS boundaries above. The
+post-merge desktop distribution work must replace repository-root assumptions,
+direct mutation imports, and `core.spawnInstance` calls with installed
+`oas ... --json` integration plus observation-only behavior when the CLI is
+absent. Therefore the maintainer does not return PR #19 solely for that bridge
+when capability/control-pane adjacency is gone and the debt is accurately
+recorded; no release may contain the bridge as the standalone architecture.
+
 # Consequences
 
 The desktop product can deliver a rich native experience without bloating the
