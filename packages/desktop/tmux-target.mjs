@@ -68,9 +68,12 @@ export function viewerPrefix(pid) {
  *   1. create placeholder session (unique unpredictable oasdesk- name);
  *   2. link-window the =-anchored exact source window in;
  *   3. kill the placeholder window — the link is the sole window;
- *   4. lock the viewer: prefix/prefix2 None + a nonexistent key-table, so
- *      no tmux window-management key can leave the linked window (normal
- *      pane interaction is raw input to the pty and unaffected).
+ *   4. lock the viewer: prefix/prefix2 None + a dedicated key-table —
+ *      PROVISIONED with exactly the safe wheel bindings (see
+ *      LOCKED_TABLE_BINDINGS) and nothing else, so no tmux
+ *      window-management key can leave the linked window while wheel
+ *      scrollback (tmux-owned history!) keeps working. Normal pane
+ *      interaction is raw input to the pty and unaffected.
  * Destroying the source window then TERMINATES the viewer (its only window
  * is gone → pty exits → the tab shows "session ended") — verified
  * empirically; it can never activate a sibling.
@@ -89,6 +92,25 @@ export function viewerPrefix(pid) {
  *             killViewer: () => void }}
  */
 let viewerSeq = 0;
+
+/** The locked key table's COMPLETE binding set — wheel scrollback only.
+ * An inert (nonexistent) table blocked window escape but also killed wheel
+ * handling entirely: pi runs on the alternate screen, so scrollback history
+ * belongs to tmux and the renderer cannot recover it — scrolling died.
+ * WheelUpPane ports tmux's root behavior with ONE deliberate difference:
+ * the stock root binding passes through on alternate_on (send-keys -M →
+ * arrow translation), which is exactly the dead case for pi — here the
+ * wheel passes through only when the app grabbed the mouse or a mode is
+ * already active, and otherwise enters copy-mode exit-at-bottom and
+ * forwards the wheel (copy-mode's own WheelUp/WheelDownPane then do 5-line
+ * scrolling until -e exits at the bottom). NO window-management bindings
+ * (next/last/new/select-window...) exist here — that is the lock.
+ * Exported so tests can assert the exact provisioned set. */
+export const LOCKED_TABLE_BINDINGS = [
+  // argv tail for: tmux bind-key -T oasdesk-locked <key> <command...>
+  ["WheelUpPane", "if-shell", "-F", "#{||:#{pane_in_mode},#{mouse_any_flag}}", "send-keys -M", "copy-mode -e; send-keys -M"],
+];
+
 export function openTerm(spec, io) {
   const target = tmuxAttachTarget(spec.session, spec.window);
   try {
@@ -112,12 +134,23 @@ export function openTerm(spec, io) {
     // 3. drop the placeholder BY ID — the linked window is now the ONLY window
     io.tmux(["kill-window", "-t", placeholderId]);
     // 4. lock the viewer's key handling: no prefix → no window-management
-    //    bindings (next/last/new/select-window) can run; a nonexistent
-    //    key-table inerts root-table bindings too. (set-option targets
-    //    don't accept '=' — the unique random name cannot prefix-collide.)
+    //    bindings can run; the dedicated key-table carries ONLY the
+    //    provisioned wheel bindings (scrollback stays alive — tmux owns the
+    //    history). (set-option/bind-key targets don't accept '=' — the
+    //    unique random name cannot prefix-collide.)
     io.tmux(["set-option", "-t", viewer, "prefix", "None"]);
     io.tmux(["set-option", "-t", viewer, "prefix2", "None"]);
     io.tmux(["set-option", "-t", viewer, "key-table", "oasdesk-locked"]);
+    // key tables are SERVER-GLOBAL and bind-key only replaces its own key —
+    // a stale/custom binding in oasdesk-locked (from an older app run or a
+    // user's config) would survive into every viewer. Clear the app-owned
+    // table first, then install exactly the allow-list.
+    io.tmux(["unbind-key", "-a", "-q", "-T", "oasdesk-locked"]);
+    for (const binding of LOCKED_TABLE_BINDINGS) {
+      io.tmux(["bind-key", "-T", "oasdesk-locked", ...binding]);
+    }
+    // wheel needs tmux mouse handling in the viewer
+    io.tmux(["set-option", "-t", viewer, "mouse", "on"]);
     const pty = io.spawnPty(`=${viewer}`, Math.max(20, Number(spec.cols) || 80), Math.max(5, Number(spec.rows) || 24));
     return { target, viewer, pty, killViewer };
   } catch (e) {

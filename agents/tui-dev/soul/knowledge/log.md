@@ -1,5 +1,16 @@
 # Knowledge Log
 
+## 2026-07-24
+
+- **Creation**: [desktop-workspace-add-privileged-contract.md](desktop-workspace-add-privileged-contract.md)
+  — promoted the privileged workspace-add contract: bounded deterministic suggestions, provenance-gated adds, app-owned server replacement only, readiness identity checks, tmux-backed terminal continuity, and stale-completion generations.
+- **Update**: [desktop-terminal-direct-attach.md](desktop-terminal-direct-attach.md)
+  — linked the direct tmux attach decision to the provisioned locked-table rule so terminal viewers preserve scrollback while blocking window navigation.
+- **Fix**: [desktop-terminal-link-window-viewer-isolation.md](desktop-terminal-link-window-viewer-isolation.md)
+  — corrected the locked key-table guidance: `oasdesk-locked` must be a provisioned allow-list, not a nonexistent table, otherwise `WheelUpPane` scrollback dies.
+- **Creation**: [provision-locked-key-tables.md](provision-locked-key-tables.md)
+  — promoted the lesson that locked tmux key tables should be explicit allow-lists with tests pinning approved keys and forbidden window-navigation commands.
+
 ## 2026-07-23
 
 - **Update**: [anchor-tmux-attach-targets.md](anchor-tmux-attach-targets.md)
