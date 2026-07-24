@@ -117,7 +117,11 @@ function renderGrid(s) {
   // synchronously before dispatching its refresh (s.sel cleared + innerHTML).
   // Explicit re-renders (cancel/select) clear or change s.sel first, so they
   // rebuild; only a form still owned by the CURRENT selection blocks repaint.
-  if (s.sel && grid.querySelector?.(`.soul-card[data-agent="${CSS.escape ? CSS.escape(s.sel) : s.sel}"] .soul-form`)) return;
+  // No dynamic selector: agent names are roster data and may contain selector
+  // metacharacters (and this module's CSS constant shadows the global, so
+  // CSS.escape is not available here). Compare dataset identity instead.
+  if (s.sel && [...(grid.querySelectorAll?.(".soul-card") || [])]
+        .some((card) => card.dataset?.agent === s.sel && card.querySelector(".soul-form"))) return;
   grid.innerHTML = "";
   const list = s.souls.agents.filter((a) => matches(s, a));
   const spawnable = s.souls.agents.filter((a) => a.work !== "attached").length;
