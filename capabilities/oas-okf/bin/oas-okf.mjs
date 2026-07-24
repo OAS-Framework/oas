@@ -54,7 +54,15 @@ const instance = process.env.OAS_INSTANCE;
 const home = process.env.OAS_HOME || process.cwd();
 const soulDir = process.env.OAS_SOUL;
 const agentName = process.env.OAS_AGENT || "agent";
-const settings = JSON.parse(process.env.OAS_SETTINGS || "{}");
+// Fallible init stays inside an error boundary: malformed inherited env must
+// never produce a bare stack trace — in --json mode Desktop expects one
+// envelope object on stdout even for init failures.
+let settings = {};
+try { settings = JSON.parse(process.env.OAS_SETTINGS || "{}"); }
+catch (e) {
+  if (JSON_MODE) jsonFail("E_HARVEST_FAILED", `malformed OAS_SETTINGS: ${e.message || e}`);
+  process.stderr.write(`oas-okf: malformed OAS_SETTINGS (ignoring): ${e.message || e}\n`);
+}
 /** Model for the memory-harvest agent — promotion judgment is cheap-but-good
  *  work; default gpt-5.5, overridable via okf settings { "harvest-model": ... }. */
 const DEFAULT_HARVEST_MODEL = "github-copilot/gpt-5.5";

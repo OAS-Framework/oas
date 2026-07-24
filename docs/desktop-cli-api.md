@@ -14,9 +14,10 @@ oas version --json
 prints exactly one JSON object on stdout:
 
 ```json
-{"schemaVersion":1,"name":"@oas-framework/oas","version":"0.18.0","desktopApi":1}
+{"schemaVersion":1,"name":"@oas-framework/oas","version":"<installed version>","desktopApi":1}
 ```
 
+`version` is the installed package's exact semver (e.g. `0.18.0`).
 Desktop 0.18 accepts `desktopApi === 1` and semver `>=0.18.0 <0.19.0`.
 
 ## Envelope
@@ -51,6 +52,12 @@ Additional informative fields: `repo`, `runtime`, `model`, `parent`,
 
 Stable error codes: `E_USAGE`, `E_NO_DEPLOYMENT`, `E_UNKNOWN_AGENT`,
 `E_AMBIGUOUS_SOUL`, `E_PARENT_NOT_FOUND`, `E_BAD_ARGS`, `E_SPAWN_FAILED`.
+
+Dispatch-level failures (any `--json` command): `E_UNKNOWN_COMMAND` (no
+kernel subcommand or capability namespace matches, or unknown capability
+subcommand), `E_CAPABILITY_INACTIVE`, `E_CAPABILITY_BLOCKED` (untrusted),
+`E_CAPABILITY_BROKEN`, `E_DUPLICATE_NAMESPACE`, `E_CONFIG_BROKEN` — all still
+exactly one stdout envelope with a nonzero exit.
 
 ### `oas okf harvest --json`
 

@@ -14,9 +14,9 @@
       "trustedExecutables": true
     },
     "oas.okf": {
-      "source": "marketplace:oas.okf@1.3.2",
-      "version": "1.3.2",
-      "integrity": "sha256-9beaf5a3da1464de868f27a2c98d22e018fbd8f03cd0863fadc87da34fd2b06a",
+      "source": "marketplace:oas.okf@1.3.3",
+      "version": "1.3.3",
+      "integrity": "sha256-a57fbae1dcf2a7ed898b4cb48a482b4aa1141661c7351a78a96bb23649ad179c",
       "trustedExecutables": true
     }
   }

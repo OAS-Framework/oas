@@ -157,3 +157,70 @@ test("okf harvest --json: spawned envelope carries instance and window", () => {
     assert.equal(doc.error.code, "E_HARVEST_FAILED");
   }
 });
+
+// ---- end-to-end capability dispatch: `oas <ns> <cmd> --json` boundary ----
+// The generic dispatcher itself must honor the envelope: inactive namespace,
+// unknown subcommand, unknown namespace, and malformed instance metadata all
+// print exactly one envelope object on stdout with a stable code.
+
+function opsCapability(repo, { commands = { ping: "ping.mjs" } } = {}) {
+  const dir = join(repo, ".agents", "capabilities", "owned", "ops");
+  write(join(dir, "oas.json"), JSON.stringify({ capability: "acme.ops", command: "ops", version: "1.0.0", compatibility: { oas: ">=0.6.2" }, description: "Ops.", commands }));
+  write(join(dir, "ping.mjs"), "console.log(JSON.stringify({schemaVersion:1,ok:true,result:{pong:true}}))\n");
+  return dir;
+}
+
+test("capability dispatch --json failures are one stdout envelope with stable codes", () => {
+  const base = temp(); const { repo } = fixtureSoul(base);
+  opsCapability(repo);
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.ops:\n      souls:\n        dev: true\n");
+  const envNoHome = { ...process.env, PI_AGENT_HOME: "", OAS_HOME: "" };
+  // inactive namespace (not active in this context) → E_CAPABILITY_INACTIVE
+  let r = spawnSync(process.execPath, [CLI, "ops", "ping", "--json"], { cwd: repo, encoding: "utf8", env: envNoHome });
+  assert.notEqual(r.status, 0);
+  assert.equal(parseOnly(r.stdout).error.code, "E_CAPABILITY_INACTIVE");
+  // active via instance metadata: unknown subcommand → E_UNKNOWN_COMMAND
+  const home = join(base, "instance"); mkdirSync(home);
+  write(join(home, "instance.json"), JSON.stringify({ repo, capabilities: [{ id: "acme.ops" }] }));
+  const envHome = { ...process.env, PI_AGENT_HOME: home };
+  r = spawnSync(process.execPath, [CLI, "ops", "nope", "--json"], { cwd: home, encoding: "utf8", env: envHome });
+  assert.notEqual(r.status, 0);
+  assert.equal(parseOnly(r.stdout).error.code, "E_UNKNOWN_COMMAND");
+  // success passes the child's envelope through untouched
+  r = spawnSync(process.execPath, [CLI, "ops", "ping", "--json"], { cwd: home, encoding: "utf8", env: envHome });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(parseOnly(r.stdout).result, { pong: true });
+  // unknown namespace entirely → E_UNKNOWN_COMMAND (help must not hit stdout)
+  r = spawnSync(process.execPath, [CLI, "nosuchns", "x", "--json"], { cwd: repo, encoding: "utf8", env: envNoHome });
+  assert.notEqual(r.status, 0);
+  assert.equal(parseOnly(r.stdout).error.code, "E_UNKNOWN_COMMAND");
+  // malformed instance.json → E_CONFIG_BROKEN
+  const badHome = join(base, "bad-instance"); mkdirSync(badHome);
+  write(join(badHome, "instance.json"), "{not json");
+  r = spawnSync(process.execPath, [CLI, "ops", "ping", "--json"], { cwd: badHome, encoding: "utf8", env: { ...process.env, PI_AGENT_HOME: badHome } });
+  assert.notEqual(r.status, 0);
+  assert.equal(parseOnly(r.stdout).error.code, "E_CONFIG_BROKEN");
+});
+
+test("oas okf harvest --json end-to-end through the CLI dispatcher", () => {
+  const base = temp(); const { repo, root } = fixtureSoul(base);
+  // Activate oas.okf as a config-owned capability by pointing an owned package
+  // at the real oas-okf sources (owned origin ⇒ trusted without a lock).
+  const okfSrc = resolve(new URL("../capabilities/oas-okf", import.meta.url).pathname);
+  const owned = join(repo, ".agents", "capabilities", "owned", "oas-okf");
+  mkdirSync(dirname(owned), { recursive: true });
+  execFileSync("cp", ["-R", okfSrc, owned]);
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  layers:\n    knowledge:\n      capability: oas.okf\n");
+  const home = join(root, "dev", "instances", "dev-e2e");
+  write(join(home, "instance.json"), JSON.stringify({ instance: "dev-e2e", agent: "dev", repo, capabilities: [{ id: "oas.okf" }] }));
+  mkdirSync(join(home, "notes"), { recursive: true });
+  const env = { ...process.env, PI_AGENT_HOME: home, OAS_HOME: home };
+  // no notes → skipped envelope, through `oas okf harvest --json` (exit 0)
+  const r = spawnSync(process.execPath, [CLI, "okf", "harvest", "--json"], { cwd: home, encoding: "utf8", env });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(parseOnly(r.stdout), { schemaVersion: 1, ok: true, result: { harvest: "skipped", reason: "no pending notes" } });
+  // malformed OAS_SETTINGS in the environment → envelope failure, not a stack trace
+  const r2 = spawnSync(process.execPath, [OKF_BIN, "harvest", "--json"], { cwd: home, encoding: "utf8", env: { ...env, OAS_SETTINGS: "{broken" } });
+  assert.notEqual(r2.status, 0);
+  assert.equal(parseOnly(r2.stdout).error.code, "E_HARVEST_FAILED");
+});
