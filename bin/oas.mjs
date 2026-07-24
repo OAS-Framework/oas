@@ -2,7 +2,6 @@
 /**
  * oas — the OAS command line.
  *
- *   oas pane                               open the live Control Pane TUI
  *   oas doctor [dir] [--json]              show the resolved config with origins
  *   oas install <name|url|path> [...]      acquire + exact-lock a capability
  *   oas trust <capability>                approve locked executable surfaces
@@ -20,12 +19,12 @@ import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { enableTmuxMouse, tmuxConfigPath, tmuxMouseEnabled } from "../lib/tmux-config.mjs";
 import {
-  LAYERS, LEGACY_HOME_CAPABILITIES_DIR, OAS_LOCK_FILE, OAS_VERSION, configChain,
+  LAYERS, LEGACY_HOME_CAPABILITIES_DIR, OAS_LOCK_FILE, OAS_VERSION, RETIRED_CAPABILITIES, configChain,
   acquireCapability, restoreCapabilities, marketplaceCapabilities,
   capabilityManifests, capabilityManifest, capabilityMissingRequires, capabilityIntegrity, capabilityTrust, capabilityExecutablePath,
   readCapabilityLocks, writeCapabilityLock,
   resolveOasConfig, resolveWorkMode, composeInstanceAgentsMd, parseYamlNested, packagedInject, teamAgentRoots,
-  findTeamAgent, findTeamInstance, findCapabilityAgent, listCapabilityAgents, workspaceOf,
+  findTeamAgent, findTeamInstance, findCapabilityAgent, findInstanceHome, listCapabilityAgents, workspaceOf,
   ensureRoot, findRoot, findAgent, listAgents, listInstances, listAgentDefs, createAgent as coreCreateAgent,
   spawnInstance, retireInstance, upsertTmpAgent, defaultRepo,
 } from "../lib/core.mjs";
@@ -73,6 +72,18 @@ function offerTmuxMouseScrolling() {
 }
 
 // ---------- doctor ----------
+/** Doctor must diagnose, not crash: a stale activation of a retired
+ * capability fails config resolution — surface the cleanup instruction
+ * cleanly (text or JSON) instead of an uncaught stack trace. */
+function resolveForDoctor(ctx, soulName, { json } = {}) {
+  try { return resolveOasConfig(ctx, soulName); }
+  catch (e) {
+    const retiredId = Object.keys(RETIRED_CAPABILITIES).find((id) => String(e.message).includes(`"${id}"`) && String(e.message).includes("retired"));
+    if (!retiredId) throw e;
+    if (json) { console.log(JSON.stringify({ context: ctx, error: e.message, retired: [retiredId] }, null, 2)); process.exit(1); }
+    die(`${e.message}`);
+  }
+}
 function doctorComposition(ctx, soulName) {
   if (!soulName) return undefined;
   const root = findRoot(ctx);
@@ -83,7 +94,7 @@ function doctorComposition(ctx, soulName) {
 function doctorJson(dir) {
   const ctx = resolve(dir || process.cwd());
   const soulName = flag("soul");
-  const r = resolveOasConfig(ctx, soulName);
+  const r = resolveForDoctor(ctx, soulName, { json: true });
   const mans = capabilityManifests(ctx);
   const composition = doctorComposition(ctx, soulName);
   console.log(JSON.stringify({
@@ -100,6 +111,12 @@ function doctorJson(dir) {
     injects: r.injects,
     capabilities: r.capabilities.map((c) => ({ id: c.id, layer: c.layer, command: c.command, origin: c.origin, provenance: c.provenance, settings: c.settings, skills: c.skills, inject: c.inject, hooks: Object.keys(c.hooks || {}), trust: c.trust })),
     acquired: Object.fromEntries(Object.entries(mans).map(([n, m]) => [n, { layer: m.layer, command: m.command, version: m.version, dir: m._dir, origin: m._origin, description: m.description }])),
+    retiredLocks: Object.entries(readCapabilityLocks(ctx))
+      .filter(([id]) => RETIRED_CAPABILITIES[id])
+      .map(([id, lock]) => ({ id, file: lock._file, reason: RETIRED_CAPABILITIES[id] })),
+    retiredArtifacts: Object.entries(mans)
+      .filter(([id]) => RETIRED_CAPABILITIES[id])
+      .map(([id, m]) => ({ id, dir: m._dir, origin: m._origin, reason: RETIRED_CAPABILITIES[id] })),
     composedInstructions: composition?.text,
     instructionBlocks: composition?.blocks,
   }, null, 2));
@@ -109,7 +126,7 @@ function doctor(dir) {
   const ctx = resolve(dir || process.cwd());
   const soulName = flag("soul");
   const chain = configChain(ctx);
-  const r = resolveOasConfig(ctx, soulName);
+  const r = resolveForDoctor(ctx, soulName);
   console.log(`oas doctor — resolved from ${shortPath(ctx)}\n`);
 
   // Kernel/bridge version skew (published in lockstep from one tag).
@@ -168,10 +185,15 @@ function doctor(dir) {
   for (const [name, m] of Object.entries(capabilityManifests(ctx))) {
     const missing = capabilityMissingRequires(name, ctx);
     console.log(`  ${name.padEnd(16)} layer: ${(m.layer || "additive").padEnd(10)} origin: ${m._origin}${missing.length ? `  (missing: ${missing.map((x) => x.command).join(", ")})` : ""}`);
+    if (RETIRED_CAPABILITIES[name]) {
+      const installed = String(m._origin).startsWith("installed:");
+      console.log(`             WARNING: artifact of a retired capability — ${RETIRED_CAPABILITIES[name]}${installed ? `; also delete ${shortPath(m._dir)}` : ` (origin ${m._origin}: remove its declaration; the source tree at ${shortPath(m._dir)} is yours to keep or drop)`}`);
+    }
   }
   const locks = readCapabilityLocks(ctx);
   const mans = capabilityManifests(ctx);
   for (const [id, lock] of Object.entries(locks)) {
+    if (RETIRED_CAPABILITIES[id]) { console.log(`  WARNING: ${id} is locked in ${shortPath(lock._file)} but ${RETIRED_CAPABILITIES[id]}`); continue; }
     if (!mans[id]) console.log(`  WARNING: ${id} is locked in ${shortPath(lock._file)} but not acquired — run \`oas install\``);
   }
   for (const [id, m] of Object.entries(mans)) {
@@ -350,6 +372,7 @@ function install() {
   const src = args[1];
   const dir = resolve(flag("dir") || process.cwd());
   if (!src || src.startsWith("--")) { restore(dir); return; }
+  if (RETIRED_CAPABILITIES[src]) die(`${RETIRED_CAPABILITIES[src]}`);
   const known = capabilityManifest(src, dir);
   if (known) {
     console.log(`Already acquired capability ${known.capability} (${known.version || "unversioned"}); not activated or updated.`);
@@ -380,6 +403,7 @@ function restore(dir) {
   for (const r of report) {
     if (r.status === "present") console.log(`ok        ${r.id}  (${shortPath(r.dir)})`);
     else if (r.status === "restored") console.log(`restored  ${r.id} → ${shortPath(r.dir)}  (${r.integrity})`);
+    else if (r.status === "retired") console.log(`RETIRED   ${r.id}  ${r.reason}`);
     else { failed++; console.log(`FAILED    ${r.id}  ${r.reason}`); }
   }
   if (failed) die(`${failed} capabilit${failed > 1 ? "ies" : "y"} could not be restored`);
@@ -618,7 +642,7 @@ function statusTeam() {
 
 function spawnCmd() {
   const name = args[1];
-  if (!name || name.startsWith("--")) die("usage: oas spawn <agent> [--task <text>|--task-file <f>] [--purpose <slug>] [--repo <r>] [--work worktree|checkout|attached|workspace] [--work-dir <owner-work>] [--runtime pi|claude] [--model <m>] [--branch <b>] [--instructions-file <f>|--def-file <f>] [--no-launch] [--json]");
+  if (!name || name.startsWith("--")) die("usage: oas spawn <agent> [--task <text>|--task-file <f>] [--purpose <slug>] [--parent <instance>] [--repo <r>] [--work worktree|checkout|attached|workspace] [--work-dir <owner-work>] [--runtime pi|claude] [--model <m>] [--branch <b>] [--instructions-file <f>|--def-file <f>] [--no-launch] [--json]");
   let root = ensureRoot(flag("dir") || process.cwd());
   let agent = findAgent(root, name);
   const instrFile = flag("instructions-file");
@@ -658,8 +682,25 @@ function spawnCmd() {
       die(`"${name}" is a persistent agent — spawn it without --instructions-file/--def-file`);
     }
   }
+  // Lineage is explicit: --parent names the parent instance (agents spawning
+  // sub-agents pass their own name, e.g. --parent "$OAS_INSTANCE"). Without it,
+  // the spawn is operator-origin and lands top-level — ambient env vars in the
+  // shell are never treated as parentage.
+  const parent = flag("parent");
+  if (parent !== undefined && (parent === true || !String(parent).trim())) die("--parent needs an instance name");
+  if (parent) {
+    // findInstanceHome also sees capability-defined agents' instance homes
+    // (local-agents/<name>/ without a local soul) — e.g. a reviewer passing
+    // --parent "$OAS_INSTANCE" from a capability agent.
+    if (!findInstanceHome(root, parent) && !findTeamInstance(flag("dir") || process.cwd(), parent)) die(`--parent "${parent}" does not match any known instance`);
+  }
+  const taskText = flag("task");
+  if (taskText === true) die("--task needs a value (use --task-file for long tasks)");
+  const taskFileFlag = flag("task-file");
+  if (taskFileFlag === true) die("--task-file needs a path");
+  if (taskFileFlag && !existsSync(taskFileFlag)) die(`--task-file not found: ${taskFileFlag}`);
   const r = spawnInstance(root, agent, {
-    purpose: flag("purpose"), task: flag("task"), taskFile: flag("task-file"),
+    purpose: flag("purpose"), task: taskText, taskFile: taskFileFlag, parent,
     repo: flag("repo") || agent.repo || defaultRepo(workspaceOf(root)) || defaultRepo(process.cwd()),
     work: flag("work"), workDir: flag("work-dir"), runtime: flag("runtime"), model: flag("model"), branch: flag("branch"),
     launch: !args.includes("--no-launch"),
@@ -691,10 +732,7 @@ function retireCmd() {
 }
 
 async function paneCmd() {
-  const root = ensureRoot(flag("dir") || process.cwd());
-  const { startControlPane } = await import("../lib/control-pane/tui.mjs");
-  try { await startControlPane(root, { theme: flag("theme") }); }
-  catch (error) { die(error.message || String(error)); }
+  die("`oas pane` has been retired — the OAS Desktop app (packages/desktop) is the control panel now.");
 }
 
 function createCmd() {
@@ -919,14 +957,14 @@ else {
 Usage:
   oas status [--json]                       agents, souls, running instances
   oas status --team [--json]                whole-team roster across the team scope's repos
-  oas pane [--dir <dir>] [--theme dark|solarized]  open Control Pane, the live agent TUI
   oas create <name> [--description <d>]     create a persistent agent soul
       [--repo <r>] [--work <mode>] [--runtime pi|claude] [--model <m>]
       [--instructions-file <f>]
   oas spawn <agent> [--task <text>]         spawn an instance (tmux; --no-launch
       [--purpose <slug>] [--repo <r>]       = scaffold only); --instructions-file/
-      [--work worktree|checkout|attached|workspace]  --def-file creates a local (tmp) agent
-      [--work-dir <owner-work>] [--runtime pi|claude] [--model <m>] [--branch <b>]
+      [--parent <instance>]                 --def-file creates a local (tmp) agent;
+      [--work worktree|checkout|attached|workspace]  --parent nests under an existing
+      [--work-dir <owner-work>] [--runtime pi|claude] [--model <m>] [--branch <b>]  instance (default: top-level)
       [--instructions-file <f>|--def-file <f>] [--no-launch] [--json]
                                             with team: declared, unknown local souls
                                             resolve across the team scope's repos

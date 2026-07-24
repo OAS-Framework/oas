@@ -54,6 +54,12 @@ oas spawn oas-expert --dir <repo> --purpose <short-slug> \
   --task "<the user question, plus their workspace path and any config context>"
 ```
 
+Do NOT pass `--parent` here: `--dir <repo>` targets a DIFFERENT deployment's
+agents root, and lineage is deployment-local — your instance is not
+discoverable (or renderable) in the target's hierarchy, so the spawn is
+correctly operator-origin/top-level there. Pass `--parent "$OAS_INSTANCE"`
+only when spawning within your own deployment.
+
 Include in the task briefing: the user's actual question, their workspace
 path, and relevant `oas doctor` output. The expert reads its soul knowledge
 and answers with citations.

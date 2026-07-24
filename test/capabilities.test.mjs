@@ -676,3 +676,263 @@ test("owned capabilities at a non-git scope are discovered and config-owned trus
   // No git repo: install's gitignore maintenance must not have created one here.
   assert.equal(existsSync(join(ws, ".agents", "capabilities", ".gitignore")), false);
 });
+
+test("retired oas.web: config, install, and lock paths all give actionable migration diagnostics", () => {
+  const base = temp(); const repo = join(base, "repo"); mkdirSync(repo);
+  // config activation of the retired capability names the migration, not "no manifest"
+  write(join(repo, "oas-config.yaml"), `capabilities:\n  additive:\n    oas.web:\n      global: true\n`);
+  assert.throws(() => resolveOasConfig(repo), /oas\.web web panel was retired[\s\S]*OAS Desktop app[\s\S]*Remove the oas\.web entry/,
+    "config activation explains the retirement and the fix");
+  // doctor must diagnose the stale activation cleanly (text and JSON), not crash
+  const docText = spawnSync(process.execPath, [CLI, "doctor", repo], { encoding: "utf8" });
+  assert.notEqual(docText.status, 0);
+  assert.match(docText.stderr, /retired.*OAS Desktop app.*Remove the oas\.web entry/s, "doctor (text) emits the cleanup instruction");
+  assert.doesNotMatch(docText.stderr, /at resolveCapabilities|at file:/, "doctor (text) does not dump a stack trace");
+  const docJson = spawnSync(process.execPath, [CLI, "doctor", repo, "--json"], { encoding: "utf8" });
+  assert.notEqual(docJson.status, 0);
+  const dj = JSON.parse(docJson.stdout);
+  assert.deepEqual(dj.retired, ["oas.web"], "doctor --json reports the retired id");
+  assert.match(dj.error, /Remove the oas\.web entry/, "doctor --json carries the cleanup instruction");
+  // explicit install of the retired id explains instead of "not a marketplace capability"
+  const inst = spawnSync(process.execPath, [CLI, "install", "oas.web", "--dir", repo], { encoding: "utf8" });
+  assert.notEqual(inst.status, 0);
+  assert.match(inst.stderr + inst.stdout, /retired.*OAS Desktop app/s, "explicit install names the successor");
+  assert.doesNotMatch(inst.stderr + inst.stdout, /not a marketplace capability/, "no unexplained missing-capability failure");
+  // bare install with a stale lock entry reports RETIRED (actionable), and doctor warns
+  const repo2 = join(base, "repo2"); mkdirSync(repo2);
+  write(join(repo2, "oas-config.yaml"), "capabilities:\n  additive: {}\n");
+  write(join(repo2, "oas-lock.json"), JSON.stringify({ capabilities: { "oas.web": { version: "0.9.6", integrity: "sha256-x", source: "marketplace:oas-web@0.9.6" } } }));
+  const restore = spawnSync(process.execPath, [CLI, "install", "--dir", repo2], { encoding: "utf8" });
+  assert.match(restore.stdout, /RETIRED\s+oas\.web.*Remove the oas\.web entry/s, "lock restore reports the retirement with the fix");
+  assert.doesNotMatch(restore.stdout + restore.stderr, /FAILED\s+oas\.web/, "retired lock entry is not an opaque failure");
+  const doctor = spawnSync(process.execPath, [CLI, "doctor", repo2], { encoding: "utf8" });
+  assert.match(doctor.stdout, /WARNING: oas\.web is locked in .*retired.*OAS Desktop app/s, "doctor surfaces the stale lock with migration guidance");
+  const doctorJson2 = spawnSync(process.execPath, [CLI, "doctor", repo2, "--json"], { encoding: "utf8" });
+  assert.equal(doctorJson2.status, 0, "lock-only state resolves");
+  const dj2 = JSON.parse(doctorJson2.stdout);
+  assert.equal(dj2.retiredLocks?.[0]?.id, "oas.web", "doctor --json lists the stale retired lock");
+  assert.match(dj2.retiredLocks[0].reason, /Remove the oas\.web entry/, "JSON lock report carries the fix");
+});
+
+test("retired oas.web: a STALE INSTALLED ARTIFACT never bypasses the retirement diagnostics", () => {
+  // The migration's own upgrade state: the user hasn't deleted the stale
+  // installed copy yet. Presence must not short-circuit retirement.
+  const base = temp(); const repo = join(base, "repo"); mkdirSync(repo);
+  const staleDir = join(repo, ".agents", "capabilities", "installed", "oas-web");
+  write(join(staleDir, "oas.json"), JSON.stringify({ capability: "oas.web", version: "0.9.6", description: "stale web panel copy" }));
+  write(join(repo, "oas-lock.json"), JSON.stringify({ capabilities: { "oas.web": { version: "0.9.6", integrity: "sha256-x", source: "marketplace:oas-web@0.9.6" } } }));
+  // config activation with the artifact present still throws the retirement guidance
+  write(join(repo, "oas-config.yaml"), `capabilities:\n  additive:\n    oas.web:\n      global: true\n`);
+  assert.throws(() => resolveOasConfig(repo), /retired[\s\S]*OAS Desktop app[\s\S]*Remove the oas\.web entry/,
+    "stale artifact does not let config activation succeed");
+  // explicit install with the artifact present must not exit "Already acquired"
+  const inst = spawnSync(process.execPath, [CLI, "install", "oas.web", "--dir", repo], { encoding: "utf8" });
+  assert.notEqual(inst.status, 0, "explicit install of a retired id fails even when an artifact is present");
+  assert.match(inst.stderr, /retired.*OAS Desktop app/s);
+  assert.doesNotMatch(inst.stdout, /Already acquired/, "presence does not short-circuit retirement");
+  // bare install must report RETIRED, never ok/present
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive: {}\n");
+  const restore = spawnSync(process.execPath, [CLI, "install", "--dir", repo], { encoding: "utf8" });
+  assert.match(restore.stdout, /RETIRED\s+oas\.web/s, "lock restore reports RETIRED despite the present artifact");
+  assert.doesNotMatch(restore.stdout, /ok\s+oas\.web/, "no 'ok' for a retired capability's stale artifact");
+  // doctor's acquired listing flags the stale artifact with the deletion hint
+  const doctor = spawnSync(process.execPath, [CLI, "doctor", repo], { encoding: "utf8" });
+  assert.match(doctor.stdout, /oas\.web[\s\S]*WARNING: artifact of a retired capability[\s\S]*also delete/, "doctor names the stale installed copy with delete guidance");
+});
+
+test("retired oas.web: non-installed origins and source-manifest retirement are handled safely", () => {
+  const base = temp();
+  // owned origin: doctor warns WITHOUT destructive delete guidance
+  const repo = join(base, "repo"); mkdirSync(repo);
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive: {}\n");
+  write(join(repo, ".agents", "capabilities", "owned", "oas-web", "oas.json"),
+    JSON.stringify({ capability: "oas.web", version: "0.9.6", description: "owned copy" }));
+  const doc = spawnSync(process.execPath, [CLI, "doctor", repo], { encoding: "utf8" });
+  assert.match(doc.stdout, /WARNING: artifact of a retired capability/, "owned retired artifact is flagged");
+  assert.match(doc.stdout, /remove its declaration/, "non-installed origin gets declaration guidance");
+  assert.doesNotMatch(doc.stdout, /also delete/, "no delete instruction for an owned source tree");
+  // doctor --json reports the artifact in retiredArtifacts
+  const docJson = spawnSync(process.execPath, [CLI, "doctor", repo, "--json"], { encoding: "utf8" });
+  const dj = JSON.parse(docJson.stdout);
+  assert.equal(dj.retiredArtifacts?.[0]?.id, "oas.web", "doctor --json lists the retired artifact");
+  assert.match(dj.retiredArtifacts[0].origin, /^owned:/, "artifact record carries the origin");
+  // local-path acquisition of a package whose MANIFEST declares a retired id is rejected and cleaned up
+  const src = join(base, "ext-pkg"); mkdirSync(src);
+  write(join(src, "oas.json"), JSON.stringify({ capability: "oas.web", version: "0.9.9", description: "external" }));
+  const target = join(base, "target"); mkdirSync(target);
+  write(join(target, "oas-config.yaml"), "capabilities:\n  additive: {}\n");
+  const inst = spawnSync(process.execPath, [CLI, "install", src, "--dir", target], { encoding: "utf8" });
+  assert.notEqual(inst.status, 0, "path install of a retired-manifest package fails");
+  assert.match(inst.stderr, /declares capability "oas\.web".*retired/s, "failure names the manifest's retired id");
+  assert.equal(existsSync(join(target, ".agents", "capabilities", "installed", "ext-pkg")), false, "destination artifact removed");
+  assert.equal(existsSync(join(target, "oas-lock.json")), false, "no lock entry written");
+});
+
+test("spawn lineage is explicit: ambient env never sets parent; --parent and attached owner do", () => {
+  const base = temp(); const repo = join(base, "repo"); gitRepo(repo);
+  // Agents root inside the repo so the CLI resolves it from cwd.
+  const root = join(repo, "agents");
+  write(join(root, "dev", "soul", "soul.yaml"), `name: dev\nkind: persistent\nrepo: ${repo}\nwork: checkout\nruntime: pi\n`);
+  write(join(root, "dev", "soul", "AGENTS.md"), "# dev\n");
+  mkdirSync(join(root, "dev", "instances"), { recursive: true });
+  const env = { ...process.env, PATH: fakeRuntimes(base), PI_AGENTS_TMUX_SESSION: "oas-test-nosuch" };
+  delete env.PI_AGENTS_ROOT;
+  // 1. Env-polluted shell (a terminal opened inside an agent's tmux window) WITHOUT
+  //    --parent: operator origin, top-level, and the task still lands in TASK.md.
+  const polluted = { ...env, OAS_INSTANCE: "dev-existing", PI_AGENT_INSTANCE: "dev-existing" };
+  let r = spawnSync(process.execPath, [CLI, "spawn", "dev", "--task", "manual human task", "--purpose", "manual", "--no-launch", "--json"], { cwd: repo, env: polluted, encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  const manual = JSON.parse(r.stdout.slice(r.stdout.indexOf("{")));
+  assert.equal(manual.parentInstance, undefined);
+  assert.equal(manual.spawnOrigin, "operator");
+  assert.match(readFileSync(join(manual.home, "TASK.md"), "utf8"), /manual human task/);
+  // 2. --parent with an unknown instance is rejected before scaffolding.
+  r = spawnSync(process.execPath, [CLI, "spawn", "dev", "--parent", "no-such-instance", "--purpose", "bad", "--no-launch"], { cwd: repo, env, encoding: "utf8" });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /--parent "no-such-instance" does not match any known instance/);
+  // 3. Explicit --parent naming a real instance nests, and a --task-file task lands.
+  const tf = join(base, "task.md"); writeFileSync(tf, "task from a file\n");
+  r = spawnSync(process.execPath, [CLI, "spawn", "dev", "--parent", manual.instance, "--task-file", tf, "--purpose", "child", "--no-launch", "--json"], { cwd: repo, env, encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  const child = JSON.parse(r.stdout.slice(r.stdout.indexOf("{")));
+  assert.equal(child.parentInstance, manual.instance);
+  assert.equal(child.spawnOrigin, "instance");
+  assert.match(readFileSync(join(child.home, "TASK.md"), "utf8"), /task from a file/);
+  // 4. --task without a value fails loudly instead of writing a broken TASK.md.
+  r = spawnSync(process.execPath, [CLI, "spawn", "dev", "--task", "--purpose", "oops", "--no-launch"], { cwd: repo, env, encoding: "utf8" });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /--task needs a value/);
+  // 5. Kernel: attached mode still nests under the work-tree OWNER (no env, no parent).
+  const agent = findAgent(root, "dev");
+  const oldPath = process.env.PATH;
+  const oldInst = process.env.OAS_INSTANCE; const oldPiInst = process.env.PI_AGENT_INSTANCE;
+  process.env.PATH = fakeRuntimes(base);
+  process.env.OAS_INSTANCE = "dev-existing"; process.env.PI_AGENT_INSTANCE = "dev-existing";
+  try {
+    const attached = spawnInstance(root, agent, { instance: "dev-svc", work: "attached", workDir: join(manual.home, "work"), task: "attached task", launch: false });
+    assert.equal(attached.parentInstance, manual.instance, "attached fallback: work-tree owner is the parent");
+    assert.equal(attached.spawnOrigin, "instance");
+    assert.match(readFileSync(join(attached.home, "TASK.md"), "utf8"), /attached task/);
+    // 6. Kernel: explicit o.parent wins even for non-attached spawns; env is ignored.
+    const nested = spawnInstance(root, agent, { instance: "dev-sub", parent: manual.instance, task: "sub task", launch: false });
+    assert.equal(nested.parentInstance, manual.instance);
+    assert.equal(nested.spawnOrigin, "instance");
+    // 7. Kernel: no parent, no attached fallback → operator, despite polluted env.
+    const top = spawnInstance(root, agent, { instance: "dev-top", launch: false });
+    assert.equal(top.parentInstance, undefined);
+    assert.equal(top.spawnOrigin, "operator");
+    assert.match(readFileSync(join(top.home, "TASK.md"), "utf8"), /No task was provided/);
+  } finally {
+    process.env.PATH = oldPath;
+    if (oldInst === undefined) delete process.env.OAS_INSTANCE; else process.env.OAS_INSTANCE = oldInst;
+    if (oldPiInst === undefined) delete process.env.PI_AGENT_INSTANCE; else process.env.PI_AGENT_INSTANCE = oldPiInst;
+  }
+});
+
+test("--parent accepts capability-defined parent instances homing under local-agents/", () => {
+  const base = temp(); const { repo, root } = fixtureSoul(base);
+  capability(repo, "rev", { capability: "acme.rev", agents: ["agents/reviewer"] }, {
+    "agents/reviewer/soul.yaml": "name: reviewer\nkind: capability\nwork: checkout\nruntime: pi\ndescription: Reviewer.\n",
+    "agents/reviewer/AGENTS.md": "# Reviewer\n",
+  });
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.rev:\n      global: true\n");
+  return import("../lib/core.mjs").then((core) => {
+    const capAgent = core.findCapabilityAgent(repo, root, "reviewer");
+    const oldPath = process.env.PATH; process.env.PATH = fakeRuntimes(base);
+    try {
+      // Capability agent instance homes under <root>/local-agents/reviewer/instances/.
+      const parent = core.spawnInstance(root, { ...capAgent, repo }, { instance: "reviewer-abc", launch: false });
+      assert.ok(parent.home.includes(join("local-agents", "reviewer", "instances")));
+      // Kernel lookup sees it (this is what `oas spawn --parent` validates with).
+      assert.ok(core.findInstanceHome(root, "reviewer-abc"), "findInstanceHome sees capability-agent homes");
+      // Coordinator-style spawn: a capability-defined instance passes itself as
+      // --parent when spawning a child through the CLI.
+      const env = { ...process.env, PATH: fakeRuntimes(base), PI_AGENTS_TMUX_SESSION: "oas-test-nosuch" };
+      delete env.PI_AGENTS_ROOT;
+      const r = spawnSync(process.execPath, [CLI, "spawn", "dev", "--parent", "reviewer-abc", "--task", "child work", "--purpose", "child", "--no-launch", "--json"], { cwd: repo, env, encoding: "utf8" });
+      assert.equal(r.status, 0, r.stderr);
+      const child = JSON.parse(r.stdout.slice(r.stdout.indexOf("{")));
+      assert.equal(child.parentInstance, "reviewer-abc");
+      assert.equal(child.spawnOrigin, "instance");
+      assert.match(readFileSync(join(child.home, "TASK.md"), "utf8"), /child work/);
+      core.retireInstance(root, "reviewer-abc", { tmuxSession: "oas-test-nosuch" });
+    } finally { process.env.PATH = oldPath; }
+  });
+});
+
+test("lineage is deployment-local: --parent from an unrelated deployment is rejected", () => {
+  const base = temp();
+  // Deployment A: the caller's instance lives here.
+  const a = fixtureSoul(base);
+  // Deployment B: a separate repo + agents root (oas-support's --dir <repo> case).
+  const repoB = join(base, "other-repo"); gitRepo(repoB);
+  const rootB = join(repoB, "agents");
+  write(join(rootB, "expert", "soul", "soul.yaml"), `name: expert\nkind: persistent\nrepo: ${repoB}\nwork: checkout\nruntime: pi\n`);
+  write(join(rootB, "expert", "soul", "AGENTS.md"), "# expert\n");
+  mkdirSync(join(rootB, "expert", "instances"), { recursive: true });
+  const env = { ...process.env, PATH: fakeRuntimes(base), PI_AGENTS_TMUX_SESSION: "oas-test-nosuch" };
+  delete env.PI_AGENTS_ROOT;
+  // A real instance in deployment A…
+  let r = spawnSync(process.execPath, [CLI, "spawn", "dev", "--purpose", "caller", "--no-launch", "--json"], { cwd: a.repo, env, encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  const caller = JSON.parse(r.stdout.slice(r.stdout.indexOf("{")));
+  // …is NOT a valid parent when spawning into deployment B (its hierarchy
+  // cannot resolve foreign instances — cross-deployment spawns are operator-origin).
+  r = spawnSync(process.execPath, [CLI, "spawn", "expert", "--dir", repoB, "--parent", caller.instance, "--purpose", "x", "--no-launch"], { cwd: a.repo, env, encoding: "utf8" });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /does not match any known instance/);
+  // Without --parent the cross-deployment spawn lands top-level in B.
+  r = spawnSync(process.execPath, [CLI, "spawn", "expert", "--dir", repoB, "--task", "support question", "--purpose", "x", "--no-launch", "--json"], { cwd: a.repo, env, encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  const expert = JSON.parse(r.stdout.slice(r.stdout.indexOf("{")));
+  assert.equal(expert.spawnOrigin, "operator");
+  assert.equal(expert.parentInstance, undefined);
+  assert.match(readFileSync(join(expert.home, "TASK.md"), "utf8"), /support question/);
+});
+
+test("traversal names are rejected: --parent and retire cannot reach outside instances/", () => {
+  const base = temp(); const { repo, root, soul, agent } = fixtureSoul(base);
+  const env = { ...process.env, PATH: fakeRuntimes(base), PI_AGENTS_TMUX_SESSION: "oas-test-nosuch" };
+  delete env.PI_AGENTS_ROOT;
+  // A real instance to anchor the fixture (and prove normal lookups still work).
+  const oldPath = process.env.PATH; process.env.PATH = fakeRuntimes(base);
+  let real;
+  try { real = spawnInstance(root, agent, { instance: "dev-real", launch: false }); }
+  finally { process.env.PATH = oldPath; }
+  return import("../lib/core.mjs").then((core) => {
+    // Kernel: traversal / separator / dotted names never resolve…
+    for (const bad of ["../../dev/soul", "..", "dev/soul", "./dev-real", "dev-real/../../soul"]) {
+      assert.equal(core.findInstanceHome(root, bad), undefined, `rejected: ${bad}`);
+    }
+    // …while the plain name still does, as an immediate child of instances/.
+    assert.ok(core.findInstanceHome(root, "dev-real"));
+    // CLI spawn --parent with a traversal name fails BEFORE scaffolding.
+    const before = readdirSync(join(root, "dev", "instances"));
+    let r = spawnSync(process.execPath, [CLI, "spawn", "dev", "--parent", "../../dev/soul", "--purpose", "evil", "--no-launch"], { cwd: repo, env, encoding: "utf8" });
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /does not match any known instance/);
+    assert.deepEqual(readdirSync(join(root, "dev", "instances")), before, "no home scaffolded");
+    // CLI retire with a traversal name fails BEFORE any delete — the canonical soul survives.
+    r = spawnSync(process.execPath, [CLI, "retire", "../../dev/soul"], { cwd: repo, env, encoding: "utf8" });
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /no instance named/);
+    assert.ok(existsSync(join(soul, "soul.yaml")), "canonical soul.yaml survives");
+    assert.ok(existsSync(join(soul, "AGENTS.md")), "canonical AGENTS.md survives");
+    // Kernel retire with a traversal name also refuses.
+    assert.throws(() => core.retireInstance(root, "../../dev/soul", { tmuxSession: "oas-test-nosuch" }), /no instance named/);
+    assert.ok(existsSync(join(soul, "soul.yaml")));
+    // A VALIDLY NAMED symlink inside instances/ that points OUTSIDE must also be
+    // rejected — this exercises the realpath containment guard independently of
+    // the charset regex (the target's basename intentionally matches the name).
+    const outside = join(base, "outside", "dev-linked");
+    mkdirSync(outside, { recursive: true });
+    writeFileSync(join(outside, "precious.txt"), "keep me");
+    symlinkSync(outside, join(root, "dev", "instances", "dev-linked"));
+    assert.equal(core.findInstanceHome(root, "dev-linked"), undefined, "escaping symlink rejected by containment");
+    assert.throws(() => core.retireInstance(root, "dev-linked", { tmuxSession: "oas-test-nosuch" }), /no instance named/);
+    assert.ok(existsSync(join(outside, "precious.txt")), "symlink target untouched");
+    // Real instance still retires normally.
+    core.retireInstance(root, "dev-real", { tmuxSession: "oas-test-nosuch" });
+    assert.ok(!existsSync(real.home));
+  });
+});

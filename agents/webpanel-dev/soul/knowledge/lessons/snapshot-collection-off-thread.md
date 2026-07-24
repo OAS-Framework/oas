@@ -3,7 +3,7 @@ type: Lesson
 title: Keep roster collection out of the serving process
 description: The panel's key latency tail came from synchronous collectControlPane work blocking the single-threaded server, so /api/panel and findInstance should serve from a background child-process snapshot instead of collecting inline on request paths.
 tags: [oas-web, performance, event-loop, latency]
-timestamp: 2026-07-22
+timestamp: 2026-07-23
 ---
 
 # What made typing spiky
@@ -15,6 +15,10 @@ polls, plus instance-registry TTL rebuilds, synchronously ran
 included `git status` calls and took about 300-600ms. A key POST arriving during
 one of those polls queued behind it: measured key latency was about 6ms alone vs
 about 639ms during a panel poll.
+
+The background snapshot also means a just-spawned instance can exist before the
+panel roster can resolve it by name; post-spawn follow-up actions need the wait
+pattern in [Wait for the roster snapshot before post-spawn instance actions](/lessons/post-spawn-roster-snapshot-lag.md).
 
 # Fix pattern
 

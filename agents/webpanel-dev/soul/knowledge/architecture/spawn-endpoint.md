@@ -3,7 +3,7 @@ type: Concept
 title: Spawn endpoint root allowlist and empty-task semantics
 description: POST /api/spawn treats browser-supplied agentsRoot as a selector into the server's workspace roots, while task "" intentionally spawns an awaiting-instructions instance.
 tags: [oas-web, spawn, endpoint, security, task]
-timestamp: 2026-07-22
+timestamp: 2026-07-24
 ---
 
 # Endpoint contract
@@ -28,6 +28,20 @@ optional "+task" flow prompts for task text before spawning.
 
 Repo resolution for panel spawns mirrors the CLI fallback:
 `def.repo || defaultRepo(workspaceOf(root))`.
+
+Renderer code must preserve typed-but-unsubmitted task and purpose text before
+this request is built. If a periodic roster repaint replaces the open spawn form,
+the user-visible task can become an intentional empty-task request; see
+[Periodic repaints must not rebuild DOM under open forms](/lessons/poll-repaint-wipes-form-input.md).
+
+# Post-spawn follow-ups
+
+A successful `POST /api/spawn` does not mean the new instance is immediately
+visible through `/api/panel`, because the panel roster is a background snapshot.
+Any follow-up that resolves the spawned instance by name, such as opening its
+terminal, should wait for the workspace-scoped panel roster to include it and
+degrade safely if it never appears; see [Wait for the roster snapshot before
+post-spawn instance actions](/lessons/post-spawn-roster-snapshot-lag.md).
 
 # Errors and verification
 
