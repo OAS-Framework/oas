@@ -2,8 +2,8 @@
 type: Lesson
 title: Server reuse needs an identity probe, not just a liveness probe
 description: Desktop server reuse must compare an identity/version response with the local checkout's manifest, because a server that answers workspace endpoints can still be an incompatible older or newer install.
-tags: [desktop, server, compatibility, versioning]
-timestamp: 2026-07-23
+tags: [desktop, server, compatibility, versioning, testing]
+timestamp: 2026-07-24
 ---
 
 A server that answers `/api/panel` for the workspace is live, but not
@@ -22,6 +22,13 @@ Exact match is preferable to a `>= minVersion` rule here: it avoids
 version-ordering code and also rejects a newer foreign server whose API may have
 moved. The endpoint values should come from the manifest, not a hardcoded
 string, so the package version remains the single source of truth.
+
+Regression fixtures that mean "wrong identity" must use impossible sentinels,
+not plausible real versions. During the package migration, a compat test used
+`version: "0.1.0"` as the mismatch fixture; after `/api/version` moved from
+`oas.json` to `packages/desktop/package.json`, the desktop package's real
+version was also `0.1.0`, so the "mismatch" matched and the assertion flipped.
+Use values like `"0.0.0-other"` for identity-mismatch fixtures.
 
 Keep the review bar from [Regression tests must exercise the layer that had the bug](/lessons/regression-tests-bug-layer.md):
 extract the reuse decision into its own module, cover the real stale global
