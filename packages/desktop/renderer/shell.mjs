@@ -6,7 +6,7 @@
 // The shell owns tabs/navigation and provides ctx. The full roster (with
 // chat transcript, spawn, jira) lives in the ported views — the shell chrome
 // stays a thin rail so nothing is duplicated.
-import { currentWorkspace, groupInstances, onWorkspaceChange } from "./views/common.mjs";
+import { currentWorkspace, groupInstances, adoptWorkspace, onWorkspaceChange } from "./views/common.mjs";
 import {
   initTheme, toggleTheme, xtermTheme, onThemeChange,
   terminalTypography, setTerminalFontSize, setTerminalFontFamily, onTerminalTypographyChange,
@@ -16,7 +16,10 @@ import { createViewLifecycle } from "./view-lifecycle.mjs";
 import { reserveKey, whenKeyFree } from "./tab-keys.mjs";
 import { createTerminalTab } from "./terminal-tab.mjs";
 import { createTabChrome, tabKeyAction, focusAfterLastTab } from "./tab-a11y.mjs";
-import { collapseKey, hasInstanceChildren, instanceVisibleInTree } from "./instance-tree.mjs";
+import {
+  collapseKey, hasInstanceChildren, filterInstanceTree, instanceVisibleInTree,
+  captureTreeRenderState, configureDisclosure, rosterResponseOwns,
+} from "./instance-tree.mjs";
 import {
   terminalTabsForWorkspace, tabVisibleInContext, canActivateTab,
   fallbackTabForContext, terminalOpenOwnsWorkspace,
@@ -115,6 +118,7 @@ let contextRosterGen = 0;
 let contextRosterEl = null;
 let contextFilter = "";
 let contextInstances = [];
+let contextWorkspace = "";
 const collapsedInstances = new Set();
 
 function initContextRoster() {
@@ -136,7 +140,13 @@ async function refreshContextRoster() {
   if (!contextRosterEl) return;
   const myGen = ++contextRosterGen;
   const ws = currentWorkspace();
-  const owns = () => myGen === contextRosterGen && currentWorkspace() === ws;
+  const owns = (responseWs = ws) => rosterResponseOwns({
+    dispatchWorkspace: ws,
+    responseWorkspace: responseWs,
+    currentWorkspace: currentWorkspace(),
+    dispatchGeneration: myGen,
+    currentGeneration: contextRosterGen,
+  });
   const listEl = contextRosterEl.querySelector(".ctx-list");
   let panel;
   try {
@@ -145,23 +155,28 @@ async function refreshContextRoster() {
     if (owns()) listEl.innerHTML = `<div class="ctx-empty">Roster unavailable: ${e.message}</div>`;
     return;
   }
-  if (!owns()) return;
+  const resolvedWs = panel.workspace?.id || ws;
+  if (!owns(resolvedWs)) return;
+  if (!currentWorkspace() && resolvedWs) adoptWorkspace(resolvedWs);
+  contextWorkspace = resolvedWs;
   contextInstances = panel.instances || [];
   renderContextRoster(contextInstances);
 }
 
 function renderContextRoster(instances) {
   const listEl = contextRosterEl.querySelector(".ctx-list");
+  const restoreTreeState = captureTreeRenderState(listEl);
   listEl.innerHTML = "";
-  const matching = instances.filter((i) => !contextFilter ||
-    [i.instance, i.agent, i.repoName, i.task].some((v) => String(v || "").toLowerCase().includes(contextFilter)));
-  const ws = currentWorkspace();
+  const matching = filterInstanceTree(instances, contextFilter);
+  const ws = contextWorkspace || currentWorkspace();
+  const filtering = !!contextFilter.trim();
   const visible = matching.filter((i) => instanceVisibleInTree(
-    i, instances, collapsedInstances, ws, !!contextFilter,
+    i, instances, collapsedInstances, ws, filtering,
   ));
   contextRosterEl.querySelector(".ctx-count").textContent = `${instances.filter((i) => i.running).length}/${instances.length}`;
   if (!visible.length) {
     listEl.innerHTML = `<div class="ctx-empty">${instances.length ? "Nothing matches." : "No instances."}</div>`;
+    restoreTreeState();
     return;
   }
   for (const [, repos] of groupInstances(visible)) {
@@ -192,19 +207,24 @@ function renderContextRoster(instances) {
         const disclosure = document.createElement("button");
         disclosure.type = "button";
         disclosure.className = `ctx-disclosure${hasChildren ? "" : " empty"}`;
-        disclosure.textContent = collapsed ? "▸" : "▾";
         disclosure.tabIndex = hasChildren ? 0 : -1;
         if (hasChildren) {
-          disclosure.setAttribute("aria-expanded", String(!collapsed));
-          disclosure.setAttribute("aria-label", `${collapsed ? "Expand" : "Collapse"} ${i.instance}`);
-          disclosure.addEventListener("click", () => {
-            if (collapsed) collapsedInstances.delete(key); else collapsedInstances.add(key);
-            renderContextRoster(contextInstances);
+          configureDisclosure(disclosure, {
+            instance: i.instance, collapsed, filtering,
+            onToggle: () => {
+              if (collapsed) collapsedInstances.delete(key); else collapsedInstances.add(key);
+              renderContextRoster(contextInstances);
+            },
           });
-        } else disclosure.setAttribute("aria-hidden", "true");
+        } else {
+          disclosure.textContent = "▾";
+          disclosure.setAttribute("aria-hidden", "true");
+        }
 
         const row = document.createElement("button");
         row.type = "button";
+        row.dataset.treeInstance = i.instance;
+        row.dataset.treeControl = "terminal";
         row.className = "ctx-inst" + (i.running ? "" : " idle") + (isActive ? " active" : "");
         row.disabled = !i.running;
         row.title = i.running ? `Open ${i.instance} terminal` : `${i.instance} is idle`;
@@ -226,6 +246,7 @@ function renderContextRoster(instances) {
       }
     }
   }
+  restoreTreeState();
 }
 
 async function showInstances() {
@@ -563,6 +584,7 @@ initContextRoster();
 onWorkspaceChange(() => {
   contextRosterGen++;
   contextInstances = [];
+  contextWorkspace = currentWorkspace();
   updateContextTabs();
   if (sidebarMode === "instances") showInstances();
   else refreshContextRoster();

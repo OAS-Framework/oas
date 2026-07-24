@@ -51,6 +51,8 @@ body {
 .ctx-disclosure { width: 18px; height: 26px; flex: none; padding: 0; border: 0; border-radius: 4px;
                   background: none; color: var(--muted); font: 11px/1 inherit; cursor: pointer; }
 .ctx-disclosure:hover { background: var(--surface-2); color: var(--fg); }
+.ctx-disclosure:disabled { cursor: default; color: var(--muted); }
+.ctx-disclosure:disabled:hover { background: none; }
 .ctx-disclosure.empty { visibility: hidden; pointer-events: none; }
 .ctx-guides { position: absolute; inset: 0 auto 0 0; pointer-events: none; }
 .ctx-guide { position: absolute; top: -2px; bottom: -2px; width: 1px; background: var(--border); }
