@@ -118,6 +118,7 @@ body {
                           background: transparent; color: var(--muted); font-family: inherit; font-size: 22px; line-height: 1;
                           cursor: pointer; }
 .ws-dialog .icon-button:hover { background: var(--surface-2); color: var(--fg); }
+.ws-dialog .icon-button:disabled { background: transparent; color: var(--faint); cursor: default; }
 .ws-dialog-intro { margin: 0; padding: 0 18px 13px; color: var(--muted); font-size: 12px; }
 #ws-suggestion-search { width: auto; margin: 0 18px; flex: none; }
 .ws-dialog-status { min-height: 25px; margin: 0; padding: 8px 18px 2px; color: var(--muted); font-size: 11px; }

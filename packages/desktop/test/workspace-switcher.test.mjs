@@ -53,6 +53,7 @@ test("workspace switcher: deferred A completing after B cannot overwrite B", asy
 test("workspace menu is searchable, disambiguated, keyboard closable, and switches explicitly", () => {
   const { dom, document, selected, controller } = setup();
   controller.begin()(B, [A, B]);
+  assert.equal(document.getElementById("ws-name").textContent, "oas — beta · /org-b/oas");
   document.getElementById("ws-trigger").click();
   assert.equal(document.getElementById("ws-trigger").getAttribute("aria-expanded"), "true");
   const options = [...document.querySelectorAll(".ws-option")];
@@ -60,9 +61,14 @@ test("workspace menu is searchable, disambiguated, keyboard closable, and switch
     "oas — alpha · /org-a/oas", "oas — beta · /org-b/oas",
   ]);
   assert.equal(options[1].getAttribute("aria-selected"), "true");
-  options[0].click();
+  options[0].focus();
+  controller.begin()(B, [A, B]);
+  assert.equal(document.activeElement.dataset.workspaceId, "/org-a/oas",
+    "roster refresh preserves the focused workspace option identity");
+  document.activeElement.click();
   assert.deepEqual(selected, ["/org-a/oas"]);
   assert.equal(document.getElementById("ws-menu").hidden, true);
+  assert.equal(document.activeElement, document.getElementById("ws-trigger"));
 
   document.getElementById("ws-trigger").click();
   const search = document.getElementById("ws-menu-search");
@@ -89,8 +95,14 @@ test("add workspace modal discovers, filters, selects and confirms a suggestion"
   assert.equal(modal.hidden, false);
   assert.equal(document.activeElement, document.getElementById("ws-suggestion-search"));
   assert.deepEqual([...document.querySelectorAll(".ws-suggestion-title")].map((node) => node.textContent), ["oas", "tools"]);
-  const choices = [...document.querySelectorAll(".ws-suggestion")];
-  choices[1].click();
+  let choices = [...document.querySelectorAll(".ws-suggestion")];
+  assert.deepEqual(choices.map((choice) => choice.tabIndex), [0, -1]);
+  choices[0].focus();
+  choices[0].dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+  choices = [...document.querySelectorAll(".ws-suggestion")];
+  assert.equal(document.activeElement.dataset.workspaceId, "/org-c/tools");
+  assert.equal(choices[1].getAttribute("aria-checked"), "true");
+  assert.deepEqual(choices.map((choice) => choice.tabIndex), [-1, 0]);
   assert.equal(document.getElementById("ws-confirm").disabled, false);
   document.getElementById("ws-confirm").click();
   await new Promise((resolve) => setTimeout(resolve, 0));
@@ -98,6 +110,32 @@ test("add workspace modal discovers, filters, selects and confirms a suggestion"
   assert.deepEqual(selected, ["/org-c/tools"]);
   assert.equal(modal.hidden, true);
   assert.equal(document.activeElement, document.getElementById("ws-trigger"));
+  dom.window.close();
+});
+
+test("pending add cannot be dismissed and successful completion always reconciles", async () => {
+  const addGate = deferred();
+  const { dom, document, selected, controller } = setup({
+    discoverSuggestions: async () => ({ suggestions: [A] }),
+    addWorkspace: () => addGate.promise,
+  });
+  controller.begin()(B, [B]);
+  await controller.openModal();
+  document.querySelector(".ws-suggestion").click();
+  document.getElementById("ws-confirm").click();
+  const modal = document.getElementById("ws-modal");
+  const dialog = document.querySelector(".ws-dialog");
+  assert.equal(dialog.getAttribute("aria-busy"), "true");
+  assert.equal(document.getElementById("ws-cancel").disabled, true);
+  assert.equal(document.getElementById("ws-dialog-close").disabled, true);
+  dialog.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  modal.dispatchEvent(new dom.window.MouseEvent("mousedown", { bubbles: true }));
+  assert.equal(modal.hidden, false, "Escape and backdrop cannot abandon an in-flight mutation");
+  addGate.resolve({ workspace: A, workspaces: [B, A] });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(modal.hidden, true);
+  assert.deepEqual(selected, ["/org-a/oas"]);
+  assert.equal(document.getElementById("ws-trigger").title, "Active workspace: /org-a/oas");
   dom.window.close();
 });
 

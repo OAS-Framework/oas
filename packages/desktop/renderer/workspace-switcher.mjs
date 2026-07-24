@@ -28,6 +28,7 @@ export function createWorkspaceSwitcher({
   const status = q("ws-dialog-status"), confirm = q("ws-confirm"), browse = q("ws-browse");
   const cancel = q("ws-cancel"), closeButton = q("ws-dialog-close");
   let generation = 0, modalGeneration = 0, activeId = "", workspaces = [], suggestions = [], selected = null;
+  let adding = false;
 
   const setStatus = (message = "", error = false) => {
     status.textContent = message;
@@ -42,6 +43,8 @@ export function createWorkspaceSwitcher({
   const renderOptions = () => {
     const query = menuSearch.value.trim().toLocaleLowerCase();
     const labels = workspaceChoiceLabels(workspaces);
+    const focusedId = document.activeElement?.classList?.contains("ws-option")
+      ? document.activeElement.dataset.workspaceId : "";
     options.replaceChildren();
     workspaces.forEach((workspace, index) => {
       const haystack = `${labels[index]} ${workspace.id} ${workspace.team?.name || ""}`.toLocaleLowerCase();
@@ -51,6 +54,7 @@ export function createWorkspaceSwitcher({
       button.className = "ws-option";
       button.setAttribute("role", "option");
       button.setAttribute("aria-selected", String(workspace.id === activeId));
+      button.dataset.workspaceId = workspace.id;
       button.title = workspace.id;
       const check = document.createElement("span");
       check.className = "ws-check";
@@ -67,11 +71,14 @@ export function createWorkspaceSwitcher({
       copy.append(name, path);
       button.append(check, copy);
       button.addEventListener("click", () => {
-        closeMenu();
+        closeMenu(true);
         if (workspace.id !== activeId) selectWorkspace(workspace.id);
       });
       options.append(button);
     });
+    if (focusedId && !menu.hidden) {
+      [...options.querySelectorAll(".ws-option")].find((button) => button.dataset.workspaceId === focusedId)?.focus();
+    }
   };
   const openMenu = () => {
     menu.hidden = false;
@@ -81,20 +88,24 @@ export function createWorkspaceSwitcher({
     menuSearch.focus();
   };
 
-  const renderSuggestions = () => {
+  const renderSuggestions = (focusId = "") => {
     const query = modalSearch.value.trim().toLocaleLowerCase();
     suggestionsEl.replaceChildren();
     const visible = suggestions.filter((candidate) => {
       const haystack = `${candidateName(candidate)} ${candidateId(candidate)} ${candidate.team?.name || ""} ${candidate.reason || ""}`.toLocaleLowerCase();
       return !query || haystack.includes(query);
     });
-    for (const candidate of visible) {
+    const selectedId = candidateId(selected);
+    const selectedIsVisible = visible.some((candidate) => candidateId(candidate) === selectedId);
+    visible.forEach((candidate, index) => {
       const id = candidateId(candidate);
       const button = document.createElement("button");
       button.type = "button";
       button.className = "ws-suggestion";
+      button.dataset.workspaceId = id;
       button.setAttribute("role", "radio");
-      button.setAttribute("aria-checked", String(candidateId(selected) === id));
+      button.setAttribute("aria-checked", String(selectedId === id));
+      button.tabIndex = selectedId === id || (!selectedIsVisible && index === 0) ? 0 : -1;
       button.title = id;
       const radio = document.createElement("span");
       radio.className = "ws-radio";
@@ -118,29 +129,43 @@ export function createWorkspaceSwitcher({
       button.addEventListener("click", () => {
         selected = candidate;
         confirm.disabled = false;
-        renderSuggestions();
+        renderSuggestions(id);
       });
       suggestionsEl.append(button);
+    });
+    if (focusId) {
+      [...suggestionsEl.querySelectorAll(".ws-suggestion")]
+        .find((button) => button.dataset.workspaceId === focusId)?.focus();
     }
     if (!visible.length && !status.textContent) setStatus("No matching OAS workspaces found.");
   };
 
+  const setAdding = (value) => {
+    adding = value;
+    dialog.setAttribute("aria-busy", String(value));
+    browse.disabled = value;
+    cancel.disabled = value;
+    closeButton.disabled = value;
+    confirm.disabled = value || !selected;
+  };
   const closeModal = (restore = true) => {
+    if (adding) return false;
     modalGeneration++;
     modal.hidden = true;
     selected = null;
     confirm.disabled = true;
     if (restore) trigger.focus();
+    return true;
   };
   const openModal = async () => {
+    if (adding) return;
     closeMenu();
     const token = ++modalGeneration;
     modal.hidden = false;
     modalSearch.value = "";
     suggestions = [];
     selected = null;
-    confirm.disabled = true;
-    browse.disabled = false;
+    setAdding(false);
     suggestionsEl.replaceChildren();
     setStatus("Finding OAS workspaces…");
     modalSearch.focus();
@@ -180,13 +205,12 @@ export function createWorkspaceSwitcher({
     if (!selected) return;
     const token = ++modalGeneration;
     const choice = selected;
-    confirm.disabled = true;
-    browse.disabled = true;
+    setAdding(true);
     setStatus(`Adding ${candidateName(choice)}…`);
     try {
       const result = await addWorkspace(choice);
       if (token !== modalGeneration) return;
-      browse.disabled = false;
+      setAdding(false);
       const workspace = result?.workspace || choice;
       const list = result?.workspaces || [...workspaces, workspace];
       render(workspace, list);
@@ -195,8 +219,7 @@ export function createWorkspaceSwitcher({
       trigger.focus();
     } catch (error) {
       if (token !== modalGeneration) return;
-      browse.disabled = false;
-      confirm.disabled = false;
+      setAdding(false);
       setStatus(error?.message || "Could not add that workspace.", true);
     }
   };
@@ -205,7 +228,9 @@ export function createWorkspaceSwitcher({
     activeId = workspace?.id || "";
     workspaces = Array.isArray(list) ? [...list] : [];
     if (workspace && !workspaces.some((candidate) => candidate.id === activeId)) workspaces.unshift(workspace);
-    currentName.textContent = workspace ? candidateName(workspace) : "Resolving…";
+    const labels = workspaceChoiceLabels(workspaces);
+    const activeIndex = workspaces.findIndex((candidate) => candidate.id === activeId);
+    currentName.textContent = workspace ? (labels[activeIndex] || candidateName(workspace)) : "Resolving…";
     trigger.title = activeId ? `Active workspace: ${activeId}` : "Resolving active workspace";
     renderOptions();
   };
@@ -225,10 +250,26 @@ export function createWorkspaceSwitcher({
       : event.key === "ArrowDown" ? Math.min(items.length - 1, index + 1) : Math.max(0, index < 0 ? 0 : index - 1);
     items[next].focus();
   };
+  const onSuggestionKey = (event) => {
+    if (!["ArrowDown", "ArrowUp", "ArrowRight", "ArrowLeft", "Home", "End"].includes(event.key)) return;
+    const target = event.target.closest?.(".ws-suggestion");
+    if (!target) return;
+    event.preventDefault();
+    const items = [...suggestionsEl.querySelectorAll(".ws-suggestion")];
+    const index = items.indexOf(target);
+    const next = event.key === "Home" ? 0 : event.key === "End" ? items.length - 1
+      : ["ArrowDown", "ArrowRight"].includes(event.key) ? (index + 1) % items.length
+        : (index - 1 + items.length) % items.length;
+    const id = items[next].dataset.workspaceId;
+    selected = suggestions.find((candidate) => candidateId(candidate) === id) || selected;
+    confirm.disabled = !selected;
+    renderSuggestions(id);
+  };
   const onDialogKey = (event) => {
     if (event.key === "Escape") { event.preventDefault(); closeModal(); return; }
     if (event.key !== "Tab") return;
-    const focusable = [...dialog.querySelectorAll("button:not([disabled]), input:not([disabled])")].filter((element) => !element.hidden);
+    const focusable = [...dialog.querySelectorAll("button:not([disabled]), input:not([disabled])")]
+      .filter((element) => !element.hidden && element.tabIndex >= 0);
     if (!focusable.length) return;
     const first = focusable[0], last = focusable.at(-1);
     if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
@@ -243,6 +284,7 @@ export function createWorkspaceSwitcher({
   menu.addEventListener("keydown", onMenuKey);
   addOpen.addEventListener("click", openModal);
   modalSearch.addEventListener("input", renderSuggestions);
+  suggestionsEl.addEventListener("keydown", onSuggestionKey);
   browse.addEventListener("click", onBrowse);
   confirm.addEventListener("click", onConfirm);
   cancel.addEventListener("click", () => closeModal());
