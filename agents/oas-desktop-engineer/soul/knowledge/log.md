@@ -1,6 +1,7 @@
 # Knowledge Log
 
 ## 2026-07-24
+* **Creation**: promoted [smoke scripts that launch Electron must reap by process group on every exit path](/lessons/electron-smoke-process-group-reaping.md) from the oas-desktop-engineer-desktop-dist notes.
 * **Creation**: promoted [shared degradation state must treat unknown as capable](/lessons/degradation-state-unknown-capable.md) from the oas-desktop-engineer-desktop-dist notes.
 * **Update**: merged the renderer theme token raw-fallback gotcha into [desktop renderer views port of the panel](/architecture/desktop-renderer-views-port.md): `var(--warn)` should not carry raw fallback literals when the token is defined in theme.css.
 * **Creation**: promoted [fake CLI fixtures need absolute-path launchers under hostile PATH](/lessons/fake-cli-fixtures-hostile-path.md) from the oas-desktop-engineer-desktop-dist notes.
