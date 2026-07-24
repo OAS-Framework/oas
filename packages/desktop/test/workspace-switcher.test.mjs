@@ -220,6 +220,10 @@ test("pending add is single-flight, cannot be dismissed, and always reconciles",
   assert.equal(document.getElementById("ws-cancel").disabled, true);
   assert.equal(document.getElementById("ws-dialog-close").disabled, true);
   assert.equal(document.getElementById("ws-suggestion-search").disabled, true);
+  const busyStatus = document.getElementById("ws-dialog-status");
+  assert.equal(document.activeElement, busyStatus, "add parks focus on the status inside the modal");
+  busyStatus.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Tab", bubbles: true }));
+  assert.equal(document.activeElement, busyStatus, "Tab cannot escape while every action is disabled");
   const suggestionButtons = [...document.querySelectorAll(".ws-suggestion")];
   assert.deepEqual(suggestionButtons.map((button) => button.disabled), [true, true]);
   suggestionButtons[1].click();
@@ -235,6 +239,26 @@ test("pending add is single-flight, cannot be dismissed, and always reconciles",
   assert.equal(modal.hidden, true);
   assert.deepEqual(selected, ["/org-a/oas"]);
   assert.equal(document.getElementById("ws-trigger").title, "Active workspace: /org-a/oas");
+  dom.window.close();
+});
+
+test("pending native picker parks focus inside the modal and restores Browse on cancel", async () => {
+  const picker = deferred();
+  const { dom, document, controller } = setup({
+    discoverSuggestions: async () => ({ stale: false, suggestions: [A] }),
+    pickWorkspace: () => picker.promise,
+  });
+  controller.begin()(B, [B]);
+  await controller.openModal();
+  document.getElementById("ws-browse").click();
+  const busyStatus = document.getElementById("ws-dialog-status");
+  assert.equal(document.activeElement, busyStatus);
+  busyStatus.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Tab", bubbles: true }));
+  assert.equal(document.activeElement, busyStatus);
+  picker.resolve({ ok: false, code: "cancelled", reason: "not rendered" });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(document.activeElement, document.getElementById("ws-browse"));
+  assert.equal(document.getElementById("ws-modal").hidden, false);
   dom.window.close();
 });
 

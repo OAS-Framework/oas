@@ -157,6 +157,7 @@ export function createWorkspaceSwitcher({
     modalSearch.disabled = value;
     for (const suggestion of suggestionsEl.querySelectorAll(".ws-suggestion")) suggestion.disabled = value;
     confirm.disabled = value || !selected;
+    if (value) status.focus();
   };
   const closeModal = (restore = true) => {
     if (adding) return false;
@@ -227,15 +228,17 @@ export function createWorkspaceSwitcher({
       const result = await pickWorkspace();
       if (token !== modalGeneration) return;
       setAdding(false);
-      if (result?.code === "cancelled") { paintDiscoveryState(); return; }
+      if (result?.code === "cancelled") { paintDiscoveryState(); browse.focus(); return; }
       if (resolvedMutation(result)) return;
       discoveryGeneration++;
       setStatus(mutationFailureMessage(result, "Could not use that folder."), true);
+      browse.focus();
     } catch (error) {
       if (token !== modalGeneration) return;
       setAdding(false);
       discoveryGeneration++;
       setStatus(error?.message || "Could not use that folder.", true);
+      browse.focus();
     }
   };
   const onConfirm = async () => {
@@ -250,10 +253,12 @@ export function createWorkspaceSwitcher({
       setAdding(false);
       if (resolvedMutation(result)) return;
       setStatus(mutationFailureMessage(result, "Could not add that workspace."), true);
+      confirm.focus();
     } catch (error) {
       if (token !== modalGeneration) return;
       setAdding(false);
       setStatus(error?.message || "Could not add that workspace.", true);
+      confirm.focus();
     }
   };
 
@@ -300,6 +305,7 @@ export function createWorkspaceSwitcher({
   };
   const onDialogKey = (event) => {
     if (event.key === "Escape") { event.preventDefault(); closeModal(); return; }
+    if (adding && event.key === "Tab") { event.preventDefault(); status.focus(); return; }
     if (event.key !== "Tab") return;
     const focusable = [...dialog.querySelectorAll("button:not([disabled]), input:not([disabled])")]
       .filter((element) => !element.hidden && element.tabIndex >= 0);
