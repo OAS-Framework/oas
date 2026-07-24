@@ -13,7 +13,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const RENDERER = join(ROOT, "packages", "desktop", "renderer");
 
 test("views ship as .mjs with mount/unmount (shell imports ./views/<name>.mjs)", () => {
-  for (const name of ["instances", "spawn", "jira"]) {
+  for (const name of ["instances", "spawn"]) {
     const f = join(RENDERER, "views", `${name}.mjs`);
     assert.ok(existsSync(f), `${name}.mjs missing`);
     const src = readFileSync(f, "utf8");
@@ -101,7 +101,7 @@ test("per-instance requests are workspace-scoped: same-named instance in two wor
   const interrupted = [];
   const upstream = createServer((req, res) => {
     const url = new URL(req.url, "http://localhost");
-    const m = url.pathname.match(/^\/api\/(interrupt|chat|jira)\/([^/]+)$/);
+    const m = url.pathname.match(/^\/api\/(interrupt|chat)\/([^/]+)$/);
     const ws = url.searchParams.get("ws");
     const ok = (body) => { res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify(body)); };
     const notFound = () => { res.writeHead(404, { "content-type": "application/json" }); res.end(JSON.stringify({ error: "unknown instance" })); };
@@ -118,7 +118,7 @@ test("per-instance requests are workspace-scoped: same-named instance in two wor
   try {
     common.setWorkspace("wsB");
     // the path builder itself pins the selected workspace on every kind
-    for (const kind of ["interrupt", "chat", "jira", "session", "keys"]) {
+    for (const kind of ["interrupt", "chat", "session", "keys"]) {
       const p = common.instanceApiPath(kind, "dev-1");
       assert.match(p, new RegExp(`^/api/${kind}/dev-1\\?ws=wsB$`), `${kind} must carry the selected ws`);
     }
@@ -127,7 +127,7 @@ test("per-instance requests are workspace-scoped: same-named instance in two wor
     await common.postJson(ctx, common.instanceApiPath("interrupt", "dev-1"), {});
     assert.deepEqual(interrupted, ["B"], "interrupt must resolve only inside the selected workspace");
     // reads scope identically
-    assert.deepEqual(await common.apiJson(ctx, common.instanceApiPath("jira", "dev-1")), { owner: "B" });
+    assert.deepEqual(await common.apiJson(ctx, common.instanceApiPath("chat", "dev-1")), { owner: "B" });
     // an instance that exists only in the OTHER workspace is a strict miss
     common.setWorkspace("wsC");
     await assert.rejects(common.postJson(ctx, common.instanceApiPath("interrupt", "dev-1"), {}), /unknown instance/);
@@ -135,40 +135,6 @@ test("per-instance requests are workspace-scoped: same-named instance in two wor
   } finally {
     common.setWorkspace(prevWs);
     upstream.close();
-  }
-});
-
-test("jira guard: a deferred response from the previous workspace never paints after a switch + same-name reselect", async () => {
-  const common = await import(new URL("../packages/desktop/renderer/views/common.mjs", import.meta.url).href);
-  const { refreshJira } = await import(new URL("../packages/desktop/renderer/views/instances.mjs", import.meta.url).href);
-  // ctx.api resolves on demand so the test controls response ORDER exactly.
-  const gate = [];
-  const ctx = { api: (pathname) => new Promise((ok) => gate.push({ pathname, ok })) };
-  const payload = (ws) => ({ ok: true, status: 200, json: async () => ({ enabled: true, label: `from-${ws}` }) });
-  const s = { alive: true, sel: "dev-1", jiraReq: 0, jira: null, lastChatSig: "x", lastChatData: null, ctx };
-  const prevWs = common.currentWorkspace();
-  try {
-    // 1. viewing wsB: jira fetch for dev-1 goes out (in flight)
-    common.setWorkspace("wsB");
-    const inFlightB = refreshJira(s, "dev-1");
-    assert.match(gate[0].pathname, /ws=wsB/);
-    // 2. user switches to wsA and reselects the SAME instance name — the view
-    //    bumps jiraReq (clearSelection/select do this) and refetches
-    common.setWorkspace("wsA");
-    s.jiraReq++;
-    const inFlightA = refreshJira(s, "dev-1");
-    assert.match(gate[1].pathname, /ws=wsA/);
-    // 3. wsA's response lands first and paints
-    gate[1].ok(payload("wsA"));
-    await inFlightA;
-    assert.equal(s.jira.label, "from-wsA");
-    // 4. wsB's STALE response finally lands — name matches (dev-1 === dev-1),
-    //    but the generation token must reject it
-    gate[0].ok(payload("wsB"));
-    await inFlightB;
-    assert.equal(s.jira.label, "from-wsA", "stale cross-workspace jira response must never paint");
-  } finally {
-    common.setWorkspace(prevWs);
   }
 });
 

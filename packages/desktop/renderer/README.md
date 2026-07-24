@@ -9,16 +9,14 @@ No frameworks, no dependencies; data comes from the bundled backend HTTP API.
 ## Views (`views/`)
 
 - **instances.mjs** — roster + instance detail: pi-style chat transcript
-  (`GET /api/chat/<instance>`), task/state/git/workspace summary, interrupt,
-  inline Jira card when the instance carries `oas.jira` meta. The live
+  (`GET /api/chat/<instance>`), task/state/git/workspace summary, interrupt.
+  The live
   terminal is NOT here — the "Open terminal" action calls
   `ctx.openTerminal(instance)` (the shell's terminal view owns interaction).
 - **spawn.mjs** — available agents (`GET /api/agents`) with spawn-from-app
   (`POST /api/spawn`), purpose/task fields. Panel defaults hold: empty task
   spawns an instance awaiting instructions; attached-mode agents are not
   spawnable standalone.
-- **jira.mjs** — epic + Agent Roster panel per Jira-linked instance
-  (`GET /api/jira/<instance>`).
 - **common.mjs** — shared helpers: escaping, mini-markdown, ctx.api JSON
   wrappers, roster grouping, and workspace switching (`?ws=`) — the selected
   workspace is shared across views via `setWorkspace`/`onWorkspaceChange`
@@ -31,7 +29,7 @@ light, WCAG AA); views style themselves against tokens only, scoped under
 ## Developing without the shell
 
 `harness.html` supplies a stub `ctx` and tab chrome for ALL views — including
-the Markdown and Diff tabs (they prompt for a file path / instance name;
+the Markdown tab (it prompts for a file path;
 `ctx.openFile` routes into the markdown view); `harness-server.mjs`
 serves it and proxies `/api/*` to a running backend server (same-origin, so
 GETs and guarded POSTs both work exactly as in the real shell):

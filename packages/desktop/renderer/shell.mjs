@@ -4,7 +4,7 @@
 // module in ./views/ exporting mount(el, ctx) / unmount(), where
 //   ctx = { api(pathname, opts), openFile(path), openTerminal(instance) }
 // The shell owns tabs/navigation and provides ctx. The full roster (with
-// chat transcript, spawn, jira) lives in the ported views — the shell chrome
+// chat transcript, spawn) lives in the ported views — the shell chrome
 // stays a thin rail so nothing is duplicated.
 import { currentWorkspace, setWorkspace, groupInstances, adoptWorkspace, onWorkspaceChange } from "./views/common.mjs";
 import {
@@ -530,8 +530,6 @@ async function openTerminalTabInner(instance, ws, key) {
 // ── nav rail ──────────────────────────────────────────────────────────────
 // Two first-class navigation surfaces: hierarchy and soul roster. Instances
 // live permanently below them; selecting one opens its terminal artifact.
-// Diff and Jira surfaces are intentionally NOT wired (modules stay dormant
-// in the tree per the coordinator's directive).
 const NAV = [
   { name: "hierarchy", label: "Active overview", icon: "⌘", title: "Active overview" },
   { name: "spawn", label: "Soul roster", icon: "✦", title: "Soul roster" },

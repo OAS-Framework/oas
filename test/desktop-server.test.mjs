@@ -251,7 +251,7 @@ test("desktop server: /api/agents lists persistent AND capability-defined agents
   } finally { proc.kill(); }
 });
 
-// ---- /api/file guard + /api/diff (desktop viewers) ----
+// ---- /api/file guard (desktop viewers) ----
 
 test("desktop server: file guard: traversal, prefix-sneak, and symlink escapes fail closed", async () => {
   const { mkdtempSync, writeFileSync, mkdirSync, symlinkSync, realpathSync } = await import("node:fs");
@@ -275,7 +275,7 @@ test("desktop server: file guard: traversal, prefix-sneak, and symlink escapes f
   assert.equal(resolveGuardedFile(join(root, "missing"), [root]).code, 404, "missing file is 404");
 });
 
-test("desktop server: /api/file serves guarded text files with markdown flag; /api/diff 404s unknown instance", async () => {
+test("desktop server: /api/file serves guarded text files with markdown flag", async () => {
   const port = 4000 + Math.floor(Math.random() * 2000);
   const proc = spawn(process.execPath, [SRV, "start", "--port", String(port), "--dir", ROOT], { stdio: "ignore" });
   try {
@@ -311,11 +311,10 @@ test("desktop server: /api/file serves guarded text files with markdown flag; /a
       if (served) break;
     }
     assert.ok(served, "an agent AGENTS.md was served through the guard");
-    assert.equal((await get("/api/diff/no-such-instance")).status, 404, "diff for unknown instance is 404");
   } finally { proc.kill(); }
 });
 
-test("desktop server: hostile Host header is rejected on GET file/diff APIs (DNS rebinding)", async () => {
+test("desktop server: hostile Host header is rejected on GET file APIs (DNS rebinding)", async () => {
   const port = 4000 + Math.floor(Math.random() * 2000);
   const proc = spawn(process.execPath, [SRV, "start", "--port", String(port), "--dir", ROOT], { stdio: "ignore" });
   try {
@@ -331,52 +330,9 @@ test("desktop server: hostile Host header is rejected on GET file/diff APIs (DNS
       rq.on("error", reject); rq.end();
     });
     assert.equal(await rawGet(`/api/file?path=${encodeURIComponent(join(ROOT, "README.md"))}`), 403, "rebinding host cannot read files");
-    assert.equal(await rawGet("/api/diff/x"), 403, "rebinding host cannot read diffs");
     assert.equal(await rawGet("/api/panel"), 403, "rebinding host cannot enumerate roots");
     assert.equal((await fetch(`http://127.0.0.1:${port}/api/panel`)).status, 200, "loopback host still serves");
   } finally { proc.kill(); }
-});
-
-test("desktop server: diff stats: -z rename records key by the new path with R status", () => {
-  const src = extractBlock(SRV, "DIFFSTAT");
-  const parseDiffStats = new Function(`${src}; return parseDiffStats;`)();
-  // rename dir/old.js -> dir/new name.js (space: -z handles unusual names), plus a modify
-  const numstat = "3\t1\t\0dir/old.js\0dir/new name.js\0" + "5\t2\tplain.js\0";
-  const nameStatus = "R100\0dir/old.js\0dir/new name.js\0" + "M\0plain.js\0";
-  const files = parseDiffStats(numstat, nameStatus);
-  assert.equal(files.length, 2);
-  const ren = files.find((f) => f.status === "R");
-  assert.ok(ren, "rename detected");
-  assert.equal(ren.path, "dir/new name.js", "keyed by the NEW path");
-  assert.equal(ren.additions, 3); assert.equal(ren.deletions, 1);
-  const mod = files.find((f) => f.path === "plain.js");
-  assert.equal(mod.status, "M"); assert.equal(mod.additions, 5);
-});
-
-test("desktop server: diff synthesis: untracked symlinks render link text, FIFOs are skipped unread", async () => {
-  const { mkdtempSync, writeFileSync, symlinkSync, lstatSync, readlinkSync, readFileSync } = await import("node:fs");
-  const { execFileSync: xfs } = await import("node:child_process");
-  const { tmpdir } = await import("node:os");
-  const src = extractBlock(SRV, "UNTRACKED");
-  const synthUntracked = new Function(`${src}; return synthUntracked;`)();
-  const dir = mkdtempSync(join(tmpdir(), "oasweb-untracked-"));
-  writeFileSync(join(dir, "secret-target"), "TOP-SECRET-KEY-MATERIAL");
-  symlinkSync(join(dir, "secret-target"), join(dir, "leak.txt"));
-  writeFileSync(join(dir, "plain.txt"), "hello\n");
-  try { xfs("mkfifo", [join(dir, "pipe")], { timeout: 4000 }); } catch { /* platform without mkfifo */ }
-  const untracked = ["leak.txt", "plain.txt", ...(lstatSync(join(dir, "pipe"), { throwIfNoEntry: false }) ? ["pipe"] : [])];
-  const files = [];
-  const io = { lstatSync, readlinkSync, readFileSync, join, maxBytes: 2 * 1024 * 1024 };
-  const diff = synthUntracked(dir, untracked, files, io);
-  assert.ok(!diff.includes("TOP-SECRET-KEY-MATERIAL"), "symlink target content never read into the diff");
-  assert.ok(diff.includes("+hello"), "regular file content synthesized");
-  const leak = files.find((f) => f.path === "leak.txt");
-  assert.ok(leak, "symlink listed as added");
-  assert.ok(diff.includes("secret-target"), "symlink renders its link text (readlink)");
-  const pipe = files.find((f) => f.path === "pipe");
-  if (pipe) assert.equal(pipe.additions, null, "FIFO listed but never opened");
-  // swap-in guard: a statSync-based implementation would follow the symlink
-  assert.ok(src.includes("lstatSync") || src.includes("io.lstatSync"), "implementation lstat's entries");
 });
 
 // ---- tmux target anchoring: prefix-match hazard (reviewer-death bug class) ----

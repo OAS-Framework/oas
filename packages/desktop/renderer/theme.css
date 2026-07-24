@@ -201,7 +201,7 @@
 .oas-view .working .dots span:nth-child(2) { animation-delay: .2s; }
 .oas-view .working .dots span:nth-child(3) { animation-delay: .4s; }
 
-/* ── cards (summary, spawn, jira) ── */
+/* ── cards (summary, spawn) ── */
 .oas-view .cards { padding: 14px 18px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
 .oas-view .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
                   padding: 12px 14px; box-shadow: var(--shadow); }
@@ -212,9 +212,3 @@
 .oas-view .kv .k { color: var(--muted); }
 .oas-view .kv .v { color: var(--fg); word-break: break-all; }
 
-/* ── jira ── */
-.oas-view table.jt { width: 100%; border-collapse: collapse; font-size: 12.5px; }
-.oas-view table.jt th { text-align: left; color: var(--muted); font-weight: 600; font-size: 11.5px;
-                        padding: 4px 10px 4px 0; border-bottom: 1px solid var(--border); text-transform: uppercase; letter-spacing: .04em; }
-.oas-view table.jt td { padding: 5px 10px 5px 0; border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent); vertical-align: top; }
-.oas-view .jkey { color: var(--accent); font-weight: 600; white-space: nowrap; }

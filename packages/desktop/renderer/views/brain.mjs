@@ -203,7 +203,7 @@ export async function mount(el, ctx) {
     const a = (loadAgents.list || []).find((x) => x.name === name);
     desc.textContent = a?.description || "";
     status(`Loading ${name}…`);
-    // House generation-token pattern (see diff.mjs owns()): BOTH completion
+    // House generation-token pattern: BOTH completion
     // paths check ownership — an earlier request's rejection must not replace
     // a later selection's rendered brain (round-4 review @3ebfc47), and the
     // selected name is bound in too so completion can't paint a stale agent.
@@ -217,7 +217,7 @@ export async function mount(el, ctx) {
   };
 
   // Workspace-aware agent loading: /api/agents is ws-scoped, and the shared
-  // workspace bus (Instances/Spawn/Jira switchers) must refresh this view.
+  // workspace bus (Instances/Spawn switchers) must refresh this view.
   async function loadAgents() {
     const myRoster = ++rosterGen;
     gen++;               // also retire in-flight brain requests of the old roster

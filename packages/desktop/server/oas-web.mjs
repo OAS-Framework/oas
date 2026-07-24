@@ -13,11 +13,9 @@
  *   POST /api/keys/<instance>       { data } → raw key bytes into the session (no Enter)
  *   POST /api/interrupt/<instance>  sends Ctrl-C (Escape for pi/claude prompts stays manual)
 
- *   GET  /api/jira/<instance>       epic + Agent Roster for instances with oas.jira meta
  *   GET  /api/brain/<agent>?ws=<id> agent "brain" JSON: soul (AGENTS.md, skills,
  *                                   knowledge tree) + per-instance artifacts (abs paths)
  *   GET  /api/file?path=<abs>       text file content, guarded to workspace roots + agent homes
- *   GET  /api/diff/<instance>?staged=0|1   unified git diff of the instance's work tree + stats
  *
  * SECURITY: binds 127.0.0.1 ONLY. This process can type into your terminals.
  * Interaction model: terminal-direct (tmux send-keys / capture-pane) — the
@@ -25,7 +23,7 @@
  */
 import { createServer } from "node:http";
 import { execFile, execFileSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync, statSync, realpathSync, lstatSync, readlinkSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync, realpathSync } from "node:fs";
 import { basename, dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { homedir } from "node:os";
@@ -118,7 +116,6 @@ function panelData(wsId) {
       workspace: dirname(i.agentsRoot), repoName: (i.repo || dirname(i.agentsRoot)).split("/").pop(),
       parentInstance: i.parentInstance || null,
       tmux: i.tmux, git: i.git, task: i.task, next: i.next,
-      jira: i.capabilityMeta?.["oas.jira"] || null,
       team: i.team || null,
     })),
   };
@@ -512,50 +509,7 @@ function brainData(agentName, wsId) {
   };
 }
 
-// ---- Jira (P2): epic + Agent Roster via acli, using the instance's oas.jira meta ----
-function acliJson(argv) {
-  try { return JSON.parse(execFileSync("acli", argv, { encoding: "utf8", timeout: 20000 })); }
-  catch { return undefined; }
-}
-function jiraPanel(inst) {
-  const meta = inst.jira;
-  if (!meta?.label) return { enabled: false };
-  const site = meta.site, project = meta.project, label = meta.label;
-  if (!site || !project) return { enabled: true, label, error: "site/project not configured" };
-  const mine = acliJson(["jira", "workitem", "search", "--site", site,
-    "--jql", `project = ${project} AND labels = ${label} AND statusCategory != Done ORDER BY rank`, "--json"]);
-  const tickets = (Array.isArray(mine) ? mine : mine?.issues || mine?.results || []).map((t) => ({
-    key: t.key, type: t.fields?.issuetype?.name || t.type || "", summary: t.fields?.summary || t.summary || "",
-    status: t.fields?.status?.name || t.status || "", parent: t.fields?.parent?.key || t.parent || null,
-  }));
-  // The epic: a labeled epic, else the parent chain of the first labeled ticket.
-  let epicKey = tickets.find((t) => /epic/i.test(t.type))?.key || tickets.find((t) => t.parent)?.parent || null;
-  let epic = null;
-  if (epicKey) {
-    const e = acliJson(["jira", "workitem", "view", epicKey, "--site", site, "--json"]);
-    if (e) {
-      const desc = e.fields?.description || e.description || "";
-      const text = typeof desc === "string" ? desc : JSON.stringify(desc);
-      epic = { key: epicKey, summary: e.fields?.summary || e.summary || "", status: e.fields?.status?.name || e.status || "", roster: parseRoster(text) };
-      if (/epic/i.test(String(e.fields?.issuetype?.name || e.type || "")) === false && !epic.summary) epic = { key: epicKey, summary: "", status: "", roster: [] };
-    }
-  }
-  return { enabled: true, label, site, project, tickets, epic };
-}
-export function parseRoster(text) {
-  const m = String(text).match(/##\s*Agent Roster\s*([\s\S]*?)(?=\n##\s|$)/i);
-  if (!m) return [];
-  const rows = m[1].split("\n").map((l) => l.trim()).filter((l) => l.startsWith("|"));
-  const cells = (l) => l.split("|").slice(1, -1).map((c) => c.trim());
-  if (rows.length < 2) return [];
-  const header = cells(rows[0]);
-  return rows.slice(2).map((r) => {
-    const c = cells(r);
-    return Object.fromEntries(header.map((h, i) => [h.toLowerCase().replace(/[^a-z]+/g, "-").replace(/^-|-$/g, ""), c[i] || ""]));
-  }).filter((r) => Object.values(r).some(Boolean));
-}
-
-// ---- File serving (markdown/brain viewers) + git diff (diff viewer) ----
+// ---- File serving (markdown/brain viewers) ----
 
 /* OASWEB_FILEGUARD_BEGIN — path-traversal guard for /api/file, extracted by
    tests. A requested path is readable ONLY if its realpath (symlinks resolved)
@@ -581,7 +535,7 @@ const FILE_MAX_BYTES = 2 * 1024 * 1024;
 
 /** Allowed roots for /api/file: every agents root of every workspace (agent
  * homes — souls, instances, knowledge) plus the known instances' work trees
- * and repos (the brain/diff viewers open files there too). */
+ * and repos (the brain/markdown viewers open files there too). */
 function fileRoots() {
   const roots = workspaces().flatMap((w) => w.roots);
   for (const d of snapshot.byWs.values()) {
@@ -610,95 +564,10 @@ function fileData(requested) {
   };
 }
 
-function git(cwd, argv) {
-  return execFileSync("git", ["-C", cwd, ...argv], { encoding: "utf8", timeout: 15000, maxBuffer: 32 * 1024 * 1024 });
-}
-
-/* OASWEB_DIFFSTAT_BEGIN — -z diff stat parsing, extracted by tests. Rename
-   records carry explicit old NUL new fields — never parse the human
-   "dir/{old => new}" form; both maps key by the NEW path. numstat -z rename
-   records are "adds\tdels\t" followed by old NUL new as separate fields. */
-function parseDiffStats(numstatZ, nameStatusZ) {
-  const statusOf = new Map();
-  {
-    const f = String(nameStatusZ).split("\0");
-    for (let i = 0; i < f.length - 1; ) {
-      const st = f[i++][0];
-      if (!st) continue;
-      const a = f[i++];
-      const b = st === "R" || st === "C" ? f[i++] : a; // rename/copy: old, new
-      statusOf.set(b, st);
-    }
-  }
-  const files = [];
-  {
-    const f = String(numstatZ).split("\0");
-    for (let i = 0; i < f.length - 1; ) {
-      const c = f[i++].split("\t");
-      if (c.length < 3) continue;
-      const path = c[2] !== "" ? c[2] : (i++, f[i++]); // rename: skip old, take new
-      files.push({ path, status: statusOf.get(path) || "M",
-                   additions: c[0] === "-" ? null : Number(c[0]),
-                   deletions: c[1] === "-" ? null : Number(c[1]) });
-    }
-  }
-  return files;
-}
-/* OASWEB_DIFFSTAT_END */
-
-/** Git diff of an instance's work tree: unified diff + per-file stats.
- * staged=1 diffs the index (--cached); default diffs the work tree and
- * includes untracked files as added (intent-to-add view via numstat merge). */
-function diffData(inst, staged) {
-  // inst.work is the work MODE (worktree/checkout/attached); the tree itself
-  // lives at <home>/work by convention (model.mjs gitState uses the same path).
-  const cwd = existsSync(join(inst.home || "", "work")) ? join(inst.home, "work") : inst.repo;
-  if (!cwd || !existsSync(cwd)) return { error: "instance has no work tree", code: 404 };
-  let branch = null;
-  try { branch = git(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]).trim(); } catch { return { error: "not a git repository", code: 409 }; }
-  const mode = staged ? ["--cached"] : [];
-  const files = parseDiffStats(
-    git(cwd, ["diff", ...mode, "--numstat", "-M", "-z"]),
-    git(cwd, ["diff", ...mode, "--name-status", "-M", "-z"]));
-  let diff = git(cwd, ["diff", ...mode, "-M"]);
-  if (!staged) {
-    const untracked = git(cwd, ["ls-files", "--others", "--exclude-standard"]).split("\n").filter(Boolean);
-    diff += synthUntracked(cwd, untracked, files, { lstatSync, readlinkSync, readFileSync, join, maxBytes: FILE_MAX_BYTES });
-  }
-  return { body: { repo: cwd, branch, staged: !!staged, files, diff } };
-}
-
-/* OASWEB_UNTRACKED_BEGIN — untracked-file diff synthesis, extracted by tests.
-   SECURITY: lstat first — an untrusted worktree can plant a symlink to
-   ~/.ssh keys (leak) or a FIFO/device (server hang); only regular files are
-   read, and symlinks render as their link text (readlink), never the target. */
-function synthUntracked(cwd, untracked, files, io) {
-  let diff = "";
-  for (const path of untracked) {
-    let text;
-    try {
-      const full = io.join(cwd, path);
-      const st = io.lstatSync(full);
-      if (st.isSymbolicLink()) { text = io.readlinkSync(full); }
-      else if (!st.isFile()) { files.push({ path, status: "A", additions: null, deletions: null }); continue; }
-      else {
-        const buf = io.readFileSync(full);
-        if (buf.includes(0) || buf.length > io.maxBytes) { files.push({ path, status: "A", additions: null, deletions: null }); continue; }
-        text = buf.toString("utf8");
-      }
-    } catch { continue; }
-    const lines = text.length ? text.replace(/\n$/, "").split("\n") : [];
-    files.push({ path, status: "A", additions: lines.length, deletions: 0 });
-    diff += `diff --git a/${path} b/${path}\nnew file mode 100644\n--- /dev/null\n+++ b/${path}\n@@ -0,0 +1,${lines.length} @@\n${lines.map((l) => "+" + l).join("\n")}\n`;
-  }
-  return diff;
-}
-/* OASWEB_UNTRACKED_END */
-
 // ---- HTTP ----
 // Identity for compatibility probes (GET /api/version): the desktop app must
 // not reuse an OLDER server that answers /api/panel but lacks the
-// desktop endpoints (/api/brain, /api/file, /api/diff...). The bundled
+// desktop endpoints (/api/brain, /api/file...). The bundled
 // server's identity is the desktop package's name and version.
 const MANIFEST = (() => {
   const p = JSON.parse(readFileSync(join(HERE, "..", "package.json"), "utf8"));
@@ -719,7 +588,7 @@ const server = createServer(async (req, res) => {
   const path = url.pathname;
   // DNS-rebinding guard: EVERY request must carry a loopback Host — a hostile
   // page rebinding its hostname to 127.0.0.1 must neither type into terminals
-  // (POST) nor read workspace files via the GET APIs (/api/file, /api/diff).
+  // (POST) nor read workspace files via the GET API (/api/file).
   const host = String(req.headers.host || "").replace(/:\d+$/, "");
   const okHost = (h) => h === "127.0.0.1" || h === "localhost" || h === "[::1]" || h === "::1";
   if (!okHost(host)) return send(res, 403, { error: "forbidden origin" });
@@ -758,7 +627,7 @@ const server = createServer(async (req, res) => {
       const r = fileData(url.searchParams.get("path") || "");
       return r.error ? send(res, r.code, { error: r.error }) : send(res, 200, r.body);
     }
-    const m = path.match(/^\/api\/(session|keys|interrupt|jira|chat|diff)\/([A-Za-z0-9._-]+)$/);
+    const m = path.match(/^\/api\/(session|keys|interrupt|chat)\/([A-Za-z0-9._-]+)$/);
     if (m) {
       const inst = findInstance(m[2], url.searchParams.get("ws") || undefined);
       if (!inst) return send(res, 404, { error: `unknown instance "${m[2]}"` });
@@ -790,12 +659,7 @@ const server = createServer(async (req, res) => {
         sendInterrupt(inst);
         return send(res, 200, { sent: true });
       }
-      if (m[1] === "jira" && req.method === "GET") return send(res, 200, jiraPanel(inst));
       if (m[1] === "chat" && req.method === "GET") return send(res, 200, chatData(inst, Number(url.searchParams.get("limit") || 120)));
-      if (m[1] === "diff" && req.method === "GET") {
-        const r = diffData(inst, url.searchParams.get("staged") === "1");
-        return r.error ? send(res, r.code, { error: r.error }) : send(res, 200, r.body);
-      }
     }
     return send(res, 404, { error: "not found" });
   } catch (e) {
