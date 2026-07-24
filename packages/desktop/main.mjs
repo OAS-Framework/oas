@@ -18,6 +18,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { apiUrl, apiInit } from "./api-url.mjs";
 import { openTerm, sweepViewers } from "./tmux-target.mjs";
 import { ensureServerOnPort, serverCompatible } from "./server-compat.mjs";
+import { createServerHost } from "./server-host.mjs";
 import { validateWorkspace, workspaceSuggestions, parseRecents, pushRecent, decideAdd, createGenerations, createAddExecutor } from "./workspace-registry.mjs";
 
 const require = createRequire(import.meta.url);
@@ -40,8 +41,24 @@ const WORKSPACE = resolve(argDir || process.env.OAS_DESKTOP_DIR || REPO_ROOT);
 const workspaceDirs = [WORKSPACE];
 
 // ---- oas-web server management ----------------------------------------
-let serverChild = null; // set only when WE spawned it
-let serverTransition = false; // an app-owned replacement is in flight — ownership persists across it
+// Server host (server-host.mjs): owns the child lifecycle, the ownership-
+// through-transition invariant, and trust-state invalidation on replace.
+const serverHost = createServerHost({
+  spawnChild: (dirs) => {
+    const bin = join(REPO_ROOT, "capabilities", "oas-web", "bin", "oas-web.mjs");
+    if (!existsSync(bin)) throw new Error(`oas-web server not found at ${bin} and no usable server on port ${port}`);
+    const child = spawn(process.execPath, [bin, "start", "--port", String(port), ...dirs.flatMap((d) => ["--dir", d])], {
+      stdio: ["ignore", "pipe", "pipe"],
+      cwd: WORKSPACE,
+    });
+    child.stdout.on("data", (d) => process.stdout.write(`[oas-web] ${d}`));
+    child.stderr.on("data", (d) => process.stderr.write(`[oas-web] ${d}`));
+    return child;
+  },
+  // trust state belongs to the outgoing server — stale entries must never
+  // validate ?ws= or decideAdd; repopulated only from the current server.
+  onInvalidate: () => { allowedWs = new Set(); },
+});
 let wsId = null;        // verified workspace id on the server we use
 let allowedWs = new Set(); // workspace ids the connected server advertises
 
@@ -91,48 +108,13 @@ async function freePort(from) {
 }
 
 function spawnServer(onPort, dirs = workspaceDirs) {
-  const bin = join(REPO_ROOT, "capabilities", "oas-web", "bin", "oas-web.mjs");
-  if (!existsSync(bin)) throw new Error(`oas-web server not found at ${bin} and no usable server on port ${port}`);
-  // Capture the child locally: the exit listener clears the global ONLY if
-  // it still points at THIS child — an old child's late exit must never
-  // erase the reference to (and ownership of) its replacement.
-  const child = spawn(process.execPath, [bin, "start", "--port", String(onPort), ...dirs.flatMap((d) => ["--dir", d])], {
-    stdio: ["ignore", "pipe", "pipe"],
-    cwd: WORKSPACE,
-  });
-  child.stdout.on("data", (d) => process.stdout.write(`[oas-web] ${d}`));
-  child.stderr.on("data", (d) => process.stderr.write(`[oas-web] ${d}`));
-  child.on("exit", () => { if (serverChild === child) serverChild = null; });
-  serverChild = child;
-  return child;
+  return serverHost.start(dirs);
 }
 
-/** Stop the owned server (awaiting actual process exit so the port is
- * released — kill() only signals) and start one with `dirs`. Ownership is
- * preserved for the WHOLE transition via serverTransition: a second add
- * arriving mid-replacement must still see an app-owned server (it queues in
- * the executor) rather than failing as foreign and superseding the first. */
+/** Replace the owned server — the host owns exit-await/ownership/trust
+ * invariants; this wrapper just binds the dirs. */
 async function replaceServer(dirs) {
-  serverTransition = true;
-  // trust-state invalidation: the advertised-workspace set belongs to the
-  // OUTGOING server — clear it now; it is repopulated only from the server
-  // that successfully becomes current (readiness probe, or refreshAdvertised
-  // after a restore). Stale entries must never validate ?ws= or decideAdd.
-  allowedWs = new Set();
-  try {
-    const old = serverChild;
-    if (old) {
-      serverChild = null; // we own the transition; old's exit listener is now a no-op
-      await new Promise((done) => {
-        const t = setTimeout(() => { try { old.kill("SIGKILL"); } catch { /* gone */ } }, 3000);
-        old.once("exit", () => { clearTimeout(t); done(); });
-        try { old.kill(); } catch { clearTimeout(t); done(); }
-      });
-    }
-    spawnServer(port, dirs);
-  } finally {
-    serverTransition = false;
-  }
+  await serverHost.replace(dirs);
 }
 
 async function ensureServer() {
@@ -212,7 +194,7 @@ const executeAdd = createAddExecutor({
   commitDirs: (dirs) => { workspaceDirs.length = 0; workspaceDirs.push(...dirs); },
   commitRecent: (p) => writeRecents(pushRecent(readRecents(), p)),
   replaceServer,
-  refreshAdvertised: async () => { await panelWorkspaces(); }, // repopulates allowedWs from the CURRENT server
+  refreshAdvertised: async () => (await panelWorkspaces()) !== null, // true only when the server ANSWERED
   probeVersion,
   // any 2xx is NOT enough during a same-port race — identity must match
   isCompatible: (v) => serverCompatible(v, localServerIdentity()).compatible,
@@ -242,7 +224,7 @@ async function performAdd(requestedPath, fromPicker) {
     validate: wsValidate,
     suggestedPaths: lastSuggested,
     fromPicker,
-    serverOwned: !!serverChild || serverTransition,
+    serverOwned: serverHost.owned(),
     advertised: allowedWs,
   });
   if (!decision.ok) return { ok: false, code: decision.code, reason: decision.reason };
@@ -405,7 +387,7 @@ function shutdown() {
   }
   ptys.clear();
   sweepOrphanViewers();
-  if (serverChild) { try { serverChild.kill(); } catch { /* best-effort */ } serverChild = null; }
+  serverHost.stop();
 }
 app.on("before-quit", shutdown);
 // SIGTERM/SIGINT (e.g. `kill <pid>`, Ctrl-C from a launcher shell) do not run

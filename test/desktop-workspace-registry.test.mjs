@@ -142,7 +142,7 @@ function execHarness(over = {}) {
     commitDirs: (d) => { state.dirs = d; state.committedDirs = d; },
     commitRecent: (p) => state.recents.push(p),
     replaceServer: async (d) => { state.serverDirs = d; state.replacements.push([...d]); state.advertisedValid = false; },
-    refreshAdvertised: async () => { state.advertisedValid = true; state.refreshes = (state.refreshes || 0) + 1; },
+    refreshAdvertised: async () => { state.advertisedValid = true; state.refreshes = (state.refreshes || 0) + 1; return true; },
     probeVersion: async () => { state.probes++; return over.version ?? { ok: true, body: { capability: "oas.web", version: "1" } }; },
     isCompatible: over.isCompatible ?? ((v) => v?.body?.capability === "oas.web"),
     advertises: over.advertises ?? (async () => true),
@@ -239,8 +239,8 @@ test("executor: a THROWING readiness callback still restores and reports server-
   // review wsadd2: rejections from probe/compat/advertise bypassed rollback,
   // leaving the staged privileged configuration live.
   for (const broken of [
-    { probeVersion: async () => { throw new Error("probe exploded"); } },
-    { isCompatible: () => { throw new Error("manifest parse failed"); } },
+    { probeVersion: (() => { let n = 0; return async () => { if (n++ < 2) throw new Error("probe exploded"); return { ok: true, body: {} }; }; })() },
+    { isCompatible: (() => { let n = 0; return (v) => { if (n++ < 2) throw new Error("manifest parse failed"); return true; }; })() },
     { advertises: async () => { throw new Error("panel unreachable"); } },
   ]) {
     const { state, exec } = execHarness(broken.isCompatible ? { isCompatible: broken.isCompatible } : {});
@@ -250,7 +250,7 @@ test("executor: a THROWING readiness callback still restores and reports server-
       commitDirs: (d) => { state.dirs = d; },
       commitRecent: (p) => state.recents.push(p),
       replaceServer: async (d) => { state.serverDirs = d; state.replacements.push([...d]); state.advertisedValid = false; },
-      refreshAdvertised: async () => { state.advertisedValid = true; },
+      refreshAdvertised: async () => { state.advertisedValid = true; return true; },
       probeVersion: broken.probeVersion ?? (async () => ({ ok: true, body: { capability: "oas.web", version: "1" } })),
       isCompatible: broken.isCompatible ?? ((v) => true),
       advertises: broken.advertises ?? (async () => true),
@@ -283,49 +283,35 @@ test("executor: success path does NOT call refreshAdvertised (readiness already 
   assert.equal(state.refreshes ?? 0, 0);
 });
 
-test("ownership persists across a deferred server replacement — second add queues instead of failing foreign", async () => {
-  // review wsadd2: replaceServer cleared the child ref before awaiting exit
-  // (up to 3s); a second add in that window derived serverOwned=false, got
-  // foreign-server, and its generation superseded the first. Model main.mjs's
-  // composition: ownership = !!child || transition-in-flight.
-  let child = { pid: 1 };
-  let transition = false;
-  const serverOwned = () => !!child || transition;
-  const order = [];
-  let releaseExit;
-  const exitGate = new Promise((ok) => { releaseExit = ok; });
+test("executor: restore is readiness-aware — refresh retried until the restored server ANSWERS", async () => {
+  // review wsadd3: the restored child is not listening immediately after
+  // spawn; a single connection-refused refresh treated as success left
+  // allowedWs empty. The executor must retry (identity-checked) until the
+  // restored server answers.
+  const state = { dirs: ["/w/base"], replacements: [], refreshCalls: 0, refreshOk: 0 };
+  let restoredUpAfter = 2; // restored server answers on the 3rd probe
+  let phase = "staged";
   const io = {
-    getDirs: () => ["/w/base"],
-    commitDirs: () => {},
+    getDirs: () => [...state.dirs],
+    commitDirs: (d) => { state.dirs = d; },
     commitRecent: () => {},
-    replaceServer: async (d) => {
-      transition = true;                    // main.mjs: serverTransition = true
-      try {
-        const old = child;
-        if (old) { child = null; order.push("await-exit"); await exitGate; }
-        child = { pid: 2 };
-        order.push(`spawn:${d.at(-1)}`);
-      } finally { transition = false; }
+    replaceServer: async (d) => { state.replacements.push([...d]); phase = d.length === 1 ? "restored" : "staged"; },
+    probeVersion: async () => {
+      if (phase === "staged") return { ok: true, body: {} };            // staged server answers but never advertises
+      state.refreshCalls++;
+      if (state.refreshCalls <= restoredUpAfter) return null;           // restored server not up yet
+      return { ok: true, body: {} };
     },
-    refreshAdvertised: async () => {},
-    probeVersion: async () => ({ ok: true }),
     isCompatible: () => true,
-    advertises: async () => true,
+    advertises: async () => false, // staged readiness never satisfied → restore path
+    refreshAdvertised: async () => { state.refreshOk++; return true; },
     delay: async () => {},
-    attempts: 2,
+    attempts: 6,
   };
   const run = createAddExecutor(io);
-  const p1 = run({ id: "/w/one", path: "/w/one" }, () => true);
-  await new Promise((ok) => setImmediate(ok));
-  // mid-transition: old child killed (ref null), exit not yet awaited
-  assert.equal(child, null, "child ref cleared during transition");
-  assert.equal(serverOwned(), true, "ownership PERSISTS through the transition");
-  // a second add admitted now (decideAdd would pass serverOwned) queues in
-  // the executor rather than racing
-  const p2 = run({ id: "/w/two", path: "/w/two" }, () => true);
-  releaseExit();
-  const [r1, r2] = [await p1, await p2];
-  assert.equal(r1.ok, true);
-  assert.equal(r2.ok, true);
-  assert.deepEqual(order, ["await-exit", "spawn:/w/one", "await-exit", "spawn:/w/two"], "strictly serialized transitions");
+  const r = await run({ id: "/w/new", path: "/w/new" }, () => true);
+  assert.equal(r.code, "server-timeout");
+  assert.deepEqual(state.replacements.at(-1), ["/w/base"], "restored");
+  assert.ok(state.refreshCalls > restoredUpAfter, "kept probing the restored server until it answered");
+  assert.equal(state.refreshOk, 1, "advertised state rebuilt exactly once, from the ANSWERING restored server");
 });

@@ -153,9 +153,10 @@ export function createGenerations() {
  *        INVALIDATE any cached advertised-workspace state when the
  *        replacement starts — the executor repopulates it only from the
  *        server that successfully becomes current (readiness or restore).
- * @param {() => Promise<void>} io.refreshAdvertised  repopulate the cached
- *        advertised set from the CURRENT server (called after restore so
- *        rollback also rolls back trust state)
+ * @param {() => Promise<boolean>} io.refreshAdvertised  repopulate the cached
+ *        advertised set from the CURRENT server; returns whether the server
+ *        ANSWERED (an unreachable just-spawned server is not success — the
+ *        executor retries until it answers or attempts exhaust)
  * @param {() => Promise<{ok:boolean,status?:number,body?:any}|null>} io.probeVersion
  * @param {(v: any) => boolean} io.isCompatible  serverCompatible(v, local).compatible
  * @param {(id: string) => Promise<boolean>} io.advertises
@@ -196,10 +197,19 @@ export function createAddExecutor(io) {
       thrown = e;
     } finally {
       if (!committed) {
-        // restore the previous server, then repopulate advertised state
-        // from the RESTORED server — never leave staged trust behind.
+        // restore the previous server, then rebuild advertised state from
+        // the RESTORED server — readiness-aware: the fresh child is not
+        // guaranteed to be listening yet (spawn returns immediately), and a
+        // connection-refused refresh is NOT success; retry with an identity
+        // check until it answers or attempts exhaust (review wsadd3).
         await io.replaceServer(previousDirs).catch(() => { /* best-effort restore */ });
-        await io.refreshAdvertised().catch(() => { /* advertised set stays empty until the next probe */ });
+        for (let i = 0; i < attempts; i++) {
+          try {
+            const v = await io.probeVersion();
+            if (v?.ok && io.isCompatible(v) && await io.refreshAdvertised()) break;
+          } catch { /* not up yet */ }
+          await delay(250);
+        }
       }
     }
     if (thrown) return { ok: false, code: "server-error", reason: `readiness check failed: ${thrown.message || thrown}` };
