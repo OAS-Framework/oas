@@ -17,12 +17,13 @@
 // xvfb-run is present (the workflow provides it); on macOS Electron runs
 // headless-ish natively.
 import { spawn } from "node:child_process";
-import { existsSync, readdirSync, statSync, mkdtempSync } from "node:fs";
+import { existsSync, readdirSync, statSync, readFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createReaper } from "./proc-reaper.mjs";
 import { runAbiProbe } from "./smoke-probes.mjs";
+import { WATCHDOG_MS, PHASE_BUDGET_MS, boundedTail, readDevToolsPort, awaitClose } from "./launch-probe.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PKG = join(HERE, "..");
@@ -44,8 +45,7 @@ process.on("exit", reapAll);
 for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"]) process.on(sig, () => { reapAll(); process.exit(1); });
 process.on("uncaughtException", (e) => { console.error(`dist:smoke FAIL — uncaught: ${e.message}`); reapAll(); process.exit(1); });
 process.on("unhandledRejection", (e) => { console.error(`dist:smoke FAIL — unhandled: ${e?.message || e}`); reapAll(); process.exit(1); });
-const WATCHDOG_MS = 120_000;
-const watchdog = setTimeout(() => { console.error(`dist:smoke FAIL — watchdog: exceeded ${WATCHDOG_MS / 1000}s`); reapAll(); process.exit(1); }, WATCHDOG_MS);
+const watchdog = setTimeout(() => { console.error(`dist:smoke FAIL — watchdog: exceeded ${WATCHDOG_MS / 1000}s (derived from phase budgets)`); reapAll(); process.exit(1); }, WATCHDOG_MS);
 watchdog.unref?.();
 
 // ---- 1. artifact inventory -------------------------------------------------
@@ -114,46 +114,29 @@ if (!existsSync(app.exe)) fail(`packaged executable missing: ${app.exe}`);
 // (CI-oriented phase: on operator machines run only the static phases — see
 // the soul's no-GUI-launches policy; OAS_SMOKE_SKIP_LAUNCH=1 skips this.)
 if (process.env.OAS_SMOKE_SKIP_LAUNCH === "1") {
+  // Refuse to silently degrade the launch smoke in CI (review ee04a44-r2
+  // nit): if the skip leaks into GitHub Actions it would print ok while
+  // testing nothing.
+  if (process.env.GITHUB_ACTIONS === "true") fail("OAS_SMOKE_SKIP_LAUNCH must not be set in CI — the launch phase is required there");
   ok("launch phase skipped (OAS_SMOKE_SKIP_LAUNCH=1) — CI runs it");
 } else {
-  // Transient-failure hardening (integration rehearsal saw one "renderer
-  // never exposed over CDP" on a first run — investigated, three defects):
-  //  1. the debugging port was random with NO bind verification: a stale
-  //     listener (e.g. an orphaned previous smoke) answers /json with ITS
-  //     targets, or the new app fails to bind silently → pick a VERIFIED
-  //     free port before launching;
-  //  2. a startup crash burned the whole budget as "not up yet" with
-  //     stdio ignored → fail fast on child exit and surface captured
-  //     stderr for diagnosis;
-  //  3. first-run cold starts (Gatekeeper scan of an unsigned app, cold
-  //     page cache on loaded runners) can legitimately exceed 30s → the
-  //     readiness budget is 90s, still bounded, with progress diagnostics
-  //     every 10s. NOT a blind retry: one launch, one bounded wait,
-  //     structured failure output.
-  const { createServer: createNetServer } = await import("node:net");
-  async function freePort(from) {
-    for (let p = from; p < from + 100; p++) {
-      const ok2 = await new Promise((res) => {
-        const s = createNetServer();
-        s.once("error", () => res(false));
-        s.listen(p, "127.0.0.1", () => s.close(() => res(true)));
-      });
-      if (ok2) return p;
-    }
-    fail("no free CDP port available");
-  }
-  const port = await freePort(9500 + Math.floor(Math.random() * 300));
-  const backendPort = await freePort(10000 + Math.floor(Math.random() * 1500));
+  // Readiness probing (review ee04a44 + r2). The port is obtained race-free
+  // and IDENTITY-BOUND: launch with --remote-debugging-port=0 and read the
+  // DevToolsActivePort file Chromium writes into --user-data-dir — the port
+  // is definitionally OUR child's, so no stale/foreign listener can be
+  // mistaken for the app (no check-then-use free-port race). The backend
+  // port is app-selected: main.mjs's ensureServer runs its own freePort
+  // from OAS_DESKTOP_PORT, so a random start value cannot collide fatally.
+  // stdio is captured (bounded rolling tail) and drained on 'close' before
+  // any crash tail is reported; startup exit fails fast; one launch, one
+  // bounded wait — never a blind retry.
   const userData = mkdtempSync(join(tmpdir(), "oas-desktop-smoke-"));
-  const args = [`--remote-debugging-port=${port}`, `--user-data-dir=${userData}`,
+  const args = [`--remote-debugging-port=0`, `--user-data-dir=${userData}`,
     "--no-sandbox", "--disable-gpu", "--dir", userData /* empty workspace: picker path, no deployment needed */];
-  // spawnTracked: detached process group + registered for unconditional
-  // reaping on every exit path (see leak-proofing block above). stderr is
-  // CAPTURED (not ignored) so a startup crash is diagnosable.
-  const child = spawnTracked(app.exe, args, { stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, OAS_DESKTOP_PORT: String(backendPort) } });
+  const child = spawnTracked(app.exe, args, { stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, OAS_DESKTOP_PORT: String(10000 + Math.floor(Math.random() * 1500)) } });
   let childLog = "", childExit = null;
-  child.stdout?.on("data", (d) => { childLog += d; });
-  child.stderr?.on("data", (d) => { childLog += d; });
+  child.stdout?.on("data", (d) => { childLog = boundedTail(childLog, d); });
+  child.stderr?.on("data", (d) => { childLog = boundedTail(childLog, d); });
   child.on("exit", (code, sig) => { childExit = { code, sig }; });
   // Slice G resource-containment baseline: capture the `oasdesk-*` tmux
   // viewer count before launch and assert it is RESTORED after the app is
@@ -167,12 +150,19 @@ if (process.env.OAS_SMOKE_SKIP_LAUNCH === "1") {
   }
   const viewerBaseline = await oasdeskViewerCount(); // null when tmux absent
   let launchError = null;
+  const drainTail = async () => { await awaitClose(child, { drainMs: 2000 }); return childLog.slice(-1500); };
   try {
-    const LAUNCH_BUDGET_MS = 90_000;
+    // The CDP port is our child's, read from its DevToolsActivePort file
+    // (race-free, identity-bound). childExited aborts the wait fast.
+    const portRes = await readDevToolsPort(userData, { join, existsSync, readFileSync, now: () => Date.now(), sleep: (ms) => new Promise((r) => setTimeout(r, ms)) }, {
+      timeoutMs: PHASE_BUDGET_MS.launchReady, pollMs: 250, childExited: () => childExit !== null,
+    });
+    if (portRes.error) throw new Error(`${portRes.error} (app alive=${!childExit}); output tail:\n${await drainTail()}`);
+    const port = portRes.port;
     const t0 = Date.now();
     let targets = null, lastDiag = 0;
-    while (!targets && Date.now() - t0 < LAUNCH_BUDGET_MS) {
-      if (childExit) throw new Error(`packaged app exited during startup (code=${childExit.code} sig=${childExit.sig}); output tail:\n${childLog.slice(-1500)}`);
+    while (!targets && Date.now() - t0 < PHASE_BUDGET_MS.launchReady) {
+      if (childExit) throw new Error(`packaged app exited during startup (code=${childExit.code} sig=${childExit.sig}); output tail:\n${await drainTail()}`);
       await new Promise((r) => setTimeout(r, 500));
       try {
         const res = await fetch(`http://127.0.0.1:${port}/json`, { signal: AbortSignal.timeout(2000) });
@@ -184,11 +174,11 @@ if (process.env.OAS_SMOKE_SKIP_LAUNCH === "1") {
         console.log(`dist:smoke … waiting for CDP (${Math.round((Date.now() - t0) / 1000)}s; app alive=${!childExit})`);
       }
     }
-    if (!targets) throw new Error(`packaged app never exposed its renderer over CDP within ${LAUNCH_BUDGET_MS / 1000}s (app alive=${!childExit}); output tail:\n${childLog.slice(-1500)}`);
+    if (!targets) throw new Error(`packaged app never exposed its renderer over CDP within ${PHASE_BUDGET_MS.launchReady / 1000}s (app alive=${!childExit}); output tail:\n${await drainTail()}`);
     // Evaluate in the page: the shell booted if the nav rail rendered.
     const ws = new WebSocket(targets.webSocketDebuggerUrl);
     const result = await new Promise((resolve, reject) => {
-      const to = setTimeout(() => reject(new Error("CDP evaluate timeout")), 20000);
+      const to = setTimeout(() => reject(new Error("CDP evaluate timeout")), PHASE_BUDGET_MS.cdpEvaluate);
       ws.onopen = () => ws.send(JSON.stringify({
         id: 1, method: "Runtime.evaluate",
         params: {
