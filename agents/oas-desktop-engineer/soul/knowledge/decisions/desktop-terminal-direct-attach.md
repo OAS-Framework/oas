@@ -32,6 +32,11 @@ Key semantics, verified live:
   exact `=<viewer>` target so stale roster entries fail loudly instead of
   prefix-matching a different live window.
 
+Because each tab opens bounded OS resources, terminal open also needs
+main-process reuse and hard-cap enforcement; renderer tab dedupe is only UX.
+See [Bounded OS resources spawned per user action need a hard cap in the owning
+process](/lessons/terminal-resource-cap-in-owning-process.md).
+
 This is the opposite of the legacy web panel path (capture-pane polling +
 send-keys through the backend HTTP API), which stays untouched as the
 remote fallback.

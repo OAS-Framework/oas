@@ -17,25 +17,27 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { apiUrl, apiInit } from "./api-url.mjs";
 import { openTerm, sweepViewers } from "./tmux-target.mjs";
+import { createTerminalRegistry, terminalTargetKey, MAX_TERMINALS } from "./terminal-registry.mjs";
 import { ensureServerOnPort, serverCompatible } from "./server-compat.mjs";
 import { createServerHost, createServerAdapter } from "./server-host.mjs";
 import { validateWorkspace, workspaceSuggestions, parseRecents, pushRecent, decideAdd, createGenerations, createAddExecutor } from "./workspace-registry.mjs";
+import { resolveDeployment, teamAgentRoots } from "./server/deployment.mjs";
 
 const require = createRequire(import.meta.url);
 const pty = require("node-pty");
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-// packages/desktop → repo root two levels up (in-tree layout).
-const REPO_ROOT = resolve(HERE, "..", "..");
 
 let port = Number(process.env.OAS_DESKTOP_PORT || 4820);
 const base = () => `http://127.0.0.1:${port}`;
-// Workspace the panel shows: --dir <path> or OAS_DESKTOP_DIR or the repo root.
+// Workspace the panel shows: --dir <path> or OAS_DESKTOP_DIR or the cwd the
+// app was launched from. The packaged app never infers a framework repo root
+// — with no OAS deployment in view the renderer shows the workspace picker.
 const argDir = (() => {
   const i = process.argv.indexOf("--dir");
   return i >= 0 && process.argv[i + 1] ? process.argv[i + 1] : undefined;
 })();
-const WORKSPACE = resolve(argDir || process.env.OAS_DESKTOP_DIR || REPO_ROOT);
+const WORKSPACE = resolve(argDir || process.env.OAS_DESKTOP_DIR || process.cwd());
 // Mutable workspace set: startup workspace plus runtime-added ones — the
 // repeated --dir list an app-owned server is (re)started with.
 const workspaceDirs = [WORKSPACE];
@@ -47,10 +49,14 @@ const serverHost = createServerHost({
   spawnChild: (dirs, onPort) => {
     const bin = join(HERE, "server", "oas-web.mjs");
     if (!existsSync(bin)) throw new Error(`desktop backend server not found at ${bin} and no usable server on port ${onPort}`);
-    const child = spawn(process.execPath, [bin, "start", "--port", String(onPort), ...dirs.flatMap((d) => ["--dir", d])], {
+    // The persisted user-chosen oas binary (if any) rides along as the
+    // server's top-priority discovery candidate; the server re-probes it.
+    const chosen = readCliChoice();
+    const child = spawn(process.execPath, [bin, "start", "--port", String(onPort),
+      ...dirs.flatMap((d) => ["--dir", d]), ...(chosen ? ["--oas-bin", chosen] : [])], {
       stdio: ["ignore", "pipe", "pipe"],
       cwd: WORKSPACE,
-      env: { ...process.env, OAS_DESKTOP_FRAMEWORK_ROOT: REPO_ROOT },
+      env: { ...process.env },
     });
     child.stdout.on("data", (d) => process.stdout.write(`[oas-desktop-server] ${d}`));
     child.stderr.on("data", (d) => process.stderr.write(`[oas-desktop-server] ${d}`));
@@ -158,14 +164,14 @@ function guard(e) { if (!trustedFrame(e)) throw new Error("forbidden: untrusted 
 // ---- IPC: workspace suggestions + runtime add ---------------------------
 // Privileged side of the runtime workspace switcher (phase-2 hook 3; the
 // renderer modal is the designer's). Discovery is bounded: known dirs, team
-// siblings via the kernel's own seams, validated recents. workspace:add
-// only ever replaces an app-OWNED server; foreign servers fail closed.
-const core = await import(pathToFileURL(join(REPO_ROOT, "lib", "core.mjs")).href).catch(() => null);
+// siblings via the app-owned read-only deployment reader, validated recents.
+// workspace:add only ever replaces an app-OWNED server; foreign servers fail
+// closed.
 const wsGens = createGenerations();
 const RECENTS_FILE = () => join(app.getPath("userData"), "workspace-recents.json");
 
 const wsValidate = (p) => validateWorkspace(p, {
-  resolveConfig: (path) => core ? core.resolveOasConfig(path) : null,
+  resolveConfig: (path) => resolveDeployment(path),
   // agents/ OR local-agents/ qualifies — OAS is fully usable with local souls alone.
   hasAgentsRoot: (path) => ["agents", "local-agents"].some((d) => {
     try { return existsSync(join(path, d)) && lstatSync(join(path, d)).isDirectory(); } catch { return false; }
@@ -176,10 +182,10 @@ function teamSiblingsOf(p) {
   // Sibling workspaces within p's team scope — same seams as the server's
   // workspaceEntry: the team scope's child repos that themselves validate.
   try {
-    const cfg = core?.resolveOasConfig(p);
+    const cfg = resolveDeployment(p);
     const scope = cfg?.team?.scope;
     if (!scope) return [];
-    return core.teamAgentRoots(scope).map((root) => dirname(root)).filter((d) => d !== p);
+    return teamAgentRoots(scope).map((root) => dirname(root)).filter((d) => d !== p);
   } catch { return []; }
 }
 
@@ -257,6 +263,32 @@ ipcMain.handle("workspace:pick", async (e) => {
   return performAdd(r.filePaths[0], true);
 });
 
+// ---- IPC: CLI binary picker (Choose oas…) --------------------------------
+// Native file picker for the degradation card. Persistence lives here (the
+// main process owns userData); the picked path goes to the server via the
+// renderer's POST /api/cli/reprobe {bin} — the server re-validates with the
+// full probe, so a bad pick degrades with diagnostics, never trusts a path.
+const CLI_CHOICE_FILE = () => join(app.getPath("userData"), "oas-cli-choice.json");
+function readCliChoice() {
+  try { const p = JSON.parse(readFileSync(CLI_CHOICE_FILE(), "utf8")).bin; return typeof p === "string" && p.startsWith("/") ? p : null; }
+  catch { return null; }
+}
+function writeCliChoice(bin) {
+  try { writeFileSync(CLI_CHOICE_FILE(), JSON.stringify({ bin })); } catch { /* best-effort */ }
+}
+ipcMain.handle("cli:pick", async (e) => {
+  guard(e);
+  const win = BrowserWindow.fromWebContents(e.sender);
+  const r = await dialog.showOpenDialog(win, {
+    title: "Choose the oas CLI binary",
+    properties: ["openFile", "showHiddenFiles"],
+    message: "Select the oas executable (e.g. from `command -v oas`)",
+  });
+  if (r.canceled || !r.filePaths?.[0]) return { path: null };
+  writeCliChoice(r.filePaths[0]);           // persisted — top discovery priority next launch
+  return { path: r.filePaths[0] };
+});
+
 // ---- IPC: API proxy -----------------------------------------------------
 // The renderer never talks to the network directly; ctx.api() lands here.
 ipcMain.handle("api", async (e, pathname, opts) => {
@@ -276,8 +308,30 @@ ipcMain.handle("api", async (e, pathname, opts) => {
 });
 
 // ---- IPC: integrated terminal (node-pty ↔ grouped tmux viewer session) ---
-const ptys = new Map(); // id -> { pty, killViewer }
+const ptys = new Map(); // id -> { pty, killViewer, wc }
 let nextPtyId = 1;
+// Resource registry (terminal-registry.mjs): DEDUPE by target + HARD CAP.
+// The main process owns the ptys and oasdesk viewer sessions, so the ceiling
+// lives here — the renderer cannot be trusted to bound it.
+const termRegistry = createTerminalRegistry({ max: MAX_TERMINALS });
+
+/** Kill + release every pty owned by a renderer that navigated/reloaded/
+ * died (review cb7622e-r2 important 2). On a renderer reload the OLD tabs are
+ * gone but their ptys survive in main and stay committed in the registry —
+ * without this they'd occupy cap slots forever with no tab to reattach them
+ * (a functional dead-end and a slow cap leak). Wiring the source window's
+ * lifecycle events to a drop closes it: a reloaded renderer starts clean and
+ * the freed targets can be re-opened. */
+function dropPtysForWebContents(wc) {
+  for (const [id, t] of [...ptys]) {
+    if (t.wc !== wc) continue;
+    ptys.delete(id);
+    termRegistry.release(id);
+    try { t.pty.kill(); } catch { /* already gone */ }
+    t.killViewer();
+  }
+}
+const wcWired = new WeakSet(); // wire each renderer's lifecycle listeners once
 
 const tmuxRun = (args) => execFileSync("tmux", args, { stdio: "ignore", timeout: 4000 });
 
@@ -298,6 +352,15 @@ function sweepOrphanViewers() {
 
 ipcMain.handle("term:open", (e, { session, window: win, cols, rows }) => {
   guard(e);
+  // Resource containment (Slice G): DEDUPE by target + HARD CAP, enforced
+  // atomically here (this handler is synchronous end to end, so concurrent
+  // IPC opens cannot interleave to exceed the cap). Repeated opens of the
+  // same target REUSE the live terminal; a distinct open beyond the cap is
+  // rejected visibly and actionably — never a silent evict or extra create.
+  const targetKey = terminalTargetKey(session, win);
+  const plan = termRegistry.plan(targetKey);
+  if (plan.action === "reuse") return { reused: true, id: plan.id };
+  if (plan.action === "cap") return { capped: true, active: plan.active, max: plan.max };
   // openTerm (tmux-target.mjs): anchors + PREFLIGHTS the exact source target
   // (missing target rejects here → the renderer's "could not attach"), then
   // builds a per-tab LINKED-WINDOW viewer session (placeholder → link exact
@@ -306,26 +369,44 @@ ipcMain.handle("term:open", (e, { session, window: win, cols, rows }) => {
   // viewer-side key binding, and no sibling auto-select on window death can
   // ever steer this tab to another agent — when the source window dies the
   // viewer terminates (pty exit → "session ended"). Durable session
-  // untouched.
-  const { pty: p, killViewer } = openTerm({ session, window: win, cols, rows }, {
-    preflight: (target) => tmuxRun(["list-panes", "-t", target]),
-    tmux: tmuxRun,
-    tmuxOut: (args) => execFileSync("tmux", args, { encoding: "utf8", timeout: 4000 }).trim(),
-    spawnPty: (target, c, r) => pty.spawn("tmux", ["attach-session", "-t", target], {
-      name: "xterm-256color", cols: c, rows: r, cwd: process.env.HOME, env: process.env,
-    }),
-  });
+  // untouched. A create FAILURE (bad target) leaks nothing: openTerm kills
+  // its own partial viewer and nothing is committed to the registry.
+  let opened;
+  try {
+    opened = openTerm({ session, window: win, cols, rows }, {
+      preflight: (target) => tmuxRun(["list-panes", "-t", target]),
+      tmux: tmuxRun,
+      tmuxOut: (args) => execFileSync("tmux", args, { encoding: "utf8", timeout: 4000 }).trim(),
+      spawnPty: (target, c, r) => pty.spawn("tmux", ["attach-session", "-t", target], {
+        name: "xterm-256color", cols: c, rows: r, cwd: process.env.HOME, env: process.env,
+      }),
+    });
+  } catch (err) {
+    return { error: String(err.message || err) };
+  }
+  const { pty: p, killViewer } = opened;
   const id = nextPtyId++;
   const wc = e.sender;
   const dropViewer = () => { try { killViewer(); } catch { /* already gone (session ended) */ } };
   p.onData((data) => { if (!wc.isDestroyed()) wc.send(`term:data:${id}`, data); });
   p.onExit(({ exitCode }) => {
     ptys.delete(id);
+    termRegistry.release(id);   // free the target slot the moment the pty ends
     dropViewer(); // pty gone (detach or session end) — the viewer session must not linger
     if (!wc.isDestroyed()) wc.send(`term:exit:${id}`, exitCode);
   });
-  ptys.set(id, { pty: p, killViewer: dropViewer });
-  return id;
+  ptys.set(id, { pty: p, killViewer: dropViewer, wc });
+  termRegistry.commit(targetKey, id);
+  // Release this renderer's ptys when it reloads, navigates, or its process
+  // goes away — the tabs that owned them no longer exist (wired once per wc).
+  if (!wcWired.has(wc)) {
+    wcWired.add(wc);
+    const drop = () => dropPtysForWebContents(wc);
+    wc.on("did-navigate", drop);            // full reload / navigation (not in-page hash)
+    wc.on("render-process-gone", drop);     // renderer crash/replace
+    wc.once("destroyed", drop);              // window/webContents torn down
+  }
+  return { id };
 });
 ipcMain.on("term:write", (e, id, data) => { guard(e); ptys.get(id)?.pty.write(String(data)); });
 ipcMain.on("term:resize", (e, id, cols, rows) => {
@@ -339,6 +420,7 @@ ipcMain.on("term:close", (e, id) => {
   // windows always survive (onExit also drops the viewer; both are safe).
   const t = ptys.get(id);
   ptys.delete(id);
+  termRegistry.release(id);   // free the target slot so a re-open is allowed
   try { t?.pty.kill(); } catch { /* already gone */ }
   t?.killViewer();
 });
@@ -377,6 +459,13 @@ app.whenReady().then(async () => {
   try { await ensureServer(); }
   catch (e) { console.error(`oas-desktop: ${e.message}`); }
   await createWindow();
+  // Contract re-probe trigger "app focus": notify the renderer, which calls
+  // POST /api/cli/reprobe (the server owns probe state and rate semantics).
+  app.on("browser-window-focus", () => {
+    for (const w of BrowserWindow.getAllWindows()) {
+      if (!w.webContents.isDestroyed()) w.webContents.send("app:focus");
+    }
+  });
   app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
 
@@ -385,9 +474,11 @@ app.on("window-all-closed", () => { app.quit(); });
 function shutdown() {
   // Detach every pty and kill its viewer session (never the durable
   // sessions); stop the server only if we started it; sweep any orphans.
-  for (const t of ptys.values()) {
+  for (const id of [...ptys.keys()]) {
+    const t = ptys.get(id);
     try { t.pty.kill(); } catch { /* best-effort */ }
     t.killViewer();
+    termRegistry.release(id);
   }
   ptys.clear();
   sweepOrphanViewers();

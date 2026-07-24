@@ -10,6 +10,14 @@ import {
 } from "../lib/core.mjs";
 
 const CLI = resolve(new URL("../bin/oas.mjs", import.meta.url).pathname);
+/** Parse a `--json` CLI success envelope (Desktop CLI API v1): stdout must be
+ *  exactly one JSON object {schemaVersion:1,ok:true,result} — no progress prose. */
+function jsonResult(r) {
+  const env = JSON.parse(r.stdout); // throws on any stdout contamination
+  assert.equal(env.schemaVersion, 1);
+  assert.equal(env.ok, true, JSON.stringify(env.error));
+  return env.result;
+}
 function temp() { return mkdtempSync(join(tmpdir(), "oas-cap-test-")); }
 function write(path, content) { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, content); }
 function gitRepo(dir) {
@@ -316,7 +324,7 @@ test("cross-repo spawn resolves a sibling repo's soul via the team scope and hom
   // Spawn from repo A; soul lives in repo B — unique team-wide match wins.
   let r = spawnSync(process.execPath, [CLI, "spawn", "api-dev", "--no-launch", "--json", "--dir", repoA], { encoding: "utf8", env });
   assert.equal(r.status, 0, r.stderr);
-  const res = JSON.parse(r.stdout.slice(r.stdout.indexOf("{")));
+  const res = jsonResult(r);
   assert.match(res.home, new RegExp(`^${repoB.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/agents/api-dev/instances/`));
   assert.equal(JSON.parse(readFileSync(join(res.home, "instance.json"), "utf8")).repo, repoB);
   // Ambiguity: same soul name in repo A errors with guidance.
@@ -333,7 +341,7 @@ test("cross-repo spawn resolves a sibling repo's soul via the team scope and hom
   // Local soul still wins over team lookup (no cross-repo redirect).
   r = spawnSync(process.execPath, [CLI, "spawn", "api-dev", "--purpose", "local", "--no-launch", "--json", "--dir", repoA], { encoding: "utf8", env });
   assert.equal(r.status, 0, r.stderr);
-  const local = JSON.parse(r.stdout.slice(r.stdout.indexOf("{")));
+  const local = jsonResult(r);
   assert.ok(local.home.startsWith(join(repoA, "agents")));
   // Cross-repo retire finds the instance home in repo B.
   r = spawnSync(process.execPath, [CLI, "retire", res.instance, "--dir", repoA], { encoding: "utf8", env });
@@ -782,8 +790,8 @@ test("spawn lineage is explicit: ambient env never sets parent; --parent and att
   const polluted = { ...env, OAS_INSTANCE: "dev-existing", PI_AGENT_INSTANCE: "dev-existing" };
   let r = spawnSync(process.execPath, [CLI, "spawn", "dev", "--task", "manual human task", "--purpose", "manual", "--no-launch", "--json"], { cwd: repo, env: polluted, encoding: "utf8" });
   assert.equal(r.status, 0, r.stderr);
-  const manual = JSON.parse(r.stdout.slice(r.stdout.indexOf("{")));
-  assert.equal(manual.parentInstance, undefined);
+  const manual = jsonResult(r);
+  assert.equal(manual.parent, null);
   assert.equal(manual.spawnOrigin, "operator");
   assert.match(readFileSync(join(manual.home, "TASK.md"), "utf8"), /manual human task/);
   // 2. --parent with an unknown instance is rejected before scaffolding.
@@ -794,8 +802,8 @@ test("spawn lineage is explicit: ambient env never sets parent; --parent and att
   const tf = join(base, "task.md"); writeFileSync(tf, "task from a file\n");
   r = spawnSync(process.execPath, [CLI, "spawn", "dev", "--parent", manual.instance, "--task-file", tf, "--purpose", "child", "--no-launch", "--json"], { cwd: repo, env, encoding: "utf8" });
   assert.equal(r.status, 0, r.stderr);
-  const child = JSON.parse(r.stdout.slice(r.stdout.indexOf("{")));
-  assert.equal(child.parentInstance, manual.instance);
+  const child = jsonResult(r);
+  assert.equal(child.parent, manual.instance);
   assert.equal(child.spawnOrigin, "instance");
   assert.match(readFileSync(join(child.home, "TASK.md"), "utf8"), /task from a file/);
   // 4. --task without a value fails loudly instead of writing a broken TASK.md.
@@ -851,8 +859,8 @@ test("--parent accepts capability-defined parent instances homing under local-ag
       delete env.PI_AGENTS_ROOT;
       const r = spawnSync(process.execPath, [CLI, "spawn", "dev", "--parent", "reviewer-abc", "--task", "child work", "--purpose", "child", "--no-launch", "--json"], { cwd: repo, env, encoding: "utf8" });
       assert.equal(r.status, 0, r.stderr);
-      const child = JSON.parse(r.stdout.slice(r.stdout.indexOf("{")));
-      assert.equal(child.parentInstance, "reviewer-abc");
+      const child = jsonResult(r);
+      assert.equal(child.parent, "reviewer-abc");
       assert.equal(child.spawnOrigin, "instance");
       assert.match(readFileSync(join(child.home, "TASK.md"), "utf8"), /child work/);
       core.retireInstance(root, "reviewer-abc", { tmuxSession: "oas-test-nosuch" });
@@ -875,7 +883,7 @@ test("lineage is deployment-local: --parent from an unrelated deployment is reje
   // A real instance in deployment A…
   let r = spawnSync(process.execPath, [CLI, "spawn", "dev", "--purpose", "caller", "--no-launch", "--json"], { cwd: a.repo, env, encoding: "utf8" });
   assert.equal(r.status, 0, r.stderr);
-  const caller = JSON.parse(r.stdout.slice(r.stdout.indexOf("{")));
+  const caller = jsonResult(r);
   // …is NOT a valid parent when spawning into deployment B (its hierarchy
   // cannot resolve foreign instances — cross-deployment spawns are operator-origin).
   r = spawnSync(process.execPath, [CLI, "spawn", "expert", "--dir", repoB, "--parent", caller.instance, "--purpose", "x", "--no-launch"], { cwd: a.repo, env, encoding: "utf8" });
@@ -884,9 +892,9 @@ test("lineage is deployment-local: --parent from an unrelated deployment is reje
   // Without --parent the cross-deployment spawn lands top-level in B.
   r = spawnSync(process.execPath, [CLI, "spawn", "expert", "--dir", repoB, "--task", "support question", "--purpose", "x", "--no-launch", "--json"], { cwd: a.repo, env, encoding: "utf8" });
   assert.equal(r.status, 0, r.stderr);
-  const expert = JSON.parse(r.stdout.slice(r.stdout.indexOf("{")));
+  const expert = jsonResult(r);
   assert.equal(expert.spawnOrigin, "operator");
-  assert.equal(expert.parentInstance, undefined);
+  assert.equal(expert.parent, null);
   assert.match(readFileSync(join(expert.home, "TASK.md"), "utf8"), /support question/);
 });
 

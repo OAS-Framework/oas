@@ -16,7 +16,7 @@
     "oas.okf": {
       "source": "marketplace:oas.okf@1.4.0",
       "version": "1.4.0",
-      "integrity": "sha256-d965281841bee8ab5aaa736c8864fa892c7c67969edcf3c9260e55fc0e10c823",
+      "integrity": "sha256-45c0cab49915fff18d97826bffb1cd0e4151e2930637744f707205dea4bc1499",
       "trustedExecutables": true
     }
   }

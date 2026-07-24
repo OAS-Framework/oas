@@ -4,6 +4,18 @@ import { JSDOM } from "jsdom";
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
+// These suites exercise the spawn-form races; mutations require a VERIFIED
+// compatible CLI (frozen contract), so seed the shared CLI state as
+// available before each mount — the CLI dimension has its own suite
+// (cli-degradation.test.mjs).
+const cliStatusMod = await import("../renderer/views/cli-status.mjs");
+const CLI_OK = { ok: true, bin: "/seed/oas", version: "0.18.0", source: "path", required: { desktopApi: 1, range: ">=0.18.0 <0.19.0" }, probedAt: 1, tried: [] };
+async function seedCliAvailable() {
+  await cliStatusMod.refreshCli({
+    api: async () => ({ ok: true, status: 200, json: async () => ({ ok: true, bin: "/seed/oas", version: "0.18.0", source: "path", required: { desktopApi: 1, range: ">=0.18.0 <0.19.0" }, probedAt: 1, tried: [] }) }),
+  });
+}
+
 test("Soul roster: switching A→B during a hanging spawn removes A form and agentsRoot", async () => {
   const dom = new JSDOM("<!doctype html><html><head></head><body><div id=host></div></body></html>", { url: "http://localhost" });
   const oldDocument = globalThis.document;
@@ -13,6 +25,7 @@ test("Soul roster: switching A→B during a hanging spawn removes A form and age
 
   const common = await import("../renderer/views/common.mjs");
   const spawn = await import("../renderer/views/spawn.mjs");
+  await seedCliAvailable();
   const previousWs = common.currentWorkspace();
   let releaseA;
   const opened = [];
@@ -23,6 +36,7 @@ test("Soul roster: switching A→B during a hanging spawn removes A form and age
   });
   const ctx = {
     api(pathname, opts = {}) {
+      if (pathname === "/api/cli" || pathname === "/api/cli/reprobe") return Promise.resolve(CLI_OK);
       requests.push({ pathname, opts });
       if (opts.method === "POST") return new Promise((ok) => { releaseA = ok; });
       const ws = pathname.includes("ws=wsB") ? "wsB" : "wsA";
@@ -86,6 +100,7 @@ test("Soul roster: delayed switch refresh cannot erase a newer B spawn form", as
 
   const common = await import("../renderer/views/common.mjs");
   const spawn = await import("../renderer/views/spawn.mjs");
+  await seedCliAvailable();
   const previousWs = common.currentWorkspace();
   const delayedSwitch = [];
   let bGets = 0;
@@ -102,6 +117,7 @@ test("Soul roster: delayed switch refresh cannot erase a newer B spawn form", as
         workspace: { id: ws }, workspaces: [{ id: "wsA", name: "A" }, { id: "wsB", name: "B" }] };
   const ctx = {
     api(pathname, opts = {}) {
+      if (pathname === "/api/cli" || pathname === "/api/cli/reprobe") return Promise.resolve(CLI_OK);
       if (opts.method === "POST") return new Promise((ok) => { releaseBSpawn = ok; });
       const ws = pathname.includes("ws=wsB") ? "wsB" : "wsA";
       if (ws === "wsB" && bGets++ < 2) {
@@ -161,11 +177,13 @@ test("Soul roster: the periodic refresh never wipes an open spawn form's typed t
   globalThis.setInterval = (fn) => { polls.push(fn); return { fake: true }; };
   const common = await import("../renderer/views/common.mjs");
   const spawn = await import("../renderer/views/spawn.mjs");
+  await seedCliAvailable();
   const previousWs = common.currentWorkspace();
   const agent = { name: "dev", agentsRoot: "/a", description: "", runtime: "pi", work: "workspace", repo: true, repoName: "r" };
   const posts = [];
   const ctx = {
     api: (pathname, opts = {}) => {
+      if (pathname === "/api/cli" || pathname === "/api/cli/reprobe") return Promise.resolve(CLI_OK);
       if (opts.method === "POST") {
         posts.push(JSON.parse(opts.body));
         return Promise.resolve({ ok: true, status: 200, json: async () => ({ instance: "i1", launched: true }) });
@@ -217,12 +235,14 @@ test("Soul roster: selector-metacharacter agent names spawn cleanly and still bl
   globalThis.setInterval = (fn) => { polls.push(fn); return { fake: true }; };
   const common = await import("../renderer/views/common.mjs");
   const spawn = await import("../renderer/views/spawn.mjs");
+  await seedCliAvailable();
   const previousWs = common.currentWorkspace();
   const evil = 'bad"name]:\'x';                 // querySelector metacharacters
   const agent = { name: evil, agentsRoot: "/a", description: "", runtime: "pi", work: "workspace", repo: true, repoName: "r" };
   const posts = [];
   const ctx = {
     api: (pathname, opts = {}) => {
+      if (pathname === "/api/cli" || pathname === "/api/cli/reprobe") return Promise.resolve(CLI_OK);
       if (opts.method === "POST") {
         posts.push(JSON.parse(opts.body));
         return Promise.resolve({ ok: true, status: 200, json: async () => ({ instance: "i1", launched: true }) });

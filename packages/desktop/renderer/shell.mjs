@@ -4,7 +4,7 @@
 // module in ./views/ exporting mount(el, ctx) / unmount(), where
 //   ctx = { api(pathname, opts), openFile(path), openTerminal(instance) }
 // The shell owns tabs/navigation and provides ctx. The full roster (with
-// chat transcript, spawn, jira) lives in the ported views — the shell chrome
+// chat transcript, spawn) lives in the ported views — the shell chrome
 // stays a thin rail so nothing is duplicated.
 import { currentWorkspace, setWorkspace, groupInstances, adoptWorkspace, onWorkspaceChange } from "./views/common.mjs";
 import {
@@ -33,7 +33,14 @@ initTheme();
 // ── ctx (shared by all views) ─────────────────────────────────────────────
 async function api(pathname, opts) {
   const r = await desk.api(pathname, opts);
-  if (!r.ok) throw new Error(r.body?.error || `HTTP ${r.status} for ${pathname}`);
+  if (!r.ok) {
+    // Mark RECEIVED HTTP errors so consumers (cli-status settled-state
+    // classification) can distinguish them from transport failures, which
+    // reject inside desk.api itself.
+    const err = new Error(r.body?.error || `HTTP ${r.status} for ${pathname}`);
+    err.status = r.status;
+    throw err;
+  }
   return r.body;
 }
 
@@ -42,6 +49,12 @@ const ctx = {
   openFile: (path) => openViewTab("markdown", `≡ ${String(path).split("/").pop()}`, { path }, `file:${path}`),
   openTerminal: (instance) => openTerminalTab(instance),
   openBrain: (agent) => openBrainTab(agent),
+  // CLI degradation affordances (cli-status.mjs feature-detects both):
+  // native binary picker (privileged; main persists the choice) and external
+  // link opening (window.open is denied by the shell's window-open handler
+  // except for http(s), which routes to the OS browser).
+  chooseCliBinary: () => desk.cliPickBinary(),
+  openExternal: (url) => window.open(url, "_blank", "noreferrer"),
   // additive shell affordance (views feature-detect it): switch the STAGE
   // to a named sidebar view (stage views are not tabs — see below).
   openView: (name) => name === "instances"
@@ -530,8 +543,6 @@ async function openTerminalTabInner(instance, ws, key) {
 // ── nav rail ──────────────────────────────────────────────────────────────
 // Two first-class navigation surfaces: hierarchy and soul roster. Instances
 // live permanently below them; selecting one opens its terminal artifact.
-// Diff and Jira surfaces are intentionally NOT wired (modules stay dormant
-// in the tree per the coordinator's directive).
 const NAV = [
   { name: "hierarchy", label: "Active overview", icon: "⌘", title: "Active overview" },
   { name: "spawn", label: "Soul roster", icon: "✦", title: "Soul roster" },
@@ -604,6 +615,14 @@ onWorkspaceChange(() => {
   else refreshContextRoster();
 });
 setInterval(() => refreshContextRoster(), 4000);
+
+// Contract re-probe triggers: launch (initial refresh) and app focus. The
+// cli-status module owns the shared state; the Spawn view (and any future
+// mutation surface) subscribes for consistent enable/disable.
+import("./views/cli-status.mjs").then(({ refreshCli, reprobeCli }) => {
+  refreshCli(ctx);
+  desk.onAppFocus?.(() => reprobeCli(ctx));
+});
 
 // Home surface: the agent hierarchy — running instances and how they relate.
 showStage("hierarchy");

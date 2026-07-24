@@ -1,0 +1,245 @@
+// Desktop server ↔ CLI integration: discovery status endpoint, re-probe,
+// and the two v1 mutations routed through a FAKE compatible `oas` binary
+// (the repo CLI is intentionally pre-0.18 until tag-driven CI bumps it, so
+// acceptance is exercised with a fixture that speaks the exact contract).
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { mkdtempSync, writeFileSync, chmodSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { tmpdir } from "node:os";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+const SRV = join(ROOT, "packages", "desktop", "server", "oas-web.mjs");
+
+/** A fake `oas` that speaks Desktop CLI API v1 exactly. It logs its argv/cwd
+ * so assertions can verify the adapter's invocation shape. */
+function fakeCli(dir, { version = "0.18.0", desktopApi = 1, probeExit = 0, probeHangMs = 0 } = {}) {
+  const log = join(dir, "cli-calls.jsonl");
+  const js = join(dir, "oas.cjs");
+  const bin = join(dir, "oas");
+  writeFileSync(js, `const { appendFileSync, readFileSync } = require("node:fs");
+const argv = process.argv.slice(2);
+appendFileSync(${JSON.stringify(log)}, JSON.stringify({ argv, cwd: process.cwd() }) + "\\n");
+if (argv[0] === "version" && argv.includes("--json")) {
+  process.stdout.write(JSON.stringify({ schemaVersion: 1, name: "@oas-framework/oas", version: ${JSON.stringify(version)}, desktopApi: ${JSON.stringify(desktopApi)} }));
+  // Liar modes (review 0b83988): print a VALID probe, then exit nonzero or
+  // REALLY hang past the probe timeout — either must be rejected by
+  // discovery. if/else if throughout: fallthrough to the trailing exit(2)
+  // previously made the "hanger" exit in 0.058s (review 6b90702).
+  if (${JSON.stringify(probeHangMs)} > 0) { setTimeout(() => process.exit(0), ${JSON.stringify(probeHangMs)}); }
+  else process.exit(${JSON.stringify(probeExit)});
+} else if (argv[0] === "spawn" && argv.includes("--json")) {
+  const agent = argv[1];
+  const tf = argv[argv.indexOf("--task-file") + 1];
+  const task = readFileSync(tf, "utf8");
+  if (agent === "boom") { process.stdout.write(JSON.stringify({ schemaVersion: 1, ok: false, error: { code: "E_SPAWN_FAILED", message: "boom" } })); process.exit(1); }
+  process.stdout.write(JSON.stringify({ schemaVersion: 1, ok: true, result: {
+    instance: agent + "-t1", agent, home: "/tmp/h", work: "worktree", branch: "b",
+    launched: true, warnings: [], tmux: { session: "pi-agents", window: agent + "-t1" },
+    taskEcho: task } }));
+  process.exit(0);
+} else if (argv[0] === "okf" && argv[1] === "harvest" && argv.includes("--json")) {
+  process.stdout.write(JSON.stringify({ schemaVersion: 1, ok: true, result: { harvest: "skipped", reason: "no pending notes" } }));
+  process.exit(0);
+} else {
+  process.stderr.write("unexpected argv: " + argv.join(" "));
+  process.exit(2);
+}
+`);
+  // PATH is intentionally hostile in these tests (/nonexistent), so the
+  // launcher must not rely on env lookup: absolute node, absolute script.
+  writeFileSync(bin, `#!/bin/sh
+exec ${JSON.stringify(process.execPath)} ${JSON.stringify(js)} "$@"
+`);
+  chmodSync(bin, 0o755);
+  // The locator canonicalizes candidates (realpath) — on macOS /var →
+  // /private/var — so assertions compare against the canonical path.
+  return { bin, real: realpathSync(bin), calls: () => readFileSync(log, "utf8").trim().split("\n").map((l) => JSON.parse(l)) };
+}
+
+async function startServer(env) {
+  const port = 4300 + Math.floor(Math.random() * 1500);
+  const proc = spawn(process.execPath, [SRV, "start", "--port", String(port), "--dir", ROOT],
+    { stdio: "ignore", env: { ...process.env, ...env } });
+  for (let i = 0; i < 40; i++) {
+    await new Promise((r) => setTimeout(r, 100));
+    try { await fetch(`http://127.0.0.1:${port}/api/panel`); return { proc, port }; } catch { /* retry */ }
+  }
+  proc.kill();
+  throw new Error("server did not come up");
+}
+
+test("desktop server: /api/cli reports discovery status; compatible fake CLI accepted via OAS_DESKTOP_OAS_BIN", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "oas-clifake-"));
+  const { bin, real } = fakeCli(dir);
+  const { proc, port } = await startServer({ OAS_DESKTOP_OAS_BIN: bin, PATH: "/nonexistent", SHELL: "/bin/false" });
+  try {
+    // startup probe may still be running — reprobe deterministically
+    const s = await (await fetch(`http://127.0.0.1:${port}/api/cli/reprobe`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })).json();
+    assert.equal(s.ok, true, JSON.stringify(s));
+    assert.equal(s.version, "0.18.0");
+    assert.equal(s.source, "env");
+    assert.deepEqual(s.required, { desktopApi: 1, range: ">=0.18.0 <0.19.0" });
+    const g = await (await fetch(`http://127.0.0.1:${port}/api/cli`)).json();
+    assert.equal(g.ok, true);
+    assert.equal(g.bin, real);
+  } finally { proc.kill(); }
+});
+
+test("desktop server: incompatible CLI → status carries per-candidate diagnostics; spawn degrades 503", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "oas-cliold-"));
+  const { bin, real } = fakeCli(dir, { version: "0.17.6" });
+  const { proc, port } = await startServer({ OAS_DESKTOP_OAS_BIN: bin, PATH: "/nonexistent", SHELL: "/bin/false" });
+  try {
+    const s = await (await fetch(`http://127.0.0.1:${port}/api/cli/reprobe`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })).json();
+    assert.equal(s.ok, false);
+    const envTried = s.tried.find((t) => t.path === real);
+    assert.ok(envTried, "the rejected candidate is in diagnostics");
+    assert.match(envTried.reason, /outside/);
+    assert.equal(envTried.version, "0.17.6", "detected version surfaces for the card");
+    // mutation degrades with the stable code — reads keep working
+    const ad = await (await fetch(`http://127.0.0.1:${port}/api/agents`)).json();
+    assert.ok(Array.isArray(ad.agents) && ad.agents.length, "reads still work without a compatible CLI");
+    const r = await fetch(`http://127.0.0.1:${port}/api/spawn`, { method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ agent: ad.agents[0].name, agentsRoot: ad.agents[0].agentsRoot }) });
+    assert.equal(r.status, 503);
+    assert.equal((await r.json()).code, "cli-unavailable");
+  } finally { proc.kill(); }
+});
+
+test("desktop server: a CLI that prints a valid probe but exits nonzero (or hangs) is REJECTED (review 0b83988)", async () => {
+  // exercises the PRODUCTION probeBin callback: err && stdout must reject.
+  const dir1 = mkdtempSync(join(tmpdir(), "oas-cliliar-"));
+  const liar = fakeCli(dir1, { probeExit: 1 });     // valid probe on stdout, exit 1
+  const { proc, port } = await startServer({ OAS_DESKTOP_OAS_BIN: liar.bin, PATH: "/nonexistent", SHELL: "/bin/false" });
+  try {
+    const s = await (await fetch(`http://127.0.0.1:${port}/api/cli/reprobe`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })).json();
+    assert.equal(s.ok, false, `nonzero-exit liar accepted: ${JSON.stringify(s)}`);
+    const tried = s.tried.find((t) => t.path === liar.real);
+    assert.ok(tried, "liar recorded in diagnostics");
+    assert.match(tried.reason, /probe failed/, "rejected as a probe failure, not by payload");
+  } finally { proc.kill(); }
+  // timeout case: valid probe printed, process REALLY hangs past the 8s
+  // probe timeout. The server kills it (killSignal SIGKILL) and the
+  // candidate must reject. Assert independently that (a) the fixture
+  // actually hangs and (b) the reprobe crossed the production timeout —
+  // review 6b90702 caught the previous "hanger" exiting in 0.058s via
+  // fallthrough, leaving the timeout path untested.
+  const dir2 = mkdtempSync(join(tmpdir(), "oas-clihang-"));
+  const hanger = fakeCli(dir2, { probeHangMs: 20000 });
+  // (a) the fixture hangs: run it directly and confirm it is still alive
+  // after 1s (then kill it).
+  {
+    const direct = spawn(hanger.bin, ["version", "--json"], { stdio: "ignore" });
+    let exited = false;
+    direct.on("exit", () => { exited = true; });
+    await new Promise((r) => setTimeout(r, 1000));
+    assert.equal(exited, false, "hanger fixture really hangs (no fallthrough exit)");
+    direct.kill("SIGKILL");
+  }
+  const r2 = await startServer({ OAS_DESKTOP_OAS_BIN: hanger.bin, PATH: "/nonexistent", SHELL: "/bin/false" });
+  try {
+    const t0 = Date.now();
+    const s2 = await (await fetch(`http://127.0.0.1:${r2.port}/api/cli/reprobe`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })).json();
+    const elapsed = Date.now() - t0;
+    assert.equal(s2.ok, false, `hanging liar accepted: ${JSON.stringify(s2)}`);
+    const tried2 = s2.tried.find((t) => t.path === hanger.real);
+    assert.ok(tried2 && /probe failed/.test(tried2.reason), "timeout rejected as probe failure");
+    // (b) the production 8s probe timeout actually elapsed for this candidate
+    assert.ok(elapsed >= 7500, `reprobe crossed the probe timeout (took ${elapsed}ms)`);
+  } finally { r2.proc.kill(); }
+});
+
+test("desktop server: spawn routes through the CLI with --dir/--task-file argv; harvest fixes cwd to the instance home", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "oas-climut-"));
+  const { bin, calls } = fakeCli(dir);
+  const { proc, port } = await startServer({ OAS_DESKTOP_OAS_BIN: bin, PATH: "/nonexistent", SHELL: "/bin/false" });
+  try {
+    await fetch(`http://127.0.0.1:${port}/api/cli/reprobe`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+    const ad = await (await fetch(`http://127.0.0.1:${port}/api/agents`)).json();
+    const agent = ad.agents[0];
+    // ---- spawn
+    const r = await fetch(`http://127.0.0.1:${port}/api/spawn`, { method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ agent: agent.name, agentsRoot: agent.agentsRoot, task: "secret task text", purpose: "t1" }) });
+    assert.equal(r.status, 200, JSON.stringify(await r.clone().json()));
+    const body = await r.json();
+    assert.equal(body.spawned, true);
+    assert.equal(body.instance, `${agent.name}-t1`);
+    assert.ok(Array.isArray(body.warnings));
+    assert.ok(body.tmux && body.tmux.window, "tmux target present (contract result field)");
+    const spawnCall = calls().find((c) => c.argv[0] === "spawn");
+    assert.ok(spawnCall, "CLI spawn invoked");
+    assert.equal(spawnCall.argv[1], agent.name);
+    assert.equal(spawnCall.argv[spawnCall.argv.indexOf("--dir") + 1], dirname(agent.agentsRoot), "--dir is the workspace context");
+    assert.ok(spawnCall.argv.includes("--task-file"), "task travels by 0600 tempfile, never argv");
+    assert.ok(!spawnCall.argv.includes("secret task text"), "task text NEVER in argv");
+    assert.equal(spawnCall.argv[spawnCall.argv.indexOf("--purpose") + 1], "t1");
+    // ---- spawn failure envelope → 409 with the CLI's stable code
+    const rf = await fetch(`http://127.0.0.1:${port}/api/spawn`, { method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ agent: "boom", agentsRoot: agent.agentsRoot }) });
+    // "boom" is not a real soul in this repo — unknown agent (409) is also
+    // acceptable; the point is a stable non-2xx with an error body.
+    assert.ok([409, 502].includes(rf.status), `spawn failure surfaces (${rf.status})`);
+    // ---- harvest: pick a real instance from the panel and check cwd
+    const pd = await (await fetch(`http://127.0.0.1:${port}/api/panel`)).json();
+    const inst = pd.instances.find((i) => i.home);
+    if (inst) {
+      const hr = await fetch(`http://127.0.0.1:${port}/api/harvest/${encodeURIComponent(inst.instance)}?ws=${encodeURIComponent(pd.workspace.id)}`, { method: "POST" });
+      assert.equal(hr.status, 200, JSON.stringify(await hr.clone().json()));
+      const hb = await hr.json();
+      assert.equal(hb.harvest, "skipped");
+      const harvestCall = calls().find((c) => c.argv[0] === "okf");
+      assert.deepEqual(harvestCall.argv, ["okf", "harvest", "--json"]);
+      assert.equal(harvestCall.cwd, inst.home, "cwd fixed by the backend to the RESOLVED instance home");
+    }
+    // unknown instance → 404, CLI never invoked for it
+    const h404 = await fetch(`http://127.0.0.1:${port}/api/harvest/no-such-instance`, { method: "POST" });
+    assert.equal(h404.status, 404);
+  } finally { proc.kill(); }
+});
+
+test("desktop server: hostile instance.json cannot steer the harvest cwd (review 53a20c7 blocker)", async () => {
+  const cliDir = mkdtempSync(join(tmpdir(), "oas-clihostile-"));
+  const { bin, calls } = fakeCli(cliDir);
+  // Workspace with an instance whose instance.json points home at an
+  // ARBITRARY directory — the roster and the endpoint must both pin the
+  // directory-derived home; the CLI must never run in the steered cwd.
+  const scope = realpathSync(mkdtempSync(join(tmpdir(), "oas-hostile-ws-")));
+  const steerTarget = realpathSync(mkdtempSync(join(tmpdir(), "oas-steer-target-")));
+  const instHome = join(scope, "agents", "dev", "instances", "dev-evil");
+  mkdirSync(join(scope, "agents", "dev", "soul"), { recursive: true });
+  writeFileSync(join(scope, "agents", "dev", "soul", "soul.yaml"), "name: dev\ndescription: d\n");
+  mkdirSync(instHome, { recursive: true });
+  writeFileSync(join(instHome, "instance.json"),
+    JSON.stringify({ instance: "dev-evil", agent: "dev", home: steerTarget }));
+  const { proc, port } = await startServer({ OAS_DESKTOP_OAS_BIN: bin, PATH: "/nonexistent", SHELL: "/bin/false" });
+  const proc2 = spawn(process.execPath, [SRV, "start", "--port", String(port + 1), "--dir", scope],
+    { stdio: "ignore", env: { ...process.env, OAS_DESKTOP_OAS_BIN: bin, PATH: "/nonexistent", SHELL: "/bin/false" } });
+  proc.kill(); // only the scope-scoped server matters here
+  try {
+    let up = false;
+    for (let i = 0; i < 40 && !up; i++) {
+      await new Promise((r) => setTimeout(r, 100));
+      try { await fetch(`http://127.0.0.1:${port + 1}/api/panel`); up = true; } catch { /* retry */ }
+    }
+    assert.ok(up, "scoped server came up");
+    await fetch(`http://127.0.0.1:${port + 1}/api/cli/reprobe`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+    // roster: home must be the DIRECTORY-derived one, not the steered target
+    const pd = await (await fetch(`http://127.0.0.1:${port + 1}/api/panel`)).json();
+    const evil = pd.instances.find((i) => i.instance === "dev-evil");
+    assert.ok(evil, "instance surfaces");
+    assert.equal(evil.home, instHome, "roster home is directory-derived, never instance.json's");
+    // harvest: runs in the real home — never in the steered directory
+    const hr = await fetch(`http://127.0.0.1:${port + 1}/api/harvest/dev-evil?ws=${encodeURIComponent(pd.workspace.id)}`, { method: "POST" });
+    assert.equal(hr.status, 200, JSON.stringify(await hr.clone().json()));
+    const harvestCall = calls().find((c) => c.argv[0] === "okf");
+    assert.ok(harvestCall, "harvest ran");
+    assert.equal(harvestCall.cwd, instHome, "cwd pinned to the enumerated directory");
+    assert.notEqual(harvestCall.cwd, steerTarget, "steered cwd never used");
+  } finally { proc2.kill(); }
+});

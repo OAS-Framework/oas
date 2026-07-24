@@ -1,7 +1,7 @@
 /* oas desktop — Instances view: roster + instance detail.
    Ports the web panel's roster and the pi-style chat transcript
    (/api/chat/<instance>) into a desktop renderer view, plus a task/state/git
-   summary and an inline Jira panel when the instance has oas.jira meta.
+   summary.
    The live terminal is NOT here — "Open terminal" hands off to the shell's
    terminal view via ctx.openTerminal(instance) (contract; tui-dev owns it).
    Contract: export mount(el, ctx) / unmount(). Plain ES module + DOM. */
@@ -18,13 +18,11 @@ export function mount(el, ctx) {
   const s = state = {
     el, ctx,
     panel: { instances: [] },
-    jira: null,               // last /api/jira payload for the selected instance
     sel: null,
     filterText: "",
     pendingSends: [],
     fastPollUntil: 0,
     chatReq: 0,               // request generation — stale responses never paint
-    jiraReq: 0,               // jira generation — bumped on every selection/clear/ws switch
     lastChatSig: "",
     lastChatData: null,
     openTools: new Set(),
@@ -151,8 +149,8 @@ function renderRoster(s) {
 
 /* ── selection + detail head ── */
 function clearSelection(s) {
-  s.sel = null; s.lastChatSig = ""; s.lastChatData = null; s.jira = null;
-  s.pendingSends.length = 0; s.chatReq++; s.jiraReq++;
+  s.sel = null; s.lastChatSig = ""; s.lastChatData = null;
+  s.pendingSends.length = 0; s.chatReq++;
   s.q("vhead").style.display = "none";
   s.q("chat").innerHTML = '<div class="empty"><span class="big">⌥</span>Select an instance to follow its session.</div>';
 }
@@ -162,14 +160,11 @@ function select(s, name) {
   const i = s.panel.instances.find((x) => x.instance === name);
   if (i) renderHead(s, i);
   renderRoster(s);
-  s.lastChatSig = ""; s.lastChatData = null; s.jira = null;
+  s.lastChatSig = ""; s.lastChatData = null;
   s.chatReq++;                       // invalidate in-flight fetches for the old instance
-  s.jiraReq++;
   s.pendingSends.length = 0;
   s.q("chat").innerHTML = '<div class="loading-block"><span class="spinner"></span> Loading session…</div>';
   refreshChat(s, true);
-  // Jira surface hidden by directive — refreshJira stays exported (dormant,
-  // regression-tested) but is no longer invoked, so no inline card renders.
 }
 
 function renderHead(s, i) {
@@ -188,46 +183,6 @@ function renderHead(s, i) {
     i.workspace ? `workspace <b>${escapeHtml(String(i.workspace).split("/").pop())}</b>` : "",
     i.next ? `next: ${escapeHtml(String(i.next).slice(0, 110))}` : "",
   ].filter(Boolean).map((x) => `<span>${x}</span>`).join("");
-}
-
-/* ── jira (inline card at the top of the transcript when meta is present) ──
-   Exported for the deferred-response regression: the guard must check the
-   REQUEST GENERATION, not just the instance name — with the same instance
-   name in two workspaces, "fetch in B → switch to A → reselect same name →
-   B's response lands" passes a name-only check and paints B's data in A. */
-export async function refreshJira(s, name) {
-  const myReq = s.jiraReq;           // capture BEFORE the await
-  let d;
-  try { d = await apiJson(s.ctx, instanceApiPath("jira", name)); }
-  catch { return; }
-  // stale if: view unmounted, selection changed, or ANY newer selection/clear/
-  // workspace switch happened while this response was in flight (jiraReq).
-  if (!s.alive || s.sel !== name || myReq !== s.jiraReq) return;
-  s.jira = d && d.enabled ? d : null;
-  s.lastChatSig = "";                 // repaint transcript with the jira card
-  if (s.lastChatData) renderChat(s, s.lastChatData, false);
-}
-
-export function jiraCardHtml(d) {
-  if (!d || !d.enabled) return "";
-  if (d.error) return `<div class="turn ai"><div class="card"><h3>Jira · ${escapeHtml(d.label || "")}</h3><div class="body">${escapeHtml(d.error)}</div></div></div>`;
-  let inner = "";
-  if (d.epic) {
-    inner += `<div class="body"><span class="jkey">${escapeHtml(d.epic.key)}</span> ${escapeHtml(d.epic.summary || "")}${d.epic.status ? ` <span class="chip">${escapeHtml(d.epic.status)}</span>` : ""}</div>`;
-    if (Array.isArray(d.epic.roster) && d.epic.roster.length) {
-      const cols = Object.keys(d.epic.roster[0]);
-      inner += `<table class="jt"><thead><tr>${cols.map((c) => `<th>${escapeHtml(c)}</th>`).join("")}</tr></thead><tbody>` +
-        d.epic.roster.map((r) => `<tr>${cols.map((c) => `<td>${escapeHtml(r[c] || "")}</td>`).join("")}</tr>`).join("") +
-        "</tbody></table>";
-    }
-  }
-  if (Array.isArray(d.tickets) && d.tickets.length) {
-    inner += `<table class="jt"><thead><tr><th>Key</th><th>Type</th><th>Summary</th><th>Status</th></tr></thead><tbody>` +
-      d.tickets.map((t) => `<tr><td class="jkey">${escapeHtml(t.key)}</td><td>${escapeHtml(t.type)}</td><td>${escapeHtml(t.summary)}</td><td>${escapeHtml(t.status)}</td></tr>`).join("") +
-      "</tbody></table>";
-  }
-  if (!inner) inner = '<div class="body">No open tickets.</div>';
-  return `<div class="turn ai"><div class="card"><h3>Jira · ${escapeHtml(d.label || "")}</h3>${inner}</div></div>`;
 }
 
 /* ── transcript rendering — ported from the panel's pi-style chat view ── */
@@ -313,8 +268,7 @@ function renderChat(s, d, scroll) {
   if (!d) return;
   if (!d.available) { box.innerHTML = '<div class="empty"><span class="big">⎀</span>No session transcript found for this instance.</div>'; return; }
   const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 120;
-  let html = jiraCardHtml(s.jira);
-  html += d.turns.map((t, i) => turnHtml(s, t, i)).join("") || "";
+  let html = d.turns.map((t, i) => turnHtml(s, t, i)).join("") || "";
   // live indicator: a tool call in flight, or the last turn is the human's
   // (the agent is thinking — its reply lands only when a block completes)
   const last = d.turns.at(-1);
@@ -347,7 +301,7 @@ async function refreshChat(s, scroll) {
   s.lastChatData = d;
   const sig = forSel + ":" + d.turns.length + (d.turns.at(-1)?.text || "") + (d.turns.at(-1)?.tools?.length || 0)
     + ":" + (d.turns.at(-1)?.tools || []).filter((t) => t.result === null).length
-    + ":" + (d.turns.at(-1)?.role || "") + ":" + (s.jira ? "j" : "");
+    + ":" + (d.turns.at(-1)?.role || "");
   if (sig === s.lastChatSig && !scroll) return; // avoid re-render flicker
   s.lastChatSig = sig;
   renderChat(s, d, scroll);

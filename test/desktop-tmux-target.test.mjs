@@ -358,3 +358,87 @@ test("live tmux: real wheel events through an attached pty client — installed 
     spawnSync("rm", ["-f", sock], { timeout: 5000 });
   }
 });
+
+// ── Slice G: resource containment end to end on an isolated live tmux ──────
+// Human release blocker: dedupe by target + hard cap 6 + baseline-restoring
+// cleanup, proven against REAL viewer sessions (no GUI). Uses an isolated
+// tmux server (-S socket) so it never touches the operator's durable
+// sessions and leaves ZERO residue.
+test("live tmux: dedupe + cap 6 + baseline restoration on an isolated server", async (t) => {
+  const probe = spawnSync("tmux", ["-V"], { encoding: "utf8" });
+  if (probe.error || probe.status !== 0) return t.skip("tmux not available");
+  const { createTerminalRegistry, terminalTargetKey } = await import("../packages/desktop/terminal-registry.mjs");
+  const { mkdtempSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const sock = join(mkdtempSync(join(tmpdir(), "oasg-")), "s");
+  const tx = (args, out = false) => {
+    const r = spawnSync("tmux", ["-S", sock, ...args], { encoding: "utf8", timeout: 5000 });
+    if (r.status !== 0 && !out) throw new Error(`tmux ${args.join(" ")}: ${r.stderr}`);
+    return (r.stdout || "").trim();
+  };
+  const viewerCount = () => tx(["list-sessions", "-F", "#{session_name}"], true).split("\n").filter((s) => s.startsWith("oasdesk-")).length;
+  // Faithful main.mjs handler over REAL openTerm on the isolated server.
+  const reg = createTerminalRegistry({ max: 6 });
+  const ptys = new Map(); // id -> { key, killViewer }
+  let nextId = 1, viewersCreated = 0;
+  const io = {
+    preflight: (target) => { const r = spawnSync("tmux", ["-S", sock, "list-panes", "-t", target], { timeout: 5000 }); if (r.status !== 0) throw new Error("no target"); },
+    tmux: (args) => tx(args),
+    tmuxOut: (args) => tx(args),
+    spawnPty: (target) => ({ target }), // no real attach needed to prove the resource bound
+  };
+  const openHandler = (session, window) => {
+    const key = terminalTargetKey(session, window);
+    const plan = reg.plan(key);
+    if (plan.action === "reuse") return { reused: true, id: plan.id };
+    if (plan.action === "cap") return { capped: true, active: plan.active, max: plan.max };
+    let r;
+    try { r = openTerm({ session, window }, io); } catch (e) { return { error: String(e.message) }; }
+    viewersCreated++;
+    const id = nextId++;
+    ptys.set(id, { key, killViewer: r.killViewer, viewer: r.viewer });
+    reg.commit(key, id);
+    return { id };
+  };
+  const closeHandler = (id) => { const t2 = ptys.get(id); if (!t2) return; try { t2.killViewer(); } catch {} ptys.delete(id); reg.release(id); };
+
+  try {
+    // one durable session with 8 windows = 8 distinct terminal targets
+    tx(["new-session", "-d", "-s", "durable", "-n", "inst1", "sh"]);
+    for (let i = 2; i <= 8; i++) tx(["new-window", "-t", "=durable", "-n", `inst${i}`, "sh"]);
+    const baseline = viewerCount();
+    assert.equal(baseline, 0, "no viewers at baseline");
+
+    // dedupe: 50 opens of the SAME target → one viewer
+    let firstId = null;
+    for (let i = 0; i < 50; i++) {
+      const r = openHandler("durable", "inst1");
+      if (i === 0) firstId = r.id; else assert.equal(r.reused, true, "repeat open reuses");
+    }
+    assert.equal(viewerCount(), 1, "50 same-target opens created exactly one viewer session");
+
+    // cap: fill to 6 distinct, 7th refused, no 7th viewer created
+    for (let i = 2; i <= 6; i++) assert.ok(openHandler("durable", `inst${i}`).id !== undefined, `open inst${i}`);
+    assert.equal(viewerCount(), 6, "six live viewers");
+    const seventh = openHandler("durable", "inst7");
+    assert.equal(seventh.capped, true, "7th refused");
+    assert.equal(viewerCount(), 6, "no 7th viewer session was created on the tmux server");
+
+    // close one → a slot frees → 7th now opens
+    closeHandler(firstId);
+    assert.equal(viewerCount(), 5, "closing a terminal killed exactly its viewer");
+    assert.ok(openHandler("durable", "inst7").id !== undefined, "freed slot allows a new distinct open");
+    assert.equal(viewerCount(), 6, "back at the cap");
+
+    // baseline restoration: close all → ZERO viewers, durable windows survive
+    for (const id of [...ptys.keys()]) closeHandler(id);
+    assert.equal(viewerCount(), baseline, "all viewers cleaned up — baseline restored");
+    assert.equal(reg.activeCount(), 0, "registry drained");
+    const durableWins = tx(["list-windows", "-t", "=durable", "-F", "#{window_name}"], true).split("\n");
+    assert.equal(durableWins.length, 8, "every durable window survived the viewer churn");
+    assert.ok(viewersCreated >= 7, "the churn really created and tore down viewers");
+  } finally {
+    spawnSync("tmux", ["-S", sock, "kill-server"], { timeout: 5000 });
+    spawnSync("rm", ["-f", sock], { timeout: 5000 });
+  }
+});

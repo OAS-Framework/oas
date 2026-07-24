@@ -42,12 +42,27 @@ const FRAMEWORK_ROOT = (() => {
 const out = (o) => { process.stdout.write(JSON.stringify(o) + "\n"); process.exit(0); };
 const warn = (m) => out({ warning: `oas-okf: ${String(m).slice(0, 300)}` });
 
+// Desktop CLI API v1: `oas okf harvest --json` emits EXACTLY ONE envelope
+// object on stdout — {schemaVersion:1,ok,result|error} — and a nonzero exit
+// on failure. Ordinary (non---json) output keeps the hook JSON shape above.
+const JSON_MODE = process.argv.includes("--json");
+const jsonOk = (result) => { process.stdout.write(JSON.stringify({ schemaVersion: 1, ok: true, result }) + "\n"); process.exit(0); };
+const jsonFail = (code, message) => { process.stdout.write(JSON.stringify({ schemaVersion: 1, ok: false, error: { code, message: String(message).slice(0, 300) } }) + "\n"); process.exit(1); };
+
 const event = process.env.OAS_EVENT || process.argv[2];
 const instance = process.env.OAS_INSTANCE;
 const home = process.env.OAS_HOME || process.cwd();
 const soulDir = process.env.OAS_SOUL;
 const agentName = process.env.OAS_AGENT || "agent";
-const settings = JSON.parse(process.env.OAS_SETTINGS || "{}");
+// Fallible init stays inside an error boundary: malformed inherited env must
+// never produce a bare stack trace — in --json mode Desktop expects one
+// envelope object on stdout even for init failures.
+let settings = {};
+try { settings = JSON.parse(process.env.OAS_SETTINGS || "{}"); }
+catch (e) {
+  if (JSON_MODE) jsonFail("E_HARVEST_FAILED", `malformed OAS_SETTINGS: ${e.message || e}`);
+  process.stderr.write(`oas-okf: malformed OAS_SETTINGS (ignoring): ${e.message || e}\n`);
+}
 /** Model for the memory-harvest agent — promotion judgment is cheap-but-good
  *  work; default gpt-5.5, overridable via okf settings { "harvest-model": ... }. */
 const DEFAULT_HARVEST_MODEL = "github-copilot/gpt-5.5";
@@ -177,7 +192,7 @@ _(the single next action — keep this current; a fresh session on any model res
       }
     }
     const notesDir = join(home, "notes");
-    const skip = (why) => out({ meta: { harvestSpawn: "skipped", why } });
+    const skip = (why) => (JSON_MODE ? jsonOk({ harvest: "skipped", reason: why }) : out({ meta: { harvestSpawn: "skipped", why } }));
     if (String(agName).startsWith("memory-harvest")) skip("self (loop guard)");
     const notes = existsSync(notesDir) ? readdirSync(notesDir).filter((f) => f.endsWith(".md")) : [];
     if (notes.length === 0) skip("no pending notes");
@@ -251,8 +266,12 @@ _(the single next action — keep this current; a fresh session on any model res
         task: `Harvest the pending notes of live instance "${inst}" (agent "${agName}") into its soul.\n\n- Source notes: ${notesDir} (${notes.join(", ")})\n- Soul knowledge bundle to update: ${join(soulTarget, "knowledge")}\n- Soul skills dir (for procedure-shaped notes): ${join(soulTarget, "skills")}\n- You are ATTACHED to the instance's work tree (./work) — commit your promotions there as a single commit, prefixed "memory-harvest:".\n- Follow your memory-harvest skill: promote/merge/drop each note, knowledge vs skill routing, index + log discipline, validate the bundle, DELETE processed notes from the source notes/ dir (so they are not re-harvested), commit, then run \`oas retire ${harvName} --self\`.`,
       });
     }
+    if (JSON_MODE) jsonOk({ harvest: "spawned", instance: r.instance, window: r.tmux?.window || null });
     out({ meta: { harvestSpawn: r.instance, window: r.tmux?.window } });
-  } catch (e) { warn(`harvest spawn failed (notes are safe on disk): ${e.message || e}`); }
+  } catch (e) {
+    if (JSON_MODE) jsonFail("E_HARVEST_FAILED", `harvest spawn failed (notes are safe on disk): ${e.message || e}`);
+    warn(`harvest spawn failed (notes are safe on disk): ${e.message || e}`);
+  }
 } else if (event === "retire") {
   // Retirement is intentionally a no-op for knowledge (for now): promotion happens
   // continuously via agent-initiated harvest. Uncommitted notes die with the home —
