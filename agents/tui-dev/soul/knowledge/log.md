@@ -2,6 +2,10 @@
 
 ## 2026-07-24
 
+- **Creation**: [privileged-state-transitions-transactions.md](privileged-state-transitions-transactions.md)
+  — promoted the lesson that privileged desktop mutations need serialization, staged effects, identity/readiness verification, post-success commit, restore-on-failure, and child-process ownership guards.
+- **Update**: [desktop-workspace-add-privileged-contract.md](desktop-workspace-add-privileged-contract.md)
+  — corrected stale-completion guidance so generation tokens do not substitute for staged/serialized workspace-add mutations and app-owned child replacement waits for real exit with ownership checks.
 - **Creation**: [desktop-workspace-add-privileged-contract.md](desktop-workspace-add-privileged-contract.md)
   — promoted the privileged workspace-add contract: bounded deterministic suggestions, provenance-gated adds, app-owned server replacement only, readiness identity checks, tmux-backed terminal continuity, and stale-completion generations.
 - **Update**: [desktop-terminal-direct-attach.md](desktop-terminal-direct-attach.md)
