@@ -1,7 +1,7 @@
 ---
 type: Lesson
 title: JSON contracts must cover dispatcher boundaries
-description: A capability command's --json envelope guarantee is void if the generic CLI dispatcher can fail before the command boundary and print help or stderr instead.
+description: A capability command's --json envelope guarantee is void unless the generic CLI dispatcher wraps the whole dispatch path, including manifest discovery, trust checks, command decoding, non-match fallthrough, and child spawn failures.
 tags: [cli, json, contract, capabilities]
 timestamp: 2026-07-24
 ---
@@ -22,10 +22,17 @@ Patterns that generalized from the fix:
 
 - put a `bail(code, msg)` helper inside the dispatcher, choosing `jsonFail` or
   human `die()` before any dispatcher failure can print non-JSON output;
-- cover the "no namespace matched" fallthrough that would otherwise print help
-  text to stdout;
-- map child `spawnSync` errors (`r.error`, child never ran) to the same JSON
-  failure envelope;
+- wrap the whole dispatcher body in one `try`; use a non-error sentinel such as
+  `NOT_DISPATCHED` for the only legitimate fallthrough ("no namespace matched")
+  instead of relying on exceptions or partial guarding;
+- map child `spawnSync` errors (`r.error`, child never ran) and unclassified
+  dispatcher exceptions to stable JSON failure envelopes such as
+  `E_CAPABILITY_BROKEN`, while narrower guarded failures can keep specific codes
+  such as `E_CONFIG_BROKEN`;
+- validate third-party manifest command values before use (`commands[sub]` must
+  be a non-empty string before `.split()`), because manifest discovery, trust
+  checks, and manifest decoding can all throw before the capability process
+  starts;
 - move fallible module-top-level initialization, such as inherited
   `OAS_SETTINGS` parsing, inside the command boundary;
 - test the contract end-to-end through `CLI <namespace> <subcommand> --json`,
