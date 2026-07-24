@@ -154,4 +154,5 @@ installed. The source tree reaches one owner and one panel before release,
 avoiding a second migration immediately afterward. The tradeoff is an
 intentional breaking upgrade without a notice release: CLI diagnostics,
 release notes, config/lock cleanup, and an operational installer become hard
-release gates rather than later follow-ups.
+release gates rather than later follow-ups. The exact first-publication shape is
+binding in the [Desktop public release contract](/decisions/desktop-public-release-contract.md).
