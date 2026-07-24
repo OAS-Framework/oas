@@ -28,16 +28,22 @@ the POST body was produced.
 # The fix
 
 Protect any open form owned by the current selection, not only disabled/in-flight
-forms. Tag cards with the agent name and suppress poll repaints when the selected
-card still contains its `.soul-form`:
+forms. Tag cards with the agent name, but do not interpolate that name into a
+CSS selector. Suppress poll repaints by iterating the static card set and
+comparing dataset identity in JavaScript:
 
 ```js
-s.sel && grid.querySelector(`.soul-card[data-agent="${CSS.escape(s.sel)}"] .soul-form`)
+s.sel && [...grid.querySelectorAll(".soul-card")].some(
+  (card) => card.dataset.agent === s.sel && card.querySelector(".soul-form"),
+)
 ```
 
 Explicit re-renders such as cancel or selecting another soul mutate `s.sel`
 first, so they still rebuild. The barrier is for periodic poll repaint under a
-live form with uncommitted DOM-held user state.
+live form with uncommitted DOM-held user state. The earlier escaped-selector
+version was superseded by [the no-dynamic-selectors lesson](/lessons/no-dynamic-selectors-from-data.md),
+because local names can shadow the global `CSS.escape` helper and raw selector
+fallbacks can throw or match the wrong card.
 
 # General rule
 
