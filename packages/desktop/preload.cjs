@@ -12,6 +12,11 @@ contextBridge.exposeInMainWorld("oasDesktop", {
   termWrite: (id, data) => ipcRenderer.send("term:write", id, data),
   termResize: (id, cols, rows) => ipcRenderer.send("term:resize", id, cols, rows),
   termClose: (id) => ipcRenderer.send("term:close", id),
+
+  /** Runtime workspace switcher (privileged; renderer modal is the UX layer). */
+  workspaceSuggestions: () => ipcRenderer.invoke("workspace:suggestions"),
+  workspaceAdd: (path) => ipcRenderer.invoke("workspace:add", path),
+  workspacePick: () => ipcRenderer.invoke("workspace:pick"),
   onTermData: (id, cb) => {
     const ch = `term:data:${id}`;
     const fn = (_e, data) => cb(data);

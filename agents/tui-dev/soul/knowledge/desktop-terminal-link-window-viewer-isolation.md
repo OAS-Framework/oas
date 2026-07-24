@@ -3,7 +3,7 @@ type: Lesson
 title: Grouped sessions share membership — link-window isolates viewer windows
 description: tmux grouped sessions isolate current-window selection but share window membership, so desktop terminal viewers must be independent sessions with only a link-window to the exact source window and disabled prefix/root window navigation.
 tags: [tmux, desktop, terminal, link-window, isolation]
-timestamp: 2026-07-23
+timestamp: 2026-07-24
 ---
 
 Grouping a viewer with the durable session (`new-session -t`) isolates only the
@@ -31,12 +31,19 @@ activating a sibling, and killing the viewer does not kill the source window
 because tmux link refcounts keep the durable window alive.
 
 Lock the viewer against in-terminal window navigation: set its `prefix` and
-`prefix2` options to `None`, and set `key-table` to a nonexistent table such as
-`oasdesk-locked` so root bindings are inert. `set-option -t` does not accept the
-`=` anchors covered by [Anchor every tmux target the desktop constructs](anchor-tmux-attach-targets.md), so this exception is safe only for the unique random viewer session name, not for source session/window targets.
+`prefix2` options to `None`, and set `key-table` to a provisioned locked table.
+The table must be an explicit allow-list, not a nonexistent table: see
+[Provision locked tmux key tables as explicit allow-lists](provision-locked-key-tables.md)
+for the `WheelUpPane` scrollback binding and forbidden window-navigation set.
+`set-option -t` does not accept the `=` anchors covered by [Anchor every tmux
+target the desktop constructs](anchor-tmux-attach-targets.md), so this exception
+is safe only for the unique random viewer session name, not for source
+session/window targets.
 
 Regression coverage should drive the live escapes that made grouping wrong:
 kill source window A and assert source B never appears in the viewer; send
 `C-b n`, `C-b l`, `C-b c`, and `C-b 1` and assert the viewer's window set stays
-on the linked window. Mutation checks should prove the tests fail if the code
-reverts to grouped sessions or drops the key lock.
+on the linked window. It should also preserve wheel scrollback through the
+locked key table. Mutation checks should prove the tests fail if the code
+reverts to grouped sessions, drops the key lock, or makes the locked table
+nonexistent.

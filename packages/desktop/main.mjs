@@ -9,15 +9,16 @@
 //   * integrated terminal: node-pty running `tmux attach-session` per
 //     terminal tab, bytes streamed to xterm.js over IPC. Closing a tab kills
 //     the pty ONLY — the tmux session is the durable host and must survive.
-import { app, BrowserWindow, ipcMain, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import { spawn, execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, writeFileSync, lstatSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { apiUrl, apiInit } from "./api-url.mjs";
 import { openTerm, sweepViewers } from "./tmux-target.mjs";
 import { ensureServerOnPort } from "./server-compat.mjs";
+import { validateWorkspace, workspaceSuggestions, parseRecents, pushRecent, decideAdd, createGenerations } from "./workspace-registry.mjs";
 
 const require = createRequire(import.meta.url);
 const pty = require("node-pty");
@@ -34,6 +35,9 @@ const argDir = (() => {
   return i >= 0 && process.argv[i + 1] ? process.argv[i + 1] : undefined;
 })();
 const WORKSPACE = resolve(argDir || process.env.OAS_DESKTOP_DIR || REPO_ROOT);
+// Mutable workspace set: startup workspace plus runtime-added ones — the
+// repeated --dir list an app-owned oas-web is (re)started with.
+const workspaceDirs = [WORKSPACE];
 
 // ---- oas-web server management ----------------------------------------
 let serverChild = null; // set only when WE spawned it
@@ -88,7 +92,7 @@ async function freePort(from) {
 function spawnServer(onPort) {
   const bin = join(REPO_ROOT, "capabilities", "oas-web", "bin", "oas-web.mjs");
   if (!existsSync(bin)) throw new Error(`oas-web server not found at ${bin} and no usable server on port ${port}`);
-  serverChild = spawn(process.execPath, [bin, "start", "--port", String(onPort), "--dir", WORKSPACE], {
+  serverChild = spawn(process.execPath, [bin, "start", "--port", String(onPort), ...workspaceDirs.flatMap((d) => ["--dir", d])], {
     stdio: ["ignore", "pipe", "pipe"],
     cwd: WORKSPACE,
   });
@@ -133,6 +137,109 @@ function trustedFrame(e) {
   return url === RENDERER_URL || url.startsWith(`${RENDERER_URL}#`);
 }
 function guard(e) { if (!trustedFrame(e)) throw new Error("forbidden: untrusted frame"); }
+
+// ---- IPC: workspace suggestions + runtime add ---------------------------
+// Privileged side of the runtime workspace switcher (phase-2 hook 3; the
+// renderer modal is the designer's). Discovery is bounded: known dirs, team
+// siblings via the kernel's own seams, validated recents. workspace:add
+// only ever replaces an app-OWNED server; foreign servers fail closed.
+const core = await import(pathToFileURL(join(REPO_ROOT, "lib", "core.mjs")).href).catch(() => null);
+const wsGens = createGenerations();
+const RECENTS_FILE = () => join(app.getPath("userData"), "workspace-recents.json");
+
+const wsValidate = (p) => validateWorkspace(p, {
+  resolveConfig: (path) => core ? core.resolveOasConfig(path) : null,
+  hasAgentsRoot: (path) => existsSync(join(path, "agents")) && lstatSync(join(path, "agents")).isDirectory(),
+});
+
+function teamSiblingsOf(p) {
+  // Sibling workspaces within p's team scope — same seams as oas-web's
+  // workspaceEntry: the team scope's child repos that themselves validate.
+  try {
+    const cfg = core?.resolveOasConfig(p);
+    const scope = cfg?.team?.scope;
+    if (!scope) return [];
+    return core.teamAgentRoots(scope).map((root) => dirname(root)).filter((d) => d !== p);
+  } catch { return []; }
+}
+
+function readRecents() {
+  try { return parseRecents(readFileSync(RECENTS_FILE(), "utf8"), (p) => !!wsValidate(p)); }
+  catch { return []; }
+}
+function writeRecents(recents) {
+  try { writeFileSync(RECENTS_FILE(), JSON.stringify(recents, null, 2)); } catch { /* best-effort */ }
+}
+
+let lastSuggested = new Set(); // canonical paths offered by the latest suggestions call
+
+ipcMain.handle("workspace:suggestions", async (e) => {
+  guard(e);
+  const gen = wsGens.next("suggestions");
+  await panelWorkspaces(); // refresh allowedWs from the live server
+  const list = workspaceSuggestions({
+    knownPaths: [...workspaceDirs],
+    teamSiblings: teamSiblingsOf,
+    recents: readRecents(),
+    advertised: allowedWs,
+    validate: wsValidate,
+  });
+  if (!wsGens.isCurrent("suggestions", gen)) return { stale: true, suggestions: [] };
+  lastSuggested = new Set(list.map((s) => s.path));
+  return { stale: false, suggestions: list };
+});
+
+async function performAdd(requestedPath, fromPicker) {
+  const gen = wsGens.next("add");
+  const decision = decideAdd(requestedPath, {
+    realpath: (p) => realpathSync(p),
+    validate: wsValidate,
+    suggestedPaths: lastSuggested,
+    fromPicker,
+    serverOwned: !!serverChild,
+    advertised: allowedWs,
+  });
+  if (!decision.ok) return { ok: false, reason: decision.reason };
+  const ws = decision.workspace;
+  if (decision.action === "already-advertised") return { ok: true, workspace: ws };
+  // Replace ONLY our own server with the extended --dir set. Terminals are
+  // unaffected: viewer sessions attach to tmux, not to the oas-web process.
+  workspaceDirs.push(ws.path);
+  writeRecents(pushRecent(readRecents(), ws.path));
+  try { serverChild.kill(); } catch { /* already gone */ }
+  serverChild = null;
+  spawnServer(port);
+  // readiness: /api/version identity match AND the new id advertised
+  for (let i = 0; i < 40; i++) {
+    const v = await probeVersion();
+    if (v?.ok) {
+      await panelWorkspaces();
+      if (allowedWs.has(ws.id)) {
+        if (!wsGens.isCurrent("add", gen)) return { ok: false, reason: "superseded by a newer request" };
+        return { ok: true, workspace: ws };
+      }
+    }
+    await new Promise((ok) => setTimeout(ok, 250));
+  }
+  return { ok: false, reason: "replacement server did not advertise the new workspace in time" };
+}
+
+ipcMain.handle("workspace:add", async (e, requestedPath) => {
+  guard(e);
+  if (typeof requestedPath !== "string" || !requestedPath.startsWith("/")) return { ok: false, reason: "bad path" };
+  return performAdd(requestedPath, false);
+});
+
+ipcMain.handle("workspace:pick", async (e) => {
+  guard(e);
+  // Explicit separate action: native directory picker feeding the SAME
+  // validation path (fromPicker bypasses only the suggestion-set provenance
+  // check — canonicalization and workspace validation still apply).
+  const win = BrowserWindow.fromWebContents(e.sender);
+  const r = await dialog.showOpenDialog(win, { properties: ["openDirectory"] });
+  if (r.canceled || !r.filePaths?.[0]) return { ok: false, reason: "cancelled" };
+  return performAdd(r.filePaths[0], true);
+});
 
 // ---- IPC: API proxy -----------------------------------------------------
 // The renderer never talks to the network directly; ctx.api() lands here.
