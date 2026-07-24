@@ -7,7 +7,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { tmuxAttachTarget, openTerm, sweepViewers } from "../packages/desktop/tmux-target.mjs";
+import { tmuxAttachTarget, openTerm, sweepViewers, LOCKED_TABLE_BINDINGS } from "../packages/desktop/tmux-target.mjs";
 
 test("anchors both components: =session:=window", () => {
   assert.equal(tmuxAttachTarget("pi-agents", "reviewer-1"), "=pi-agents:=reviewer-1");
@@ -66,6 +66,8 @@ test("openTerm: linked-window viewer built in order, keys locked, pty attaches t
     ["tmux", "set-option", "-t", "oasdesk-test-1", "prefix", "None"],         // key lock: no prefix → no window-management ops
     ["tmux", "set-option", "-t", "oasdesk-test-1", "prefix2", "None"],
     ["tmux", "set-option", "-t", "oasdesk-test-1", "key-table", "oasdesk-locked"],
+    ...LOCKED_TABLE_BINDINGS.map((b) => ["tmux", "bind-key", "-T", "oasdesk-locked", ...b]), // provisioned wheel bindings
+    ["tmux", "set-option", "-t", "oasdesk-test-1", "mouse", "on"],            // wheel events reach tmux
     ["spawn", "=oasdesk-test-1", 120, 40],                                     // pty attaches to the viewer
   ]);
   assert.equal(r.pty, fake);
@@ -252,6 +254,73 @@ test("live tmux: viewer construction works under a nonzero base-index (isolated 
     assert.deepEqual(wins, ["instA"], "viewer contains ONLY the linked window despite base-index 1");
     r.killViewer();
     assert.ok(T(["list-windows", "-t", "=src", "-F", "#{window_name}"], true).includes("instA"), "source intact");
+  } finally {
+    spawnSync("tmux", ["-S", sock, "kill-server"], { timeout: 5000 });
+    spawnSync("rm", ["-f", sock], { timeout: 5000 });
+  }
+});
+
+test("locked table provisions ONLY the approved wheel bindings — no window management", () => {
+  // Unit guard on the exported binding set itself (the live test asserts
+  // the installed table): exactly the approved keys, and none of the
+  // window-management commands can appear in any binding.
+  const keys = LOCKED_TABLE_BINDINGS.map(([k]) => k);
+  assert.deepEqual(keys, ["WheelUpPane"], "exactly the approved binding keys");
+  const flat = LOCKED_TABLE_BINDINGS.flat().join(" ");
+  for (const forbidden of ["next-window", "previous-window", "last-window", "new-window", "select-window", "kill-window", "choose-", "switch-client"]) {
+    assert.ok(!flat.includes(forbidden), `no ${forbidden} in the locked table`);
+  }
+  assert.match(flat, /copy-mode -e/, "wheel enters exit-at-bottom copy mode");
+  assert.match(flat, /send-keys -M/, "mouse event forwarded");
+});
+
+test("live tmux: wheel binding scrolls history in the viewer without leaving the window (isolated server)", (t) => {
+  // Designer's regression: viewer pinned to A (A+B source), >pane-height
+  // history in A; wheel-up enters copy mode and scroll position increases;
+  // wheel-down returns to bottom (copy-mode exits); current window stays A
+  // throughout; teardown spares the source.
+  const probe = spawnSync("tmux", ["-V"], { encoding: "utf8" });
+  if (probe.error || probe.status !== 0) return t.skip("tmux not available");
+  const sock = `/tmp/oaswh-${process.pid}.sock`;
+  const T = (args, out = false) => {
+    const r = spawnSync("tmux", ["-S", sock, ...args], { encoding: "utf8", timeout: 5000 });
+    if (r.status !== 0) throw new Error(`tmux ${args.join(" ")} failed: ${r.stderr}`);
+    return out ? r.stdout.trim() : undefined;
+  };
+  try {
+    T(["new-session", "-d", "-s", "src", "-n", "instA", "sh"]);
+    T(["new-window", "-t", "=src", "-n", "instB", "sh"]);
+    // >pane-height history in A
+    T(["send-keys", "-t", "=src:=instA", "for i in $(seq 1 200); do echo line$i; done", "Enter"]);
+    const r = openTerm({ session: "src", window: "instA" }, {
+      preflight: (target) => T(["list-panes", "-t", target]),
+      tmux: (args) => T(args),
+      tmuxOut: (args) => T(args, true),
+      spawnPty: (target) => ({ target }),
+    });
+    // the provisioned binding is installed in the locked table, and the
+    // table contains ONLY approved bindings
+    const table = T(["list-keys", "-T", "oasdesk-locked"], true);
+    assert.match(table, /WheelUpPane/, "wheel binding installed");
+    for (const forbidden of ["next-window", "previous-window", "last-window", "new-window", "select-window"]) {
+      assert.ok(!table.includes(forbidden), `locked table has no ${forbidden}`);
+    }
+    // drive the binding's non-passthrough branch (pane not in a mode):
+    // run the same command the binding dispatches
+    T(["copy-mode", "-e", "-t", r.viewer]);
+    T(["send-keys", "-X", "-t", r.viewer, "scroll-up"]);
+    const pos = Number(T(["display-message", "-p", "-t", r.viewer, "#{scroll_position}"], true));
+    assert.ok(pos > 0, `scroll position increased (${pos})`);
+    assert.equal(T(["display-message", "-p", "-t", r.viewer, "#{pane_in_mode}"], true), "1", "in copy mode");
+    // wheel-down to bottom: -e exits copy mode at position 0
+    T(["send-keys", "-X", "-t", r.viewer, "scroll-down"]);
+    try { T(["send-keys", "-X", "-t", r.viewer, "scroll-down"]); } catch { /* exited at bottom — send-keys -X fails outside a mode */ }
+    assert.equal(T(["display-message", "-p", "-t", r.viewer, "#{pane_in_mode}"], true), "0", "copy mode exited at bottom");
+    // window never changed; viewer still holds only instA
+    assert.deepEqual(T(["list-windows", "-t", `=${r.viewer}`, "-F", "#{window_name}"], true).split("\n"), ["instA"]);
+    r.killViewer();
+    const windows = T(["list-windows", "-t", "=src", "-F", "#{window_name}"], true);
+    assert.ok(windows.includes("instA") && windows.includes("instB"), "source windows survive");
   } finally {
     spawnSync("tmux", ["-S", sock, "kill-server"], { timeout: 5000 });
     spawnSync("rm", ["-f", sock], { timeout: 5000 });
