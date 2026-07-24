@@ -43,7 +43,10 @@ the shell host imports views by name as `./views/<name>.mjs`:
 `theme.css` carries the panel tokens scoped under `.oas-view` so shell chrome is
 unaffected; `ensureTheme`'s fallback resolves `../theme.css` relative to the
 `views/` modules, and the harness preloads CSS in a way that can mask a broken
-fallback. The pi-style transcript UI itself was recovered from git history
+fallback. Keep token references token-only: `var(--warn)` is valid because the
+token exists in `theme.css`, while raw fallback literals such as
+`var(--warn, #b58900)` can fail the computed-inventory contrast test. The
+pi-style transcript UI itself was recovered from git history
 (`git show 002a442:capabilities/oas-web/ui/panel.html`) because the current
 panel is terminal-mirror-only and no longer contains it.
 

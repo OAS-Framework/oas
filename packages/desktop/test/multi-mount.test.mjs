@@ -1,5 +1,5 @@
 // Multi-mount regression (review de387d1): the shell opens several markdown
-// tabs and several per-instance diff tabs at once — mounting a second tab
+// tabs at once — mounting a second tab
 // must not empty the first, and disposing one must not blank the other.
 // mount() returns a per-mount disposer the view host prefers.
 import { test } from "node:test";
@@ -7,14 +7,12 @@ import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 
 const md = await import("../renderer/views/markdown.mjs");
-const dv = await import("../renderer/views/diff.mjs");
 
 function dom() {
   const d = new JSDOM("<!doctype html><html><body></body></html>");
   return d.window.document;
 }
 const fileApi = (content) => async () => ({ path: "/x/a.md", name: "a.md", size: 1, markdown: true, content });
-const diffApi = (branch) => async () => ({ repo: "/r", branch, files: [], diff: "" });
 
 test("markdown: two mounts coexist; disposing one keeps the other", async () => {
   const doc = dom();
@@ -52,30 +50,6 @@ test("markdown heading links and code-copy controls remain keyboard focusable", 
   copy.focus();
   assert.equal(doc.activeElement, copy);
   dispose();
-});
-
-test("diff: two mounts coexist; disposing one keeps the other", async () => {
-  const doc = dom();
-  const el1 = doc.createElement("div"); doc.body.append(el1);
-  const el2 = doc.createElement("div"); doc.body.append(el2);
-  const d1 = await dv.mount(el1, { api: diffApi("branch-a"), instance: "a" });
-  const d2 = await dv.mount(el2, { api: diffApi("branch-b"), instance: "b" });
-  assert.equal(typeof d1, "function", "mount must return a disposer");
-  assert.ok(el1.textContent.includes("branch-a"), "first tab intact after second mount");
-  assert.ok(el2.textContent.includes("branch-b"));
-  d2();
-  assert.ok(el1.textContent.includes("branch-a"), "other tab untouched by dispose");
-  d1();
-});
-
-test("diff: ctx.ws is forwarded to /api/diff", async () => {
-  const doc = dom();
-  const el = doc.createElement("div"); doc.body.append(el);
-  let seen = "";
-  const api = async (p) => { seen = p; return { repo: "/r", branch: "b", files: [], diff: "" }; };
-  const d = await dv.mount(el, { api, instance: "a", ws: "/Users/me/oas" });
-  assert.ok(seen.includes("ws=%2FUsers%2Fme%2Foas"), `ws missing in ${seen}`);
-  d();
 });
 
 test("module-level unmount() still disposes everything (harness compat)", async () => {

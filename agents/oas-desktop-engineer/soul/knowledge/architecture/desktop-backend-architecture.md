@@ -1,7 +1,7 @@
 ---
 type: Concept
 title: Desktop backend architecture — zero-dependency localhost server bundled in the app
-description: The desktop backend is a zero-dependency node:http server on 127.0.0.1 bundled at packages/desktop/server/, spawned by the Electron main process, serving the /api surface to the desktop renderer (its only client) and reusing the roster model and tmux as its only seams to the agents.
+description: The desktop backend is a zero-dependency node:http server on 127.0.0.1 bundled at packages/desktop/server/, spawned by the Electron main process, serving the /api surface to the desktop renderer (its only client) and reusing app-owned deployment reads plus tmux as its main seams to the agents.
 tags: [desktop, backend, architecture, http, tmux]
 timestamp: 2026-07-24
 ---
@@ -15,18 +15,19 @@ The backend lives in `packages/desktop/server/` (migrated from the retired
   spawned by the Electron main process (`main.mjs`); `--port <n>` and
   repeatable `--dir <ws>` are still honored. Endpoints:
   - `GET /api/panel?ws=<id>` — roster JSON per workspace.
-  - `POST /api/spawn` — spawns an agent in an allowlisted workspace root,
-    with `task: ""` meaning "await instructions" (see
+  - `POST /api/spawn` — validates the selected workspace root and agent before
+    crossing the OAS mutation boundary; until the compatible CLI adapter lands,
+    valid mutation requests degrade with a stable `cli-unavailable` 503 (see
     [spawn endpoint](/architecture/spawn-endpoint.md)).
   - `GET /api/brain/<agent>?ws=<id>` — returns soul artifact paths, package-level
     capability-agent skills, and workspace-scoped running-state for the desktop
-    brain view while resolving agent names through kernel lookup seams (see
-    [agent brain endpoint](/architecture/agent-brain-endpoint-and-view.md)).
+    brain view while resolving agent names through deployment-reader lookup seams
+    (see [agent brain endpoint](/architecture/agent-brain-endpoint-and-view.md)).
   - `GET /api/session/<instance>?ws=<id>&lines=n` — raw ANSI tmux `capture-pane` text plus pane geometry, cursor state, and history depth.
   - `GET /api/chat/<instance>?ws=<id>&limit=n` — parsed structured transcript turns.
-  - `GET /api/file` — guarded file reads for desktop viewers; realpaths the
-    requested path and every allowed root before containment checks (see
-    [the file guard lesson](/lessons/file-endpoint-realpath-guard.md)).
+  - `GET /api/file` — guarded file reads for desktop viewers; consumes
+    admitted canonical root strings and realpaths only the requested path before
+    containment checks (see [the file guard lesson](/lessons/file-endpoint-realpath-guard.md)).
   - `GET /api/diff` — worktree diff/stat reads for desktop viewers; derives
     `<home>/work` rather than using `inst.work` and parses NUL-delimited git
     rename stats (see [the work-mode lesson](/lessons/instance-work-mode-not-path.md)
@@ -47,31 +48,34 @@ The backend lives in `packages/desktop/server/` (migrated from the retired
   renderer views live in `packages/desktop/renderer/` (see
   [desktop renderer views port](/architecture/desktop-renderer-views-port.md)).
 
-# Kernel seams (all pre-existing, none owned here)
+# OAS deployment seams
 
-- **Roster**: the roster model (`collectControlPane(root)`, bundled with the
-  server after `lib/control-pane/` was deleted) — the same collector the old
-  TUI used. Slow collection runs in a hidden `collect` child-process path; the
-  serving process answers `/api/panel` and `findInstance(name, wsId)` from an
-  in-memory snapshot so
-  key/input endpoints are not blocked by roster rebuilds, and scoped instance
+- **Deployment reader + roster**: the backend no longer imports
+  `FRAMEWORK_ROOT`/`lib/core.mjs`. Read-only deployment discovery lives in
+  `packages/desktop/server/deployment.mjs`: it resolves workspace/team roots,
+  local and capability agents, skill manifests, frontmatter, and instances with
+  packaged-app tolerance for malformed observed deployments. See
+  [desktop deployment reader](/architecture/desktop-deployment-reader.md).
+
+  The roster model (`collectControlPane(root)`, bundled with the server after
+  `lib/control-pane/` was deleted) is still the snapshot producer. Slow
+  collection runs in a hidden `collect` child-process path; the serving process
+  answers `/api/panel` and `findInstance(name, wsId)` from an in-memory snapshot
+  so key/input endpoints are not blocked by roster rebuilds, and scoped instance
   lookups fail closed inside the supplied workspace instead of falling back to a
   global first match. Callers that have resolved a workspace must pass that
   workspace id so same-named instances in other workspaces do not leak into
   running-state or terminal decisions (see
   [the scoped snapshot lookup lesson](/lessons/workspace-scoped-snapshot-lookups.md)).
-  FRAMEWORK_ROOT resolution belongs to the app: `main.mjs` resolves the kernel
-  and the bundled server must not assume a capability-install path.
-  **The direct import of `lib/core.mjs` via FRAMEWORK_ROOT is transitional
-  migration debt**, not a durable boundary: per the desktop-succession
-  decision, operational OAS mutations belong behind a compatible installed
-  `oas ... --json` CLI, with observation-only degradation when no compatible
-  OAS install exists. Do not extend the direct-core bridge; retire it when
-  the CLI boundary lands.
-  Roster instance
-  objects expose `work` as the work mode, not a filesystem path; endpoints that
-  need a work tree derive `<home>/work` from `inst.home` (see
+  Roster instance objects expose `work` as the work mode, not a filesystem path;
+  endpoints that need a work tree derive `<home>/work` from `inst.home` (see
   [the work-mode lesson](/lessons/instance-work-mode-not-path.md)).
+
+- **OAS mutations**: operational mutations belong behind a compatible installed
+  `oas ... --json` CLI. The deployment reader is read-only; `spawnInstance` did
+  not move into it. Until the CLI adapter lands, mutation-capable routes preserve
+  validation first and then degrade with stable `cli-unavailable` 503 responses
+  instead of reintroducing a direct-core bridge.
 - **Session view + input**: tmux only — `capture-pane` to read and raw
   `/api/keys` delivery through `send-keys` / `paste-buffer` to write. The
   terminal's own input line is the sole input surface; do not reintroduce a

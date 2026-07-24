@@ -67,5 +67,5 @@ fail with `ERR_MODULE_NOT_FOUND`.
 - [Multi-workspace support](/architecture/multi-workspace-switcher.md)
 - [desktop backend architecture](/architecture/desktop-backend-architecture.md)
 - [Raw key passthrough and the loopback Host/Origin guards](/architecture/raw-key-passthrough-and-host-guard.md)
-- [Guard file-serving paths by realpathing requests and roots](/lessons/file-endpoint-realpath-guard.md)
+- [Guard file-serving paths with admitted canonical roots](/lessons/file-endpoint-realpath-guard.md)
 - [Desktop renderer views port](/architecture/desktop-renderer-views-port.md)

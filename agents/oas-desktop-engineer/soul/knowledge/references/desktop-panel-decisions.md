@@ -25,6 +25,7 @@ internalize:
   `packages/desktop/` (server bundled with the app); `lib/control-pane/` and
   `oas pane` were retired — the roster model moved into the desktop server.
   Per the decision, OAS lifecycle mutations from the app go through a
-  compatible installed `oas ... --json` CLI (observation-only when absent);
-  the current direct `lib/core.mjs` import is transitional debt, explicitly
-  not a co-equal path.
+  compatible installed `oas ... --json` CLI (observation-only when absent). The
+  desktop server's direct `lib/core.mjs` bridge has been removed: read-only
+  deployment discovery is app-owned, while mutation requests validate first and
+  then degrade as `cli-unavailable` 503 until the CLI adapter lands.

@@ -47,6 +47,15 @@ red. If they stay green, the test is documentation rather than protection. Do
 this especially when a review finding says "X must happen before Y" or "guard G
 must exist"; those are easy to test vacuously at the wrong layer.
 
+For security or stale-state fixes, the mutation check must hit the exact layer
+that carried the bug: an extracted guard block with a pre-captured admitted
+root, the endpoint's own containment using hostile roster objects, the
+production probe callback reached through a lying fake binary, or a stale UI
+path driven by a retained detached DOM handle with the control re-verified.
+Tests aimed at a sibling primitive, a freshly sanitized request path, or an input
+the production path has already cleaned can stay green after the real fix is
+reverted.
+
 Rule: when a review finding says "X happens in the wrong order in file F", the
 regression must execute F's code or an extraction of it. Testing only a helper F
 calls proves the helper, not the composition that misordered it. Corollary: code

@@ -3,10 +3,11 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { basename, join } from "node:path";
 
 // The roster model lives with the desktop server, outside the kernel tree.
-// The kernel seam (core.listInstances) is injected by the server after it
-// resolves FRAMEWORK_ROOT — a static relative import would break here.
-let listInstances = () => { throw new Error("model.mjs: initModel(core) must be called before collectControlPane"); };
-export function initModel(core) { listInstances = core.listInstances; }
+// The read seam (listInstances) is injected by the server from the app-owned
+// read-only deployment reader (server/deployment.mjs) — the packaged app
+// never imports the framework checkout's kernel.
+let listInstances = () => { throw new Error("model.mjs: initModel(reader) must be called before collectControlPane"); };
+export function initModel(reader) { listInstances = reader.listInstances; }
 
 function exec(command, args, options = {}) {
   try {

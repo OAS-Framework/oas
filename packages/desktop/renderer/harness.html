@@ -49,9 +49,7 @@
   <button class="tab" data-view="instances">Instances</button>
   <button class="tab" data-view="spawn">Spawn</button>
   <button class="tab" data-view="brain">Brain</button>
-  <button class="tab" data-view="jira">Jira</button>
   <button class="tab" data-view="markdown">Markdown</button>
-  <button class="tab" data-view="diff">Diff</button>
   <span class="spacer"></span>
   <span class="note" id="note"></span>
   <button class="tab" id="themebtn" title="Toggle light/dark">◐</button>
@@ -83,17 +81,12 @@
   const host = document.getElementById("host");
   let current = null;
   async function show(name, extra) {
-    // markdown needs a file path, diff an instance name — prompt when the
+    // markdown needs a file path — prompt when the
     // tab is clicked directly (openFile passes the path in `extra`)
     if (name === "markdown" && !extra) {
       const path = prompt("Absolute path of the file to open:");
       if (!path) return;
       extra = { path };
-    }
-    if (name === "diff" && !extra) {
-      const instance = prompt("Instance name to diff:");
-      if (!instance) return;
-      extra = { instance };
     }
     if (current) { current.mod.unmount(); current = null; }
     const mod = await import(`./views/${name}.mjs`);

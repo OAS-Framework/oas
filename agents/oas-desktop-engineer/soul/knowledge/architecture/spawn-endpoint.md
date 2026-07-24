@@ -1,7 +1,7 @@
 ---
 type: Concept
-title: Spawn endpoint root allowlist and empty-task semantics
-description: POST /api/spawn treats browser-supplied agentsRoot as a selector into the server's workspace roots, while task "" intentionally spawns an awaiting-instructions instance.
+title: Spawn endpoint root allowlist, empty-task semantics, and CLI-unavailable degradation
+description: POST /api/spawn treats browser-supplied agentsRoot as a selector into the server's workspace roots, preserves task "" as the awaiting-instructions spawn shape, and returns a stable cli-unavailable 503 until the CLI mutation adapter lands.
 tags: [desktop-backend, spawn, endpoint, security, task]
 timestamp: 2026-07-24
 ---
@@ -16,15 +16,18 @@ workspaces (`workspaces().flatMap((w) => w.roots)`). The client path is therefor
 a selector into a server-side allowlist, not a path-injection surface.
 
 Apply the same allowlist pattern to any future panel endpoint that accepts a
-path-shaped parameter from the browser.
+path-shaped parameter from the browser. Keep this validation in process even
+when the mutation adapter is unavailable, so root and agent mistakes stay
+meaningful client errors instead of collapsing into generic service degradation.
 
 # Empty task semantics
 
-The kernel needs no separate web-panel "no task" mode. Calling
-`spawnInstance(root, agent, { task: "" })` produces a `TASK.md` whose task section
-says "No task was provided at spawn time — await instructions." This matches the
-panel's default spawn flow: the default spawn button sends `task: ""`, and the
-optional "+task" flow prompts for task text before spawning.
+The desktop app needs no separate web-panel "no task" mode. The target OAS
+mutation remains `spawnInstance(root, agent, { task: "" })` / equivalent CLI
+semantics, producing a `TASK.md` whose task section says "No task was provided at
+spawn time — await instructions." This matches the panel's default spawn flow:
+the default spawn button sends `task: ""`, and the optional "+task" flow prompts
+for task text before spawning.
 
 Repo resolution for panel spawns mirrors the CLI fallback:
 `def.repo || defaultRepo(workspaceOf(root))`.
@@ -45,10 +48,15 @@ post-spawn instance actions](/lessons/post-spawn-roster-snapshot-lag.md).
 
 # Errors and verification
 
-Unknown agent names and spawn failures return HTTP 409 with the kernel error
-message truncated to 300 characters, matching the shape of other panel error
-responses.
+Unknown roots or agent names return HTTP 409 with the validation message
+truncated to 300 characters, matching the shape of other panel error responses.
+`spawnInstance` itself did not move into the app-owned deployment reader: until
+the compatible CLI adapter lands, requests that pass validation fail with stable
+`{ code: "cli-unavailable" }` degradation mapped to HTTP 503. Tests should pin
+that distinction so the UI can treat bad input differently from unavailable OAS
+mutation capability.
 
-This was verified end to end in v0.8.0 by spawning an instance through the panel
-API, observing it in `/api/panel`, capturing its tmux pane through
-`/api/session`, and retiring it with `oas retire`.
+The previous direct-kernel path was verified end to end in v0.8.0 by spawning an
+instance through the panel API, observing it in `/api/panel`, capturing its tmux
+pane through `/api/session`, and retiring it with `oas retire`. Future end-to-end
+spawn verification belongs with the CLI adapter.

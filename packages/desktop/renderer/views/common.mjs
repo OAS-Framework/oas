@@ -49,7 +49,7 @@ const wsListeners = new Set();
 let wsCurrent = (() => { try { return localStorage.getItem(WS_KEY) || ""; } catch { return ""; } })();
 /* Workspace GENERATION — bumped on every switch. Async paths capture it at
    dispatch and discard completions from an older generation: a deferred
-   roster/agents/jira response — or a finished spawn — from workspace A must
+   roster/agents response — or a finished spawn — from workspace A must
    never paint or act after the user switched to B (same-named instances
    across workspaces make identity checks insufficient; see the ws-scoping
    lesson). */
@@ -82,8 +82,8 @@ export function wsQuery(prefix = "?") {
 /* Per-instance endpoint path, ALWAYS scoped to the selected workspace.
    Same-named instances exist across workspaces; an unscoped request lets
    the server resolve globally — an Interrupt viewed in workspace B could
-   Ctrl-C workspace A's session, and chat/jira could leak A's data. Every
-   per-instance call (interrupt, chat, jira, session, keys…) must be built
+   Ctrl-C workspace A's session, and chat could leak A's data. Every
+   per-instance call (interrupt, chat, session, keys…) must be built
    through here. `query` is the extra query string without a leading ?/&. */
 export function instanceApiPath(kind, instance, query = "") {
   const q = query ? `?${query}${wsQuery("&")}` : wsQuery();

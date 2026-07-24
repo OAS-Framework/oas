@@ -55,15 +55,11 @@ test("pins ws on /api/brain/* like the other scoped endpoints", () => {
   assert.equal(apiUrl("/api/brain/tui-dev?ws=/stale/id", BASE, ws).searchParams.get("ws"), ws);
   // server-advertised caller ws → kept (workspace switching)
   assert.equal(apiUrl(`/api/brain/tui-dev?ws=${other}`, BASE, ws, new Set([ws, other])).searchParams.get("ws"), other);
-  // /api/diff/* follows the same policy
-  assert.equal(apiUrl("/api/diff/inst-a", BASE, ws).searchParams.get("ws"), ws);
-  assert.equal(apiUrl("/api/diff/inst-a?ws=/stale", BASE, ws).searchParams.get("ws"), ws);
-  assert.equal(apiUrl(`/api/diff/inst-a?ws=${other}`, BASE, ws, new Set([ws, other])).searchParams.get("ws"), other);
 });
 
 test("pins ws on the whole instance-addressed route family", () => {
   const ws = "/Users/me/oas", other = "/Users/me/lfx";
-  for (const ep of ["session", "keys", "interrupt", "jira", "chat", "diff", "brain"]) {
+  for (const ep of ["session", "keys", "interrupt", "chat", "brain"]) {
     // omitted ws → fails safe to the verified workspace
     assert.equal(apiUrl(`/api/${ep}/inst-a`, BASE, ws).searchParams.get("ws"), ws, `${ep}: pin on omission`);
     // stale/unknown caller ws → overwritten
