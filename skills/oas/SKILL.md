@@ -54,15 +54,15 @@ workflow requires it.
 
 ### Instance naming
 
-Name an instance for both **who it is** and **what this incarnation does**:
-`<soul-name>-<descriptive-role>`. Use a short, lowercase kebab-case role or
-purpose suffix (for example, `ux-designer-desktop-ux` or
-`reviewer-terminal-safety`), not an opaque number or generic word. When the
-full soul name would make the result unwieldy, abbreviate it to a recognizable,
-unambiguous form while preserving the descriptive suffix. Pass that suffix via
-`oas spawn --purpose <descriptive-role>` when spawning, or use the complete
-pattern as the explicit name with `oas create`. Never put secrets, user data,
-or volatile task details in an instance name.
+Name an instance for both **who it is** and **what this incarnation does** by
+spawning with `oas spawn <soul> --purpose <descriptive-role>`. OAS constructs
+`<full-soul-name>-<descriptive-role>`; use a short, lowercase kebab-case role
+suffix (for example, `desktop-ux` or `terminal-safety`), not an opaque number
+or generic word. The current spawn command always retains the full soul name,
+so shorten the purpose—not the soul prefix—when the result would be unwieldy.
+Do **not** use `oas create` to name an incarnation: it creates a new persistent
+soul. Never put secrets, user data, or volatile task details in an instance
+name.
 
 To self-retire, first finish memory/commit/reporting requirements, report final
 status, then run `oas retire <own-instance> --self`. Never retire merely to
