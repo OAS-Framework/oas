@@ -16,6 +16,7 @@ import { createViewLifecycle } from "./view-lifecycle.mjs";
 import { reserveKey, whenKeyFree } from "./tab-keys.mjs";
 import { createTerminalTab } from "./terminal-tab.mjs";
 import { createTabChrome, tabKeyAction, focusAfterLastTab } from "./tab-a11y.mjs";
+import { collapseKey, hasInstanceChildren, instanceVisibleInTree } from "./instance-tree.mjs";
 import {
   terminalTabsForWorkspace, tabVisibleInContext, canActivateTab,
   fallbackTabForContext, terminalOpenOwnsWorkspace,
@@ -113,27 +114,29 @@ let sidebarMode = "overview";
 let contextRosterGen = 0;
 let contextRosterEl = null;
 let contextFilter = "";
+let contextInstances = [];
+const collapsedInstances = new Set();
 
 function initContextRoster() {
   contextRosterEl = document.getElementById("instance-roster");
   const input = contextRosterEl.querySelector(".ctx-filter");
-  input.addEventListener("input", (e) => { contextFilter = e.target.value.toLowerCase(); refreshContextRoster(); });
+  input.addEventListener("input", (e) => {
+    contextFilter = e.target.value.toLowerCase();
+    renderContextRoster(contextInstances);
+  });
+  refreshContextRoster();
 }
 
 function setSidebarMode(mode) {
   sidebarMode = mode;
-  const sidebar = document.getElementById("sidebar");
-  const instances = mode === "instances";
-  sidebar.classList.toggle("instances-mode", instances);
-  if (contextRosterEl) contextRosterEl.hidden = !instances;
   if (typeof tabs !== "undefined") updateContextTabs();
 }
 
 async function refreshContextRoster() {
-  if (!contextRosterEl || sidebarMode !== "instances") return;
+  if (!contextRosterEl) return;
   const myGen = ++contextRosterGen;
   const ws = currentWorkspace();
-  const owns = () => myGen === contextRosterGen && sidebarMode === "instances" && currentWorkspace() === ws;
+  const owns = () => myGen === contextRosterGen && currentWorkspace() === ws;
   const listEl = contextRosterEl.querySelector(".ctx-list");
   let panel;
   try {
@@ -143,14 +146,19 @@ async function refreshContextRoster() {
     return;
   }
   if (!owns()) return;
-  renderContextRoster(panel.instances || []);
+  contextInstances = panel.instances || [];
+  renderContextRoster(contextInstances);
 }
 
 function renderContextRoster(instances) {
   const listEl = contextRosterEl.querySelector(".ctx-list");
   listEl.innerHTML = "";
-  const visible = instances.filter((i) => !contextFilter ||
+  const matching = instances.filter((i) => !contextFilter ||
     [i.instance, i.agent, i.repoName, i.task].some((v) => String(v || "").toLowerCase().includes(contextFilter)));
+  const ws = currentWorkspace();
+  const visible = matching.filter((i) => instanceVisibleInTree(
+    i, instances, collapsedInstances, ws, !!contextFilter,
+  ));
   contextRosterEl.querySelector(".ctx-count").textContent = `${instances.filter((i) => i.running).length}/${instances.length}`;
   if (!visible.length) {
     listEl.innerHTML = `<div class="ctx-empty">${instances.length ? "Nothing matches." : "No instances."}</div>`;
@@ -163,13 +171,15 @@ function renderContextRoster(instances) {
       rh.textContent = repo;
       listEl.append(rh);
       for (const i of items) {
-        const row = document.createElement("button");
+        const rowWrap = document.createElement("div");
+        rowWrap.className = "ctx-tree-row";
+        rowWrap.style.setProperty("--depth", String(i.depth || 0));
         const activeKey = tabs.get(activeTab)?.key;
-        const isActive = activeKey === `term:${currentWorkspace()}:${i.instance}`;
-        row.className = "ctx-inst" + (i.running ? "" : " idle") + (isActive ? " active" : "");
-        row.style.setProperty("--depth", String(i.depth || 0));
-        row.disabled = !i.running;
-        row.title = i.running ? `Open ${i.instance} terminal` : `${i.instance} is idle`;
+        const isActive = activeKey === `term:${ws}:${i.instance}`;
+        const key = collapseKey(ws, i.instance);
+        const hasChildren = hasInstanceChildren(instances, i.instance);
+        const collapsed = collapsedInstances.has(key);
+
         // One guide per REAL ancestry depth — not a one-level .child class.
         const guides = document.createElement("span");
         guides.className = "ctx-guides";
@@ -179,6 +189,25 @@ function renderContextRoster(instances) {
           guide.style.left = `${10 + d * 14}px`;
           guides.append(guide);
         }
+        const disclosure = document.createElement("button");
+        disclosure.type = "button";
+        disclosure.className = `ctx-disclosure${hasChildren ? "" : " empty"}`;
+        disclosure.textContent = collapsed ? "▸" : "▾";
+        disclosure.tabIndex = hasChildren ? 0 : -1;
+        if (hasChildren) {
+          disclosure.setAttribute("aria-expanded", String(!collapsed));
+          disclosure.setAttribute("aria-label", `${collapsed ? "Expand" : "Collapse"} ${i.instance}`);
+          disclosure.addEventListener("click", () => {
+            if (collapsed) collapsedInstances.delete(key); else collapsedInstances.add(key);
+            renderContextRoster(contextInstances);
+          });
+        } else disclosure.setAttribute("aria-hidden", "true");
+
+        const row = document.createElement("button");
+        row.type = "button";
+        row.className = "ctx-inst" + (i.running ? "" : " idle") + (isActive ? " active" : "");
+        row.disabled = !i.running;
+        row.title = i.running ? `Open ${i.instance} terminal` : `${i.instance} is idle`;
         const dot = document.createElement("span");
         dot.className = `ctx-dot ${i.running ? "on" : "off"}`;
         const copy = document.createElement("span");
@@ -190,9 +219,10 @@ function renderContextRoster(instances) {
         meta.className = "ctx-meta";
         meta.textContent = i.task || i.agent || "";
         copy.append(name, meta);
-        row.append(guides, dot, copy);
+        row.append(dot, copy);
         row.addEventListener("click", () => openTerminalTab(i.instance));
-        listEl.append(row);
+        rowWrap.append(guides, disclosure, row);
+        listEl.append(rowWrap);
       }
     }
   }
@@ -527,15 +557,17 @@ api("/api/panel").then((p) => {
   document.getElementById("ws-name").textContent = p.workspace?.name ? `· ${p.workspace.name}` : "";
 }).catch(() => {});
 
-// Contextual instance roster: the ONE shell sidebar becomes the recursive
-// roster in Instances mode (no view-owned second sidebar).
+// Persistent recursive instance tree: always available below the three nav
+// surfaces, with no second/contextual sidebar and no width jump.
 initContextRoster();
 onWorkspaceChange(() => {
   contextRosterGen++;
+  contextInstances = [];
   updateContextTabs();
   if (sidebarMode === "instances") showInstances();
+  else refreshContextRoster();
 });
-setInterval(() => { if (sidebarMode === "instances") refreshContextRoster(); }, 4000);
+setInterval(() => refreshContextRoster(), 4000);
 
 // Home surface: the agent hierarchy — running instances and how they relate.
 showStage("hierarchy");
