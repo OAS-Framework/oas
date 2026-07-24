@@ -205,7 +205,34 @@ test("resolved add domain failure renders prose and never switches", async () =>
   assert.equal(document.getElementById("ws-modal").hidden, false);
   assert.equal(document.querySelector(".ws-dialog").getAttribute("aria-busy"), "false");
   assert.equal(document.getElementById("ws-dialog-status").textContent, "This server is managed outside the app.");
+  assert.equal(document.activeElement, document.getElementById("ws-confirm"));
   assert.deepEqual(selected, []);
+  dom.window.close();
+});
+
+test("picker domain and transport failures restore Browse focus", async () => {
+  let rejectTransport = false;
+  const { dom, document, controller } = setup({
+    discoverSuggestions: async () => ({ stale: false, suggestions: [A] }),
+    pickWorkspace: async () => {
+      if (rejectTransport) throw new Error("Picker transport failed.");
+      return { ok: false, code: "foreign-server", reason: "This server is managed outside the app." };
+    },
+  });
+  controller.begin()(B, [B]);
+  await controller.openModal();
+  document.getElementById("ws-browse").click();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(document.getElementById("ws-dialog-status").textContent, "This server is managed outside the app.");
+  assert.equal(document.activeElement, document.getElementById("ws-browse"));
+
+  document.getElementById("ws-cancel").click();
+  rejectTransport = true;
+  await controller.openModal();
+  document.getElementById("ws-browse").click();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(document.getElementById("ws-dialog-status").textContent, "Picker transport failed.");
+  assert.equal(document.activeElement, document.getElementById("ws-browse"));
   dom.window.close();
 });
 
