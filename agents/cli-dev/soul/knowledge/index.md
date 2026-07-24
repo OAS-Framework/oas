@@ -32,11 +32,11 @@ read what the current task needs, not everything.
 * [lessons/capability-source-edits-require-lock-refresh.md](lessons/capability-source-edits-require-lock-refresh.md) - edits under capabilities/<pkg>/ change capabilityIntegrity, so clean-clone CI fails restore unless the package version and matching oas-lock.json source/version/integrity are refreshed in the same commit.
 * [lessons/json-mode-cli-contract.md](lessons/json-mode-cli-contract.md) - when a CLI command grows a machine-readable --json mode for an external consumer, success and failure must be one stdout JSON envelope with stable error codes, and all human progress prose must move to stderr in JSON mode.
 * [lessons/json-envelope-dispatch-boundary.md](lessons/json-envelope-dispatch-boundary.md) - A capability command's --json envelope guarantee is void if the generic CLI dispatcher can fail before the command boundary and print help or stderr instead.
-* [lessons/release-workflow-static-tests.md](lessons/release-workflow-static-tests.md) - A cheap, robust way to regression-test a GitHub Actions release workflow's binding ordering guarantees (exact-tag checkout, build-before-publish, GH-Release-after-npm, bump coverage) is a node:test file asserting indexOf ordering and regexes over the raw YAML.
+* [lessons/release-workflow-static-tests.md](lessons/release-workflow-static-tests.md) - A cheap, robust way to regression-test a GitHub Actions release workflow's binding ordering guarantees is a node:test file asserting indexOf ordering and regexes over raw YAML, but script references still need spawned package-script tests.
 
 ## Playbooks
 
-* [playbooks/release-tag-driven-ci.md](playbooks/release-tag-driven-ci.md) - shipping via the vX.Y.Z tag: never bump locally, probe the published artifact.
+* [playbooks/release-tag-driven-ci.md](playbooks/release-tag-driven-ci.md) - Releases are cut by pushing a vX.Y.Z tag on main which makes CI bump and publish packages; local version bumps break the workflow, retries must skip already-published artifacts, and verification means installing the published artifact.
 * [playbooks/test-conventions.md](playbooks/test-conventions.md) - test/capabilities.test.mjs house style: temp dirs, fixtureSoul, fakeRuntimes, spawnSync of the CLI.
 
 ## References
