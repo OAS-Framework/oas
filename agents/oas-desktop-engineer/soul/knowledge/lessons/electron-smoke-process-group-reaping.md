@@ -1,7 +1,7 @@
 ---
 type: Lesson
 title: Smoke scripts that launch Electron must reap by process group on every exit path
-description: Electron smoke scripts need detached process groups, group-kill cleanup on exit/signal/error paths, and scoped process-count verification so packaged app helpers do not leak.
+description: CI smoke scripts that launch Electron need detached process groups, group-kill cleanup on exit/signal/error paths, and scoped process-count verification; local agent sessions on operator machines must not run packaged-app launch smoke.
 tags: [electron, testing, smoke, process-management, desktop]
 timestamp: 2026-07-24
 ---
@@ -20,8 +20,15 @@ needed manual cleanup. Three causes compounded:
 3. **Debug iteration multiplies leaks.** Re-running a leaky smoke script while
    chasing an unrelated bug leaves one more process tree each time.
 
-For Electron smoke scripts, keep the process management as a structural part
-of the harness:
+Follow-up incident: process-group reaping is not a local safety guarantee for
+packaged GUI smoke. Detached Electron descendants and orphaned coordinator smoke
+apps can keep respawning bundled-server children; [never launch packaged GUI
+apps from agent sessions on operator machines](/lessons/no-packaged-gui-launches-local.md).
+This lesson is for CI and throwaway harness design, not permission to run the
+packaged-app launch phase locally.
+
+For Electron smoke scripts that run in CI, keep the process management as a
+structural part of the harness:
 
 - spawn every child with `detached: true` so it leads its own process group,
   and register it in a module-level set;
@@ -36,11 +43,13 @@ of the harness:
 - add an `unref()` wall-clock watchdog so a hung CDP probe cannot wait
   forever.
 
-Verification discipline: after both a PASS run and a forced-failure run
-(SIGTERM mid-launch), `ps aux | grep <worktree-path> | wc -l` must be zero.
-Scope the grep to the worktree path; do not kill by app name because a real OAS
-Desktop from another checkout may be running. This is the same boundary as
-[scope destructive cleanup during live desktop testing](/lessons/pkill-scoping-discipline.md).
+Verification discipline for CI or other throwaway runners: after both a PASS
+run and a forced-failure run (SIGTERM mid-launch), `ps aux | grep
+<worktree-path> | wc -l` must be zero. Scope the grep to the worktree path; do
+not kill by app name because a real OAS Desktop from another checkout may be
+running. On an operator machine, do not run this launch verification; use static
+artifact checks instead. This is the same boundary as [scope destructive cleanup
+during live desktop testing](/lessons/pkill-scoping-discipline.md).
 
 Keep the reusable reaping path in `packages/desktop/scripts/proc-reaper.mjs` and
 cover it with fake- and real-process tests: a shell leader can exit while a

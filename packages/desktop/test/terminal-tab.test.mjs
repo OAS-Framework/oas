@@ -107,3 +107,50 @@ test("session-ended (pty exit) then close: banner shown, no double-kill", async 
   await tab.close();
   assert.ok(!d.log.some((l) => l.startsWith("closePty")), "forget() prevented a double-kill");
 });
+
+// Slice G: the structured term:open result → lifecycle translation
+// (review cb7622e-r2 important 1). The doubles above return a bare numeric
+// id (the legacy/fallback path); these drive the {id}/{reused}/{capped}/
+// {error} shapes main.mjs now returns and assert the actionable banner /
+// numeric resolve — a regression (e.g. treating {capped:true} as a truthy
+// id) would otherwise pass the whole suite.
+test("term:open result translation: {id} resolves to the numeric id (attach proceeds)", async () => {
+  const d = makeDoubles(Promise.resolve({ id: 7 }));
+  const tab = mk(d);
+  await tab.start();
+  assert.ok(d.log.includes("focus"), "onReady ran → attach proceeded with the unwrapped id");
+  assert.ok(!d.wrap.querySelector(".term-banner"), "no error banner on success");
+  await tab.close();
+  assert.ok(d.log.includes("closePty:7"), "the unwrapped id is what gets closed");
+});
+
+test("term:open result translation: {reused,id} → actionable 'already open' banner, no attach", async () => {
+  const d = makeDoubles(Promise.resolve({ reused: true, id: 3 }));
+  const tab = mk(d);
+  await tab.start();
+  const banner = d.wrap.querySelector(".term-banner");
+  assert.ok(banner && /already open/i.test(banner.textContent), `reused banner (got: ${banner?.textContent})`);
+  assert.ok(!d.log.includes("focus"), "no attach for a reused target");
+  await tab.close();
+});
+
+test("term:open result translation: {capped} → 'Terminal limit reached' with the runtime max", async () => {
+  const d = makeDoubles(Promise.resolve({ capped: true, active: 20, max: 20 }));
+  const tab = mk(d);
+  await tab.start();
+  const banner = d.wrap.querySelector(".term-banner");
+  assert.ok(banner && /Terminal limit reached \(20\)/.test(banner.textContent), `cap banner (got: ${banner?.textContent})`);
+  assert.ok(/Close a terminal tab first/.test(banner.textContent), "actionable guidance present");
+  assert.ok(!d.log.includes("focus"), "no attach when capped");
+  await tab.close();
+});
+
+test("term:open result translation: {error} → surfaces the message, no attach", async () => {
+  const d = makeDoubles(Promise.resolve({ error: "no tmux target =s:=1" }));
+  const tab = mk(d);
+  await tab.start();
+  const banner = d.wrap.querySelector(".term-banner");
+  assert.ok(banner && /no tmux target/.test(banner.textContent), `error banner (got: ${banner?.textContent})`);
+  assert.ok(!d.log.includes("focus"), "no attach on error");
+  await tab.close();
+});

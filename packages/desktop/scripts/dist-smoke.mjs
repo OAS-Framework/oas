@@ -17,12 +17,13 @@
 // xvfb-run is present (the workflow provides it); on macOS Electron runs
 // headless-ish natively.
 import { spawn } from "node:child_process";
-import { existsSync, readdirSync, statSync, mkdtempSync } from "node:fs";
+import { existsSync, readdirSync, statSync, readFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createReaper } from "./proc-reaper.mjs";
 import { runAbiProbe } from "./smoke-probes.mjs";
+import { WATCHDOG_MS, PHASE_BUDGET_MS, boundedTail, readDevToolsPort, awaitClose } from "./launch-probe.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PKG = join(HERE, "..");
@@ -44,8 +45,7 @@ process.on("exit", reapAll);
 for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"]) process.on(sig, () => { reapAll(); process.exit(1); });
 process.on("uncaughtException", (e) => { console.error(`dist:smoke FAIL — uncaught: ${e.message}`); reapAll(); process.exit(1); });
 process.on("unhandledRejection", (e) => { console.error(`dist:smoke FAIL — unhandled: ${e?.message || e}`); reapAll(); process.exit(1); });
-const WATCHDOG_MS = 120_000;
-const watchdog = setTimeout(() => { console.error(`dist:smoke FAIL — watchdog: exceeded ${WATCHDOG_MS / 1000}s`); reapAll(); process.exit(1); }, WATCHDOG_MS);
+const watchdog = setTimeout(() => { console.error(`dist:smoke FAIL — watchdog: exceeded ${WATCHDOG_MS / 1000}s (derived from phase budgets)`); reapAll(); process.exit(1); }, WATCHDOG_MS);
 watchdog.unref?.();
 
 // ---- 1. artifact inventory -------------------------------------------------
@@ -105,35 +105,88 @@ if (!existsSync(app.exe)) fail(`packaged executable missing: ${app.exe}`);
   // Probe via the extracted runner (scripts/smoke-probes.mjs): the runner
   // CONTRACTUALLY requires the reaper's runTracked — async, detached,
   // group-tracked; reintroducing synchronous execution fails its tests.
-  const r = await runAbiProbe(reaper, app.exe, join(app.resources, "app.asar", "main.mjs"), { timeout: 30000 });
+  const r = await runAbiProbe(reaper, app.exe, join(app.resources, "app.asar", "main.mjs"), { timeout: PHASE_BUDGET_MS.abiProbe });
   if (!r.ok) fail(r.detail);
   ok(r.detail);
 }
 
 // ---- 3. packaged app launches and the renderer reaches the shell ------------
-{
-  const port = 9500 + Math.floor(Math.random() * 400);
+// (CI-oriented phase: on operator machines run only the static phases — see
+// the soul's no-GUI-launches policy; OAS_SMOKE_SKIP_LAUNCH=1 skips this.)
+if (process.env.OAS_SMOKE_SKIP_LAUNCH === "1") {
+  // Refuse to silently degrade the launch smoke in CI (review ee04a44-r2
+  // nit): if the skip leaks into GitHub Actions it would print ok while
+  // testing nothing.
+  if (process.env.GITHUB_ACTIONS === "true") fail("OAS_SMOKE_SKIP_LAUNCH must not be set in CI — the launch phase is required there");
+  ok("launch phase skipped (OAS_SMOKE_SKIP_LAUNCH=1) — CI runs it");
+} else {
+  // Readiness probing (review ee04a44 + r2). The port is obtained race-free
+  // and IDENTITY-BOUND: launch with --remote-debugging-port=0 and read the
+  // DevToolsActivePort file Chromium writes into --user-data-dir — the port
+  // is definitionally OUR child's, so no stale/foreign listener can be
+  // mistaken for the app (no check-then-use free-port race). The backend
+  // port is app-selected: main.mjs's ensureServer runs its own freePort
+  // from OAS_DESKTOP_PORT, so a random start value cannot collide fatally.
+  // stdio is captured (bounded rolling tail) and drained on 'close' before
+  // any crash tail is reported; startup exit fails fast; one launch, one
+  // bounded wait — never a blind retry.
   const userData = mkdtempSync(join(tmpdir(), "oas-desktop-smoke-"));
-  const args = [`--remote-debugging-port=${port}`, `--user-data-dir=${userData}`,
+  const args = [`--remote-debugging-port=0`, `--user-data-dir=${userData}`,
     "--no-sandbox", "--disable-gpu", "--dir", userData /* empty workspace: picker path, no deployment needed */];
-  // spawnTracked: detached process group + registered for unconditional
-  // reaping on every exit path (see leak-proofing block above).
-  const child = spawnTracked(app.exe, args, { stdio: "ignore", env: { ...process.env, OAS_DESKTOP_PORT: String(10000 + Math.floor(Math.random() * 2000)) } });
+  const child = spawnTracked(app.exe, args, { stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, OAS_DESKTOP_PORT: String(10000 + Math.floor(Math.random() * 1500)) } });
+  let childLog = "", childExit = null;
+  child.stdout?.on("data", (d) => { childLog = boundedTail(childLog, d); });
+  child.stderr?.on("data", (d) => { childLog = boundedTail(childLog, d); });
+  child.on("exit", (code, sig) => { childExit = { code, sig }; });
+  // Slice G resource-containment baseline: capture the `oasdesk-*` tmux
+  // viewer count before launch and assert it is RESTORED after the app is
+  // reaped — on BOTH the success and the forced-failure/timeout paths.
+  // Proves the app's shutdown + orphan sweep leave no viewer residue.
+  // (async count — the smoke bans synchronous child execution.)
+  async function oasdeskViewerCount() {
+    const r = await runTracked("tmux", ["list-sessions", "-F", "#{session_name}"], { timeout: 5000 });
+    if (r.timedOut) return null;                     // tmux wedged — skip (unusual)
+    return String(r.stdout).split("\n").filter((s) => s.startsWith("oasdesk-")).length;
+  }
+  const viewerBaseline = await oasdeskViewerCount(); // 0 when tmux is absent/no-server (ENOENT/nonzero → empty stdout → 0); null only on a tmux timeout
+  let launchError = null;
+  // drainTail: return the current bounded output tail. Only wait for a
+  // final flush when the child has ALREADY EXITED (a live child's tail is
+  // already current, and awaiting its 'close' would block until the
+  // watchdog — review 7bdaf1e-r2 finding 2). awaitClose is total-bounded
+  // regardless, so even the exited path cannot hang.
+  const drainTail = async () => { if (childExit !== null) await awaitClose(child, { drainMs: 2000 }); return childLog.slice(-1500); };
   try {
-    let targets = null;
-    for (let i = 0; i < 60 && !targets; i++) {
+    // ONE shared launchReady deadline across the port wait AND the /json
+    // poll (review 7bdaf1e-r2 finding 1: spending launchReady twice made
+    // worst-case success 240s > the 180s watchdog — the premature-kill this
+    // commit exists to prevent). /json answers ~immediately after
+    // DevToolsActivePort is written, so sharing the budget is ample.
+    const launchDeadline = Date.now() + PHASE_BUDGET_MS.launchReady;
+    const portRes = await readDevToolsPort(userData, { join, existsSync, readFileSync, now: () => Date.now(), sleep: (ms) => new Promise((r) => setTimeout(r, ms)) }, {
+      timeoutMs: Math.max(0, launchDeadline - Date.now()), pollMs: 250, childExited: () => childExit !== null,
+    });
+    if (portRes.error) throw new Error(`${portRes.error} (app alive=${!childExit}); output tail:\n${await drainTail()}`);
+    const port = portRes.port;
+    let targets = null, lastDiag = 0;
+    while (!targets && Date.now() < launchDeadline) {
+      if (childExit) throw new Error(`packaged app exited during startup (code=${childExit.code} sig=${childExit.sig}); output tail:\n${await drainTail()}`);
       await new Promise((r) => setTimeout(r, 500));
       try {
-        const res = await fetch(`http://127.0.0.1:${port}/json`);
+        const res = await fetch(`http://127.0.0.1:${port}/json`, { signal: AbortSignal.timeout(2000) });
         const list = await res.json();
         targets = list.find((t) => t.type === "page" && /index\.html/.test(t.url || ""));
       } catch { /* not up yet */ }
+      if (!targets && Date.now() - lastDiag > 10_000) {
+        lastDiag = Date.now();
+        console.log(`dist:smoke … waiting for CDP (${Math.round((launchDeadline - Date.now()) / 1000)}s budget left; app alive=${!childExit})`);
+      }
     }
-    if (!targets) fail("packaged app never exposed its renderer over CDP");
+    if (!targets) throw new Error(`packaged app never exposed its renderer over CDP within ${PHASE_BUDGET_MS.launchReady / 1000}s (app alive=${!childExit}); output tail:\n${await drainTail()}`);
     // Evaluate in the page: the shell booted if the nav rail rendered.
     const ws = new WebSocket(targets.webSocketDebuggerUrl);
     const result = await new Promise((resolve, reject) => {
-      const to = setTimeout(() => reject(new Error("CDP evaluate timeout")), 20000);
+      const to = setTimeout(() => reject(new Error("CDP evaluate timeout")), PHASE_BUDGET_MS.cdpEvaluate);
       ws.onopen = () => ws.send(JSON.stringify({
         id: 1, method: "Runtime.evaluate",
         params: {
@@ -155,9 +208,27 @@ if (!existsSync(app.exe)) fail(`packaged executable missing: ${app.exe}`);
       ws.onerror = (e) => { clearTimeout(to); reject(new Error(`CDP socket error`)); };
     });
     ws.close();
-    if (!String(result).startsWith("SHELL_OK")) fail(`renderer did not reach the shell: ${result}`);
+    if (!String(result).startsWith("SHELL_OK")) throw new Error(`renderer did not reach the shell: ${result}`);
     ok(`packaged app launched; ${result}`);
-  } finally { reapGroup(child); }
+  } catch (e) {
+    launchError = e;
+  } finally {
+    reapGroup(child);
+    // Baseline restoration assertion — runs on success AND failure (the
+    // catch above converted every launch failure to a caught error so this
+    // finally always executes; no fail()/process.exit skips it).
+    if (viewerBaseline !== null) {
+      let restored = false;
+      for (let i = 0; i < 10 && !restored; i++) {
+        await new Promise((r) => setTimeout(r, 500));
+        const now = await oasdeskViewerCount();
+        if (now !== null && now <= viewerBaseline) restored = true;
+      }
+      if (!restored) fail(`tmux viewer baseline not restored after ${launchError ? "forced failure" : "success"} (baseline ${viewerBaseline}, still elevated)`);
+      ok(`tmux viewer baseline restored (${viewerBaseline}) after ${launchError ? "forced failure" : "success"}`);
+    }
+  }
+  if (launchError) fail(launchError.message);
 }
 
 reapAll();

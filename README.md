@@ -260,9 +260,10 @@ The reference implementation ships as two npm packages from this repo:
 - `capabilities/oas-authoring/` — additive framework-authoring skills.
 - `injects/` — kernel and work-mode instruction sources.
 - `packages/desktop/` — the OAS Desktop app (private package; distributed as
-  installers on GitHub Releases — see `docs/release-notes/`). It replaced the
-  retired `oas.web` panel and `oas pane` command in v0.18.0; migration notes
-  in [docs/release-notes/v0.18.0.md](docs/release-notes/v0.18.0.md).
+  installers on GitHub Releases). Install/migration/support guide:
+  [docs/desktop.md](docs/desktop.md). It replaced the retired `oas.web`
+  panel and `oas pane` command in v0.18.0; migration notes in
+  [docs/release-notes/v0.18.0.md](docs/release-notes/v0.18.0.md).
 
 **`@oas-framework/pi`** — a thin pi adapter: instance-local skill exposure and
 memory session events. It registers no tools — all operations go through the
