@@ -82,6 +82,11 @@ module.exports = {
   },
   deb: {
     depends: ["tmux"],
+    // electron-builder requires a DEB maintainer + project homepage; without
+    // them the deb target fails AFTER the AppImage builds (surfaced by the
+    // build-installers CI). homepage is read from packages/desktop
+    // package.json; the maintainer is set explicitly here.
+    maintainer: "OAS Framework <maintainers@oas-framework.dev>",
   },
   dmg: {
     // default layout; no code that would require signing

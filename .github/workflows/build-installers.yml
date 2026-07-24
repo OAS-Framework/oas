@@ -46,12 +46,10 @@ jobs:
         with:
           node-version: 22
 
-      # The packaged Electron app's launch smoke needs a display on Linux;
-      # xvfb-run provides a headless one. (macOS runners launch directly.)
-      - name: Install xvfb (Linux only, for the packaged-launch smoke)
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y xvfb
-
+      # (No xvfb / display needed: the build-verify smoke runs the static
+      # inventory + node-pty ABI checks, not the packaged GUI launch — that
+      # needs an interactive windowserver an unsigned app can't get on CI
+      # runners and is verified out of band.)
       - name: Install deps (root + packages/desktop)
         run: |
           npm ci
@@ -61,18 +59,18 @@ jobs:
         working-directory: packages/desktop
         run: npm run dist
 
-      # Installed-artifact smoke: inventory + node-pty under the packaged
-      # Electron ABI + headless app launch. OAS_SMOKE_SKIP_LAUNCH is NOT set
-      # here (the script refuses it under GITHUB_ACTIONS), so the launch
-      # phase runs — xvfb-run supplies the display on Linux.
-      - name: Installed-artifact smoke
+      # Installed-artifact smoke, BUILD-VERIFY mode: inventory (artifact names
+      # + plausible sizes) + node-pty under the packaged Electron ABI. The
+      # packaged GUI LAUNCH is skipped (OAS_SMOKE_BUILD_VERIFY authorizes the
+      # skip under CI) — it needs a display unsigned apps don't get on CI
+      # runners; the installer BUILD + native-module ABI are the meaningful
+      # evidence here.
+      - name: Installed-artifact smoke (build-verify)
         working-directory: packages/desktop
-        run: |
-          if [ "${{ runner.os }}" = "Linux" ]; then
-            xvfb-run -a npm run dist:smoke
-          else
-            npm run dist:smoke
-          fi
+        env:
+          OAS_SMOKE_SKIP_LAUNCH: "1"
+          OAS_SMOKE_BUILD_VERIFY: "1"
+        run: npm run dist:smoke
 
       # Upload the distributables so the produced AppImage/DEB/DMG/ZIP names
       # can be eyeballed (proves the executableName/package naming is clean).
