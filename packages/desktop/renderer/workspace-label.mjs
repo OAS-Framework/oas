@@ -1,19 +1,35 @@
-// Generation-owned workspace header updates. Each roster request begins an
-// operation; only the latest operation may commit a server-resolved name.
+// Generation-owned workspace selector updates. Each roster request begins an
+// operation; only the latest operation may commit server-resolved options.
 export function createWorkspaceLabel(element) {
   let generation = 0;
-  const render = (workspace) => {
+  const render = (workspace, workspaces = []) => {
     const id = workspace?.id || "";
-    const name = workspace?.name || id.split("/").filter(Boolean).at(-1) || "";
-    element.textContent = name || "Resolving…";
-    element.title = id ? `Active workspace: ${id}` : "Resolving active workspace";
+    const choices = Array.isArray(workspaces) ? [...workspaces] : [];
+    if (workspace && !choices.some((candidate) => candidate.id === id)) choices.unshift(workspace);
+    element.replaceChildren();
+    if (!choices.length) {
+      const option = element.ownerDocument.createElement("option");
+      option.value = "";
+      option.textContent = "Resolving…";
+      element.append(option);
+      element.title = "Resolving active workspace";
+      return;
+    }
+    for (const choice of choices) {
+      const option = element.ownerDocument.createElement("option");
+      option.value = choice.id;
+      option.textContent = choice.name || String(choice.id || "").split("/").filter(Boolean).at(-1) || "Workspace";
+      element.append(option);
+    }
+    element.value = id;
+    element.title = id ? `Active workspace: ${id}` : "Select active workspace";
   };
   return {
     begin() {
       const token = ++generation;
-      return (workspace) => {
+      return (workspace, workspaces) => {
         if (token !== generation) return false;
-        render(workspace);
+        render(workspace, workspaces);
         return true;
       };
     },
@@ -22,4 +38,10 @@ export function createWorkspaceLabel(element) {
       render(null);
     },
   };
+}
+
+export function bindWorkspaceSelect(element, selectWorkspace) {
+  const onChange = () => selectWorkspace(element.value);
+  element.addEventListener("change", onChange);
+  return () => element.removeEventListener("change", onChange);
 }

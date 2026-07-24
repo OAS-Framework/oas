@@ -89,17 +89,18 @@ const ANSI = [
 ];
 export function xtermTheme(el = document.documentElement) {
   const css = getComputedStyle(el);
-  const v = (name, fallback) => (css.getPropertyValue(name) || "").trim() || fallback;
+  const v = (name) => (css.getPropertyValue(name) || "").trim();
   const t = {
-    background: v("--term-bg", "#0a0d12"),
-    foreground: v("--term-fg", "#e6edf3"),
-    cursor: v("--term-fg", "#e6edf3"),
-    cursorAccent: v("--term-bg", "#0a0d12"),
-    selectionBackground: v("--term-sel", "#264f78"),
+    background: v("--term-bg"),
+    foreground: v("--term-fg"),
+    cursor: v("--term-fg"),
+    cursorAccent: v("--term-bg"),
+    selectionBackground: v("--term-sel"),
+    selectionForeground: v("--term-sel-fg"),
   };
   const camel = (s) => s.replace(/-(\w)/g, (m, c) => c.toUpperCase());
   for (const name of ANSI) {
-    const val = v(`--ansi-${name}`, null);
+    const val = v(`--ansi-${name}`);
     if (val) t[camel(name)] = val;
   }
   return t;

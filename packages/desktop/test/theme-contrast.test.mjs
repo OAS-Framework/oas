@@ -4,6 +4,7 @@ import { readFileSync, readdirSync } from "node:fs";
 
 const renderer = new URL("../renderer/", import.meta.url);
 const css = readFileSync(new URL("theme.css", renderer), "utf8");
+const themeJs = readFileSync(new URL("theme.mjs", renderer), "utf8");
 function shippedStyleSources(dir = renderer) {
   const chunks = [];
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -48,11 +49,23 @@ const ansi = [
 const pairs = [
   ...["fg", "muted", "faint", "accent"].flatMap((fg) => ["bg", "surface", "surface-2"].map((bg) => [fg, bg])),
   ...["ok", "warn", "danger"].flatMap((fg) => ["bg", "surface", "surface-2", "term-bg"].map((bg) => [fg, bg])),
-  ["chip-fg", "chip-bg"], ["term-fg", "term-bg"], ["term-fg", "surface-2"], ["muted", "term-bg"],
+  ["chip-fg", "chip-bg"], ["term-fg", "term-bg"], ["term-sel-fg", "term-sel"],
+  ["term-fg", "surface-2"], ["muted", "term-bg"],
   ["fg", "term-bg"], ["accent", "term-bg"], ["violet", "term-bg"], ["violet", "surface-2"],
   ...["fg", "muted", "accent"].map((fg) => [fg, "sel"]),
   ...ansi.map((fg) => [fg, "term-bg"]),
 ];
+
+test("xterm JavaScript theme fields use the same validated tokens with no raw fallback", () => {
+  const fields = new Map([...themeJs.matchAll(/(\w+):\s*v\("(--[\w-]+)"\)/g)]
+    .map((match) => [match[1], match[2].slice(2)]));
+  assert.equal(fields.get("foreground"), "term-fg");
+  assert.equal(fields.get("background"), "term-bg");
+  assert.equal(fields.get("selectionForeground"), "term-sel-fg");
+  assert.equal(fields.get("selectionBackground"), "term-sel");
+  assert.doesNotMatch(themeJs, /v\("--[\w-]+"\s*,/,
+    "xterm colors cannot bypass the CSS token inventory through JS fallbacks");
+});
 
 test("every shipped renderer foreground is an opaque, validated semantic token", () => {
   const unvalidated = [...allStyles.matchAll(/(?:^|[;{])\s*color:\s*(color-mix\(|#[0-9a-f]{3,8}\b|var\([^;]+,)/gim)];

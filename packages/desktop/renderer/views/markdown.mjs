@@ -131,17 +131,14 @@ const STYLE = `
 .mdv h1:first-child { margin-top: 0; }
 .mdv h1, .mdv h2 { border-bottom: 1px solid var(--md-rule); padding-bottom: .3em; }
 .mdv h1, .mdv h2, .mdv h3, .mdv h4 { position: relative; scroll-margin-top: 16px; }
-.mdv .hanchor { position: absolute; left: -22px; top: 0; visibility: hidden; color: var(--accent);
+.mdv .hanchor { position: absolute; left: -22px; top: 0; color: var(--accent);
                 text-decoration: none; font-weight: 400; }
-.mdv h1:hover .hanchor, .mdv h2:hover .hanchor, .mdv h3:hover .hanchor, .mdv h4:hover .hanchor,
-.mdv .hanchor:focus-visible { visibility: visible; }
 .mdv a { color: var(--accent); }
 .mdv pre.md-code { position: relative; padding: 13px 15px; border-radius: 8px; overflow-x: auto;
                    background: var(--md-code-bg); border: 1px solid var(--md-rule); }
-.mdv pre.md-code .md-copy { position: absolute; top: 6px; right: 6px; visibility: hidden; border: 1px solid var(--border);
+.mdv pre.md-code .md-copy { position: absolute; top: 6px; right: 6px; border: 1px solid var(--border);
                             background: var(--surface); color: var(--muted); border-radius: 6px;
                             font: 11px -apple-system, sans-serif; padding: 3px 9px; cursor: pointer; }
-.mdv pre.md-code:hover .md-copy, .mdv pre.md-code .md-copy:focus-visible { visibility: visible; }
 .mdv pre.md-code .md-copy:hover { color: var(--fg); border-color: var(--accent); }
 .mdv code { font: 13px/1.55 "SF Mono", ui-monospace, Menlo, monospace; }
 .mdv :not(pre) > code { background: var(--md-code-bg); padding: .15em .4em; border-radius: 4px; }

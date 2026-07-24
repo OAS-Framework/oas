@@ -6,7 +6,7 @@
 // The shell owns tabs/navigation and provides ctx. The full roster (with
 // chat transcript, spawn, jira) lives in the ported views — the shell chrome
 // stays a thin rail so nothing is duplicated.
-import { currentWorkspace, groupInstances, adoptWorkspace, onWorkspaceChange } from "./views/common.mjs";
+import { currentWorkspace, setWorkspace, groupInstances, adoptWorkspace, onWorkspaceChange } from "./views/common.mjs";
 import {
   initTheme, toggleTheme, xtermTheme, onThemeChange,
   terminalTypography, setTerminalFontSize, setTerminalFontFamily, onTerminalTypographyChange,
@@ -17,7 +17,7 @@ import { reserveKey, whenKeyFree } from "./tab-keys.mjs";
 import { createTerminalTab } from "./terminal-tab.mjs";
 import { createTabChrome, tabKeyAction, focusAfterLastTab } from "./tab-a11y.mjs";
 import { createIntentGate, prepareOwnedOpen } from "./open-intent.mjs";
-import { createWorkspaceLabel } from "./workspace-label.mjs";
+import { createWorkspaceLabel, bindWorkspaceSelect } from "./workspace-label.mjs";
 import {
   collapseKey, hasInstanceChildren, instanceRepoLabel, treeGuideSegments, filterInstanceTree, instanceVisibleInTree,
   captureTreeRenderState, configureDisclosure, rosterResponseOwns,
@@ -124,7 +124,9 @@ let contextFilter = "";
 let contextInstances = [];
 let contextWorkspace = "";
 const collapsedInstances = new Set();
-const workspaceLabel = createWorkspaceLabel(document.getElementById("ws-name"));
+const workspaceSelect = document.getElementById("ws-select");
+const workspaceLabel = createWorkspaceLabel(workspaceSelect);
+bindWorkspaceSelect(workspaceSelect, setWorkspace);
 
 function initContextRoster() {
   contextRosterEl = document.getElementById("instance-roster");
@@ -164,7 +166,7 @@ async function refreshContextRoster() {
   const resolvedWs = panel.workspace?.id || ws;
   if (!owns(resolvedWs)) return;
   if (!currentWorkspace() && resolvedWs) adoptWorkspace(resolvedWs);
-  commitWorkspaceLabel(panel.workspace);
+  commitWorkspaceLabel(panel.workspace, panel.workspaces);
   contextWorkspace = resolvedWs;
   contextInstances = panel.instances || [];
   renderContextRoster(contextInstances);

@@ -21,6 +21,7 @@
   --term-bg: #0a0d12;     /* transcript surface follows the theme */
   --term-fg: #e6edf3;
   --term-sel: #264f78;
+  --term-sel-fg: #f5f9ff;
   /* xterm typography: OS monospace by default; user overrides persist via theme.mjs */
   --term-font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   --term-font-size: 13px;
@@ -53,6 +54,7 @@
   --term-bg: #fdf6e3;
   --term-fg: #52666c;
   --term-sel: #d3c9a8;
+  --term-sel-fg: #37424a;
   --shadow: 0 1px 3px rgb(88 110 117 / .14);
   /* solarized ANSI remap — base colors stay AA-readable on paper */
   --ansi-black: #55666b; --ansi-red: #b52f35; --ansi-green: #465f00; --ansi-yellow: #725500;
@@ -150,7 +152,7 @@
 .oas-view .chat { flex: 1; overflow-y: auto; padding: 22px 0 30px;
                   background: var(--term-bg); color: var(--term-fg);
                   font: 13px/1.55 "SF Mono", ui-monospace, SFMono-Regular, Menlo, monospace; }
-.oas-view .chat ::selection { background: var(--term-sel); color: inherit; }
+.oas-view .chat ::selection { background: var(--term-sel); color: var(--term-sel-fg); }
 .oas-view .turn { max-width: 900px; margin: 0 auto; padding: 0 26px; }
 .oas-view .turn + .turn { margin-top: 16px; }
 .oas-view .turn.user .utext { border-left: 3px solid var(--accent);

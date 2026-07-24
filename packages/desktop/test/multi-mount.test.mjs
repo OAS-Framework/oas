@@ -31,6 +31,27 @@ test("markdown: two mounts coexist; disposing one keeps the other", async () => 
   d2();
 });
 
+test("markdown heading links and code-copy controls remain keyboard focusable", async () => {
+  const doc = dom();
+  const el = doc.createElement("div"); doc.body.append(el);
+  const dispose = await md.mount(el, {
+    api: fileApi("# Keyboard heading\n\n```js\nconst answer = 42;\n```"),
+    openFile: () => {}, path: "/x/keyboard.md",
+  });
+  const anchor = el.querySelector(".hanchor");
+  const copy = el.querySelector(".md-copy");
+  assert.ok(anchor && copy);
+  assert.equal(anchor.tabIndex, 0, "heading permalink participates in native tab order");
+  assert.equal(copy.tabIndex, 0, "copy button participates in native tab order");
+  assert.notEqual(doc.defaultView.getComputedStyle(anchor).visibility, "hidden");
+  assert.notEqual(doc.defaultView.getComputedStyle(copy).visibility, "hidden");
+  anchor.focus();
+  assert.equal(doc.activeElement, anchor);
+  copy.focus();
+  assert.equal(doc.activeElement, copy);
+  dispose();
+});
+
 test("diff: two mounts coexist; disposing one keeps the other", async () => {
   const doc = dom();
   const el1 = doc.createElement("div"); doc.body.append(el1);

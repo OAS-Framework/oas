@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
-import { createWorkspaceLabel } from "../renderer/workspace-label.mjs";
+import { createWorkspaceLabel, bindWorkspaceSelect } from "../renderer/workspace-label.mjs";
 
 const deferred = () => {
   let resolve;
@@ -10,29 +10,53 @@ const deferred = () => {
 };
 
 test("workspace label: A→B with deferred A completing last keeps B", async () => {
-  const dom = new JSDOM(`<!doctype html><body><span id="ws"></span></body>`);
-  const label = createWorkspaceLabel(dom.window.document.getElementById("ws"));
+  const dom = new JSDOM(`<!doctype html><body><select id="ws"></select></body>`);
+  const select = dom.window.document.getElementById("ws");
+  const label = createWorkspaceLabel(select);
   const aGate = deferred(), bGate = deferred();
   const commitA = label.begin();
-  const a = aGate.promise.then(commitA);
+  const a = aGate.promise.then((workspace) => commitA(workspace, [workspace]));
   const commitB = label.begin();
-  const b = bGate.promise.then(commitB);
+  const b = bGate.promise.then((workspace) => commitB(workspace, [workspace]));
 
   bGate.resolve({ id: "B", name: "Workspace B" });
   assert.equal(await b, true);
-  assert.equal(dom.window.document.getElementById("ws").textContent, "Workspace B");
+  assert.equal(select.selectedOptions[0].textContent, "Workspace B");
   aGate.resolve({ id: "A", name: "Workspace A" });
   assert.equal(await a, false);
-  assert.equal(dom.window.document.getElementById("ws").textContent, "Workspace B");
+  assert.equal(select.selectedOptions[0].textContent, "Workspace B");
   dom.window.close();
 });
 
 test("workspace label reset clears text and invalidates an in-flight response", () => {
-  const dom = new JSDOM(`<!doctype html><body><span id="ws">old</span></body>`);
-  const label = createWorkspaceLabel(dom.window.document.getElementById("ws"));
+  const dom = new JSDOM(`<!doctype html><body><select id="ws"><option>old</option></select></body>`);
+  const select = dom.window.document.getElementById("ws");
+  const label = createWorkspaceLabel(select);
   const stale = label.begin();
   label.reset();
-  assert.equal(dom.window.document.getElementById("ws").textContent, "Resolving…");
-  assert.equal(stale({ name: "stale" }), false);
+  assert.equal(select.selectedOptions[0].textContent, "Resolving…");
+  assert.equal(stale({ id: "stale", name: "stale" }, []), false);
+  dom.window.close();
+});
+
+test("workspace selector lists server workspaces and emits selected id", () => {
+  const dom = new JSDOM(`<!doctype html><body><select id="ws"></select></body>`);
+  const select = dom.window.document.getElementById("ws");
+  const label = createWorkspaceLabel(select);
+  const commit = label.begin();
+  commit(
+    { id: "/work/B", name: "Workspace B" },
+    [{ id: "/work/A", name: "Workspace A" }, { id: "/work/B", name: "Workspace B" }],
+  );
+  assert.deepEqual([...select.options].map((option) => [option.value, option.textContent]), [
+    ["/work/A", "Workspace A"], ["/work/B", "Workspace B"],
+  ]);
+  assert.equal(select.value, "/work/B");
+  let selected = "";
+  const dispose = bindWorkspaceSelect(select, (id) => { selected = id; });
+  select.value = "/work/A";
+  select.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+  assert.equal(selected, "/work/A");
+  dispose();
   dom.window.close();
 });

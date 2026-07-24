@@ -17,12 +17,14 @@ body {
   display: flex; flex-direction: column;
 }
 .side-head {
-  min-height: 62px; flex: none; display: flex; flex-direction: column; align-items: flex-start; justify-content: center;
-  gap: 2px; padding: 9px 14px 11px; border-bottom: 1px solid var(--border);
-  white-space: nowrap; overflow: hidden;
+  height: var(--bar-h); flex: none; display: flex; flex-direction: column; align-items: flex-start; justify-content: center;
+  gap: 0; padding: 4px 12px 5px; border-bottom: 1px solid var(--border); white-space: nowrap; overflow: hidden;
 }
-.side-kicker { color: var(--muted); font-size: 10px; font-weight: 650; letter-spacing: .075em; text-transform: uppercase; }
-#ws-name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; color: var(--fg); font-size: 15px; line-height: 1.25; }
+.side-kicker { color: var(--muted); font-size: 9px; line-height: 1.2; font-weight: 650; letter-spacing: .075em; text-transform: uppercase; }
+#ws-select { width: 100%; min-width: 0; height: 22px; padding: 0 18px 0 0; border: 0; outline: 0;
+             background: transparent; color: var(--fg); font-family: inherit; font-size: 14px; line-height: 1.2;
+             font-weight: 700; cursor: pointer; }
+#ws-select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 #nav { display: flex; flex-direction: column; padding: 12px 8px 14px; gap: 4px; }
 #nav-foot { margin-top: auto; display: flex; flex-direction: column; padding: 10px 8px 12px; }
 

@@ -21,9 +21,11 @@
 <body>
   <div id="app">
     <aside id="sidebar">
-      <div class="side-head" aria-label="Active OAS workspace">
-        <span class="side-kicker">OAS workspace</span>
-        <strong id="ws-name">Resolving…</strong>
+      <div class="side-head">
+        <label class="side-kicker" for="ws-select">OAS workspace</label>
+        <select id="ws-select" aria-label="Active OAS workspace">
+          <option value="">Resolving…</option>
+        </select>
       </div>
       <nav id="nav"></nav>
       <section id="instance-roster" aria-label="Instances">
