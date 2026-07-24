@@ -119,6 +119,14 @@ jobs:
   # unsigned installers via `npm run dist` (electron-builder internals are the
   # Desktop package's concern), and uploads a `desktop-<os>-<arch>` artifact
   # containing only the distributable files for that platform.
+  #
+  # packages/desktop deliverables for this seam (tracked in
+  # test/release-workflow.test.mjs — the release cannot ship without them):
+  #   * `npm test` — unit/integration tests (present);
+  #   * `npm run dist` — electron-builder packaging producing
+  #     dist/oas-desktop-* artifacts for the platform (DMG+ZIP on macOS,
+  #     AppImage+DEB on Linux);
+  #   * `npm run dist:smoke` (optional) — installed-artifact smoke.
   desktop-build:
     needs: build-and-test
     strategy:
@@ -186,13 +194,25 @@ jobs:
           (cd packages/pi && npm version "${GITHUB_REF_NAME#v}" --no-git-tag-version)
           (cd packages/desktop && npm version "${GITHUB_REF_NAME#v}" --no-git-tag-version)
 
-      - name: Publish @oas-framework/oas
-        run: npm publish --access public
+      - name: Publish @oas-framework/oas (idempotent — skip if this exact version is live)
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          if npm view "@oas-framework/oas@${V}" version >/dev/null 2>&1; then
+            echo "@oas-framework/oas@${V} already published — skipping (same-tag retry)"
+          else
+            npm publish --access public
+          fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      - name: Publish @oas-framework/pi
-        run: npm publish --access public
+      - name: Publish @oas-framework/pi (idempotent — skip if this exact version is live)
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          if npm view "@oas-framework/pi@${V}" version >/dev/null 2>&1; then
+            echo "@oas-framework/pi@${V} already published — skipping (same-tag retry)"
+          else
+            npm publish --access public
+          fi
         working-directory: packages/pi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -214,13 +234,19 @@ jobs:
           subject-path: release-assets/*
 
       # GitHub Release LAST: npm is already published; a failure here is
-      # retried from the same tag/assets (re-run this job), never retagged.
-      - name: Create the GitHub Release
+      # retried from the same tag/assets (re-run this job — the npm publishes
+      # above skip already-live versions), never retagged.
+      - name: Create the GitHub Release (idempotent — upload assets if it exists)
         run: |
-          gh release create "${GITHUB_REF_NAME}" release-assets/* \
-            --title "OAS ${GITHUB_REF_NAME}" \
-            --notes-file docs/release-notes/${GITHUB_REF_NAME}.md \
-            --verify-tag
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            echo "release ${GITHUB_REF_NAME} exists — re-uploading assets (same-tag retry)"
+            gh release upload "${GITHUB_REF_NAME}" release-assets/* --clobber
+          else
+            gh release create "${GITHUB_REF_NAME}" release-assets/* \
+              --title "OAS ${GITHUB_REF_NAME}" \
+              --notes-file docs/release-notes/${GITHUB_REF_NAME}.md \
+              --verify-tag
+          fi
         env:
           GH_TOKEN: ${{ github.token }}
 

@@ -8,8 +8,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 
 const yml = readFileSync(new URL("../.github/workflows/release.yml", import.meta.url), "utf8");
+const desktopPkg = JSON.parse(readFileSync(new URL("../packages/desktop/package.json", import.meta.url), "utf8"));
 
 test("release checks out the exact tag SHA, never a branch ref", () => {
   assert.match(yml, /ref: \$\{\{ github\.sha \}\}/, "checkout pins github.sha");
@@ -71,4 +73,41 @@ test("bump PR covers all three package manifests", () => {
   const prBlock = yml.slice(yml.indexOf("Open the version-bump PR"));
   assert.match(prBlock, /git add package\.json package-lock\.json packages\/pi\/package\.json packages\/desktop\/package\.json packages\/desktop\/package-lock\.json/);
   assert.match(prBlock, /gh pr create --base main/);
+});
+
+test("npm publication and GitHub Release are same-tag retryable (idempotent)", () => {
+  // Re-running the publish job must skip already-live npm versions instead of
+  // failing on npm's already-published rejection, and re-upload GH assets.
+  const publishJob = yml.slice(yml.indexOf("publish:\n"));
+  const oasStep = publishJob.slice(publishJob.indexOf("Publish @oas-framework/oas"), publishJob.indexOf("Publish @oas-framework/pi"));
+  const piStep = publishJob.slice(publishJob.indexOf("Publish @oas-framework/pi"), publishJob.indexOf("Download Desktop artifacts"));
+  assert.match(oasStep, /npm view "@oas-framework\/oas@\$\{V\}"/, "oas publish guarded by npm view");
+  assert.match(piStep, /npm view "@oas-framework\/pi@\$\{V\}"/, "pi publish guarded by npm view");
+  for (const step of [oasStep, piStep]) {
+    assert.ok(step.indexOf("npm view") < step.indexOf("npm publish"), "guard precedes publish");
+    assert.match(step, /already published/, "skip message on retry");
+  }
+  const ghStep = publishJob.slice(publishJob.indexOf("Create the GitHub Release"));
+  assert.match(ghStep, /gh release view/, "release existence checked");
+  assert.match(ghStep, /gh release upload .* --clobber/, "retry re-uploads assets");
+  assert.ok(ghStep.indexOf("gh release view") < ghStep.indexOf("gh release create"));
+});
+
+test("desktop package scripts invoked by the workflow exist and run", () => {
+  // The workflow's desktop-build job runs `npm test` and `npm run dist` in
+  // packages/desktop — workflow text matching alone cannot catch a missing
+  // script. `test` is owned here and must exist AND run; `dist`/`dist:smoke`
+  // (electron-builder packaging producing dist/oas-desktop-*) are the Desktop
+  // owner's deliverable on this seam — tracked as required-by-release.
+  assert.equal(typeof desktopPkg.scripts.test, "string", "packages/desktop has a test script");
+  const r = spawnSync("npm", ["test"], { cwd: new URL("../packages/desktop", import.meta.url).pathname, encoding: "utf8", timeout: 300000 });
+  assert.equal(r.status, 0, `packages/desktop npm test failed:\n${r.stderr?.slice(-2000)}`);
+  // The dist seam is declared in the workflow; when the Desktop owner lands
+  // the dist script this assertion starts enforcing its presence.
+  assert.match(yml, /npm run dist\b/, "workflow invokes npm run dist in packages/desktop");
+  if (desktopPkg.scripts.dist) {
+    assert.ok(
+      Object.keys(desktopPkg.devDependencies || {}).some((d) => d.includes("electron-builder")) || /electron-builder/.test(desktopPkg.scripts.dist),
+      "dist script is electron-builder packaging");
+  }
 });
