@@ -103,10 +103,11 @@ architecture/, codebase/) — list them here and log the growth in log.md.
 if (event === "soul-scaffold") {
   try { out({ meta: { scaffolded: scaffoldSoul() } }); } catch (e) { warn(e.message || e); }
 } else if (event === "spawn") {
-  // Ephemeral agents (capability/tmp service agents: reviewer, memory-harvest)
-  // carry no episodic state of their own — no STATE.md/log.md/notes scaffolding,
-  // and no session-protocol brief that would contradict their souls.
-  if (["capability", "tmp"].includes(process.env.OAS_KIND || "")) {
+  // Ephemeral CAPABILITY agents (reviewer, memory-harvest) carry no episodic
+  // state of their own — no STATE.md/log.md/notes scaffolding, and no
+  // session-protocol brief. LOCAL souls are full souls: they get everything.
+  // ("tmp" is the legacy spelling of local — treat it as local, with memory.)
+  if ((process.env.OAS_KIND || "") === "capability") {
     out({ meta: { memory: "none" }, brief: "Memory: none — you are ephemeral; no STATE.md/log.md/notes upkeep, no harvest." });
   }
   try {
@@ -167,26 +168,40 @@ _(the single next action — keep this current; a fresh session on any model res
       let d = home;
       while (d !== dirname(d)) { if (d.endsWith("/instances")) { root = join(d, "..", ".."); break; } d = dirname(d); }
       root = root ? realpathSync(join(root)) : undefined;
-      // instances live at <root>/<agent>/instances/<inst> or <root>/local-agents/<agent>/instances/<inst>
-      if (root && ["local-agents", "tmp-agents"].includes(root.split("/").pop())) root = dirname(root);
+      // instances live at <root>/<agent>/instances/<inst>, at the legacy nested
+      // <root>/{local,tmp}-agents/<agent>/instances/<inst>, or at the sibling
+      // <scope>/local-agents/<agent>/instances/<inst> — canonical root is <scope>/agents.
+      if (root && ["local-agents", "tmp-agents"].includes(root.split("/").pop())) {
+        const parent = dirname(root);
+        root = parent.split("/").pop() === "agents" ? parent : join(parent, "agents");
+      }
     }
     const notesDir = join(home, "notes");
     const skip = (why) => out({ meta: { harvestSpawn: "skipped", why } });
     if (String(agName).startsWith("memory-harvest")) skip("self (loop guard)");
     const notes = existsSync(notesDir) ? readdirSync(notesDir).filter((f) => f.endsWith(".md")) : [];
     if (notes.length === 0) skip("no pending notes");
-    if (!root || !existsSync(root)) skip("no agents root found above this home");
+    if (!root || (!existsSync(root) && !existsSync(join(dirname(root), "local-agents")))) skip("no agents root found above this home");
     if (!inst) skip("no instance identity (run from an instance home)");
     const core = await import(pathToFileURL(join(FRAMEWORK_ROOT, "lib", "core.mjs")).href);
     const slug = String(inst).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 30);
-    // Debounce: one harvester per source instance at a time.
-    const harvesterHome = (base) => join(root, base, "memory-harvest", "instances", `memory-harvest-${slug}`);
-    if (["local-agents", "tmp-agents"].some((b) => existsSync(harvesterHome(b)))) skip("harvester already running for this instance");
+    // Debounce: one harvester per source instance at a time (canonical sibling
+    // local-agents/ plus legacy nested locations).
+    const harvesterHomes = [
+      join(dirname(root), "local-agents", "memory-harvest", "instances", `memory-harvest-${slug}`),
+      join(root, "local-agents", "memory-harvest", "instances", `memory-harvest-${slug}`),
+      join(root, "tmp-agents", "memory-harvest", "instances", `memory-harvest-${slug}`),
+    ];
+    if (harvesterHomes.some((h) => existsSync(h))) skip("harvester already running for this instance");
     let agentDef = core.findAgent(root, "memory-harvest");
     if (!agentDef) {
-      core.upsertTmpAgent(root, { name: "memory-harvest", instructions: readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "agents", "memory-harvest.md"), "utf8") });
+      const upsert = core.upsertLocalAgent || core.upsertTmpAgent; // kernel ≥0.18 / older
+      upsert(root, { name: "memory-harvest", instructions: readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "agents", "memory-harvest.md"), "utf8") });
       agentDef = core.findAgent(root, "memory-harvest");
     }
+    // The harvester is service infrastructure: ALWAYS ephemeral, regardless of
+    // its on-disk kind (it homes as a local soul so it is uncommitted).
+    agentDef = { ...agentDef, kind: "capability" };
     // Harvest model: explicit okf settings win (hook env, or resolved from config
     // when agent-initiated); else the integration's default.
     let harvestModel = settings["harvest-model"];
@@ -199,7 +214,18 @@ _(the single next action — keep this current; a fresh session on any model res
     const harvName = `memory-harvest-${slug}`;
     const gitRootOf = (start) => { let d = start; while (d !== dirname(d)) { if (existsSync(join(d, ".git"))) return d; d = dirname(d); } return undefined; };
     let r;
-    if ((process.env.OAS_WORK || meta.work) === "workspace") {
+    const srcKind = process.env.OAS_KIND || meta.kind || "";
+    if (["local", "tmp"].includes(srcKind)) {
+      // LOCAL soul: uncommitted by contract (local-agents/, gitignored). The
+      // harvester judges notes exactly as usual, but the deliverable is DIRECT
+      // edits to the canonical soul — no commit, no PR: there is nothing to
+      // version. It must not touch the owner's work tree.
+      r = core.spawnInstance(root, agentDef, {
+        instance: harvName, parent: inst,
+        repo: context, work: "attached", workDir, model: harvestModel,
+        task: `Harvest the pending notes of live LOCAL-SOUL instance "${inst}" (agent "${agName}") into its soul — by direct edits, no commit.\n\n- Source notes: ${notesDir} (${notes.join(", ")})\n- Soul knowledge bundle to update: ${join(realSoul, "knowledge")}\n- Soul skills dir (for procedure-shaped notes): ${join(realSoul, "skills")}\n- This soul is LOCAL (uncommitted, gitignored): edit those soul files IN PLACE. Do NOT run git commit — not for the soul, and not in ./work (the shared tree belongs to the working instance; leave it untouched).\n- Follow your memory-harvest skill for everything else: promote/merge/drop each note, knowledge vs skill routing, index + log discipline, validate the bundle, DELETE processed notes from the source notes/ dir.\n- Then run \`oas retire ${harvName} --self\`.`,
+      });
+    } else if ((process.env.OAS_WORK || meta.work) === "workspace") {
       // WORKSPACE-MODE instance: ./work is the whole workspace, not a git repo —
       // the harvester may NOT commit there. The soul lives in its own home repo
       // (committed to the workspace): harvest in a WORKTREE of that repo and

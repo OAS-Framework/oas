@@ -584,6 +584,9 @@ const FILE_MAX_BYTES = 2 * 1024 * 1024;
  * and repos (the brain/diff viewers open files there too). */
 function fileRoots() {
   const roots = workspaces().flatMap((w) => w.roots);
+  // Local souls live in the scope-level local-agents/ SIBLING of each agents
+  // root — their soul/knowledge/instance files must be viewable too.
+  for (const r of [...roots]) roots.push(join(dirname(r), "local-agents"));
   for (const d of snapshot.byWs.values()) {
     for (const i of d.instances) {
       if (i.home) { roots.push(i.home); roots.push(join(i.home, "work")); } // <home>/work = the work tree (i.work is the MODE)

@@ -166,7 +166,10 @@ const RECENTS_FILE = () => join(app.getPath("userData"), "workspace-recents.json
 
 const wsValidate = (p) => validateWorkspace(p, {
   resolveConfig: (path) => core ? core.resolveOasConfig(path) : null,
-  hasAgentsRoot: (path) => existsSync(join(path, "agents")) && lstatSync(join(path, "agents")).isDirectory(),
+  // agents/ OR local-agents/ qualifies — OAS is fully usable with local souls alone.
+  hasAgentsRoot: (path) => ["agents", "local-agents"].some((d) => {
+    try { return existsSync(join(path, d)) && lstatSync(join(path, d)).isDirectory(); } catch { return false; }
+  }),
 });
 
 function teamSiblingsOf(p) {

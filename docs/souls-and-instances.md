@@ -22,7 +22,7 @@ A soul is durable and committed. It is the part you review, improve, and keep.
 | Key | Meaning |
 |---|---|
 | `name` | Agent name. |
-| `kind` | `persistent` for committed agents, `tmp` for local agents. |
+| `kind` | `persistent` for committed agents, `local` for full local souls under `local-agents/` (legacy `tmp` reads as `local`). |
 | `description` | Short role description. |
 | `repo` | Target repo, absolute or relative to the agents root's parent. |
 | `work` | `worktree` or `checkout`. |
@@ -220,19 +220,31 @@ current directory. `PI_AGENTS_ROOT` overrides the search.
 Default layout:
 
 ```text
-agents/
-  docs-expert/
-    soul/
-    instances/
-  local-agents/
+<scope>/
+  agents/              # committed souls
+    docs-expert/
+      soul/
+      instances/
+  local-agents/        # local souls — same shape, never committed
     scratch-agent/
       soul/
       instances/
 ```
 
-`local-agents/` holds uncommitted agents created from ad hoc instructions or
-imported agent definition files. Legacy `tmp-agents/` roots are still read for
-compatibility.
+`local-agents/` sits BESIDE `agents/` at the scope level and holds **full local
+souls**: complete souls (memory, skills, knowledge, instances) that are not
+committed to the repo. `oas create <name> --local` creates one — the directory
+is created on first use, and when the scope is a git repo the kernel adds
+`local-agents/` to its `.gitignore` automatically. A scope with only
+`local-agents/` is fully operable: people can use OAS with local agents alone.
+Ad hoc agents from `oas spawn --instructions-file`/`--def-file` land here too.
+Legacy nested `agents/local-agents/` and `agents/tmp-agents/` are still read
+for compatibility.
+
+Instances of a local soul receive a `local-soul` briefing: work and commits
+are normal, but soul updates are plain file edits (nothing to commit), and
+durability is the machine's — promote the soul to `agents/` when it starts to
+matter beyond one machine.
 
 Alternative agents-root layouts are planned but not built. Today the default
 layout is the only implemented layout.
