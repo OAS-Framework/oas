@@ -12,7 +12,12 @@
  *   GET  /api/session/<instance>?lines=n   ANSI pane capture of the live session
  *   POST /api/keys/<instance>       { data } → raw key bytes into the session (no Enter)
  *   POST /api/interrupt/<instance>  sends Ctrl-C (Escape for pi/claude prompts stays manual)
+
  *   GET  /api/jira/<instance>       epic + Agent Roster for instances with oas.jira meta
+ *   GET  /api/brain/<agent>?ws=<id> agent "brain" JSON: soul (AGENTS.md, skills,
+ *                                   knowledge tree) + per-instance artifacts (abs paths)
+ *   GET  /api/file?path=<abs>       text file content, guarded to workspace roots + agent homes
+ *   GET  /api/diff/<instance>?staged=0|1   unified git diff of the instance's work tree + stats
  *
  * SECURITY: binds 127.0.0.1 ONLY. This process can type into your terminals.
  * Interaction model: terminal-direct (tmux send-keys / capture-pane) — the
@@ -20,8 +25,8 @@
  */
 import { createServer } from "node:http";
 import { execFile, execFileSync, execSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { existsSync, readFileSync, readdirSync, statSync, realpathSync, lstatSync, readlinkSync } from "node:fs";
+import { basename, dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { homedir } from "node:os";
 
@@ -210,16 +215,36 @@ function snapshotPanel(wsId) {
   const id = wsId && snapshot.byWs.has(wsId) ? wsId : ids[0];
   return id ? snapshot.byWs.get(id) : null;
 }
-function findInstance(name) {
+/* OASWEB_FINDINST_BEGIN — workspace-scoped instance lookup, extracted by tests */
+function findInstance(name, wsId) {
   if (!snapshot.byWs.size) snapshot = { at: Date.now(), byWs: collectNow() }; // cold start, once
+  // With a ws scope, resolve ONLY in that workspace — same-named instances
+  // exist across workspaces and "first match anywhere" picks the wrong one.
+  if (wsId) return snapshot.byWs.get(wsId)?.instances.find((i) => i.instance === name);
   for (const d of snapshot.byWs.values()) {
     const hit = d.instances.find((i) => i.instance === name);
     if (hit) return hit;
   }
   return undefined;
 }
+/* OASWEB_FINDINST_END */
 
-function tmuxTarget(inst) { return `${inst.tmux.session}:${inst.tmux.window}`; }
+/* OASWEB_TMUXTGT_BEGIN — exact-match anchored tmux target, extracted by
+   tests. tmux -t targets are PREFIX-matched by default: in the 3s
+   stale-snapshot window an exited window (reviewer-1) can prefix-match a
+   similarly named live one (reviewer-15…), exposing its pane to capture or
+   — worse — sending it keystrokes/Ctrl-C. `=` anchors each component to an
+   exact match, so tmux errors out instead of silently prefix-matching (same
+   pattern as packages/desktop/tmux-target.mjs on the attach path). */
+function tmuxTarget(inst) {
+  const s = String(inst?.tmux?.session ?? "");
+  const w = String(inst?.tmux?.window ?? "");
+  // conservative charset; ':' is the separator and '=' the anchor — both
+  // forbidden inside components so a crafted name cannot re-shape the target
+  if (!/^[\w@%.-]+$/.test(s) || !/^[\w@%.-]+$/.test(w)) throw new Error("invalid tmux target");
+  return `=${s}:=${w}`;
+}
+/* OASWEB_TMUXTGT_END */
 
 function capture(inst, lines) {
   try {
@@ -236,16 +261,25 @@ function capture(inst, lines) {
  * cursor_flag and copy-mode (in copy mode the live cursor is not where
  * typing lands). history_size lets the client map capture lines to screen
  * rows deterministically (cursor row = history + cursor_y). */
+/* OASWEB_PANEINFO_BEGIN — active-pane geometry, extracted by tests (depends
+   on tmuxTarget + execFileSync in scope). */
 function paneInfo(inst) {
   try {
-    const out = execFileSync("tmux", ["display-message", "-p", "-t", tmuxTarget(inst),
+    // list-panes, NOT display-message: display-message -p -t <missing target>
+    // silently falls back to a default context instead of erroring — the
+    // anchored target must fail CLOSED on the read path too. The -f filter
+    // selects the ACTIVE pane: capture-pane/send-keys on a window target
+    // operate on the active pane, and list-panes emits all panes in index
+    // order — row 0 is the wrong pane once the user splits and switches.
+    const out = execFileSync("tmux", ["list-panes", "-t", tmuxTarget(inst), "-f", "#{pane_active}", "-F",
       "#{pane_width} #{pane_height} #{cursor_x} #{cursor_y} #{cursor_flag} #{pane_in_mode} #{history_size}"],
-      { encoding: "utf8", timeout: 4000 }).trim().split(/\s+/).map(Number);
+      { encoding: "utf8", timeout: 4000 }).trim().split("\n")[0].split(/\s+/).map(Number);
     return { size: { cols: out[0] || 80, rows: out[1] || 24, cx: out[2] || 0, cy: out[3] || 0,
                      cursor: out[4] === 1 && out[5] !== 1 },
              history: out[6] || 0 };
   } catch { return { size: { cols: 80, rows: 24, cx: 0, cy: 0, cursor: false }, history: 0 }; }
 }
+/* OASWEB_PANEINFO_END */
 
 /** Raw keystroke passthrough: bytes from the browser terminal go straight into
  * the pane via send-keys -H (hex bytes) — no key-name interpretation, no Enter. */
@@ -358,6 +392,120 @@ function chatData(inst, limit = 120) {
   return { available: true, kind, file, turns: turns.slice(-limit) };
 }
 
+// ---- Agent brain: soul + instance artifacts as absolute paths ----
+// The desktop brain view renders this map; file CONTENT is fetched separately
+// through /api/file (path-guarded there). This endpoint only walks known
+// agent directories under the workspace's agents roots — the agent name is
+// resolved through the same kernel seams as spawn (findAgent /
+// findCapabilityAgent), never from a caller-supplied path.
+function listSkills(dir) {
+  // skills live as <dir>/<skill>/SKILL.md with `name`/`description` frontmatter
+  const skills = [];
+  try {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      if (!e.isDirectory()) continue;
+      const s = skillEntry(join(dir, e.name));
+      if (s) skills.push(s);
+    }
+  } catch { /* no skills dir */ }
+  return skills.sort((a, b) => a.name.localeCompare(b.name));
+}
+function skillEntry(skillDir) {
+  const p = join(skillDir, "SKILL.md");
+  if (!existsSync(p)) return null;
+  let meta = {};
+  try { meta = core.parseFrontmatter(readFileSync(p, "utf8")).meta || {}; } catch { /* unreadable skill */ }
+  return { name: meta.name || basename(skillDir), path: p, description: String(meta.description || "").trim() };
+}
+function mdTree(dir) {
+  // all markdown files of a knowledge bundle, depth-first, absolute paths
+  const out = [];
+  const walk = (d, depth) => {
+    if (depth > 6) return; // bundles are shallow; guard against cycles
+    let entries;
+    try { entries = readdirSync(d, { withFileTypes: true }); } catch { return; }
+    for (const e of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+      if (e.name.startsWith(".")) continue;
+      const p = join(d, e.name);
+      if (e.isDirectory()) walk(p, depth + 1);
+      else if (e.isFile() && e.name.endsWith(".md")) out.push(p);
+    }
+  };
+  walk(dir, 0);
+  return out;
+}
+const mdIf = (p) => (existsSync(p) ? p : null);
+function brainData(agentName, wsId) {
+  const ws = wsId ? workspaceById(wsId) : workspaces()[0];
+  let def, root;
+  for (const r of ws?.roots || []) {
+    def = core.findAgent(r, agentName) || core.findCapabilityAgent(dirname(r), r, agentName);
+    if (def) { root = r; break; }
+  }
+  if (!def) return null;
+  // capability agents keep their canonical soul read-only in the package
+  const soulDir = def._soulDir || join(def._dir, "soul");
+  // Skills: local souls carry soul/skills/; capability agents ALSO declare
+  // skills at the package level (manifest `skills:` paths). Runtime
+  // composition includes both sources — mirror that: merge local + package,
+  // deterministic duplicate handling (local soul wins, then first-seen).
+  /* OASWEB_BRAINSKILLS_BEGIN — capability skill-path expansion, extracted by tests */
+  const expandSkillPath = (p, exists, list, entry) =>
+    // manifest paths are either a leaf skill dir (contains SKILL.md) or a
+    // parent tree of skill dirs (the `skills: ["skills"]` form) — core
+    // materialization accepts both, so must we.
+    exists(join(p, "SKILL.md")) ? [entry(p)].filter(Boolean) : list(p);
+  const mergeSkills = (...groups) => {
+    const byName = new Map();
+    for (const g of groups) for (const s of g) if (!byName.has(s.name)) byName.set(s.name, s);
+    return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
+  };
+  /* OASWEB_BRAINSKILLS_END */
+  const localSkills = listSkills(join(soulDir, "skills"));
+  let packageSkills = [];
+  if (def.capability) {
+    try {
+      packageSkills = core.capabilitySkillDirs(def.capability, dirname(root))
+        .flatMap((p) => expandSkillPath(p, existsSync, listSkills, skillEntry));
+    } catch { /* manifest unreadable — no package skills */ }
+  }
+  const soulSkills = mergeSkills(localSkills, packageSkills);
+  const knowledgeDir = join(soulDir, "knowledge");
+  const instances = [];
+  const instancesDir = join(def._dir, "instances");
+  let instNames = [];
+  try { instNames = readdirSync(instancesDir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name); } catch { /* no instances yet */ }
+  for (const name of instNames.sort()) {
+    const home = join(instancesDir, name);
+    // running comes from the roster snapshot, SCOPED to the brain's resolved
+    // workspace — unscoped lookup let a same-named instance running in another
+    // workspace mark this (possibly stopped) one as running (merged-state
+    // review @f889619) and offer a terminal that can't resolve locally.
+    const live = findInstance(name, ws?.id);
+    const notesDir = join(home, "notes");
+    instances.push({
+      instance: name, home, running: live ? !!live.running : false,
+      agentsMd: mdIf(join(home, "AGENTS.md")),
+      skills: listSkills(join(home, ".agents", "skills")),
+      state: mdIf(join(home, "STATE.md")),
+      task: mdIf(join(home, "TASK.md")),
+      notes: existsSync(notesDir) ? mdTree(notesDir) : [],
+    });
+  }
+  return {
+    agent: def.name, description: def.description || "", agentsRoot: root,
+    soul: {
+      agentsMd: mdIf(join(soulDir, "AGENTS.md")),
+      skills: soulSkills,
+      knowledge: {
+        index: mdIf(join(knowledgeDir, "index.md")),
+        tree: existsSync(knowledgeDir) ? mdTree(knowledgeDir) : [],
+      },
+    },
+    instances,
+  };
+}
+
 // ---- Jira (P2): epic + Agent Roster via acli, using the instance's oas.jira meta ----
 function acliJson(argv) {
   try { return JSON.parse(execFileSync("acli", argv, { encoding: "utf8", timeout: 20000 })); }
@@ -401,8 +549,152 @@ export function parseRoster(text) {
   }).filter((r) => Object.values(r).some(Boolean));
 }
 
+// ---- File serving (markdown/brain viewers) + git diff (diff viewer) ----
+
+/* OASWEB_FILEGUARD_BEGIN — path-traversal guard for /api/file, extracted by
+   tests. A requested path is readable ONLY if its realpath (symlinks resolved)
+   sits under one of the allowed roots — realpaths themselves — so `..`
+   segments, sneaky prefixes (/root-evil vs /root) and symlink escapes all
+   fail closed. */
+function underRoot(realPath, realRoot) {
+  return realPath === realRoot || realPath.startsWith(realRoot.endsWith(sep) ? realRoot : realRoot + sep);
+}
+function resolveGuardedFile(requested, allowedRoots) {
+  if (typeof requested !== "string" || !requested.startsWith("/")) return { error: "path must be absolute", code: 400 };
+  let real;
+  try { real = realpathSync(resolve(requested)); } catch { return { error: "no such file", code: 404 }; }
+  const roots = [];
+  for (const r of allowedRoots) { try { roots.push(realpathSync(r)); } catch { /* skip missing */ } }
+  if (!roots.some((root) => underRoot(real, root))) return { error: "path outside allowed roots", code: 403 };
+  return { real };
+}
+/* OASWEB_FILEGUARD_END */
+
+const MARKDOWN_EXT = new Set([".md", ".markdown", ".mdown", ".mkd"]);
+const FILE_MAX_BYTES = 2 * 1024 * 1024;
+
+/** Allowed roots for /api/file: every agents root of every workspace (agent
+ * homes — souls, instances, knowledge) plus the known instances' work trees
+ * and repos (the brain/diff viewers open files there too). */
+function fileRoots() {
+  const roots = workspaces().flatMap((w) => w.roots);
+  for (const d of snapshot.byWs.values()) {
+    for (const i of d.instances) {
+      if (i.home) { roots.push(i.home); roots.push(join(i.home, "work")); } // <home>/work = the work tree (i.work is the MODE)
+      if (i.repo) roots.push(i.repo);
+    }
+  }
+  return roots;
+}
+
+function fileData(requested) {
+  const g = resolveGuardedFile(requested, fileRoots());
+  if (g.error) return g;
+  const st = statSync(g.real);
+  if (!st.isFile()) return { error: "not a regular file", code: 400 };
+  if (st.size > FILE_MAX_BYTES) return { error: `file too large (${st.size} bytes)`, code: 413 };
+  const buf = readFileSync(g.real);
+  if (buf.includes(0)) return { error: "binary file", code: 415 };
+  return {
+    body: {
+      path: g.real, name: basename(g.real), size: st.size, mtime: st.mtime.toISOString(),
+      markdown: MARKDOWN_EXT.has(extname(g.real).toLowerCase()),
+      content: buf.toString("utf8"),
+    },
+  };
+}
+
+function git(cwd, argv) {
+  return execFileSync("git", ["-C", cwd, ...argv], { encoding: "utf8", timeout: 15000, maxBuffer: 32 * 1024 * 1024 });
+}
+
+/* OASWEB_DIFFSTAT_BEGIN — -z diff stat parsing, extracted by tests. Rename
+   records carry explicit old NUL new fields — never parse the human
+   "dir/{old => new}" form; both maps key by the NEW path. numstat -z rename
+   records are "adds\tdels\t" followed by old NUL new as separate fields. */
+function parseDiffStats(numstatZ, nameStatusZ) {
+  const statusOf = new Map();
+  {
+    const f = String(nameStatusZ).split("\0");
+    for (let i = 0; i < f.length - 1; ) {
+      const st = f[i++][0];
+      if (!st) continue;
+      const a = f[i++];
+      const b = st === "R" || st === "C" ? f[i++] : a; // rename/copy: old, new
+      statusOf.set(b, st);
+    }
+  }
+  const files = [];
+  {
+    const f = String(numstatZ).split("\0");
+    for (let i = 0; i < f.length - 1; ) {
+      const c = f[i++].split("\t");
+      if (c.length < 3) continue;
+      const path = c[2] !== "" ? c[2] : (i++, f[i++]); // rename: skip old, take new
+      files.push({ path, status: statusOf.get(path) || "M",
+                   additions: c[0] === "-" ? null : Number(c[0]),
+                   deletions: c[1] === "-" ? null : Number(c[1]) });
+    }
+  }
+  return files;
+}
+/* OASWEB_DIFFSTAT_END */
+
+/** Git diff of an instance's work tree: unified diff + per-file stats.
+ * staged=1 diffs the index (--cached); default diffs the work tree and
+ * includes untracked files as added (intent-to-add view via numstat merge). */
+function diffData(inst, staged) {
+  // inst.work is the work MODE (worktree/checkout/attached); the tree itself
+  // lives at <home>/work by convention (model.mjs gitState uses the same path).
+  const cwd = existsSync(join(inst.home || "", "work")) ? join(inst.home, "work") : inst.repo;
+  if (!cwd || !existsSync(cwd)) return { error: "instance has no work tree", code: 404 };
+  let branch = null;
+  try { branch = git(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]).trim(); } catch { return { error: "not a git repository", code: 409 }; }
+  const mode = staged ? ["--cached"] : [];
+  const files = parseDiffStats(
+    git(cwd, ["diff", ...mode, "--numstat", "-M", "-z"]),
+    git(cwd, ["diff", ...mode, "--name-status", "-M", "-z"]));
+  let diff = git(cwd, ["diff", ...mode, "-M"]);
+  if (!staged) {
+    const untracked = git(cwd, ["ls-files", "--others", "--exclude-standard"]).split("\n").filter(Boolean);
+    diff += synthUntracked(cwd, untracked, files, { lstatSync, readlinkSync, readFileSync, join, maxBytes: FILE_MAX_BYTES });
+  }
+  return { body: { repo: cwd, branch, staged: !!staged, files, diff } };
+}
+
+/* OASWEB_UNTRACKED_BEGIN — untracked-file diff synthesis, extracted by tests.
+   SECURITY: lstat first — an untrusted worktree can plant a symlink to
+   ~/.ssh keys (leak) or a FIFO/device (server hang); only regular files are
+   read, and symlinks render as their link text (readlink), never the target. */
+function synthUntracked(cwd, untracked, files, io) {
+  let diff = "";
+  for (const path of untracked) {
+    let text;
+    try {
+      const full = io.join(cwd, path);
+      const st = io.lstatSync(full);
+      if (st.isSymbolicLink()) { text = io.readlinkSync(full); }
+      else if (!st.isFile()) { files.push({ path, status: "A", additions: null, deletions: null }); continue; }
+      else {
+        const buf = io.readFileSync(full);
+        if (buf.includes(0) || buf.length > io.maxBytes) { files.push({ path, status: "A", additions: null, deletions: null }); continue; }
+        text = buf.toString("utf8");
+      }
+    } catch { continue; }
+    const lines = text.length ? text.replace(/\n$/, "").split("\n") : [];
+    files.push({ path, status: "A", additions: lines.length, deletions: 0 });
+    diff += `diff --git a/${path} b/${path}\nnew file mode 100644\n--- /dev/null\n+++ b/${path}\n@@ -0,0 +1,${lines.length} @@\n${lines.map((l) => "+" + l).join("\n")}\n`;
+  }
+  return diff;
+}
+/* OASWEB_UNTRACKED_END */
+
 // ---- HTTP ----
 const UI = readFileSync(join(HERE, "..", "ui", "panel.html"), "utf8");
+// Identity for compatibility probes (GET /api/version): the desktop app must
+// not reuse an OLDER installed oas-web that answers /api/panel but lacks the
+// desktop endpoints (/api/brain, /api/file, /api/diff...).
+const MANIFEST = JSON.parse(readFileSync(join(HERE, "..", "oas.json"), "utf8"));
 const send = (res, code, body, type = "application/json") => {
   const data = type === "application/json" ? JSON.stringify(body) : body;
   res.writeHead(code, { "content-type": `${type}; charset=utf-8`, "cache-control": "no-store" });
@@ -416,26 +708,37 @@ const readBody = (req) => new Promise((ok) => {
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, "http://localhost");
   const path = url.pathname;
-  // DNS-rebinding / CSRF guard: mutating requests must come from a loopback
-  // origin — a hostile page resolving to 127.0.0.1 must not type into terminals.
+  // DNS-rebinding guard: EVERY request must carry a loopback Host — a hostile
+  // page rebinding its hostname to 127.0.0.1 must neither type into terminals
+  // (POST) nor read workspace files via the GET APIs (/api/file, /api/diff).
+  const host = String(req.headers.host || "").replace(/:\d+$/, "");
+  const okHost = (h) => h === "127.0.0.1" || h === "localhost" || h === "[::1]" || h === "::1";
+  if (!okHost(host)) return send(res, 403, { error: "forbidden origin" });
+  // CSRF guard: mutating requests must also come from a loopback origin.
   if (req.method === "POST") {
-    const host = String(req.headers.host || "").replace(/:\d+$/, "");
-    const okHost = (h) => h === "127.0.0.1" || h === "localhost" || h === "[::1]" || h === "::1";
     let originOk = true;
     if (req.headers.origin !== undefined) {
       // "Origin: null" (sandboxed pages) and malformed origins must 403, not throw.
       try { originOk = okHost(new URL(String(req.headers.origin)).hostname); } catch { originOk = false; }
     }
-    if (!okHost(host) || !originOk) return send(res, 403, { error: "forbidden origin" });
+    if (!originOk) return send(res, 403, { error: "forbidden origin" });
   }
   try {
     if (req.method === "GET" && path === "/") return send(res, 200, UI, "text/html");
+    if (req.method === "GET" && path === "/api/version") {
+      return send(res, 200, { capability: MANIFEST.capability, version: MANIFEST.version });
+    }
     if (req.method === "GET" && path === "/api/panel") {
       const d = snapshotPanel(url.searchParams.get("ws") || undefined);
       // first request before the initial snapshot lands: collect inline once
       return send(res, 200, d || panelData(url.searchParams.get("ws") || undefined));
     }
     if (req.method === "GET" && path === "/api/agents") return send(res, 200, agentsData(url.searchParams.get("ws") || undefined));
+    const bm = path.match(/^\/api\/brain\/([A-Za-z0-9._-]+)$/);
+    if (bm && req.method === "GET") {
+      const d = brainData(bm[1], url.searchParams.get("ws") || undefined);
+      return d ? send(res, 200, d) : send(res, 404, { error: `unknown agent "${bm[1]}"` });
+    }
     if (req.method === "POST" && path === "/api/spawn") {
       const body = await readBody(req);
       if (typeof body.agent !== "string" || !body.agent || typeof body.agentsRoot !== "string" || !body.agentsRoot)
@@ -443,9 +746,13 @@ const server = createServer(async (req, res) => {
       try { return send(res, 200, { spawned: true, ...spawnAgent(body) }); }
       catch (e) { return send(res, 409, { error: String(e.message || e).slice(0, 300) }); }
     }
-    const m = path.match(/^\/api\/(session|keys|interrupt|jira|chat)\/([A-Za-z0-9._-]+)$/);
+    if (req.method === "GET" && path === "/api/file") {
+      const r = fileData(url.searchParams.get("path") || "");
+      return r.error ? send(res, r.code, { error: r.error }) : send(res, 200, r.body);
+    }
+    const m = path.match(/^\/api\/(session|keys|interrupt|jira|chat|diff)\/([A-Za-z0-9._-]+)$/);
     if (m) {
-      const inst = findInstance(m[2]);
+      const inst = findInstance(m[2], url.searchParams.get("ws") || undefined);
       if (!inst) return send(res, 404, { error: `unknown instance "${m[2]}"` });
       if (m[1] === "session" && req.method === "GET") {
         if (!inst.running) return send(res, 200, { running: false, text: "" });
@@ -477,6 +784,10 @@ const server = createServer(async (req, res) => {
       }
       if (m[1] === "jira" && req.method === "GET") return send(res, 200, jiraPanel(inst));
       if (m[1] === "chat" && req.method === "GET") return send(res, 200, chatData(inst, Number(url.searchParams.get("limit") || 120)));
+      if (m[1] === "diff" && req.method === "GET") {
+        const r = diffData(inst, url.searchParams.get("staged") === "1");
+        return r.error ? send(res, r.code, { error: r.error }) : send(res, 200, r.body);
+      }
     }
     return send(res, 404, { error: "not found" });
   } catch (e) {

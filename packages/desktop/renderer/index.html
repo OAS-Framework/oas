@@ -1,0 +1,69 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self' 'sha256-0Jdk9tmT9Tt8cjZwiacnC7eiFpnP3st50xHv+9r+lAw='; style-src 'self' 'unsafe-inline'; img-src 'self' data:;" />
+  <title>OAS Desktop</title>
+  <script type="importmap">
+  { "imports": {
+      "marked": "../node_modules/marked/lib/marked.esm.js",
+      "dompurify": "../node_modules/dompurify/dist/purify.es.mjs",
+      "highlight.js": "./vendor/highlight.mjs"
+  } }
+  </script>
+  <link rel="stylesheet" href="../node_modules/@xterm/xterm/css/xterm.css" />
+  <link rel="stylesheet" href="theme.css" />
+  <link rel="stylesheet" href="shell.css" />
+  <script src="../node_modules/@xterm/xterm/lib/xterm.js"></script>
+  <script src="../node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
+</head>
+<body>
+  <div id="app">
+    <aside id="sidebar">
+      <div class="side-head">
+        <span class="side-kicker">OAS workspace</span>
+        <button id="ws-trigger" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="ws-menu">
+          <span id="ws-name">Resolving…</span><span class="ws-chevron" aria-hidden="true">⌄</span>
+        </button>
+      </div>
+      <div id="ws-menu" class="ws-menu" hidden>
+        <input id="ws-menu-search" type="search" placeholder="Find workspace…" autocomplete="off" aria-label="Find an added workspace">
+        <div id="ws-options" class="ws-options" role="listbox" aria-label="Added workspaces"></div>
+        <button id="ws-add-open" class="ws-add-open" type="button"><span aria-hidden="true">＋</span> Add workspace…</button>
+      </div>
+      <nav id="nav"></nav>
+      <section id="instance-roster" aria-label="Instances">
+        <div class="ctx-head"><span>Instances</span><span class="ctx-count"></span></div>
+        <input class="ctx-filter" placeholder="Filter instances…" autocomplete="off" aria-label="Filter instances">
+        <div class="ctx-list"></div>
+      </section>
+      <div id="nav-foot"></div>
+    </aside>
+    <main id="main">
+      <div id="tabbar" role="tablist" aria-label="Open terminals and artifacts"></div>
+      <div id="stagehost"></div>
+      <div id="tabhost" style="display:none"></div>
+    </main>
+  </div>
+  <div id="ws-modal" class="ws-modal" hidden>
+    <section class="ws-dialog" role="dialog" aria-modal="true" aria-labelledby="ws-dialog-title" aria-describedby="ws-dialog-status">
+      <header class="ws-dialog-head">
+        <div><span class="side-kicker">OAS desktop</span><h2 id="ws-dialog-title">Add workspace</h2></div>
+        <button id="ws-dialog-close" class="icon-button" type="button" aria-label="Close add workspace dialog">×</button>
+      </header>
+      <p class="ws-dialog-intro">Choose a discovered OAS workspace or browse for another folder.</p>
+      <input id="ws-suggestion-search" type="search" placeholder="Filter suggestions…" autocomplete="off" aria-label="Filter suggested OAS workspaces">
+      <p id="ws-dialog-status" class="ws-dialog-status" aria-live="polite" tabindex="-1"></p>
+      <div id="ws-suggestions" class="ws-suggestions" role="radiogroup" aria-label="Suggested OAS workspaces"></div>
+      <footer class="ws-dialog-foot">
+        <button id="ws-browse" class="secondary" type="button">Browse…</button>
+        <span class="ws-dialog-spacer"></span>
+        <button id="ws-cancel" class="secondary" type="button">Cancel</button>
+        <button id="ws-confirm" class="primary" type="button" disabled>Add workspace</button>
+      </footer>
+    </section>
+  </div>
+  <script type="module" src="shell.mjs"></script>
+</body>
+</html>
