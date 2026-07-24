@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: Desktop succeeds the web and terminal panels as a standalone product
-description: The Electron desktop app becomes OAS's sole panel, owns its bundled backend outside the kernel, degrades to observation without an installed OAS CLI, and replaces oas.web and oas pane through a gated one-release sunset.
+description: The Electron desktop app becomes OAS's sole panel, owns its bundled backend outside the kernel, degrades to observation without an installed OAS CLI, and removes oas.web and oas pane in the pre-release desktop migration as a documented breaking change.
 status: accepted
 tags: [desktop, control-pane, distribution, deprecation, architecture]
 timestamp: 2026-07-24
@@ -26,6 +26,13 @@ the [standalone TUI decision](/decisions/control-pane-live-standalone-tui.md),
 [card architecture](/decisions/control-pane-v3-card-architecture.md), and
 [visual language](/decisions/control-pane-visual-language.md). Those concepts
 remain as the history and migration source for the replacement.
+
+The first accepted form of this decision required a stability-gated N/N+1
+notice and treated the initial desktop feature as a transitional oas.web
+bridge. Human direction later on 2026-07-24 changed that timing: complete the
+backend migration and legacy removal in PR #19, before the next release. This
+amendment supersedes the earlier transition schedule while preserving the
+standalone-product, ownership, no-OAS, package, and soul-succession boundaries.
 
 # Decision
 
@@ -79,23 +86,35 @@ installer does not hide a second full operational kernel inside the app; doing
 so would erase the degradation boundary and permit version skew against the
 workspace's actual OAS installation.
 
-## Gated N/N+1 sunset
+## Immediate pre-release succession
 
-Removal is not immediate. The deprecation clock begins only after replacement
-installers and the replacement workflows are operational and stable.
+PR #19 completes the ownership cut before the next release rather than shipping
+a transitional bridge and waiting through an N/N+1 deprecation cycle. In that
+same change:
 
-- **Release N:** desktop is the recommended panel. `oas pane`, `oas web`,
-  installation of `oas.web`, the control-pane package export, and their docs
-  are marked deprecated and point to desktop. Migration guidance covers user
-  configs and locks that name `oas.web`.
-- **Release N+1:** remove `capabilities/oas-web/`, `lib/control-pane/`, the
-  `oas pane` command, the `./control-pane` export, and their tests, docs, and
-  marketplace references. Diagnostics or explicit cleanup guidance prevent
-  old config and lock entries from failing mysteriously.
+- the desktop-owned backend moves under `packages/desktop/` and is bundled with
+  the app, with no runtime dependency on the adjacent capability or private
+  control-pane implementation;
+- `capabilities/oas-web/`, `lib/control-pane/`, `oas pane`, the
+  `./control-pane` package export, and their obsolete tests, docs, and
+  marketplace surfaces are removed; and
+- the root npm package remains free of desktop dependencies and loses the
+  removed capability and export.
 
-A full notice release is required because both the capability and the package
-export have shipped publicly, so repository search cannot establish the full
-external dependency set.
+This is intentionally a **breaking release impact**. `oas.web` and the
+`./control-pane` export have already shipped publicly, so absence of known
+repository consumers does not imply absence of external consumers. The release
+must name every removed command, capability, path, and export, and give
+explicit replacement and cleanup steps. `oas doctor` or an equally
+deterministic CLI diagnostic must recognize configs and locks that still name
+`oas.web`, explain that the capability was removed, and direct the operator to
+remove the stale activation/lock instead of failing mysteriously. Existing
+installed copies are not retained as a product fallback.
+
+Merge-before-release is allowed; release-before-replacement is not. No npm tag
+or GitHub release containing the removals is cut until desktop installer build,
+distribution, and replacement guidance are operational. This release gate
+preserves an available replacement without delaying the source ownership cut.
 
 ## Soul succession
 
@@ -106,21 +125,22 @@ retire only after their still-relevant terminal, server, renderer, security,
 testing, and release knowledge has been migrated topic by topic and is
 reachable from the successor's indexes.
 
-# Transition constraint
+# PR #19 completion constraint
 
-The first desktop feature may retain `oas.web` as a coherent in-tree backend
-bridge. Its adjacent-checkout paths and exact web-capability identity are
-transitional seams, not installer contracts. Dormant Diff and Jira source may
-remain inert during that bridge, but it is not a product promise and does not
-enter installer scope without explicit approval. No new browser-panel or TUI
-features are added beyond correctness and security fixes while the successor is
-being prepared.
+The feature is no longer accepted as an in-tree oas.web bridge. Before merge,
+its server behavior must be self-owned under `packages/desktop/`, all adjacent
+capability/control-pane dependencies must be gone, and the legacy product
+surfaces must be removed completely. Dormant Diff and Jira source remains
+outside the product promise and installer scope unless separately approved.
+The substantial scope change receives a fresh full maintainer review rather
+than inheriting approval from the transitional implementation.
 
 # Consequences
 
 The desktop product can deliver a rich native experience without bloating the
 kernel npm package or pretending to administer OAS when no compatible kernel is
-installed. The cost is a deliberate migration: the desktop backend must own
-read behavior, CLI JSON seams must cover mutations, installer stability gates
-the legacy sunset, and publicly shipped config/export references require a
-notice period.
+installed. The source tree reaches one owner and one panel before release,
+avoiding a second migration immediately afterward. The tradeoff is an
+intentional breaking upgrade without a notice release: CLI diagnostics,
+release notes, config/lock cleanup, and an operational installer become hard
+release gates rather than later follow-ups.

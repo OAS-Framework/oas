@@ -1,6 +1,8 @@
 # Knowledge Log
 
 ## 2026-07-24
+* **Update**: [Desktop panel succession](/decisions/desktop-panel-succession.md) timing amended by direct human direction — PR #19 now completes the desktop-owned backend cut and immediately removes oas.web plus `oas pane`/`lib/control-pane` before the next release, superseding the same-day N/N+1 sunset plan. The removal is a documented breaking impact with config/lock diagnostics and migration guidance; merge may precede installer readiness, but release may not.
+* **Update**: the [roadmap](/roadmap/next-steps.md) and [repo state](/stewardship/repo-state.md) now reflect PR #19's expanded immediate-succession scope and mandatory full re-review.
 * **Creation**: [Root test discovery requires dependency installation for private nested packages](/lessons/private-nested-package-ci-install.md) — root test globs can include private nested packages that npm does not treat as workspaces, so CI must install their independent lockfiles and cache against them.
 * **Harvest**: merged pending note `desktop-succession-boundaries.md` into the existing [desktop succession decision](/decisions/desktop-panel-succession.md); no concept change was needed because the decision already carried the durable boundaries.
 * **Creation**: [Desktop succeeds the web and terminal panels as a standalone product](/decisions/desktop-panel-succession.md) — the Electron app becomes the sole panel and GitHub-Release product; its package owns the backend, installed `oas ... --json` gates administration, no-OAS mode observes existing deployments, and a stability-gated N/N+1 release sequence retires oas.web and oas pane after soul knowledge succession.
