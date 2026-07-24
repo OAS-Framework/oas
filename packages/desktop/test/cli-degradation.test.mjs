@@ -91,7 +91,7 @@ test("cliCard renders the full contract surface: detected, required, Choose, Ret
   // required range + api
   assert.ok(el.textContent.includes(">=0.18.0 <0.19.0"), "required range shown");
   // copyable install command
-  assert.ok(el.querySelector(".cli-cmd").textContent.includes("npm install -g @oas-framework/oas@0.18.0"));
+  assert.ok(el.querySelector(".cli-cmd").textContent.includes("npm install -g @oas-framework/oas@0.18.1"));
   assert.ok(el.querySelector(".cli-copy"), "copy affordance present");
   // actions
   const choose = el.querySelector(".cli-choose");

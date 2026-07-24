@@ -4,7 +4,7 @@
    reads and existing terminal access keep working, while Spawn and Harvest
    are disabled behind ONE consistent card showing the detected path/version,
    the required range, **Choose oas…**, **Retry**, a docs link, and a
-   copyable `npm install -g @oas-framework/oas@0.18.0`. Never silently
+   copyable `npm install -g @oas-framework/oas@0.18.1`. Never silently
    install. Missing tmux is a SEPARATE diagnosis — never conflated with CLI
    compatibility.
 
@@ -12,7 +12,7 @@
    every mutation surface renders the SAME card; views only mount it. */
 import { escapeHtml } from "./common.mjs";
 
-export const INSTALL_COMMAND = "npm install -g @oas-framework/oas@0.18.0";
+export const INSTALL_COMMAND = "npm install -g @oas-framework/oas@0.18.1";
 export const DOCS_URL = "https://github.com/OAS-Framework/oas/blob/main/docs/desktop-cli-api.md";
 
 let cli = null;              // last GET /api/cli payload (null = probe not yet settled)
