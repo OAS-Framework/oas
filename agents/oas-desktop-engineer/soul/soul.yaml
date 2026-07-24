@@ -1,0 +1,8 @@
+name: oas-desktop-engineer
+kind: persistent
+description: OAS Desktop full-stack engineer — owns packages/desktop (Electron app, bundled server backend, release automation)
+type: developers
+repo: .
+work: worktree
+runtime: pi
+model: github-copilot/claude-fable-5:high, anthropic/claude-fable-5:high
