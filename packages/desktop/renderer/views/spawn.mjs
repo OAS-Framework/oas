@@ -9,6 +9,7 @@ import {
   escapeHtml, apiJson, postJson, ensureTheme,
   setWorkspace, onWorkspaceChange, renderWorkspaceSelect, wsQuery, workspaceGeneration,
 } from "./common.mjs";
+import { cliAvailable, cliKnownUnavailable, cliStatus, refreshCli, onCliChange, cliCard } from "./cli-status.mjs";
 
 const CSS = `
 .souls { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--bg); }
@@ -57,6 +58,10 @@ export function mount(el, ctx) {
     </div>`;
   s.q = (cls) => el.querySelector("." + cls);
   s.q("filter").addEventListener("input", (e) => { s.filterText = e.target.value; renderGrid(s); });
+  // CLI degradation: refresh once on mount and re-render the grid whenever
+  // availability flips — spawn buttons disable consistently with the card.
+  refreshCli(ctx);
+  s.unsubCli = onCliChange(() => { if (s.alive) renderGrid(s); });
   s.q("wssel").addEventListener("change", (e) => setWorkspace(e.target.value));
   s.unsubWs = onWorkspaceChange(() => {
     // Workspace switch owns the whole surface: invalidate any A spawn form
@@ -78,6 +83,8 @@ export function unmount() {
   state.alive = false;
   state.timers.forEach(clearInterval);
   if (state.unsubWs) state.unsubWs();
+  if (state.unsubCli) state.unsubCli();
+  if (state.cliCardHandle) { state.cliCardHandle.dispose(); state.cliCardHandle = null; }
   state.el.innerHTML = "";
   state = null;
 }
@@ -120,6 +127,13 @@ function renderGrid(s) {
   // No dynamic selector: agent names are roster data and may contain selector
   // metacharacters (and this module's CSS constant shadows the global, so
   // CSS.escape is not available here). Compare dataset identity instead.
+  // EXCEPTION (review d7becaf): a CLI-not-available transition BYPASSES form
+  // preservation — the launch race (form opened while CLI state was
+  // unknown, probe lands ok:false) must not leave a live submit behind a
+  // missing degradation card. The selection is invalidated so the rebuild
+  // shows the card and disabled buttons; doSpawn independently re-checks.
+  const noCli = !cliAvailable(); // frozen contract: unknown does NOT render capable
+  if (noCli && s.sel) s.sel = null, s.selAgent = null;
   if (s.sel && [...(grid.querySelectorAll?.(".soul-card") || [])]
         .some((card) => card.dataset?.agent === s.sel && card.querySelector(".soul-form"))) return;
   grid.innerHTML = "";
@@ -133,12 +147,25 @@ function renderGrid(s) {
   }
   if (!list.length) { grid.innerHTML = '<div class="empty" style="grid-column:1/-1">Nothing matches the filter.</div>'; return; }
   if (typeof grid.append !== "function") return; // non-DOM host (tests observe s.souls)
+  // One consistent degradation card ABOVE the roster when the CLI is KNOWN
+  // unavailable — reads (the soul cards, brain) stay fully usable below it.
+  // Unknown state (pre-probe) disables buttons WITHOUT the card: mutations
+  // require a verified compatible CLI (frozen contract), but flashing the
+  // card during the milliseconds before the launch probe resolves would be
+  // noise.
+  if (state && s === state && cliKnownUnavailable()) {
+    if (s.cliCardHandle) s.cliCardHandle.dispose();
+    s.cliCardHandle = cliCard(grid.ownerDocument, s.ctx);
+    s.cliCardHandle.el.style.gridColumn = "1/-1";
+    grid.append(s.cliCardHandle.el);
+  } else if (s.cliCardHandle) { s.cliCardHandle.dispose(); s.cliCardHandle = null; }
   for (const a of list) grid.append(soulCard(s, a));
 }
 
 function soulCard(s, a) {
   const attached = a.work === "attached"; // needs an owning instance's work tree
-  const open = s.sel === a.name && !attached;
+  const noCli = !cliAvailable();          // unknown OR unavailable — mutations need a verified CLI
+  const open = s.sel === a.name && !attached && !noCli;
   const card = document.createElement("div");
   card.className = "soul-card" + (attached ? " attached" : "") + (open ? " open" : "");
   card.dataset.agent = a.name;
@@ -149,7 +176,7 @@ function soulCard(s, a) {
       <span class="chip rt">${escapeHtml(a.runtime)}</span>
       <span class="chip">${escapeHtml(a.work)}</span>
       ${a.repo ? `<span class="chip">${escapeHtml(a.repoName)}</span>` : ""}
-      ${a.kind === "tmp" ? '<span class="chip">local</span>' : ""}
+      ${a.kind === "local" ? '<span class="chip">local</span>' : ""}
       ${attached ? '<span class="chip">not spawnable standalone</span>' : ""}
     </div>`;
   const actions = document.createElement("div");
@@ -158,11 +185,14 @@ function soulCard(s, a) {
     const spawn = document.createElement("button");
     spawn.className = "act spawn-act";
     spawn.textContent = attached ? "Attached only" : "Spawn";
-    spawn.disabled = attached;
+    spawn.disabled = attached || noCli;
     spawn.title = attached
       ? "Attached-mode agent — spawn it from an owning instance’s work tree"
-      : `Spawn ${a.name}`;
+      : noCli
+        ? "Spawning requires a compatible installed oas CLI — see the card above"
+        : `Spawn ${a.name}`;
     spawn.addEventListener("click", () => {
+      if (!cliAvailable()) return; // state may have flipped since render
       s.sel = a.name; s.selAgent = a; renderGrid(s);
       s.q("souls-grid").querySelector(".soul-form .fpurpose")?.focus();
     });
@@ -240,6 +270,14 @@ export async function waitForInstanceInPanel(s, name, isCurrent, { tries = 20, d
 export async function doSpawn(s, ui) {
   const a = s.selAgent;
   if (!a) return;
+  // CLI gate at SUBMIT time (review d7becaf): a form opened before a state
+  // flip must not dispatch — the render-time disable alone cannot cover a
+  // form that was already open. Mutations require a VERIFIED compatible CLI.
+  if (!cliAvailable()) {
+    s.sel = null; s.selAgent = null;
+    renderGrid(s); // repaints the degradation card + disabled buttons
+    return;
+  }
   // Legacy field interface (shared regression tests + old callers): adapt
   // s.q("ftask"|"fpurpose"|"fspawn"|"fstatus") into the ui seam.
   if (!ui) {

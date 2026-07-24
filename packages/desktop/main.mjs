@@ -20,22 +20,23 @@ import { openTerm, sweepViewers } from "./tmux-target.mjs";
 import { ensureServerOnPort, serverCompatible } from "./server-compat.mjs";
 import { createServerHost, createServerAdapter } from "./server-host.mjs";
 import { validateWorkspace, workspaceSuggestions, parseRecents, pushRecent, decideAdd, createGenerations, createAddExecutor } from "./workspace-registry.mjs";
+import { resolveDeployment, teamAgentRoots } from "./server/deployment.mjs";
 
 const require = createRequire(import.meta.url);
 const pty = require("node-pty");
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-// packages/desktop → repo root two levels up (in-tree layout).
-const REPO_ROOT = resolve(HERE, "..", "..");
 
 let port = Number(process.env.OAS_DESKTOP_PORT || 4820);
 const base = () => `http://127.0.0.1:${port}`;
-// Workspace the panel shows: --dir <path> or OAS_DESKTOP_DIR or the repo root.
+// Workspace the panel shows: --dir <path> or OAS_DESKTOP_DIR or the cwd the
+// app was launched from. The packaged app never infers a framework repo root
+// — with no OAS deployment in view the renderer shows the workspace picker.
 const argDir = (() => {
   const i = process.argv.indexOf("--dir");
   return i >= 0 && process.argv[i + 1] ? process.argv[i + 1] : undefined;
 })();
-const WORKSPACE = resolve(argDir || process.env.OAS_DESKTOP_DIR || REPO_ROOT);
+const WORKSPACE = resolve(argDir || process.env.OAS_DESKTOP_DIR || process.cwd());
 // Mutable workspace set: startup workspace plus runtime-added ones — the
 // repeated --dir list an app-owned server is (re)started with.
 const workspaceDirs = [WORKSPACE];
@@ -47,10 +48,14 @@ const serverHost = createServerHost({
   spawnChild: (dirs, onPort) => {
     const bin = join(HERE, "server", "oas-web.mjs");
     if (!existsSync(bin)) throw new Error(`desktop backend server not found at ${bin} and no usable server on port ${onPort}`);
-    const child = spawn(process.execPath, [bin, "start", "--port", String(onPort), ...dirs.flatMap((d) => ["--dir", d])], {
+    // The persisted user-chosen oas binary (if any) rides along as the
+    // server's top-priority discovery candidate; the server re-probes it.
+    const chosen = readCliChoice();
+    const child = spawn(process.execPath, [bin, "start", "--port", String(onPort),
+      ...dirs.flatMap((d) => ["--dir", d]), ...(chosen ? ["--oas-bin", chosen] : [])], {
       stdio: ["ignore", "pipe", "pipe"],
       cwd: WORKSPACE,
-      env: { ...process.env, OAS_DESKTOP_FRAMEWORK_ROOT: REPO_ROOT },
+      env: { ...process.env },
     });
     child.stdout.on("data", (d) => process.stdout.write(`[oas-desktop-server] ${d}`));
     child.stderr.on("data", (d) => process.stderr.write(`[oas-desktop-server] ${d}`));
@@ -158,25 +163,28 @@ function guard(e) { if (!trustedFrame(e)) throw new Error("forbidden: untrusted 
 // ---- IPC: workspace suggestions + runtime add ---------------------------
 // Privileged side of the runtime workspace switcher (phase-2 hook 3; the
 // renderer modal is the designer's). Discovery is bounded: known dirs, team
-// siblings via the kernel's own seams, validated recents. workspace:add
-// only ever replaces an app-OWNED server; foreign servers fail closed.
-const core = await import(pathToFileURL(join(REPO_ROOT, "lib", "core.mjs")).href).catch(() => null);
+// siblings via the app-owned read-only deployment reader, validated recents.
+// workspace:add only ever replaces an app-OWNED server; foreign servers fail
+// closed.
 const wsGens = createGenerations();
 const RECENTS_FILE = () => join(app.getPath("userData"), "workspace-recents.json");
 
 const wsValidate = (p) => validateWorkspace(p, {
-  resolveConfig: (path) => core ? core.resolveOasConfig(path) : null,
-  hasAgentsRoot: (path) => existsSync(join(path, "agents")) && lstatSync(join(path, "agents")).isDirectory(),
+  resolveConfig: (path) => resolveDeployment(path),
+  // agents/ OR local-agents/ qualifies — OAS is fully usable with local souls alone.
+  hasAgentsRoot: (path) => ["agents", "local-agents"].some((d) => {
+    try { return existsSync(join(path, d)) && lstatSync(join(path, d)).isDirectory(); } catch { return false; }
+  }),
 });
 
 function teamSiblingsOf(p) {
   // Sibling workspaces within p's team scope — same seams as the server's
   // workspaceEntry: the team scope's child repos that themselves validate.
   try {
-    const cfg = core?.resolveOasConfig(p);
+    const cfg = resolveDeployment(p);
     const scope = cfg?.team?.scope;
     if (!scope) return [];
-    return core.teamAgentRoots(scope).map((root) => dirname(root)).filter((d) => d !== p);
+    return teamAgentRoots(scope).map((root) => dirname(root)).filter((d) => d !== p);
   } catch { return []; }
 }
 
@@ -252,6 +260,32 @@ ipcMain.handle("workspace:pick", async (e) => {
   const r = await dialog.showOpenDialog(win, { properties: ["openDirectory"] });
   if (r.canceled || !r.filePaths?.[0]) return { ok: false, code: "cancelled", reason: "picker cancelled" };
   return performAdd(r.filePaths[0], true);
+});
+
+// ---- IPC: CLI binary picker (Choose oas…) --------------------------------
+// Native file picker for the degradation card. Persistence lives here (the
+// main process owns userData); the picked path goes to the server via the
+// renderer's POST /api/cli/reprobe {bin} — the server re-validates with the
+// full probe, so a bad pick degrades with diagnostics, never trusts a path.
+const CLI_CHOICE_FILE = () => join(app.getPath("userData"), "oas-cli-choice.json");
+function readCliChoice() {
+  try { const p = JSON.parse(readFileSync(CLI_CHOICE_FILE(), "utf8")).bin; return typeof p === "string" && p.startsWith("/") ? p : null; }
+  catch { return null; }
+}
+function writeCliChoice(bin) {
+  try { writeFileSync(CLI_CHOICE_FILE(), JSON.stringify({ bin })); } catch { /* best-effort */ }
+}
+ipcMain.handle("cli:pick", async (e) => {
+  guard(e);
+  const win = BrowserWindow.fromWebContents(e.sender);
+  const r = await dialog.showOpenDialog(win, {
+    title: "Choose the oas CLI binary",
+    properties: ["openFile", "showHiddenFiles"],
+    message: "Select the oas executable (e.g. from `command -v oas`)",
+  });
+  if (r.canceled || !r.filePaths?.[0]) return { path: null };
+  writeCliChoice(r.filePaths[0]);           // persisted — top discovery priority next launch
+  return { path: r.filePaths[0] };
 });
 
 // ---- IPC: API proxy -----------------------------------------------------
@@ -374,6 +408,13 @@ app.whenReady().then(async () => {
   try { await ensureServer(); }
   catch (e) { console.error(`oas-desktop: ${e.message}`); }
   await createWindow();
+  // Contract re-probe trigger "app focus": notify the renderer, which calls
+  // POST /api/cli/reprobe (the server owns probe state and rate semantics).
+  app.on("browser-window-focus", () => {
+    for (const w of BrowserWindow.getAllWindows()) {
+      if (!w.webContents.isDestroyed()) w.webContents.send("app:focus");
+    }
+  });
   app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
 

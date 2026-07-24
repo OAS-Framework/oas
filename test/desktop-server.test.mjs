@@ -207,7 +207,81 @@ test("desktop server: /api/brain returns the contract shape with absolute paths"
   } finally { proc.kill(); }
 });
 
+test("desktop server: harvestHome rejects out-of-layout homes independently of roster derivation (review 0b83988)", async () => {
+  // Defense-in-depth isolation: the roster pins home to the enumerated
+  // directory, but the ENDPOINT's own containment must also hold — a
+  // tampered snapshot or future roster regression must not reach the CLI.
+  // Exercise the extracted block directly with hostile inst objects.
+  const { mkdtempSync, mkdirSync, realpathSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { dirname, basename } = await import("node:path");
+  const src = extractBlock(SRV, "HARVESTHOME");
+  const scope = mkdtempSync(join(tmpdir(), "oasweb-hh-"));
+  const root = join(scope, "agents");
+  const goodHome = join(root, "dev", "instances", "dev-1");
+  mkdirSync(goodHome, { recursive: true });
+  const localHome = join(scope, "local-agents", "loc", "instances", "loc-1");
+  mkdirSync(localHome, { recursive: true });
+  const outside = mkdtempSync(join(tmpdir(), "oasweb-hh-outside-"));
+  mkdirSync(join(outside, "instances", "evil-1"), { recursive: true });
+  const harvestHome = new Function("realpathSync", "basename", "dirname", "join", "workspaces", "reader",
+    `${src}; return harvestHome;`)(
+    realpathSync, basename, dirname, join,
+    () => [{ roots: [root] }],
+    { localAgentsDirOf: (r) => join(dirname(r), "local-agents") });
+  // in-layout homes resolve (agents root and the local-agents sibling)
+  assert.equal(harvestHome({ instance: "dev-1", home: goodHome }), realpathSync(goodHome), "agents-root home accepted");
+  assert.equal(harvestHome({ instance: "loc-1", home: localHome }), realpathSync(localHome), "local-agents sibling home accepted");
+  // hostile shapes ALL reject regardless of what the roster said
+  assert.equal(harvestHome({ instance: "evil-1", home: join(outside, "instances", "evil-1") }), null, "foreign instances layout rejected");
+  assert.equal(harvestHome({ instance: "dev-1", home: outside }), null, "non-instances directory rejected");
+  assert.equal(harvestHome({ instance: "other-name", home: goodHome }), null, "basename/instance mismatch rejected");
+  assert.equal(harvestHome({ instance: "dev-1", home: join(scope, "nope", "instances", "dev-1") }), null, "unknown base rejected");
+  assert.equal(harvestHome({ instance: "dev-1" }), null, "missing home rejected");
+  assert.equal(harvestHome({ instance: "dev-1", home: 42 }), null, "non-string home rejected");
+});
+
 // ---- /api/agents + /api/spawn: roster of spawnable souls incl. capability agents ----
+
+test("desktop server: /api/brain never returns skills from symlinks escaping a capability package (e2e, review 0b83988)", async () => {
+  const { mkdtempSync, mkdirSync, writeFileSync, symlinkSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  // Workspace with an OWNED capability whose agent soul dir contains a
+  // skills tree where one SKILL.md is a symlink OUT of the package — the
+  // exact escape reviewer-ae3e199 reproduced against brainData's
+  // soulDir/skills walk (TOP-SECRET frontmatter leaked into soul.skills).
+  const scope = mkdtempSync(join(tmpdir(), "oasweb-brainesc-"));
+  writeFileSync(join(scope, "outside-skill.md"), "---\nname: leaked-skill\ndescription: TOP-SECRET-SOUL-SKILL\n---\n# s\n");
+  const capDir = join(scope, ".agents", "capabilities", "owned", "esc");
+  mkdirSync(join(capDir, "agents", "helper", "skills", "good"), { recursive: true });
+  mkdirSync(join(capDir, "agents", "helper", "skills", "sneaky"), { recursive: true });
+  writeFileSync(join(scope, "oas-config.yaml"), "name: t\ncapabilities:\n  additive:\n    esc.cap: {}\n");
+  writeFileSync(join(capDir, "oas.json"), JSON.stringify({
+    capability: "esc.cap", version: "1.0.0", description: "x", agents: ["agents/helper"],
+  }));
+  writeFileSync(join(capDir, "agents", "helper", "soul.yaml"), "name: helper\ndescription: h\n");
+  writeFileSync(join(capDir, "agents", "helper", "AGENTS.md"), "# helper\n");
+  writeFileSync(join(capDir, "agents", "helper", "skills", "good", "SKILL.md"), "---\nname: good-skill\ndescription: ok\n---\n# g\n");
+  symlinkSync(join(scope, "outside-skill.md"), join(capDir, "agents", "helper", "skills", "sneaky", "SKILL.md"));
+  mkdirSync(join(scope, "agents"), { recursive: true });
+  const port = 4000 + Math.floor(Math.random() * 2000);
+  const proc = spawn(process.execPath, [SRV, "start", "--port", String(port), "--dir", scope], { stdio: "ignore" });
+  try {
+    let up = false;
+    for (let i = 0; i < 40 && !up; i++) {
+      await new Promise((r) => setTimeout(r, 100));
+      try { await fetch(`http://127.0.0.1:${port}/api/panel`); up = true; } catch { /* retry */ }
+    }
+    assert.ok(up, "server came up");
+    const d = await (await fetch(`http://127.0.0.1:${port}/api/brain/helper`)).json();
+    assert.ok(d.soul, "capability agent resolves a brain");
+    const names = d.soul.skills.map((s) => s.name);
+    assert.ok(!names.includes("leaked-skill"), `escaping SKILL.md symlink never surfaces (got: ${names.join(", ")})`);
+    assert.ok(!JSON.stringify(d).includes("TOP-SECRET"), "no leaked frontmatter anywhere in the brain payload");
+    assert.ok(names.includes("good-skill"), "contained skill still resolves (containment, not blanket removal)");
+  } finally { proc.kill(); }
+});
+
 
 test("desktop server: /api/agents lists persistent AND capability-defined agents; /api/spawn validates", async () => {
   // CI runs from a bare checkout where .agents/capabilities/installed/ is
@@ -242,16 +316,19 @@ test("desktop server: /api/agents lists persistent AND capability-defined agents
     assert.equal((await post({ agent: "reviewer", agentsRoot: "/tmp" })).status, 409, "foreign agentsRoot rejected");
     const root = d.agents[0].agentsRoot;
     assert.equal((await post({ agent: "no-such-agent", agentsRoot: root })).status, 409, "unknown agent rejected");
-    // capability agent RESOLVES through the spawn path (attached mode fails on
-    // workDir, proving findCapabilityAgent found the soul — not "unknown agent")
+    // capability agent RESOLVES through the spawn path: validation passes
+    // (not "unknown agent") and the mutation boundary answers with the
+    // stable cli-unavailable degradation (503) — the app never bundles a
+    // kernel; spawning requires a compatible installed oas CLI.
     const r = await post({ agent: "reviewer", agentsRoot: root });
-    assert.equal(r.status, 409);
-    const err = (await r.json()).error;
-    assert.ok(!/unknown agent/.test(err), `reviewer resolves via findCapabilityAgent (got: ${err})`);
+    assert.equal(r.status, 503, "mutation without a CLI adapter degrades, not crashes");
+    const body = await r.json();
+    assert.ok(!/unknown agent/.test(body.error), `reviewer resolves via findCapabilityAgent (got: ${body.error})`);
+    assert.equal(body.code, "cli-unavailable", "stable degradation code for the UI");
   } finally { proc.kill(); }
 });
 
-// ---- /api/file guard + /api/diff (desktop viewers) ----
+// ---- /api/file guard (desktop viewers) ----
 
 test("desktop server: file guard: traversal, prefix-sneak, and symlink escapes fail closed", async () => {
   const { mkdtempSync, writeFileSync, mkdirSync, symlinkSync, realpathSync } = await import("node:fs");
@@ -267,15 +344,50 @@ test("desktop server: file guard: traversal, prefix-sneak, and symlink escapes f
   writeFileSync(join(evil, "secret"), "no");
   writeFileSync(join(base, "outside"), "no");
   symlinkSync(join(base, "outside"), join(root, "link"));
-  assert.ok(resolveGuardedFile(join(root, "ok.md"), [root]).real, "in-root file allowed");
-  assert.equal(resolveGuardedFile(join(root, "..", "outside"), [root]).code, 403, "dotdot traversal rejected");
-  assert.equal(resolveGuardedFile(join(evil, "secret"), [root]).code, 403, "prefix-sneak sibling rejected");
-  assert.equal(resolveGuardedFile(join(root, "link"), [root]).code, 403, "symlink escape rejected");
-  assert.equal(resolveGuardedFile("relative/path", [root]).code, 400, "relative path rejected");
-  assert.equal(resolveGuardedFile(join(root, "missing"), [root]).code, 404, "missing file is 404");
+  // CONTRACT (review 9db1e81): roots are PRE-CANONICALIZED at admission;
+  // the guard never re-resolves them.
+  const realRoot = realpathSync(root);
+  assert.ok(resolveGuardedFile(join(root, "ok.md"), [realRoot]).real, "in-root file allowed");
+  assert.equal(resolveGuardedFile(join(root, "..", "outside"), [realRoot]).code, 403, "dotdot traversal rejected");
+  assert.equal(resolveGuardedFile(join(evil, "secret"), [realRoot]).code, 403, "prefix-sneak sibling rejected");
+  assert.equal(resolveGuardedFile(join(root, "link"), [realRoot]).code, 403, "symlink escape rejected");
+  assert.equal(resolveGuardedFile("relative/path", [realRoot]).code, 400, "relative path rejected");
+  assert.equal(resolveGuardedFile(join(root, "missing"), [realRoot]).code, 404, "missing file is 404");
 });
 
-test("desktop server: /api/file serves guarded text files with markdown flag; /api/diff 404s unknown instance", async () => {
+test("desktop server: file guard never re-resolves roots — a dir→symlink swap AFTER admission cannot re-target them (review 9db1e81)", async () => {
+  const { mkdtempSync, writeFileSync, mkdirSync, symlinkSync, rmSync, realpathSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { sep, resolve } = await import("node:path");
+  const src = extractBlock(SRV, "FILEGUARD");
+  const resolveGuardedFile = new Function("realpathSync", "resolve", "sep",
+    `${src}; return resolveGuardedFile;`)(realpathSync, resolve, sep);
+  // The reviewer's exact reproduction: capture the canonical root at
+  // admission time, swap the directory for a symlink to a secret dir, THEN
+  // run the guard. Because the guard consults only the captured canonical
+  // string, the request (which now resolves into the secret dir) falls
+  // outside it and must 403.
+  const base = mkdtempSync(join(tmpdir(), "oasweb-swap-"));
+  const secret = mkdtempSync(join(tmpdir(), "oasweb-swap-secret-"));
+  writeFileSync(join(secret, "secret.md"), "TOCTOU-SECRET");
+  const la = join(base, "local-agents"); mkdirSync(la);
+  writeFileSync(join(la, "real.md"), "legit");
+  const admittedRealBase = realpathSync(la);            // fileRoots-style admission capture
+  // sanity pre-swap: legit file serves through the admitted root
+  assert.ok(resolveGuardedFile(join(la, "real.md"), [admittedRealBase]).real, "pre-swap file allowed");
+  // THE SWAP happens between admission and guarded resolution
+  rmSync(la, { recursive: true, force: true });
+  symlinkSync(secret, la);
+  for (const p of [join(la, "secret.md"), join(secret, "secret.md")]) {
+    const r = resolveGuardedFile(p, [admittedRealBase]);
+    assert.equal(r.code, 403, `post-swap request rejected (${p}) — got ${JSON.stringify(r)}`);
+  }
+  // mutation guard: the extracted source must not canonicalize roots at use
+  assert.ok(!/allowedRoots\)\s*\{[\s\S]*realpathSync\(r\)/.test(src) && !src.includes("for (const r of allowedRoots) { try { roots.push(realpathSync"),
+    "guard source must not re-resolve allowed roots");
+});
+
+test("desktop server: /api/file serves guarded text files with markdown flag", async () => {
   const port = 4000 + Math.floor(Math.random() * 2000);
   const proc = spawn(process.execPath, [SRV, "start", "--port", String(port), "--dir", ROOT], { stdio: "ignore" });
   try {
@@ -311,11 +423,10 @@ test("desktop server: /api/file serves guarded text files with markdown flag; /a
       if (served) break;
     }
     assert.ok(served, "an agent AGENTS.md was served through the guard");
-    assert.equal((await get("/api/diff/no-such-instance")).status, 404, "diff for unknown instance is 404");
   } finally { proc.kill(); }
 });
 
-test("desktop server: hostile Host header is rejected on GET file/diff APIs (DNS rebinding)", async () => {
+test("desktop server: hostile Host header is rejected on GET file APIs (DNS rebinding)", async () => {
   const port = 4000 + Math.floor(Math.random() * 2000);
   const proc = spawn(process.execPath, [SRV, "start", "--port", String(port), "--dir", ROOT], { stdio: "ignore" });
   try {
@@ -331,52 +442,100 @@ test("desktop server: hostile Host header is rejected on GET file/diff APIs (DNS
       rq.on("error", reject); rq.end();
     });
     assert.equal(await rawGet(`/api/file?path=${encodeURIComponent(join(ROOT, "README.md"))}`), 403, "rebinding host cannot read files");
-    assert.equal(await rawGet("/api/diff/x"), 403, "rebinding host cannot read diffs");
     assert.equal(await rawGet("/api/panel"), 403, "rebinding host cannot enumerate roots");
     assert.equal((await fetch(`http://127.0.0.1:${port}/api/panel`)).status, 200, "loopback host still serves");
   } finally { proc.kill(); }
 });
 
-test("desktop server: diff stats: -z rename records key by the new path with R status", () => {
-  const src = extractBlock(SRV, "DIFFSTAT");
-  const parseDiffStats = new Function(`${src}; return parseDiffStats;`)();
-  // rename dir/old.js -> dir/new name.js (space: -z handles unusual names), plus a modify
-  const numstat = "3\t1\t\0dir/old.js\0dir/new name.js\0" + "5\t2\tplain.js\0";
-  const nameStatus = "R100\0dir/old.js\0dir/new name.js\0" + "M\0plain.js\0";
-  const files = parseDiffStats(numstat, nameStatus);
-  assert.equal(files.length, 2);
-  const ren = files.find((f) => f.status === "R");
-  assert.ok(ren, "rename detected");
-  assert.equal(ren.path, "dir/new name.js", "keyed by the NEW path");
-  assert.equal(ren.additions, 3); assert.equal(ren.deletions, 1);
-  const mod = files.find((f) => f.path === "plain.js");
-  assert.equal(mod.status, "M"); assert.equal(mod.additions, 5);
+// ---- local-agents symlink escape: an untrusted workspace must not widen /api/file ----
+
+test("desktop server: a symlinked local-agents sibling never becomes an /api/file root (403)", async () => {
+  const { mkdtempSync, mkdirSync, writeFileSync, symlinkSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  // A valid-looking workspace whose local-agents is a SYMLINK to a secret
+  // directory outside it — realpath-based guards would canonicalize the
+  // link and authorize its TARGET (review 4e2667b blocker).
+  const secret = mkdtempSync(join(tmpdir(), "oasweb-secret-"));
+  writeFileSync(join(secret, "secret.md"), "# TOP-SECRET-LOCAL-AGENTS");
+  const scope = mkdtempSync(join(tmpdir(), "oasweb-symlink-ws-"));
+  mkdirSync(join(scope, "agents", "dev", "soul"), { recursive: true });
+  writeFileSync(join(scope, "agents", "dev", "soul", "soul.yaml"), "name: dev\ndescription: d\n");
+  writeFileSync(join(scope, "agents", "dev", "soul", "AGENTS.md"), "# dev\n");
+  symlinkSync(secret, join(scope, "local-agents"));
+  const port = 4000 + Math.floor(Math.random() * 2000);
+  const proc = spawn(process.execPath, [SRV, "start", "--port", String(port), "--dir", scope], { stdio: "ignore" });
+  try {
+    let up = false;
+    for (let i = 0; i < 40 && !up; i++) {
+      await new Promise((r) => setTimeout(r, 100));
+      try { await fetch(`http://127.0.0.1:${port}/api/panel`); up = true; } catch { /* retry */ }
+    }
+    assert.ok(up, "server came up");
+    const get = (p) => fetch(`http://127.0.0.1:${port}${p}`);
+    // the symlink target must NOT be readable through the sibling root
+    for (const path of [join(scope, "local-agents", "secret.md"), join(secret, "secret.md")]) {
+      const r = await get(`/api/file?path=${encodeURIComponent(path)}`);
+      assert.ok([403, 404].includes(r.status), `symlinked local-agents target rejected (${path} → ${r.status})`);
+      if (r.status === 200) assert.fail("secret served through a symlinked local-agents root");
+    }
+    // a legitimate file inside the real agents root still serves
+    const okR = await get(`/api/file?path=${encodeURIComponent(join(scope, "agents", "dev", "soul", "AGENTS.md"))}`);
+    assert.equal(okR.status, 200, "real agents-root files still serve");
+    // and a REAL (non-symlink) local-agents sibling still works end to end
+    const scope2 = mkdtempSync(join(tmpdir(), "oasweb-real-local-"));
+    mkdirSync(join(scope2, "agents"), { recursive: true });
+    mkdirSync(join(scope2, "local-agents", "loc", "soul"), { recursive: true });
+    writeFileSync(join(scope2, "local-agents", "loc", "soul", "soul.yaml"), "name: loc\n");
+    writeFileSync(join(scope2, "local-agents", "loc", "soul", "AGENTS.md"), "# loc\n");
+    const port2 = 4000 + Math.floor(Math.random() * 2000);
+    const proc2 = spawn(process.execPath, [SRV, "start", "--port", String(port2), "--dir", scope2], { stdio: "ignore" });
+    try {
+      let up2 = false;
+      for (let i = 0; i < 40 && !up2; i++) {
+        await new Promise((r) => setTimeout(r, 100));
+        try { await fetch(`http://127.0.0.1:${port2}/api/panel`); up2 = true; } catch { /* retry */ }
+      }
+      assert.ok(up2, "second server came up");
+      const r2 = await fetch(`http://127.0.0.1:${port2}/api/file?path=${encodeURIComponent(join(scope2, "local-agents", "loc", "soul", "AGENTS.md"))}`);
+      assert.equal(r2.status, 200, "REAL local-agents sibling files serve (local souls stay first-class)");
+    } finally { proc2.kill(); }
+  } finally { proc.kill(); }
 });
 
-test("desktop server: diff synthesis: untracked symlinks render link text, FIFOs are skipped unread", async () => {
-  const { mkdtempSync, writeFileSync, symlinkSync, lstatSync, readlinkSync, readFileSync } = await import("node:fs");
-  const { execFileSync: xfs } = await import("node:child_process");
+test("desktop server: dir→symlink swap after admission cannot re-resolve the local-agents root (TOCTOU)", async () => {
+  const { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync } = await import("node:fs");
   const { tmpdir } = await import("node:os");
-  const src = extractBlock(SRV, "UNTRACKED");
-  const synthUntracked = new Function(`${src}; return synthUntracked;`)();
-  const dir = mkdtempSync(join(tmpdir(), "oasweb-untracked-"));
-  writeFileSync(join(dir, "secret-target"), "TOP-SECRET-KEY-MATERIAL");
-  symlinkSync(join(dir, "secret-target"), join(dir, "leak.txt"));
-  writeFileSync(join(dir, "plain.txt"), "hello\n");
-  try { xfs("mkfifo", [join(dir, "pipe")], { timeout: 4000 }); } catch { /* platform without mkfifo */ }
-  const untracked = ["leak.txt", "plain.txt", ...(lstatSync(join(dir, "pipe"), { throwIfNoEntry: false }) ? ["pipe"] : [])];
-  const files = [];
-  const io = { lstatSync, readlinkSync, readFileSync, join, maxBytes: 2 * 1024 * 1024 };
-  const diff = synthUntracked(dir, untracked, files, io);
-  assert.ok(!diff.includes("TOP-SECRET-KEY-MATERIAL"), "symlink target content never read into the diff");
-  assert.ok(diff.includes("+hello"), "regular file content synthesized");
-  const leak = files.find((f) => f.path === "leak.txt");
-  assert.ok(leak, "symlink listed as added");
-  assert.ok(diff.includes("secret-target"), "symlink renders its link text (readlink)");
-  const pipe = files.find((f) => f.path === "pipe");
-  if (pipe) assert.equal(pipe.additions, null, "FIFO listed but never opened");
-  // swap-in guard: a statSync-based implementation would follow the symlink
-  assert.ok(src.includes("lstatSync") || src.includes("io.lstatSync"), "implementation lstat's entries");
+  // Admission sees a REAL local-agents dir; a workspace process then swaps
+  // it for a symlink to a secret dir. Because fileRoots pushes the
+  // IMMUTABLE realpath captured at admission (review ac366f9), the later
+  // resolveGuardedFile canonicalization must not follow the swapped link.
+  const secret = mkdtempSync(join(tmpdir(), "oasweb-toctou-secret-"));
+  writeFileSync(join(secret, "secret.md"), "# TOCTOU-SECRET");
+  const scope = mkdtempSync(join(tmpdir(), "oasweb-toctou-ws-"));
+  mkdirSync(join(scope, "agents", "dev", "soul"), { recursive: true });
+  writeFileSync(join(scope, "agents", "dev", "soul", "soul.yaml"), "name: dev\ndescription: d\n");
+  mkdirSync(join(scope, "local-agents", "loc", "soul"), { recursive: true });
+  writeFileSync(join(scope, "local-agents", "loc", "soul", "AGENTS.md"), "# loc\n");
+  const port = 4000 + Math.floor(Math.random() * 2000);
+  const proc = spawn(process.execPath, [SRV, "start", "--port", String(port), "--dir", scope], { stdio: "ignore" });
+  try {
+    let up = false;
+    for (let i = 0; i < 40 && !up; i++) {
+      await new Promise((r) => setTimeout(r, 100));
+      try { await fetch(`http://127.0.0.1:${port}/api/panel`); up = true; } catch { /* retry */ }
+    }
+    assert.ok(up, "server came up");
+    const get = (p) => fetch(`http://127.0.0.1:${port}/api/file?path=${encodeURIComponent(p)}`);
+    // sanity: the real sibling serves before the swap
+    assert.equal((await get(join(scope, "local-agents", "loc", "soul", "AGENTS.md"))).status, 200, "real sibling serves pre-swap");
+    // THE SWAP: replace the directory with a symlink to the secret dir
+    rmSync(join(scope, "local-agents"), { recursive: true, force: true });
+    symlinkSync(secret, join(scope, "local-agents"));
+    for (const p of [join(scope, "local-agents", "secret.md"), join(secret, "secret.md")]) {
+      const r = await get(p);
+      assert.ok([403, 404].includes(r.status), `post-swap symlink target rejected (${p} → ${r.status})`);
+    }
+  } finally { proc.kill(); }
 });
 
 // ---- tmux target anchoring: prefix-match hazard (reviewer-death bug class) ----

@@ -20,4 +20,4 @@ Desktop viewers inspect files from worktrees that may be untrusted. Reading an u
 # Related concepts
 
 - [desktop backend architecture](/architecture/desktop-backend-architecture.md)
-- [Guard file-serving paths by realpathing requests and roots](/lessons/file-endpoint-realpath-guard.md)
+- [Guard file-serving paths with admitted canonical roots](/lessons/file-endpoint-realpath-guard.md)

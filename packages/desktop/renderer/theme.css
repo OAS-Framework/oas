@@ -201,7 +201,25 @@
 .oas-view .working .dots span:nth-child(2) { animation-delay: .2s; }
 .oas-view .working .dots span:nth-child(3) { animation-delay: .4s; }
 
-/* ── cards (summary, spawn, jira) ── */
+/* ── cli degradation card (Spawn/Harvest without a compatible oas CLI) ── */
+.oas-view .cli-card, .cli-card { background: var(--surface); border: 1px solid var(--warn); border-radius: 12px;
+            padding: 14px 16px; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 10px;
+            max-width: 640px; font-size: 13px; color: var(--fg); }
+.cli-card .cli-head { font-weight: 650; display: flex; align-items: center; gap: 8px; }
+.cli-card .cli-head .glyph { color: var(--warn); }
+.cli-card .cli-body { color: var(--muted); line-height: 1.5; display: flex; flex-direction: column; gap: 10px; }
+.cli-card .cli-kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; font-size: 12.5px; }
+.cli-card .cli-kv .k { color: var(--muted); }
+.cli-card .cli-kv .v { color: var(--fg); word-break: break-all; }
+.cli-card .cli-ver { color: var(--muted); }
+.cli-card .cli-install { display: flex; gap: 8px; align-items: center; }
+.cli-card .cli-cmd { background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px;
+            padding: 6px 10px; user-select: all; overflow-x: auto; white-space: nowrap; }
+.cli-card .cli-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.cli-card .cli-docs { color: var(--accent); font-size: 12.5px; }
+.cli-card .cli-status { color: var(--muted); font-size: 12.5px; }
+
+/* ── cards (summary, spawn) ── */
 .oas-view .cards { padding: 14px 18px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
 .oas-view .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
                   padding: 12px 14px; box-shadow: var(--shadow); }
@@ -212,9 +230,3 @@
 .oas-view .kv .k { color: var(--muted); }
 .oas-view .kv .v { color: var(--fg); word-break: break-all; }
 
-/* ── jira ── */
-.oas-view table.jt { width: 100%; border-collapse: collapse; font-size: 12.5px; }
-.oas-view table.jt th { text-align: left; color: var(--muted); font-weight: 600; font-size: 11.5px;
-                        padding: 4px 10px 4px 0; border-bottom: 1px solid var(--border); text-transform: uppercase; letter-spacing: .04em; }
-.oas-view table.jt td { padding: 5px 10px 5px 0; border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent); vertical-align: top; }
-.oas-view .jkey { color: var(--accent); font-weight: 600; white-space: nowrap; }

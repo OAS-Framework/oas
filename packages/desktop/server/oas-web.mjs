@@ -9,15 +9,17 @@
  *   GET  /api/panel                 roster JSON (instances, git, task, tmux state)
  *   GET  /api/agents                available agents (souls) per workspace root
  *   POST /api/spawn                 { agent, agentsRoot, task?, purpose? } → spawn an instance
+ *                                   (mutations require the installed `oas` CLI; see cliUnavailable)
  *   GET  /api/session/<instance>?lines=n   ANSI pane capture of the live session
  *   POST /api/keys/<instance>       { data } → raw key bytes into the session (no Enter)
  *   POST /api/interrupt/<instance>  sends Ctrl-C (Escape for pi/claude prompts stays manual)
 
- *   GET  /api/jira/<instance>       epic + Agent Roster for instances with oas.jira meta
+ *   GET  /api/cli                   CLI discovery status (bin, version, required range, tried)
+ *   POST /api/cli/reprobe           re-run discovery; body { bin? } prioritizes a user-chosen binary
+ *   POST /api/harvest/<instance>    `oas okf harvest --json` with cwd fixed to the instance home
  *   GET  /api/brain/<agent>?ws=<id> agent "brain" JSON: soul (AGENTS.md, skills,
  *                                   knowledge tree) + per-instance artifacts (abs paths)
  *   GET  /api/file?path=<abs>       text file content, guarded to workspace roots + agent homes
- *   GET  /api/diff/<instance>?staged=0|1   unified git diff of the instance's work tree + stats
  *
  * SECURITY: binds 127.0.0.1 ONLY. This process can type into your terminals.
  * Interaction model: terminal-direct (tmux send-keys / capture-pane) — the
@@ -25,24 +27,12 @@
  */
 import { createServer } from "node:http";
 import { execFile, execFileSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync, statSync, realpathSync, lstatSync, readlinkSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync, lstatSync, realpathSync, accessSync, constants as fsConstants } from "node:fs";
 import { basename, dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { homedir } from "node:os";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-
-/** Kernel root: the app is in-tree at packages/desktop/server → repo root is
- * three levels up. OAS_DESKTOP_FRAMEWORK_ROOT overrides for packaged builds
- * where the app resolves the kernel itself. */
-const FRAMEWORK_ROOT = (() => {
-  const env = process.env.OAS_DESKTOP_FRAMEWORK_ROOT;
-  if (env && existsSync(join(env, "lib", "core.mjs"))) return resolve(env);
-  const rel = join(HERE, "..", "..", "..");
-  if (existsSync(join(rel, "lib", "core.mjs"))) return rel;
-  console.error(`oas-desktop server: cannot find the OAS kernel (lib/core.mjs) at ${rel} — set OAS_DESKTOP_FRAMEWORK_ROOT`);
-  process.exit(1);
-})();
 
 const args = process.argv.slice(2);
 const sub = args[0];
@@ -60,9 +50,14 @@ if (sub !== "start" && sub !== "collect") {
   process.exit(1);
 }
 
-const core = await import(pathToFileURL(join(FRAMEWORK_ROOT, "lib", "core.mjs")).href);
+// App-owned READ-ONLY deployment reader — the packaged app never imports the
+// framework checkout's kernel module and accepts no framework-root
+// override; all lifecycle mutations go through the installed `oas` CLI.
+const reader = await import(pathToFileURL(join(HERE, "deployment.mjs")).href);
 const model = await import(pathToFileURL(join(HERE, "model.mjs")).href);
-model.initModel(core);
+model.initModel(reader);
+const locator = await import(pathToFileURL(join(HERE, "..", "cli-locator.mjs")).href);
+const adapter = await import(pathToFileURL(join(HERE, "..", "cli-adapter.mjs")).href);
 
 /** Workspaces in view. Each --dir registers one (repeatable); no --dir means
  * the cwd. Every context resolves to its team scope (or config scope) so the
@@ -74,14 +69,14 @@ const DEBUG = flag("debug") === true || process.env.OASWEB_DEBUG === "1";
 function workspaceEntry(ctx) {
   let team, roots = [], scope = ctx;
   try {
-    const r = core.resolveOasConfig(ctx);
-    if (r.team) { team = r.team; scope = r.team.scope; roots = core.teamAgentRoots(r.team.scope); }
+    const r = reader.resolveDeployment(ctx);
+    if (r.team) { team = r.team; scope = r.team.scope; roots = reader.teamAgentRoots(r.team.scope); }
     else {
       const level = r.chain?.find((c) => c._level !== process.env.HOME)?._level;
       if (level) scope = level;
     }
   } catch { /* fall through to local root */ }
-  if (!roots.length) { try { roots = [core.ensureRoot(ctx)]; } catch { roots = []; } }
+  if (!roots.length) { const root = reader.findAgentsRoot(ctx); roots = root ? [root] : []; }
   return { id: scope, name: scope.split("/").pop(), scope, team: team || null, roots };
 }
 function workspaces() {
@@ -118,16 +113,15 @@ function panelData(wsId) {
       workspace: dirname(i.agentsRoot), repoName: (i.repo || dirname(i.agentsRoot)).split("/").pop(),
       parentInstance: i.parentInstance || null,
       tmux: i.tmux, git: i.git, task: i.task, next: i.next,
-      jira: i.capabilityMeta?.["oas.jira"] || null,
       team: i.team || null,
     })),
   };
 }
 
 /** Available agents (souls) of a workspace — what `oas spawn <agent>` could
- * start. Same kernel seams as the CLI: core.listAgents per agents root, plus
+ * start. Same read-only seams as the reader: listAgents per agents root, plus
  * capability-defined agents (packages' `agents:` souls) active in the root's
- * context — the CLI resolves those via findCapabilityAgent. */
+ * context. */
 function agentsData(wsId) {
   const ws = wsId ? workspaceById(wsId) : workspaces()[0];
   const agents = [];
@@ -140,15 +134,14 @@ function agentsData(wsId) {
       workspace: context, repoName: resolve(context, a.repo || ".").split("/").pop(),
     });
     try {
-      const local = core.listAgents(root);
+      const local = reader.listAgents(root);
       const seen = new Set(local.map((a) => a.name));
       for (const a of local) pushAgent(a);
-      // Capability-defined agents (kind "capability") — full soul via the same
-      // resolver the CLI's spawn fallback uses.
-      for (const c of core.listCapabilityAgents(context)) {
+      // Capability-defined agents (kind "capability") — read-only resolution.
+      for (const c of reader.listCapabilityAgents(context)) {
         if (seen.has(c.name)) continue;
         seen.add(c.name);
-        const soul = core.findCapabilityAgent(context, root, c.name);
+        const soul = reader.findCapabilityAgent(context, root, c.name);
         if (soul) pushAgent(soul);
       }
     } catch { /* one broken root must not hide the rest */ }
@@ -157,31 +150,99 @@ function agentsData(wsId) {
   return { workspace: ws ? { id: ws.id, name: ws.name } : null, agents };
 }
 
-/** Spawn an instance of an available agent. Default is NO TASK — the instance
- * comes up awaiting instruction (the user talks to it through the panel). */
-function spawnAgent({ agent, agentsRoot, task, purpose }) {
+/** Spawn an instance of an available agent through the discovered `oas` CLI
+ * (Desktop CLI API v1) — the app never reimplements kernel spawn logic.
+ * Default is NO TASK: the instance comes up awaiting instruction.
+ * Validation errors THROW (→ 409); domain/CLI results RESOLVE with the
+ * envelope so stable error codes reach the UI. */
+async function spawnAgent({ agent, agentsRoot, task, purpose }) {
   const name = String(agent || "");
   const root = resolve(String(agentsRoot || ""));
   // agentsRoot must be one of the workspace roots this server was started for —
   // never spawn into an arbitrary caller-supplied directory.
   const known = workspaces().flatMap((w) => w.roots);
   if (!known.some((r) => resolve(r) === root)) throw new Error(`unknown agents root "${agentsRoot}"`);
-  const def = core.findAgent(root, name)
-    // CLI parity: capability-defined agents (a package's `agents:` soul active
-    // in this context) resolve via findCapabilityAgent and home locally.
-    || core.findCapabilityAgent(dirname(root), root, name);
+  const def = reader.findAgent(root, name)
+    || reader.findCapabilityAgent(dirname(root), root, name);
   if (!def) throw new Error(`unknown agent "${name}"`);
-  const r = core.spawnInstance(root, def, {
-    purpose: purpose ? String(purpose) : undefined,
+  // Mutation boundary: a compatible installed CLI is required — degradation,
+  // not a bundled kernel.
+  if (!cliState.ok) {
+    const err = new Error("spawning requires a compatible installed oas CLI — the desktop app does not bundle a kernel");
+    err.code = "cli-unavailable";
+    throw err;
+  }
+  const env = await adapter.cliSpawn(cliState.bin, {
+    agent: name,
+    workspaceDir: dirname(root),          // the workspace context owning this agents root
     task: task ? String(task) : "",
-    // Lineage: server-mediated spawns are OPERATOR-origin (a human clicked the
-    // button) — no `parent` is passed, and spawnInstance never reads ambient
-    // OAS_INSTANCE/PI_AGENT_INSTANCE (this server process may have inherited an
-    // agent's env from the shell it was born in; that is not parentage).
-    repo: def.repo || core.defaultRepo(core.workspaceOf(root)) || undefined,
+    purpose: purpose ? String(purpose) : undefined,
   });
+  if (!env.ok) {
+    const err = new Error(env.error.message || "spawn failed");
+    err.code = env.error.code || "E_SPAWN_FAILED";
+    throw err;
+  }
+  const r = env.result;
   return { instance: r.instance, agent: r.agent, home: r.home, work: r.work,
-           branch: r.branch || null, launched: r.launched, warnings: r.warnings || [] };
+           branch: r.branch ?? null, launched: !!r.launched, warnings: r.warnings || [],
+           tmux: r.tmux ?? null };
+}
+
+/* ── CLI discovery (Desktop CLI API v1) ──
+   The server is the privileged process that runs mutations, so it owns the
+   probe. The persisted user-chosen binary arrives from the Electron main
+   process as --oas-bin (main owns persistence in userData); re-probe runs at
+   startup, on explicit /api/cli/reprobe (app focus, Retry, choose). */
+let cliState = { ok: false, probedAt: 0, tried: [] };
+// User-chosen binary: seeded from --oas-bin (main passes the persisted pick
+// at server start) and updated by /api/cli/reprobe {bin} — top candidate on
+// every subsequent probe until replaced.
+let chosenBin = typeof flag("oas-bin") === "string" ? flag("oas-bin") : null;
+const cliIo = {
+  persisted: () => chosenBin,
+  env: process.env,
+  isExecutableFile: (p) => {
+    try { const st = statSync(p); if (!st.isFile()) return false; accessSync(p, fsConstants.X_OK); return true; }
+    catch { return false; }
+  },
+  canonicalize: (p) => realpathSync(p),
+  // Slow sources — ASYNC (never block the serving event loop; review
+  // 53a20c7) and evaluated lazily/at-most-once by the locator's source
+  // ordering (they only run when every earlier candidate failed).
+  npmGlobalBin: () => new Promise((ok) => {
+    execFile("npm", ["prefix", "-g"], { encoding: "utf8", timeout: 5000, shell: false },
+      (err, stdout) => ok(err ? null : (String(stdout).trim() ? join(String(stdout).trim(), "bin") : null)));
+  }),
+  loginShellWhich: () => new Promise((ok) => {
+    const sh = process.env.SHELL || "/bin/sh";
+    execFile(sh, ["-l", "-c", "command -v oas"], { encoding: "utf8", timeout: 5000, shell: false },
+      (err, stdout) => { const out = String(stdout || "").trim(); ok(!err && out.startsWith("/") ? out : null); });
+  }),
+};
+// Probe: REJECT on any execFile error — nonzero exit or timeout with
+// plausible stdout must never yield the mutation binary (review 53a20c7).
+const probeBin = (path) => new Promise((ok, bad) => {
+  execFile(path, ["version", "--json"], { encoding: "utf8", timeout: 8000, shell: false, killSignal: "SIGKILL" },
+    (err, stdout) => (err ? bad(err) : ok({ stdout })));
+});
+async function reprobeCli(chosen) {
+  if (chosen) chosenBin = chosen;
+  const r = await locator.discover(cliIo, probeBin);
+  cliState = { ...r, probedAt: Date.now() };
+  return cliState;
+}
+/** Stable diagnostics for the degradation card. */
+function cliStatus() {
+  return {
+    ok: !!cliState.ok,
+    bin: cliState.bin || null,
+    version: cliState.version || null,
+    source: cliState.source || null,
+    required: { desktopApi: locator.DESKTOP_API, range: ">=0.18.0 <0.19.0" },
+    probedAt: cliState.probedAt || null,
+    tried: cliState.tried || [],
+  };
 }
 
 /* ── Non-blocking roster snapshot ──
@@ -234,6 +295,37 @@ function findInstance(name, wsId) {
   return undefined;
 }
 /* OASWEB_FINDINST_END */
+
+/* OASWEB_HARVESTHOME_BEGIN — privileged-cwd containment, extracted by tests.
+   The harvest CLI runs with cwd = the instance home. That home must be
+   DERIVED and VERIFIED, never trusted from roster data: canonicalize it and
+   require <...>/instances/<name> whose grandparent agents base is one of
+   this server's workspace roots or their local-agents siblings. */
+function harvestHome(inst) {
+  if (!inst?.home || typeof inst.home !== "string") return null;
+  let real;
+  try { real = realpathSync(inst.home); } catch { return null; }
+  // shape: <agentDir>/instances/<instanceName>
+  if (basename(real) !== String(inst.instance)) return null;
+  const instancesDir = dirname(real);
+  if (basename(instancesDir) !== "instances") return null;
+  const agentDir = dirname(instancesDir);
+  const base = dirname(agentDir); // agents root or a local-agents base
+  const allowed = [];
+  for (const w of workspaces()) {
+    for (const r of w.roots) {
+      allowed.push(r);
+      allowed.push(reader.localAgentsDirOf(r));
+      allowed.push(join(r, "local-agents"));   // legacy nested
+      allowed.push(join(r, "tmp-agents"));
+    }
+  }
+  for (const a of allowed) {
+    try { if (realpathSync(a) === base) return real; } catch { /* absent base */ }
+  }
+  return null;
+}
+/* OASWEB_HARVESTHOME_END */
 
 /* OASWEB_TMUXTGT_BEGIN — exact-match anchored tmux target, extracted by
    tests. tmux -t targets are PREFIX-matched by default: in the 3s
@@ -404,23 +496,26 @@ function chatData(inst, limit = 120) {
 // agent directories under the workspace's agents roots — the agent name is
 // resolved through the same kernel seams as spawn (findAgent /
 // findCapabilityAgent), never from a caller-supplied path.
-function listSkills(dir) {
+function listSkills(dir, contained) {
   // skills live as <dir>/<skill>/SKILL.md with `name`/`description` frontmatter
   const skills = [];
   try {
     for (const e of readdirSync(dir, { withFileTypes: true })) {
       if (!e.isDirectory()) continue;
-      const s = skillEntry(join(dir, e.name));
+      const s = skillEntry(join(dir, e.name), contained);
       if (s) skills.push(s);
     }
   } catch { /* no skills dir */ }
   return skills.sort((a, b) => a.name.localeCompare(b.name));
 }
-function skillEntry(skillDir) {
+function skillEntry(skillDir, contained) {
   const p = join(skillDir, "SKILL.md");
   if (!existsSync(p)) return null;
+  // Package skill trees: a nested SKILL.md symlink can escape the package
+  // boundary even when the tree dir itself is contained — reject per file.
+  if (contained && !contained(p)) return null;
   let meta = {};
-  try { meta = core.parseFrontmatter(readFileSync(p, "utf8")).meta || {}; } catch { /* unreadable skill */ }
+  try { meta = reader.parseFrontmatter(readFileSync(p, "utf8")).meta || {}; } catch { /* unreadable skill */ }
   return { name: meta.name || basename(skillDir), path: p, description: String(meta.description || "").trim() };
 }
 function mdTree(dir) {
@@ -445,7 +540,7 @@ function brainData(agentName, wsId) {
   const ws = wsId ? workspaceById(wsId) : workspaces()[0];
   let def, root;
   for (const r of ws?.roots || []) {
-    def = core.findAgent(r, agentName) || core.findCapabilityAgent(dirname(r), r, agentName);
+    def = reader.findAgent(r, agentName) || reader.findCapabilityAgent(dirname(r), r, agentName);
     if (def) { root = r; break; }
   }
   if (!def) return null;
@@ -467,12 +562,20 @@ function brainData(agentName, wsId) {
     return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
   };
   /* OASWEB_BRAINSKILLS_END */
-  const localSkills = listSkills(join(soulDir, "skills"));
+  // Skills under the soul dir. For CAPABILITY agents soulDir is PACKAGE-OWNED
+  // (untrusted content): the walk must apply per-file containment or a
+  // symlinked SKILL.md inside agents/helper/skills/ escapes the package
+  // (review ae3e199) — same boundary as the manifest skill trees below.
+  const soulContained = def._packageDir ? (f) => reader.containsPackageFile(def._packageDir, f) : undefined;
+  const localSkills = listSkills(join(soulDir, "skills"), soulContained);
   let packageSkills = [];
   if (def.capability) {
     try {
-      packageSkills = core.capabilitySkillDirs(def.capability, dirname(root))
-        .flatMap((p) => expandSkillPath(p, existsSync, listSkills, skillEntry));
+      packageSkills = reader.capabilitySkillDirs(def.capability, dirname(root))
+        .flatMap(({ dir, packageDir }) => {
+          const contained = (f) => reader.containsPackageFile(packageDir, f);
+          return expandSkillPath(dir, existsSync, (d) => listSkills(d, contained), (d) => skillEntry(d, contained));
+        });
     } catch { /* manifest unreadable — no package skills */ }
   }
   const soulSkills = mergeSkills(localSkills, packageSkills);
@@ -512,56 +615,18 @@ function brainData(agentName, wsId) {
   };
 }
 
-// ---- Jira (P2): epic + Agent Roster via acli, using the instance's oas.jira meta ----
-function acliJson(argv) {
-  try { return JSON.parse(execFileSync("acli", argv, { encoding: "utf8", timeout: 20000 })); }
-  catch { return undefined; }
-}
-function jiraPanel(inst) {
-  const meta = inst.jira;
-  if (!meta?.label) return { enabled: false };
-  const site = meta.site, project = meta.project, label = meta.label;
-  if (!site || !project) return { enabled: true, label, error: "site/project not configured" };
-  const mine = acliJson(["jira", "workitem", "search", "--site", site,
-    "--jql", `project = ${project} AND labels = ${label} AND statusCategory != Done ORDER BY rank`, "--json"]);
-  const tickets = (Array.isArray(mine) ? mine : mine?.issues || mine?.results || []).map((t) => ({
-    key: t.key, type: t.fields?.issuetype?.name || t.type || "", summary: t.fields?.summary || t.summary || "",
-    status: t.fields?.status?.name || t.status || "", parent: t.fields?.parent?.key || t.parent || null,
-  }));
-  // The epic: a labeled epic, else the parent chain of the first labeled ticket.
-  let epicKey = tickets.find((t) => /epic/i.test(t.type))?.key || tickets.find((t) => t.parent)?.parent || null;
-  let epic = null;
-  if (epicKey) {
-    const e = acliJson(["jira", "workitem", "view", epicKey, "--site", site, "--json"]);
-    if (e) {
-      const desc = e.fields?.description || e.description || "";
-      const text = typeof desc === "string" ? desc : JSON.stringify(desc);
-      epic = { key: epicKey, summary: e.fields?.summary || e.summary || "", status: e.fields?.status?.name || e.status || "", roster: parseRoster(text) };
-      if (/epic/i.test(String(e.fields?.issuetype?.name || e.type || "")) === false && !epic.summary) epic = { key: epicKey, summary: "", status: "", roster: [] };
-    }
-  }
-  return { enabled: true, label, site, project, tickets, epic };
-}
-export function parseRoster(text) {
-  const m = String(text).match(/##\s*Agent Roster\s*([\s\S]*?)(?=\n##\s|$)/i);
-  if (!m) return [];
-  const rows = m[1].split("\n").map((l) => l.trim()).filter((l) => l.startsWith("|"));
-  const cells = (l) => l.split("|").slice(1, -1).map((c) => c.trim());
-  if (rows.length < 2) return [];
-  const header = cells(rows[0]);
-  return rows.slice(2).map((r) => {
-    const c = cells(r);
-    return Object.fromEntries(header.map((h, i) => [h.toLowerCase().replace(/[^a-z]+/g, "-").replace(/^-|-$/g, ""), c[i] || ""]));
-  }).filter((r) => Object.values(r).some(Boolean));
-}
-
-// ---- File serving (markdown/brain viewers) + git diff (diff viewer) ----
+// ---- File serving (markdown/brain viewers) ----
 
 /* OASWEB_FILEGUARD_BEGIN — path-traversal guard for /api/file, extracted by
    tests. A requested path is readable ONLY if its realpath (symlinks resolved)
-   sits under one of the allowed roots — realpaths themselves — so `..`
-   segments, sneaky prefixes (/root-evil vs /root) and symlink escapes all
-   fail closed. */
+   sits under one of the allowed roots. CONTRACT: allowedRoots are
+   PRE-CANONICALIZED strings captured at admission time — the guard must
+   NEVER re-resolve them (review 9db1e81: re-running realpathSync on a root
+   at use time re-opened the admission-to-use TOCTOU — a dir→symlink swap
+   between fileRoots() and this check made root and request resolve into the
+   same outside target). Only the REQUESTED path is canonicalized here; `..`
+   segments, sneaky prefixes (/root-evil vs /root) and request-side symlink
+   escapes all fail closed against the immutable root strings. */
 function underRoot(realPath, realRoot) {
   return realPath === realRoot || realPath.startsWith(realRoot.endsWith(sep) ? realRoot : realRoot + sep);
 }
@@ -569,9 +634,7 @@ function resolveGuardedFile(requested, allowedRoots) {
   if (typeof requested !== "string" || !requested.startsWith("/")) return { error: "path must be absolute", code: 400 };
   let real;
   try { real = realpathSync(resolve(requested)); } catch { return { error: "no such file", code: 404 }; }
-  const roots = [];
-  for (const r of allowedRoots) { try { roots.push(realpathSync(r)); } catch { /* skip missing */ } }
-  if (!roots.some((root) => underRoot(real, root))) return { error: "path outside allowed roots", code: 403 };
+  if (!allowedRoots.some((root) => underRoot(real, root))) return { error: "path outside allowed roots", code: 403 };
   return { real };
 }
 /* OASWEB_FILEGUARD_END */
@@ -581,13 +644,36 @@ const FILE_MAX_BYTES = 2 * 1024 * 1024;
 
 /** Allowed roots for /api/file: every agents root of every workspace (agent
  * homes — souls, instances, knowledge) plus the known instances' work trees
- * and repos (the brain/diff viewers open files there too). */
+ * and repos (the brain/markdown viewers open files there too).
+ * EVERY returned root is canonicalized HERE, exactly once — the guard
+ * compares against these immutable strings without re-resolving (see the
+ * FILEGUARD contract above): a dir→symlink swap after this admission
+ * changes nothing the guard consults. */
 function fileRoots() {
-  const roots = workspaces().flatMap((w) => w.roots);
+  const roots = [];
+  const admit = (p) => { try { roots.push(realpathSync(p)); } catch { /* absent — skip */ } };
+  for (const w of workspaces()) for (const r of w.roots) admit(r);
+  // Local souls live in the scope-level local-agents/ SIBLING of each agents
+  // root — their soul/knowledge/instance files must be viewable too.
+  // SECURITY: the sibling dir is UNTRUSTED workspace content — admit it only
+  // when lstat (non-following) shows a REAL directory whose canonical parent
+  // is the canonical workspace scope; what gets pushed is the canonical
+  // string, immutable from here on.
+  for (const w of workspaces()) {
+    for (const r of w.roots) {
+      const base = reader.localAgentsDirOf(r);
+      try {
+        if (!lstatSync(base).isDirectory()) continue;        // symlink or non-dir: reject (lstat does NOT follow)
+        const realBase = realpathSync(base);
+        if (dirname(realBase) !== realpathSync(dirname(r))) continue;
+        roots.push(realBase);
+      } catch { /* absent — no local souls here */ }
+    }
+  }
   for (const d of snapshot.byWs.values()) {
     for (const i of d.instances) {
-      if (i.home) { roots.push(i.home); roots.push(join(i.home, "work")); } // <home>/work = the work tree (i.work is the MODE)
-      if (i.repo) roots.push(i.repo);
+      if (i.home) { admit(i.home); admit(join(i.home, "work")); } // <home>/work = the work tree (i.work is the MODE)
+      if (i.repo) admit(i.repo);
     }
   }
   return roots;
@@ -610,95 +696,10 @@ function fileData(requested) {
   };
 }
 
-function git(cwd, argv) {
-  return execFileSync("git", ["-C", cwd, ...argv], { encoding: "utf8", timeout: 15000, maxBuffer: 32 * 1024 * 1024 });
-}
-
-/* OASWEB_DIFFSTAT_BEGIN — -z diff stat parsing, extracted by tests. Rename
-   records carry explicit old NUL new fields — never parse the human
-   "dir/{old => new}" form; both maps key by the NEW path. numstat -z rename
-   records are "adds\tdels\t" followed by old NUL new as separate fields. */
-function parseDiffStats(numstatZ, nameStatusZ) {
-  const statusOf = new Map();
-  {
-    const f = String(nameStatusZ).split("\0");
-    for (let i = 0; i < f.length - 1; ) {
-      const st = f[i++][0];
-      if (!st) continue;
-      const a = f[i++];
-      const b = st === "R" || st === "C" ? f[i++] : a; // rename/copy: old, new
-      statusOf.set(b, st);
-    }
-  }
-  const files = [];
-  {
-    const f = String(numstatZ).split("\0");
-    for (let i = 0; i < f.length - 1; ) {
-      const c = f[i++].split("\t");
-      if (c.length < 3) continue;
-      const path = c[2] !== "" ? c[2] : (i++, f[i++]); // rename: skip old, take new
-      files.push({ path, status: statusOf.get(path) || "M",
-                   additions: c[0] === "-" ? null : Number(c[0]),
-                   deletions: c[1] === "-" ? null : Number(c[1]) });
-    }
-  }
-  return files;
-}
-/* OASWEB_DIFFSTAT_END */
-
-/** Git diff of an instance's work tree: unified diff + per-file stats.
- * staged=1 diffs the index (--cached); default diffs the work tree and
- * includes untracked files as added (intent-to-add view via numstat merge). */
-function diffData(inst, staged) {
-  // inst.work is the work MODE (worktree/checkout/attached); the tree itself
-  // lives at <home>/work by convention (model.mjs gitState uses the same path).
-  const cwd = existsSync(join(inst.home || "", "work")) ? join(inst.home, "work") : inst.repo;
-  if (!cwd || !existsSync(cwd)) return { error: "instance has no work tree", code: 404 };
-  let branch = null;
-  try { branch = git(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]).trim(); } catch { return { error: "not a git repository", code: 409 }; }
-  const mode = staged ? ["--cached"] : [];
-  const files = parseDiffStats(
-    git(cwd, ["diff", ...mode, "--numstat", "-M", "-z"]),
-    git(cwd, ["diff", ...mode, "--name-status", "-M", "-z"]));
-  let diff = git(cwd, ["diff", ...mode, "-M"]);
-  if (!staged) {
-    const untracked = git(cwd, ["ls-files", "--others", "--exclude-standard"]).split("\n").filter(Boolean);
-    diff += synthUntracked(cwd, untracked, files, { lstatSync, readlinkSync, readFileSync, join, maxBytes: FILE_MAX_BYTES });
-  }
-  return { body: { repo: cwd, branch, staged: !!staged, files, diff } };
-}
-
-/* OASWEB_UNTRACKED_BEGIN — untracked-file diff synthesis, extracted by tests.
-   SECURITY: lstat first — an untrusted worktree can plant a symlink to
-   ~/.ssh keys (leak) or a FIFO/device (server hang); only regular files are
-   read, and symlinks render as their link text (readlink), never the target. */
-function synthUntracked(cwd, untracked, files, io) {
-  let diff = "";
-  for (const path of untracked) {
-    let text;
-    try {
-      const full = io.join(cwd, path);
-      const st = io.lstatSync(full);
-      if (st.isSymbolicLink()) { text = io.readlinkSync(full); }
-      else if (!st.isFile()) { files.push({ path, status: "A", additions: null, deletions: null }); continue; }
-      else {
-        const buf = io.readFileSync(full);
-        if (buf.includes(0) || buf.length > io.maxBytes) { files.push({ path, status: "A", additions: null, deletions: null }); continue; }
-        text = buf.toString("utf8");
-      }
-    } catch { continue; }
-    const lines = text.length ? text.replace(/\n$/, "").split("\n") : [];
-    files.push({ path, status: "A", additions: lines.length, deletions: 0 });
-    diff += `diff --git a/${path} b/${path}\nnew file mode 100644\n--- /dev/null\n+++ b/${path}\n@@ -0,0 +1,${lines.length} @@\n${lines.map((l) => "+" + l).join("\n")}\n`;
-  }
-  return diff;
-}
-/* OASWEB_UNTRACKED_END */
-
 // ---- HTTP ----
 // Identity for compatibility probes (GET /api/version): the desktop app must
 // not reuse an OLDER server that answers /api/panel but lacks the
-// desktop endpoints (/api/brain, /api/file, /api/diff...). The bundled
+// desktop endpoints (/api/brain, /api/file...). The bundled
 // server's identity is the desktop package's name and version.
 const MANIFEST = (() => {
   const p = JSON.parse(readFileSync(join(HERE, "..", "package.json"), "utf8"));
@@ -719,7 +720,7 @@ const server = createServer(async (req, res) => {
   const path = url.pathname;
   // DNS-rebinding guard: EVERY request must carry a loopback Host — a hostile
   // page rebinding its hostname to 127.0.0.1 must neither type into terminals
-  // (POST) nor read workspace files via the GET APIs (/api/file, /api/diff).
+  // (POST) nor read workspace files via the GET API (/api/file).
   const host = String(req.headers.host || "").replace(/:\d+$/, "");
   const okHost = (h) => h === "127.0.0.1" || h === "localhost" || h === "[::1]" || h === "::1";
   if (!okHost(host)) return send(res, 403, { error: "forbidden origin" });
@@ -747,18 +748,55 @@ const server = createServer(async (req, res) => {
       const d = brainData(bm[1], url.searchParams.get("ws") || undefined);
       return d ? send(res, 200, d) : send(res, 404, { error: `unknown agent "${bm[1]}"` });
     }
+    if (req.method === "GET" && path === "/api/cli") {
+      return send(res, 200, cliStatus());
+    }
+    if (req.method === "POST" && path === "/api/cli/reprobe") {
+      // Re-probe triggers (contract): launch, app focus, explicit Retry, and
+      // after choosing a binary — main/renderer call this; body may carry a
+      // user-chosen absolute path which becomes the top-priority candidate.
+      const body = await readBody(req);
+      const chosen = typeof body.bin === "string" && body.bin.startsWith("/") ? body.bin : undefined;
+      await reprobeCli(chosen);
+      return send(res, 200, cliStatus());
+    }
     if (req.method === "POST" && path === "/api/spawn") {
       const body = await readBody(req);
       if (typeof body.agent !== "string" || !body.agent || typeof body.agentsRoot !== "string" || !body.agentsRoot)
         return send(res, 400, { error: "body needs { agent, agentsRoot }" });
-      try { return send(res, 200, { spawned: true, ...spawnAgent(body) }); }
-      catch (e) { return send(res, 409, { error: String(e.message || e).slice(0, 300) }); }
+      try { return send(res, 200, { spawned: true, ...(await spawnAgent(body)) }); }
+      catch (e) {
+        // Stable code for the degradation UI: cli-unavailable means "install
+        // or choose a compatible oas CLI", not "bad request".
+        const status = e.code === "cli-unavailable" ? 503 : 409;
+        return send(res, status, { error: String(e.message || e).slice(0, 300), ...(e.code ? { code: e.code } : {}) });
+      }
+    }
+    const hm = path.match(/^\/api\/harvest\/([A-Za-z0-9._-]+)$/);
+    if (hm && req.method === "POST") {
+      // Desktop v1 mutation 2: `oas okf harvest --json`, cwd FIXED by this
+      // privileged backend to the RESOLVED instance home — the caller only
+      // names an instance; it can never steer the cwd.
+      const inst = findInstance(hm[1], url.searchParams.get("ws") || undefined);
+      if (!inst) return send(res, 404, { error: `unknown instance "${hm[1]}"` });
+      if (!cliState.ok) return send(res, 503, { error: "harvest requires a compatible installed oas CLI", code: "cli-unavailable" });
+      // SECURITY (review 53a20c7): the roster derives home from the
+      // enumerated DIRECTORY (deployment.mjs never lets instance.json
+      // relocate it), and this endpoint re-verifies before executing:
+      // the canonical home must sit under a known agents root's <agent>/
+      // instances/ (or its local-agents sibling) — a tampered snapshot or
+      // future regression can never make the CLI run in an arbitrary cwd.
+      const home = harvestHome(inst);
+      if (!home) return send(res, 409, { error: "instance home not found or outside the workspace instances layout" });
+      const env = await adapter.cliHarvest(cliState.bin, home);
+      if (!env.ok) return send(res, 502, { error: env.error.message || "harvest failed", code: env.error.code || "E_HARVEST_FAILED" });
+      return send(res, 200, env.result);
     }
     if (req.method === "GET" && path === "/api/file") {
       const r = fileData(url.searchParams.get("path") || "");
       return r.error ? send(res, r.code, { error: r.error }) : send(res, 200, r.body);
     }
-    const m = path.match(/^\/api\/(session|keys|interrupt|jira|chat|diff)\/([A-Za-z0-9._-]+)$/);
+    const m = path.match(/^\/api\/(session|keys|interrupt|chat)\/([A-Za-z0-9._-]+)$/);
     if (m) {
       const inst = findInstance(m[2], url.searchParams.get("ws") || undefined);
       if (!inst) return send(res, 404, { error: `unknown instance "${m[2]}"` });
@@ -790,12 +828,7 @@ const server = createServer(async (req, res) => {
         sendInterrupt(inst);
         return send(res, 200, { sent: true });
       }
-      if (m[1] === "jira" && req.method === "GET") return send(res, 200, jiraPanel(inst));
       if (m[1] === "chat" && req.method === "GET") return send(res, 200, chatData(inst, Number(url.searchParams.get("limit") || 120)));
-      if (m[1] === "diff" && req.method === "GET") {
-        const r = diffData(inst, url.searchParams.get("staged") === "1");
-        return r.error ? send(res, r.code, { error: r.error }) : send(res, 200, r.body);
-      }
     }
     return send(res, 404, { error: "not found" });
   } catch (e) {
@@ -817,4 +850,9 @@ server.listen(port, "127.0.0.1", () => {
   console.log("Bound to 127.0.0.1 only. This process can type into your agent terminals — do not expose it.");
 });
 refreshSnapshot();                       // initial roster snapshot, off-thread
+reprobeCli().then((s) => {
+  console.log(s.ok
+    ? `oas-desktop server: oas CLI ${s.version} at ${s.bin} (${s.source})`
+    : `oas-desktop server: no compatible oas CLI found — reads and terminals work; Spawn/Harvest disabled (${(s.tried || []).length} candidate(s) tried)`);
+});
 setInterval(refreshSnapshot, 3000).unref(); // keep it fresh; child skipped if one is running
