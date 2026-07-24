@@ -148,7 +148,7 @@ if (process.env.OAS_SMOKE_SKIP_LAUNCH === "1") {
     if (r.timedOut) return null;                     // tmux wedged — skip (unusual)
     return String(r.stdout).split("\n").filter((s) => s.startsWith("oasdesk-")).length;
   }
-  const viewerBaseline = await oasdeskViewerCount(); // null when tmux absent
+  const viewerBaseline = await oasdeskViewerCount(); // 0 when tmux is absent/no-server (ENOENT/nonzero → empty stdout → 0); null only on a tmux timeout
   let launchError = null;
   // drainTail: return the current bounded output tail. Only wait for a
   // final flush when the child has ALREADY EXITED (a live child's tail is

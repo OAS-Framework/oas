@@ -308,12 +308,30 @@ ipcMain.handle("api", async (e, pathname, opts) => {
 });
 
 // ---- IPC: integrated terminal (node-pty ↔ grouped tmux viewer session) ---
-const ptys = new Map(); // id -> { pty, killViewer }
+const ptys = new Map(); // id -> { pty, killViewer, wc }
 let nextPtyId = 1;
 // Resource registry (terminal-registry.mjs): DEDUPE by target + HARD CAP.
 // The main process owns the ptys and oasdesk viewer sessions, so the ceiling
 // lives here — the renderer cannot be trusted to bound it.
 const termRegistry = createTerminalRegistry({ max: MAX_TERMINALS });
+
+/** Kill + release every pty owned by a renderer that navigated/reloaded/
+ * died (review cb7622e-r2 important 2). On a renderer reload the OLD tabs are
+ * gone but their ptys survive in main and stay committed in the registry —
+ * without this they'd occupy cap slots forever with no tab to reattach them
+ * (a functional dead-end and a slow cap leak). Wiring the source window's
+ * lifecycle events to a drop closes it: a reloaded renderer starts clean and
+ * the freed targets can be re-opened. */
+function dropPtysForWebContents(wc) {
+  for (const [id, t] of [...ptys]) {
+    if (t.wc !== wc) continue;
+    ptys.delete(id);
+    termRegistry.release(id);
+    try { t.pty.kill(); } catch { /* already gone */ }
+    t.killViewer();
+  }
+}
+const wcWired = new WeakSet(); // wire each renderer's lifecycle listeners once
 
 const tmuxRun = (args) => execFileSync("tmux", args, { stdio: "ignore", timeout: 4000 });
 
@@ -377,8 +395,17 @@ ipcMain.handle("term:open", (e, { session, window: win, cols, rows }) => {
     dropViewer(); // pty gone (detach or session end) — the viewer session must not linger
     if (!wc.isDestroyed()) wc.send(`term:exit:${id}`, exitCode);
   });
-  ptys.set(id, { pty: p, killViewer: dropViewer });
+  ptys.set(id, { pty: p, killViewer: dropViewer, wc });
   termRegistry.commit(targetKey, id);
+  // Release this renderer's ptys when it reloads, navigates, or its process
+  // goes away — the tabs that owned them no longer exist (wired once per wc).
+  if (!wcWired.has(wc)) {
+    wcWired.add(wc);
+    const drop = () => dropPtysForWebContents(wc);
+    wc.on("did-navigate", drop);            // full reload / navigation (not in-page hash)
+    wc.on("render-process-gone", drop);     // renderer crash/replace
+    wc.once("destroyed", drop);              // window/webContents torn down
+  }
   return { id };
 });
 ipcMain.on("term:write", (e, id, data) => { guard(e); ptys.get(id)?.pty.write(String(data)); });
