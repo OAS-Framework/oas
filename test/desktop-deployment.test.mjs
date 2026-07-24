@@ -11,6 +11,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync } from "node:fs";
+import * as fsExtra from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -125,7 +126,7 @@ test("reader parity (clean fixture, unconditional): kernel resolves and matches 
   const theirHelper = core.findCapabilityAgent(ctx, rootA, "helper");
   assert.equal(mineHelper._soulDir, theirHelper._soulDir, "capability soul dir parity");
   assert.equal(mineHelper._dir, theirHelper._dir, "capability instances home parity");
-  assert.deepEqual(reader.capabilitySkillDirs("clean.cap", ctx), core.capabilitySkillDirs("clean.cap", ctx), "skill dirs parity");
+  assert.deepEqual(reader.capabilitySkillDirs("clean.cap", ctx).map((s) => s.dir), core.capabilitySkillDirs("clean.cap", ctx), "skill dirs parity");
 
   // instances
   assert.deepEqual(
@@ -174,6 +175,69 @@ test("reader: manifest paths escaping the package boundary do not resolve", () =
   writeFileSync(join(base, "outside-soul", "soul.yaml"), "name: outside\n");
   assert.deepEqual(reader.listCapabilityAgents(base), [], "escaping agents path never resolves");
   assert.deepEqual(reader.capabilitySkillDirs("evil.cap", base), [], "escaping skills path never resolves");
+});
+
+test("reader: nested soul.yaml/SKILL.md symlinks escaping the package never get read", () => {
+  const base = mkdtempSync(join(tmpdir(), "oas-reader-nest-"));
+  const { symlinkSync } = fsExtra;
+  // Secret files OUTSIDE the package that symlinks will point at.
+  writeFileSync(join(base, "outside-soul.yaml"), "name: leaked\ndescription: TOP-SECRET-SOUL\n");
+  writeFileSync(join(base, "outside-skill.md"), "---\nname: leaked-skill\ndescription: TOP-SECRET-SKILL\n---\n# s\n");
+  const capDir = join(base, ".agents", "capabilities", "installed", "nest");
+  mkdirSync(join(capDir, "agents", "helper"), { recursive: true });
+  mkdirSync(join(capDir, "skills", "sneaky"), { recursive: true });
+  writeFileSync(join(base, "oas-config.yaml"), "name: t\ncapabilities:\n  additive:\n    nest.cap: {}\n");
+  writeFileSync(join(capDir, "oas.json"), JSON.stringify({
+    capability: "nest.cap", version: "1.0.0", description: "x",
+    agents: ["agents/helper"], skills: ["skills"],
+  }));
+  // The DIRECTORIES are contained — only the nested FILES are symlinks out.
+  symlinkSync(join(base, "outside-soul.yaml"), join(capDir, "agents", "helper", "soul.yaml"));
+  symlinkSync(join(base, "outside-skill.md"), join(capDir, "skills", "sneaky", "SKILL.md"));
+  // agent: the escaping soul.yaml must never be parsed — agent not listed
+  assert.deepEqual(reader.listCapabilityAgents(base), [], "agent behind an escaping soul.yaml symlink is not listed");
+  assert.equal(reader.findCapabilityAgent(base, join(base, "agents"), "leaked"), undefined, "nor resolvable by its leaked name");
+  assert.equal(reader.findCapabilityAgent(base, join(base, "agents"), "helper"), undefined, "nor by its directory name");
+  // skills: the tree dir resolves (it IS contained), but per-file containment
+  // must reject the escaping SKILL.md — exposed via containsPackageFile.
+  const dirs = reader.capabilitySkillDirs("nest.cap", base);
+  assert.equal(dirs.length, 1, "contained skill tree resolves");
+  const skillMd = join(dirs[0].dir, "sneaky", "SKILL.md");
+  assert.equal(reader.containsPackageFile(dirs[0].packageDir, skillMd), false,
+    "escaping nested SKILL.md fails the per-file containment probe");
+  // a genuinely contained file passes
+  writeFileSync(join(capDir, "skills", "good.md"), "ok");
+  assert.equal(reader.containsPackageFile(dirs[0].packageDir, join(capDir, "skills", "good.md")), true);
+});
+
+test("reader: semantically malformed instance.json degrades to the bare instance, hides nothing", () => {
+  const base = mkdtempSync(join(tmpdir(), "oas-reader-meta-"));
+  const root = join(base, "agents");
+  mkdirSync(join(root, "dev", "soul"), { recursive: true });
+  writeFileSync(join(root, "dev", "soul", "soul.yaml"), "name: dev\ndescription: d\n");
+  const mk = (name, content) => {
+    mkdirSync(join(root, "dev", "instances", name), { recursive: true });
+    if (content !== undefined) writeFileSync(join(root, "dev", "instances", name, "instance.json"), content);
+  };
+  mk("dev-null", "null");                                   // JSON.parse OK, not an object
+  mk("dev-array", "[1,2]");                                 // array
+  mk("dev-scalar", '"hi"');                                 // scalar
+  mk("dev-empty", "{}");                                    // object missing required fields
+  mk("dev-badtypes", JSON.stringify({ instance: 42, home: null })); // wrong types
+  mk("dev-good", JSON.stringify({ instance: "dev-good", agent: "dev", extra: "kept" }));
+  mk("dev-bare");                                           // no instance.json at all
+  const agents = reader.listInstances(root);
+  assert.equal(agents.length, 1);
+  const byName = new Map(agents[0].instances.map((i) => [i.instance, i]));
+  // EVERY directory surfaces — one malformed file must not hide siblings
+  for (const name of ["dev-null", "dev-array", "dev-scalar", "dev-empty", "dev-badtypes", "dev-good", "dev-bare"]) {
+    const inst = byName.get(name);
+    assert.ok(inst, `${name} surfaces in the roster`);
+    assert.equal(typeof inst.instance, "string", `${name}: instance is a string`);
+    assert.equal(typeof inst.home, "string", `${name}: home is a string`);
+    assert.ok(inst.home.endsWith(name), `${name}: home falls back to the directory`);
+  }
+  assert.equal(byName.get("dev-good").extra, "kept", "valid metadata still merges over the fallback");
 });
 
 // ---- bridge absence: the shipped desktop package carries no kernel tie ----

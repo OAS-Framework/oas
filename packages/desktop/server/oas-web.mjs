@@ -464,21 +464,24 @@ function chatData(inst, limit = 120) {
 // agent directories under the workspace's agents roots — the agent name is
 // resolved through the same kernel seams as spawn (findAgent /
 // findCapabilityAgent), never from a caller-supplied path.
-function listSkills(dir) {
+function listSkills(dir, contained) {
   // skills live as <dir>/<skill>/SKILL.md with `name`/`description` frontmatter
   const skills = [];
   try {
     for (const e of readdirSync(dir, { withFileTypes: true })) {
       if (!e.isDirectory()) continue;
-      const s = skillEntry(join(dir, e.name));
+      const s = skillEntry(join(dir, e.name), contained);
       if (s) skills.push(s);
     }
   } catch { /* no skills dir */ }
   return skills.sort((a, b) => a.name.localeCompare(b.name));
 }
-function skillEntry(skillDir) {
+function skillEntry(skillDir, contained) {
   const p = join(skillDir, "SKILL.md");
   if (!existsSync(p)) return null;
+  // Package skill trees: a nested SKILL.md symlink can escape the package
+  // boundary even when the tree dir itself is contained — reject per file.
+  if (contained && !contained(p)) return null;
   let meta = {};
   try { meta = reader.parseFrontmatter(readFileSync(p, "utf8")).meta || {}; } catch { /* unreadable skill */ }
   return { name: meta.name || basename(skillDir), path: p, description: String(meta.description || "").trim() };
@@ -532,7 +535,10 @@ function brainData(agentName, wsId) {
   if (def.capability) {
     try {
       packageSkills = reader.capabilitySkillDirs(def.capability, dirname(root))
-        .flatMap((p) => expandSkillPath(p, existsSync, listSkills, skillEntry));
+        .flatMap(({ dir, packageDir }) => {
+          const contained = (f) => reader.containsPackageFile(packageDir, f);
+          return expandSkillPath(dir, existsSync, (d) => listSkills(d, contained), (d) => skillEntry(d, contained));
+        });
     } catch { /* manifest unreadable — no package skills */ }
   }
   const soulSkills = mergeSkills(localSkills, packageSkills);

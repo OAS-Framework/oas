@@ -262,6 +262,26 @@ function manifestPath(manifest, rel) {
   } catch { return undefined; }
 }
 
+/** True when `file`'s REALPATH stays inside the package root. The
+ * manifest-entry check above is not enough: a nested symlink (e.g.
+ * agents/helper/soul.yaml → /outside/soul.yaml) passes the directory check
+ * while the file itself escapes — every file read from a package must pass
+ * through here first. */
+function containedFile(packageDir, file) {
+  try {
+    const root = realpathSync(packageDir);
+    const target = realpathSync(file);
+    const fromRoot = relative(root, target);
+    return fromRoot !== ".." && !fromRoot.startsWith(`..${sep}`) && !isAbsolute(fromRoot);
+  } catch { return false; }
+}
+
+/** Read + parse a flat-YAML file only if it is really inside the package. */
+function readContainedYaml(packageDir, file) {
+  if (!existsSync(file) || !containedFile(packageDir, file)) return undefined;
+  try { return parseYamlFlat(readFileSync(file, "utf8")); } catch { return undefined; }
+}
+
 /** All capability-declared agents (souls shipped by active packages). */
 export function listCapabilityAgents(contextDir) {
   const out = [];
@@ -272,11 +292,10 @@ export function listCapabilityAgents(contextDir) {
     const manifest = manifests[id];
     for (const rel of manifest?.agents || []) {
       const soulDir = manifestPath(manifest, rel);
-      if (!soulDir || !existsSync(join(soulDir, "soul.yaml"))) continue;
-      try {
-        const soul = parseYamlFlat(readFileSync(join(soulDir, "soul.yaml"), "utf8"));
-        out.push({ name: soul.name || basename(soulDir), capability: id, description: soul.description, soulDir });
-      } catch { /* unreadable soul — skip */ }
+      if (!soulDir) continue;
+      const soul = readContainedYaml(manifest._dir, join(soulDir, "soul.yaml"));
+      if (!soul) continue; // missing, escaping symlink, or unreadable — skip
+      out.push({ name: soul.name || basename(soulDir), capability: id, description: soul.description, soulDir, _packageDir: manifest._dir });
     }
   }
   return out;
@@ -289,8 +308,7 @@ export function listCapabilityAgents(contextDir) {
 export function findCapabilityAgent(contextDir, root, name) {
   for (const c of listCapabilityAgents(contextDir)) {
     if (c.name !== name) continue;
-    let soul = {};
-    try { soul = parseYamlFlat(readFileSync(join(c.soulDir, "soul.yaml"), "utf8")); } catch { /* keep defaults */ }
+    const soul = readContainedYaml(c._packageDir, join(c.soulDir, "soul.yaml")) || {};
     return {
       ...soul, name,
       kind: "capability", capability: c.capability,
@@ -301,11 +319,20 @@ export function findCapabilityAgent(contextDir, root, name) {
   return undefined;
 }
 
-/** Skill tree paths a capability ships (brain view's package skills). */
+/** Skill tree paths a capability ships (brain view's package skills).
+ * Every returned dir is realpath-contained; consumers that WALK these trees
+ * must still skip escaping symlinks per entry — use containsPackageFile. */
 export function capabilitySkillDirs(name, startDir) {
   const m = capabilityManifests(startDir)[name];
   if (!Array.isArray(m?.skills)) return [];
-  return m.skills.map((s) => manifestPath(m, s)).filter(Boolean);
+  return m.skills.map((s) => manifestPath(m, s)).filter(Boolean).map((dir) => ({ dir, packageDir: m._dir }));
+}
+
+/** Public containment probe for consumers reading files under a capability
+ * skill tree (e.g. the brain view's SKILL.md reads): true only when the
+ * file's realpath stays inside the owning package. */
+export function containsPackageFile(packageDir, file) {
+  return containedFile(packageDir, file);
 }
 
 // ---- instances --------------------------------------------------------------
@@ -327,10 +354,22 @@ export function listInstances(root, tmuxSession = DEFAULT_TMUX_SESSION) {
     try { entries = existsSync(instancesDir) ? readdirSync(instancesDir, { withFileTypes: true }) : []; } catch { return []; }
     return entries.filter((e) => e.isDirectory()).map((e) => {
       const metaPath = join(instancesDir, e.name, "instance.json");
-      let meta = { instance: e.name, home: join(instancesDir, e.name) };
-      try { if (existsSync(metaPath)) meta = JSON.parse(readFileSync(metaPath, "utf8")); }
-      catch { /* broken metadata — show the bare instance */ }
-      return { ...meta, running: windows.includes(meta.instance || e.name) };
+      const fallback = { instance: e.name, home: join(instancesDir, e.name) };
+      let meta = fallback;
+      try {
+        if (existsSync(metaPath)) {
+          const parsed = JSON.parse(readFileSync(metaPath, "utf8"));
+          // Semantic validation, not just parseability: JSON.parse("null")
+          // and arrays/scalars are valid JSON but not instance metadata —
+          // merge OVER the fallback so instance/home are always present.
+          if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+            meta = { ...fallback, ...parsed };
+            if (typeof meta.instance !== "string" || !meta.instance) meta.instance = fallback.instance;
+            if (typeof meta.home !== "string" || !meta.home) meta.home = fallback.home;
+          }
+        }
+      } catch { /* broken metadata — show the bare instance */ }
+      return { ...meta, running: windows.includes(meta.instance) };
     });
   };
   const out = listAgents(root).map((a) => {
