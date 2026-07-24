@@ -47,6 +47,11 @@ module.exports = {
   // posix_spawnp can exec it (inside asar it cannot).
   asarUnpack: ["**/node_modules/node-pty/**"],
   npmRebuild: true,
+  // Fresh `npm ci` can deliver node-pty's prebuilt spawn-helper WITHOUT the
+  // execute bit (posix_spawnp then fails in the packaged app — release
+  // blocker found by the integration gate). Restore it deterministically on
+  // the PACKED output; never rely on working-tree chmod residue.
+  afterPack: "scripts/after-pack.cjs",
   mac: {
     // Targets WITHOUT pinned arch: electron-builder builds the HOST arch by
     // default, so each CI matrix job (macos-14=arm64, macos-13=x64) produces
