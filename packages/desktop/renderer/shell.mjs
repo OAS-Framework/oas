@@ -42,6 +42,12 @@ const ctx = {
   openFile: (path) => openViewTab("markdown", `≡ ${String(path).split("/").pop()}`, { path }, `file:${path}`),
   openTerminal: (instance) => openTerminalTab(instance),
   openBrain: (agent) => openBrainTab(agent),
+  // CLI degradation affordances (cli-status.mjs feature-detects both):
+  // native binary picker (privileged; main persists the choice) and external
+  // link opening (window.open is denied by the shell's window-open handler
+  // except for http(s), which routes to the OS browser).
+  chooseCliBinary: () => desk.cliPickBinary(),
+  openExternal: (url) => window.open(url, "_blank", "noreferrer"),
   // additive shell affordance (views feature-detect it): switch the STAGE
   // to a named sidebar view (stage views are not tabs — see below).
   openView: (name) => name === "instances"
@@ -602,6 +608,14 @@ onWorkspaceChange(() => {
   else refreshContextRoster();
 });
 setInterval(() => refreshContextRoster(), 4000);
+
+// Contract re-probe triggers: launch (initial refresh) and app focus. The
+// cli-status module owns the shared state; the Spawn view (and any future
+// mutation surface) subscribes for consistent enable/disable.
+import("./views/cli-status.mjs").then(({ refreshCli, reprobeCli }) => {
+  refreshCli(ctx);
+  desk.onAppFocus?.(() => reprobeCli(ctx));
+});
 
 // Home surface: the agent hierarchy — running instances and how they relate.
 showStage("hierarchy");

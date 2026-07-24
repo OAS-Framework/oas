@@ -16,7 +16,12 @@ No frameworks, no dependencies; data comes from the bundled backend HTTP API.
 - **spawn.mjs** — available agents (`GET /api/agents`) with spawn-from-app
   (`POST /api/spawn`), purpose/task fields. Panel defaults hold: empty task
   spawns an instance awaiting instructions; attached-mode agents are not
-  spawnable standalone.
+  spawnable standalone. Without a compatible installed `oas` CLI the view
+  shows the shared degradation card and disables Spawn consistently.
+- **cli-status.mjs** — shared CLI degradation state + the ONE card
+  (detected path/version, required range, **Choose oas…**, **Retry**, docs
+  link, copyable install command). Views subscribe via `onCliChange`;
+  re-probe triggers: launch, app focus, Retry, choose (contract).
 - **common.mjs** — shared helpers: escaping, mini-markdown, ctx.api JSON
   wrappers, roster grouping, and workspace switching (`?ws=`) — the selected
   workspace is shared across views via `setWorkspace`/`onWorkspaceChange`

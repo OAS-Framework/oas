@@ -48,7 +48,11 @@ const serverHost = createServerHost({
   spawnChild: (dirs, onPort) => {
     const bin = join(HERE, "server", "oas-web.mjs");
     if (!existsSync(bin)) throw new Error(`desktop backend server not found at ${bin} and no usable server on port ${onPort}`);
-    const child = spawn(process.execPath, [bin, "start", "--port", String(onPort), ...dirs.flatMap((d) => ["--dir", d])], {
+    // The persisted user-chosen oas binary (if any) rides along as the
+    // server's top-priority discovery candidate; the server re-probes it.
+    const chosen = readCliChoice();
+    const child = spawn(process.execPath, [bin, "start", "--port", String(onPort),
+      ...dirs.flatMap((d) => ["--dir", d]), ...(chosen ? ["--oas-bin", chosen] : [])], {
       stdio: ["ignore", "pipe", "pipe"],
       cwd: WORKSPACE,
       env: { ...process.env },
@@ -255,6 +259,32 @@ ipcMain.handle("workspace:pick", async (e) => {
   return performAdd(r.filePaths[0], true);
 });
 
+// ---- IPC: CLI binary picker (Choose oas…) --------------------------------
+// Native file picker for the degradation card. Persistence lives here (the
+// main process owns userData); the picked path goes to the server via the
+// renderer's POST /api/cli/reprobe {bin} — the server re-validates with the
+// full probe, so a bad pick degrades with diagnostics, never trusts a path.
+const CLI_CHOICE_FILE = () => join(app.getPath("userData"), "oas-cli-choice.json");
+function readCliChoice() {
+  try { const p = JSON.parse(readFileSync(CLI_CHOICE_FILE(), "utf8")).bin; return typeof p === "string" && p.startsWith("/") ? p : null; }
+  catch { return null; }
+}
+function writeCliChoice(bin) {
+  try { writeFileSync(CLI_CHOICE_FILE(), JSON.stringify({ bin })); } catch { /* best-effort */ }
+}
+ipcMain.handle("cli:pick", async (e) => {
+  guard(e);
+  const win = BrowserWindow.fromWebContents(e.sender);
+  const r = await dialog.showOpenDialog(win, {
+    title: "Choose the oas CLI binary",
+    properties: ["openFile", "showHiddenFiles"],
+    message: "Select the oas executable (e.g. from `command -v oas`)",
+  });
+  if (r.canceled || !r.filePaths?.[0]) return { path: null };
+  writeCliChoice(r.filePaths[0]);           // persisted — top discovery priority next launch
+  return { path: r.filePaths[0] };
+});
+
 // ---- IPC: API proxy -----------------------------------------------------
 // The renderer never talks to the network directly; ctx.api() lands here.
 ipcMain.handle("api", async (e, pathname, opts) => {
@@ -375,6 +405,13 @@ app.whenReady().then(async () => {
   try { await ensureServer(); }
   catch (e) { console.error(`oas-desktop: ${e.message}`); }
   await createWindow();
+  // Contract re-probe trigger "app focus": notify the renderer, which calls
+  // POST /api/cli/reprobe (the server owns probe state and rate semantics).
+  app.on("browser-window-focus", () => {
+    for (const w of BrowserWindow.getAllWindows()) {
+      if (!w.webContents.isDestroyed()) w.webContents.send("app:focus");
+    }
+  });
   app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
 

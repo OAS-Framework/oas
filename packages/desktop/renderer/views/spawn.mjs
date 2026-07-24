@@ -9,6 +9,7 @@ import {
   escapeHtml, apiJson, postJson, ensureTheme,
   setWorkspace, onWorkspaceChange, renderWorkspaceSelect, wsQuery, workspaceGeneration,
 } from "./common.mjs";
+import { cliAvailable, cliStatus, refreshCli, onCliChange, cliCard } from "./cli-status.mjs";
 
 const CSS = `
 .souls { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--bg); }
@@ -57,6 +58,10 @@ export function mount(el, ctx) {
     </div>`;
   s.q = (cls) => el.querySelector("." + cls);
   s.q("filter").addEventListener("input", (e) => { s.filterText = e.target.value; renderGrid(s); });
+  // CLI degradation: refresh once on mount and re-render the grid whenever
+  // availability flips — spawn buttons disable consistently with the card.
+  refreshCli(ctx);
+  s.unsubCli = onCliChange(() => { if (s.alive) renderGrid(s); });
   s.q("wssel").addEventListener("change", (e) => setWorkspace(e.target.value));
   s.unsubWs = onWorkspaceChange(() => {
     // Workspace switch owns the whole surface: invalidate any A spawn form
@@ -78,6 +83,8 @@ export function unmount() {
   state.alive = false;
   state.timers.forEach(clearInterval);
   if (state.unsubWs) state.unsubWs();
+  if (state.unsubCli) state.unsubCli();
+  if (state.cliCardHandle) { state.cliCardHandle.dispose(); state.cliCardHandle = null; }
   state.el.innerHTML = "";
   state = null;
 }
@@ -133,12 +140,21 @@ function renderGrid(s) {
   }
   if (!list.length) { grid.innerHTML = '<div class="empty" style="grid-column:1/-1">Nothing matches the filter.</div>'; return; }
   if (typeof grid.append !== "function") return; // non-DOM host (tests observe s.souls)
+  // One consistent degradation card ABOVE the roster when mutations are
+  // unavailable — reads (the soul cards, brain) stay fully usable below it.
+  if (state && s === state && cliStatus() && !cliAvailable()) {
+    if (s.cliCardHandle) s.cliCardHandle.dispose();
+    s.cliCardHandle = cliCard(grid.ownerDocument, s.ctx);
+    s.cliCardHandle.el.style.gridColumn = "1/-1";
+    grid.append(s.cliCardHandle.el);
+  } else if (s.cliCardHandle) { s.cliCardHandle.dispose(); s.cliCardHandle = null; }
   for (const a of list) grid.append(soulCard(s, a));
 }
 
 function soulCard(s, a) {
   const attached = a.work === "attached"; // needs an owning instance's work tree
-  const open = s.sel === a.name && !attached;
+  const noCli = cliStatus() && !cliAvailable(); // unknown-yet ≠ unavailable
+  const open = s.sel === a.name && !attached && !noCli;
   const card = document.createElement("div");
   card.className = "soul-card" + (attached ? " attached" : "") + (open ? " open" : "");
   card.dataset.agent = a.name;
@@ -158,11 +174,14 @@ function soulCard(s, a) {
     const spawn = document.createElement("button");
     spawn.className = "act spawn-act";
     spawn.textContent = attached ? "Attached only" : "Spawn";
-    spawn.disabled = attached;
+    spawn.disabled = attached || noCli;
     spawn.title = attached
       ? "Attached-mode agent — spawn it from an owning instance’s work tree"
-      : `Spawn ${a.name}`;
+      : noCli
+        ? "Spawning requires a compatible installed oas CLI — see the card above"
+        : `Spawn ${a.name}`;
     spawn.addEventListener("click", () => {
+      if (cliStatus() && !cliAvailable()) return; // state may have flipped since render
       s.sel = a.name; s.selAgent = a; renderGrid(s);
       s.q("souls-grid").querySelector(".soul-form .fpurpose")?.focus();
     });
