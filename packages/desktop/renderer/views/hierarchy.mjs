@@ -45,8 +45,8 @@ const CSS = `
          border-radius: 10px; padding: 8px 11px; box-shadow: var(--shadow); cursor: pointer; user-select: none; }
 .hnode.dragging { cursor: grabbing; }
 .hnode:hover { background: var(--surface-2); }
-.hnode.idle { opacity: .62; }
-.hnode.sel { border-color: var(--accent); background: var(--sel); opacity: 1; }
+.hnode.idle { border-style: dashed; background: var(--surface-2); }
+.hnode.sel { border-color: var(--accent); background: var(--sel); }
 .hnode.lit { border-color: var(--accent); }
 .hnode .hname { font-weight: 600; font-size: 13px; display: flex; align-items: center; gap: 7px; min-width: 0; }
 .hnode .hname .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

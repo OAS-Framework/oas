@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 import {
-  collapseKey, hasInstanceChildren, filterInstanceTree, instanceVisibleInTree,
+  collapseKey, hasInstanceChildren, instanceRepoLabel, treeGuideSegments, filterInstanceTree, instanceVisibleInTree,
   captureTreeRenderState, configureDisclosure, rosterResponseOwns,
 } from "../renderer/instance-tree.mjs";
 
@@ -26,6 +26,30 @@ test("instance tree collapse hides arbitrary-depth descendants but not peers", (
   assert.equal(visible("other"), true);
   assert.equal(visible("grand", "wsB"), true, "collapse state is workspace-scoped");
   assert.equal(visible("grand", "wsA", true), true, "filtering reveals matching descendants without changing state");
+});
+
+test("tree guides terminate final siblings and continue only real ancestor branches", () => {
+  const flat = [
+    { instance: "root", depth: 0 },
+    { instance: "child-a", parentInstance: "root", depth: 1 },
+    { instance: "grand", parentInstance: "child-a", depth: 2 },
+    { instance: "child-b", parentInstance: "root", depth: 1 },
+  ];
+  assert.deepEqual(treeGuideSegments(flat, flat[1]), ["branch"], "non-final child continues below its elbow");
+  assert.deepEqual(treeGuideSegments(flat, flat[2]), ["continue", "end"],
+    "grandchild keeps a real ancestor continuation and ends its own branch");
+  assert.deepEqual(treeGuideSegments(flat, flat[3]), ["end"], "last child line stops at its elbow");
+
+  const onlyBranch = flat.slice(0, 3);
+  assert.deepEqual(treeGuideSegments(onlyBranch, onlyBranch[2]), ["none", "end"],
+    "descendants do not extend an exhausted parent sibling line");
+});
+
+test("instance repo label prefers roster name and falls back to path basename", () => {
+  assert.equal(instanceRepoLabel({ repoName: "oas", repo: "/tmp/ignored" }), "oas");
+  assert.equal(instanceRepoLabel({ repo: "/work/projects/desktop-app" }), "desktop-app");
+  assert.equal(instanceRepoLabel({ workspace: "/work/team" }), "team");
+  assert.equal(instanceRepoLabel({}), "workspace");
 });
 
 test("instance tree detects disclosure parents and survives malformed cycles", () => {
