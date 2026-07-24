@@ -16,11 +16,12 @@
 // Runs on the bare CI runner — no display server needed on linux when
 // xvfb-run is present (the workflow provides it); on macOS Electron runs
 // headless-ish natively.
-import { execFileSync, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import { existsSync, readdirSync, statSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createReaper } from "./proc-reaper.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PKG = join(HERE, "..");
@@ -29,22 +30,15 @@ const fail = (msg) => { console.error(`dist:smoke FAIL — ${msg}`); process.exi
 const ok = (msg) => console.log(`dist:smoke ok — ${msg}`);
 
 // ---- leak-proofing (hard requirement after a local process-swarm incident) --
-// Every child this script starts is registered here and reaped by PROCESS
-// GROUP on EVERY exit path — fail() calls process.exit() which skips
-// finally-blocks, and Electron is a process TREE (Frameworks helpers)
-// that survives killing just the parent PID. Children are spawned
-// detached:true so they lead their own group and process.kill(-pid)
-// takes the whole tree down. A wall-clock watchdog bounds the entire
-// script so a hung probe can never leave anything running in CI or on a
-// developer machine.
-const children = new Set();
-function reapAll() {
-  for (const c of children) {
-    try { process.kill(-c.pid, "SIGKILL"); } catch { /* group already gone */ }
-    try { c.kill("SIGKILL"); } catch { /* already gone */ }
-  }
-  children.clear();
-}
+// The reaper (scripts/proc-reaper.mjs, unit-tested) owns the contract:
+// detached process groups, GROUP RETENTION until explicit reaping (leader
+// exit never drops a group — descendants can outlive it), async-only child
+// execution (runTracked; never execFileSync — synchronous execution blocks
+// signal handlers and the watchdog, and its timeout kills only the
+// immediate PID). reapAll is installed on EVERY exit path — fail() calls
+// process.exit() which skips finally-blocks — plus a wall-clock watchdog.
+const reaper = createReaper({ spawn });
+const { spawnTracked, reapGroup, reapAll, runTracked } = reaper;
 process.on("exit", reapAll);
 for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"]) process.on(sig, () => { reapAll(); process.exit(1); });
 process.on("uncaughtException", (e) => { console.error(`dist:smoke FAIL — uncaught: ${e.message}`); reapAll(); process.exit(1); });
@@ -52,12 +46,6 @@ process.on("unhandledRejection", (e) => { console.error(`dist:smoke FAIL — unh
 const WATCHDOG_MS = 120_000;
 const watchdog = setTimeout(() => { console.error(`dist:smoke FAIL — watchdog: exceeded ${WATCHDOG_MS / 1000}s`); reapAll(); process.exit(1); }, WATCHDOG_MS);
 watchdog.unref?.();
-function spawnTracked(exe, args, opts) {
-  const c = spawn(exe, args, { ...opts, detached: true }); // own process group
-  children.add(c);
-  c.on("exit", () => children.delete(c));
-  return c;
-}
 
 // ---- 1. artifact inventory -------------------------------------------------
 if (!existsSync(DIST)) fail(`no dist/ — run npm run dist first`);
@@ -123,14 +111,15 @@ if (!existsSync(app.exe)) fail(`packaged executable missing: ${app.exe}`);
     p.onExit(() => { console.log(out.includes("pty-alive") ? "PTY_OK" : "PTY_NO_OUTPUT"); process.exit(0); });
     setTimeout(() => { console.log("PTY_TIMEOUT"); process.exit(1); }, 8000);
   `;
-  let r;
-  try {
-    r = execFileSync(app.exe, ["-e", probe], {
-      encoding: "utf8", timeout: 30000, killSignal: "SIGKILL",
-      env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
-    });
-  } catch (e) { fail(`node-pty ABI probe failed: ${String(e.message).slice(0, 300)}`); }
-  if (!r.includes("PTY_OK")) fail(`node-pty spawned no output: ${r.trim()}`);
+  // Async detached tracked run (never execFileSync — review 4e2667b): the
+  // probe spawns a node-pty TREE (electron + /bin/sh + spawn-helper); a
+  // hang must be group-killed while the watchdog stays responsive.
+  const r = await runTracked(app.exe, ["-e", probe], {
+    timeout: 30000,
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
+  });
+  if (r.timedOut) fail("node-pty ABI probe timed out (group killed)");
+  if (!r.stdout.includes("PTY_OK")) fail(`node-pty ABI probe failed (exit ${r.code}): ${r.stdout.trim().slice(0, 300)}`);
   ok("node-pty loads and spawns under the packaged Electron ABI (via app.asar)");
 }
 
@@ -181,7 +170,7 @@ if (!existsSync(app.exe)) fail(`packaged executable missing: ${app.exe}`);
     ws.close();
     if (!String(result).startsWith("SHELL_OK")) fail(`renderer did not reach the shell: ${result}`);
     ok(`packaged app launched; ${result}`);
-  } finally { try { process.kill(-child.pid, "SIGKILL"); } catch { /* gone */ } children.delete(child); }
+  } finally { reapGroup(child); }
 }
 
 reapAll();

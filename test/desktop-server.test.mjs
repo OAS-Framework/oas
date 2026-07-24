@@ -338,6 +338,61 @@ test("desktop server: hostile Host header is rejected on GET file APIs (DNS rebi
   } finally { proc.kill(); }
 });
 
+// ---- local-agents symlink escape: an untrusted workspace must not widen /api/file ----
+
+test("desktop server: a symlinked local-agents sibling never becomes an /api/file root (403)", async () => {
+  const { mkdtempSync, mkdirSync, writeFileSync, symlinkSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  // A valid-looking workspace whose local-agents is a SYMLINK to a secret
+  // directory outside it — realpath-based guards would canonicalize the
+  // link and authorize its TARGET (review 4e2667b blocker).
+  const secret = mkdtempSync(join(tmpdir(), "oasweb-secret-"));
+  writeFileSync(join(secret, "secret.md"), "# TOP-SECRET-LOCAL-AGENTS");
+  const scope = mkdtempSync(join(tmpdir(), "oasweb-symlink-ws-"));
+  mkdirSync(join(scope, "agents", "dev", "soul"), { recursive: true });
+  writeFileSync(join(scope, "agents", "dev", "soul", "soul.yaml"), "name: dev\ndescription: d\n");
+  writeFileSync(join(scope, "agents", "dev", "soul", "AGENTS.md"), "# dev\n");
+  symlinkSync(secret, join(scope, "local-agents"));
+  const port = 4000 + Math.floor(Math.random() * 2000);
+  const proc = spawn(process.execPath, [SRV, "start", "--port", String(port), "--dir", scope], { stdio: "ignore" });
+  try {
+    let up = false;
+    for (let i = 0; i < 40 && !up; i++) {
+      await new Promise((r) => setTimeout(r, 100));
+      try { await fetch(`http://127.0.0.1:${port}/api/panel`); up = true; } catch { /* retry */ }
+    }
+    assert.ok(up, "server came up");
+    const get = (p) => fetch(`http://127.0.0.1:${port}${p}`);
+    // the symlink target must NOT be readable through the sibling root
+    for (const path of [join(scope, "local-agents", "secret.md"), join(secret, "secret.md")]) {
+      const r = await get(`/api/file?path=${encodeURIComponent(path)}`);
+      assert.ok([403, 404].includes(r.status), `symlinked local-agents target rejected (${path} → ${r.status})`);
+      if (r.status === 200) assert.fail("secret served through a symlinked local-agents root");
+    }
+    // a legitimate file inside the real agents root still serves
+    const okR = await get(`/api/file?path=${encodeURIComponent(join(scope, "agents", "dev", "soul", "AGENTS.md"))}`);
+    assert.equal(okR.status, 200, "real agents-root files still serve");
+    // and a REAL (non-symlink) local-agents sibling still works end to end
+    const scope2 = mkdtempSync(join(tmpdir(), "oasweb-real-local-"));
+    mkdirSync(join(scope2, "agents"), { recursive: true });
+    mkdirSync(join(scope2, "local-agents", "loc", "soul"), { recursive: true });
+    writeFileSync(join(scope2, "local-agents", "loc", "soul", "soul.yaml"), "name: loc\n");
+    writeFileSync(join(scope2, "local-agents", "loc", "soul", "AGENTS.md"), "# loc\n");
+    const port2 = 4000 + Math.floor(Math.random() * 2000);
+    const proc2 = spawn(process.execPath, [SRV, "start", "--port", String(port2), "--dir", scope2], { stdio: "ignore" });
+    try {
+      let up2 = false;
+      for (let i = 0; i < 40 && !up2; i++) {
+        await new Promise((r) => setTimeout(r, 100));
+        try { await fetch(`http://127.0.0.1:${port2}/api/panel`); up2 = true; } catch { /* retry */ }
+      }
+      assert.ok(up2, "second server came up");
+      const r2 = await fetch(`http://127.0.0.1:${port2}/api/file?path=${encodeURIComponent(join(scope2, "local-agents", "loc", "soul", "AGENTS.md"))}`);
+      assert.equal(r2.status, 200, "REAL local-agents sibling files serve (local souls stay first-class)");
+    } finally { proc2.kill(); }
+  } finally { proc.kill(); }
+});
+
 // ---- tmux target anchoring: prefix-match hazard (reviewer-death bug class) ----
 
 test("desktop server: tmux targets: exact-match anchoring fails closed for reads AND writes", (t) => {

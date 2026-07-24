@@ -27,7 +27,7 @@
  */
 import { createServer } from "node:http";
 import { execFile, execFileSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync, statSync, realpathSync, accessSync, constants as fsConstants } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync, lstatSync, realpathSync, accessSync, constants as fsConstants } from "node:fs";
 import { basename, dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { homedir } from "node:os";
@@ -609,7 +609,19 @@ function fileRoots() {
   const roots = workspaces().flatMap((w) => w.roots);
   // Local souls live in the scope-level local-agents/ SIBLING of each agents
   // root — their soul/knowledge/instance files must be viewable too.
-  for (const r of [...roots]) roots.push(reader.localAgentsDirOf(r));
+  // SECURITY: the sibling dir is UNTRUSTED workspace content — if it is a
+  // symlink, resolveGuardedFile would canonicalize it and authorize its
+  // TARGET (e.g. local-agents -> /tmp/anywhere widens the file API to an
+  // arbitrary directory). Add it only when it is a REAL directory whose
+  // canonical parent is the canonical workspace scope.
+  for (const r of [...roots]) {
+    const base = reader.localAgentsDirOf(r);
+    try {
+      if (!lstatSync(base).isDirectory()) continue;          // symlink or non-dir: reject (lstat does NOT follow)
+      if (realpathSync(dirname(base)) !== realpathSync(dirname(r))) continue; // parent must be the real scope
+      roots.push(base);
+    } catch { /* absent — no local souls here */ }
+  }
   for (const d of snapshot.byWs.values()) {
     for (const i of d.instances) {
       if (i.home) { roots.push(i.home); roots.push(join(i.home, "work")); } // <home>/work = the work tree (i.work is the MODE)
