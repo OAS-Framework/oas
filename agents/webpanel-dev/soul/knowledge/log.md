@@ -1,5 +1,11 @@
 # Knowledge Log
 
+## 2026-07-24
+* **Creation**: added [Never interpolate data-derived identity into querySelector](/lessons/no-dynamic-selectors-from-data.md) from the no-dynamic-selectors-from-data note: data-derived agent names must be matched via static element iteration and dataset comparison, because a shadowing `const CSS` can make `CSS.escape` unavailable and raw selector interpolation can throw or mismatch on metacharacters.
+* **Fix**: [Periodic repaints must not rebuild DOM under open forms](/lessons/poll-repaint-wipes-form-input.md) now replaces the dynamic CSS selector guard with static card iteration plus dataset comparison and links the no-dynamic-selectors lesson.
+* **Creation**: added [Periodic repaints must not rebuild DOM under open forms](/lessons/poll-repaint-wipes-form-input.md) from the poll-repaint-wipes-form-input note: the desktop Spawn view's 8-second roster poll could rebuild an open form before submission, erase typed task text, and turn a visible task into `task: ""`; open forms with uncommitted values are repaint barriers.
+* **Update**: [Spawn endpoint root allowlist and empty-task semantics](/architecture/spawn-endpoint.md), [Desktop renderer views port of the panel](/architecture/desktop-renderer-views-port.md), and [Shared-form async actions need operation ownership tokens](/lessons/shared-form-operation-token.md) now link the open-form repaint lesson and distinguish pre-dispatch DOM-held input from post-dispatch operation ownership.
+
 ## 2026-07-23
 * **Creation**: added [Wait for the roster snapshot before post-spawn instance actions](/lessons/post-spawn-roster-snapshot-lag.md) from the spawn-roster-snapshot-lag note: `/api/panel` is served from a background snapshot, so successful spawns may not be immediately resolvable by name; post-spawn terminal opens must poll the workspace-scoped roster with operation/workspace guards and degrade if the instance never appears.
 * **Update**: [Spawn endpoint root allowlist and empty-task semantics](/architecture/spawn-endpoint.md), [Keep roster collection out of the serving process](/lessons/snapshot-collection-off-thread.md), and [Workspace-sensitive async results need local tickets and global workspace generations](/lessons/stale-response-race.md) now link the post-spawn roster snapshot lag lesson and record the wait-before-open rule.

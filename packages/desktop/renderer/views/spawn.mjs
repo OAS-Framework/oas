@@ -109,9 +109,19 @@ function matches(s, a) {
 function renderGrid(s) {
   const grid = s.q("souls-grid");
   // Polling (including a delayed switch-triggered refresh) must never replace
-  // a newer form that owns an in-flight mutation. Workspace switching already
-  // removes A synchronously before dispatching B's refresh.
-  if (grid.querySelector?.(".soul-form button:disabled")) return;
+  // an OPEN spawn form: rebuilding swaps in a fresh empty form, silently
+  // wiping typed-but-unsubmitted task/purpose text — the user then submits
+  // the replacement and the instance spawns with NO TASK. Any open form
+  // (not just a disabled in-flight one) owns the grid; the roster repaints
+  // on the next poll after the form closes. Workspace switching still resets
+  // synchronously before dispatching its refresh (s.sel cleared + innerHTML).
+  // Explicit re-renders (cancel/select) clear or change s.sel first, so they
+  // rebuild; only a form still owned by the CURRENT selection blocks repaint.
+  // No dynamic selector: agent names are roster data and may contain selector
+  // metacharacters (and this module's CSS constant shadows the global, so
+  // CSS.escape is not available here). Compare dataset identity instead.
+  if (s.sel && [...(grid.querySelectorAll?.(".soul-card") || [])]
+        .some((card) => card.dataset?.agent === s.sel && card.querySelector(".soul-form"))) return;
   grid.innerHTML = "";
   const list = s.souls.agents.filter((a) => matches(s, a));
   const spawnable = s.souls.agents.filter((a) => a.work !== "attached").length;
@@ -131,6 +141,7 @@ function soulCard(s, a) {
   const open = s.sel === a.name && !attached;
   const card = document.createElement("div");
   card.className = "soul-card" + (attached ? " attached" : "") + (open ? " open" : "");
+  card.dataset.agent = a.name;
   card.innerHTML = `
     <div class="sname"><span class="glyph" aria-hidden="true">✦</span>${escapeHtml(a.name)}</div>
     ${a.description ? `<div class="sdesc">${escapeHtml(a.description)}</div>` : '<div class="sdesc"></div>'}

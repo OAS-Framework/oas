@@ -3,7 +3,7 @@ type: Concept
 title: Desktop renderer views port of the panel
 description: The oas-web panel maps to desktop renderer views under packages/desktop/renderer/views/ as plain mount/unmount ES modules, with a same-origin harness proxy for development.
 tags: [desktop-app, renderer, views, port]
-timestamp: 2026-07-22
+timestamp: 2026-07-24
 ---
 
 # Desktop renderer views port of the panel
@@ -22,8 +22,10 @@ the shell host imports views by name as `./views/<name>.mjs`:
   hand-rolled ANSI mirror was deliberately not ported.
 - `spawn.mjs` — `/api/agents` plus `POST /api/spawn` with purpose/task. Panel
   defaults are preserved: empty task means awaiting instructions, and
-  attached-mode agents are not spawnable standalone. See the
-  [spawn endpoint contract](/architecture/spawn-endpoint.md).
+  attached-mode agents are not spawnable standalone. Because roster polling can
+  repaint this view while the user is typing, an open spawn form is a user-state
+  repaint barrier; see [the open-form repaint lesson](/lessons/poll-repaint-wipes-form-input.md)
+  and the [spawn endpoint contract](/architecture/spawn-endpoint.md).
 - `jira.mjs` — first full UI over `/api/jira/<instance>`. The browser panel
   exposed the endpoint but never rendered it, so this view was built from the
   `jiraPanel()` response shape rather than legacy UI.
