@@ -155,15 +155,27 @@ if (process.env.OAS_SMOKE_SKIP_LAUNCH === "1") {
   child.stdout?.on("data", (d) => { childLog += d; });
   child.stderr?.on("data", (d) => { childLog += d; });
   child.on("exit", (code, sig) => { childExit = { code, sig }; });
+  // Slice G resource-containment baseline: capture the `oasdesk-*` tmux
+  // viewer count before launch and assert it is RESTORED after the app is
+  // reaped — on BOTH the success and the forced-failure/timeout paths.
+  // Proves the app's shutdown + orphan sweep leave no viewer residue.
+  // (async count — the smoke bans synchronous child execution.)
+  async function oasdeskViewerCount() {
+    const r = await runTracked("tmux", ["list-sessions", "-F", "#{session_name}"], { timeout: 5000 });
+    if (r.timedOut) return null;                     // tmux wedged — skip (unusual)
+    return String(r.stdout).split("\n").filter((s) => s.startsWith("oasdesk-")).length;
+  }
+  const viewerBaseline = await oasdeskViewerCount(); // null when tmux absent
+  let launchError = null;
   try {
     const LAUNCH_BUDGET_MS = 90_000;
     const t0 = Date.now();
     let targets = null, lastDiag = 0;
     while (!targets && Date.now() - t0 < LAUNCH_BUDGET_MS) {
-      if (childExit) fail(`packaged app exited during startup (code=${childExit.code} sig=${childExit.sig}); output tail:\n${childLog.slice(-1500)}`);
+      if (childExit) throw new Error(`packaged app exited during startup (code=${childExit.code} sig=${childExit.sig}); output tail:\n${childLog.slice(-1500)}`);
       await new Promise((r) => setTimeout(r, 500));
       try {
-        const res = await fetch(`http://127.0.0.1:${port}/json`);
+        const res = await fetch(`http://127.0.0.1:${port}/json`, { signal: AbortSignal.timeout(2000) });
         const list = await res.json();
         targets = list.find((t) => t.type === "page" && /index\.html/.test(t.url || ""));
       } catch { /* not up yet */ }
@@ -172,7 +184,7 @@ if (process.env.OAS_SMOKE_SKIP_LAUNCH === "1") {
         console.log(`dist:smoke … waiting for CDP (${Math.round((Date.now() - t0) / 1000)}s; app alive=${!childExit})`);
       }
     }
-    if (!targets) fail(`packaged app never exposed its renderer over CDP within ${LAUNCH_BUDGET_MS / 1000}s (app alive=${!childExit}); output tail:\n${childLog.slice(-1500)}`);
+    if (!targets) throw new Error(`packaged app never exposed its renderer over CDP within ${LAUNCH_BUDGET_MS / 1000}s (app alive=${!childExit}); output tail:\n${childLog.slice(-1500)}`);
     // Evaluate in the page: the shell booted if the nav rail rendered.
     const ws = new WebSocket(targets.webSocketDebuggerUrl);
     const result = await new Promise((resolve, reject) => {
@@ -198,9 +210,27 @@ if (process.env.OAS_SMOKE_SKIP_LAUNCH === "1") {
       ws.onerror = (e) => { clearTimeout(to); reject(new Error(`CDP socket error`)); };
     });
     ws.close();
-    if (!String(result).startsWith("SHELL_OK")) fail(`renderer did not reach the shell: ${result}`);
+    if (!String(result).startsWith("SHELL_OK")) throw new Error(`renderer did not reach the shell: ${result}`);
     ok(`packaged app launched; ${result}`);
-  } finally { reapGroup(child); }
+  } catch (e) {
+    launchError = e;
+  } finally {
+    reapGroup(child);
+    // Baseline restoration assertion — runs on success AND failure (the
+    // catch above converted every launch failure to a caught error so this
+    // finally always executes; no fail()/process.exit skips it).
+    if (viewerBaseline !== null) {
+      let restored = false;
+      for (let i = 0; i < 10 && !restored; i++) {
+        await new Promise((r) => setTimeout(r, 500));
+        const now = await oasdeskViewerCount();
+        if (now !== null && now <= viewerBaseline) restored = true;
+      }
+      if (!restored) fail(`tmux viewer baseline not restored after ${launchError ? "forced failure" : "success"} (baseline ${viewerBaseline}, still elevated)`);
+      ok(`tmux viewer baseline restored (${viewerBaseline}) after ${launchError ? "forced failure" : "success"}`);
+    }
+  }
+  if (launchError) fail(launchError.message);
 }
 
 reapAll();
