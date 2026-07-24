@@ -165,7 +165,7 @@ function soulCard(s, a) {
       <span class="chip rt">${escapeHtml(a.runtime)}</span>
       <span class="chip">${escapeHtml(a.work)}</span>
       ${a.repo ? `<span class="chip">${escapeHtml(a.repoName)}</span>` : ""}
-      ${a.kind === "tmp" ? '<span class="chip">local</span>' : ""}
+      ${a.kind === "local" ? '<span class="chip">local</span>' : ""}
       ${attached ? '<span class="chip">not spawnable standalone</span>' : ""}
     </div>`;
   const actions = document.createElement("div");

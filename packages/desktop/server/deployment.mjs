@@ -20,8 +20,18 @@ import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync } from "
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 export const RESERVED = new Set(["bin", "local-agents", "tmp-agents"]);
+/** Local (uncommitted) souls dir: <scope>/local-agents, a SIBLING of agents/
+ * (kernel commit 030ad49) — full souls, gitignored by contract. Legacy nested
+ * <root>/local-agents and <root>/tmp-agents are still read. */
 export const LOCAL_AGENTS_DIR = "local-agents";
-const LEGACY_LOCAL_DIRS = ["tmp-agents"];
+const LEGACY_LOCAL_DIRS = ["local-agents", "tmp-agents"]; // nested-in-root legacy locations
+/** The scope-level local agents dir for an agents root (the root's sibling). */
+export const localAgentsDirOf = (root) => join(dirname(root), LOCAL_AGENTS_DIR);
+/** All local-agent base dirs readable for a root: scope sibling (canonical)
+ * plus legacy nested locations. */
+function localAgentBases(root) {
+  return [localAgentsDirOf(root), ...LEGACY_LOCAL_DIRS.map((l) => join(root, l))];
+}
 export const DEFAULT_TMUX_SESSION = process.env.PI_AGENTS_TMUX_SESSION || "pi-agents";
 const CAPABILITIES_DIRNAME = join(".agents", "capabilities");
 const INSTALLED_SUBDIR = "installed";
@@ -123,30 +133,45 @@ export function resolveDeployment(contextDir) {
   };
 }
 
-/** Agents roots of a team scope: <scope>/agents plus every child repo's agents/. */
+/** Agents roots of a team scope: <scope>/agents plus every child repo's
+ * agents/. A member counts when it has agents/ OR only local-agents/ (the
+ * canonical root is then the — possibly absent — sibling agents/). */
 export function teamAgentRoots(teamScope) {
   const roots = [];
-  const push = (p) => { try { if (existsSync(p) && lstatSync(p).isDirectory()) roots.push(resolve(p)); } catch { /* skip */ } };
+  const push = (p) => {
+    try {
+      if ((existsSync(p) && lstatSync(p).isDirectory()) ||
+          (existsSync(localAgentsDirOf(p)) && lstatSync(localAgentsDirOf(p)).isDirectory())) roots.push(resolve(p));
+    } catch { /* skip */ }
+  };
   push(join(teamScope, "agents"));
   let entries = [];
   try { entries = readdirSync(teamScope, { withFileTypes: true }); } catch { return roots; }
   for (const e of entries) {
-    if (!e.isDirectory() || e.name.startsWith(".") || e.name === "agents" || e.name === "node_modules") continue;
+    if (!e.isDirectory() || e.name.startsWith(".") || e.name === "agents" || e.name === LOCAL_AGENTS_DIR || e.name === "node_modules") continue;
     push(join(teamScope, e.name, "agents"));
   }
   return roots;
 }
 
 /** Closest agents/ dir walking up from cwd — READ-ONLY discovery (never
- * creates). Returns undefined when the context has no deployment. */
+ * creates). A scope with only local-agents/ (all-local deployments) resolves
+ * to its possibly-absent sibling agents/ as the canonical root, mirroring the
+ * kernel. Returns undefined when the context has no deployment. */
 export function findAgentsRoot(cwd) {
   if (process.env.PI_AGENTS_ROOT) return resolve(process.env.PI_AGENTS_ROOT);
   let d = resolve(cwd);
   while (true) {
     try {
       if (basename(d) === "agents" && lstatSync(d).isDirectory()) return d;
+      if (basename(d) === LOCAL_AGENTS_DIR && lstatSync(d).isDirectory() && basename(dirname(d)) !== "agents") {
+        return join(dirname(d), "agents"); // sibling layout: canonical root beside local-agents (may not exist)
+      }
       const candidate = join(d, "agents");
       if (existsSync(candidate) && lstatSync(candidate).isDirectory()) return candidate;
+      // A scope with only local souls is fully operable: canonical root is
+      // the (possibly absent) sibling agents/ dir.
+      if (existsSync(join(d, LOCAL_AGENTS_DIR)) && lstatSync(join(d, LOCAL_AGENTS_DIR)).isDirectory()) return candidate;
     } catch { /* unreadable dir — keep walking */ }
     const parent = dirname(d);
     if (parent === d) return undefined;
@@ -163,12 +188,15 @@ function readSoul(agentDir) {
     const soul = parseYamlFlat(readFileSync(p, "utf8"));
     soul._dir = agentDir;
     soul.name = soul.name || basename(agentDir);
+    if (soul.kind === "tmp") soul.kind = "local"; // legacy kind — one shape now: full local souls
     return soul;
   } catch { return undefined; }
 }
 
-/** Souls under an agents root: persistent at the top level, tmp under
- * local-agents/ (and the legacy tmp-agents/). */
+/** Souls under an agents root: persistent at the top level, LOCAL souls in
+ * the scope-level local-agents/ sibling (plus legacy nested locations).
+ * Local souls are FULL souls — memory, skills, instances — that are
+ * gitignored by contract; the roster treats them as first-class. */
 export function listAgents(root) {
   const agents = [];
   const scan = (base, kind) => {
@@ -181,13 +209,17 @@ export function listAgents(root) {
     }
   };
   scan(root, "persistent");
-  scan(join(root, LOCAL_AGENTS_DIR), "tmp");
-  for (const legacy of LEGACY_LOCAL_DIRS) scan(join(root, legacy), "tmp");
+  const seen = new Set();
+  for (const base of localAgentBases(root)) {
+    if (seen.has(base)) continue; // sibling and nested can collide on odd layouts
+    seen.add(base);
+    scan(base, "local");
+  }
   return agents;
 }
 
 export function findAgent(root, name) {
-  for (const dir of [join(root, name), join(root, LOCAL_AGENTS_DIR, name), ...LEGACY_LOCAL_DIRS.map((l) => join(root, l, name))]) {
+  for (const dir of [join(root, name), ...localAgentBases(root).map((b) => join(b, name))]) {
     const soul = readSoul(dir);
     if (soul) return soul;
   }
@@ -312,7 +344,7 @@ export function findCapabilityAgent(contextDir, root, name) {
     return {
       ...soul, name,
       kind: "capability", capability: c.capability,
-      _dir: join(root, LOCAL_AGENTS_DIR, name),
+      _dir: join(localAgentsDirOf(root), name), // instances home locally (scope's local-agents/)
       _soulDir: c.soulDir,
     };
   }
@@ -376,11 +408,14 @@ export function listInstances(root, tmuxSession = DEFAULT_TMUX_SESSION) {
     const { _dir, ...soul } = a;
     return { ...soul, dir: _dir, instances: readInstancesOf(a._dir) };
   });
-  // Capability-defined agents home under local-agents/<name>/ WITHOUT a local
-  // soul (it lives read-only in the package) — surface their instances too.
+  // Capability-defined and local agents can home under a local-agents base
+  // WITHOUT a local soul dir visible to listAgents (capability souls live
+  // read-only in their package) — surface their instances too.
   const seen = new Set(out.map((a) => a.name));
-  for (const base of [LOCAL_AGENTS_DIR, ...LEGACY_LOCAL_DIRS]) {
-    const dir = join(root, base);
+  const seenBases = new Set();
+  for (const dir of localAgentBases(root)) {
+    if (seenBases.has(dir)) continue;
+    seenBases.add(dir);
     let entries = [];
     try { entries = existsSync(dir) ? readdirSync(dir, { withFileTypes: true }) : []; } catch { continue; }
     for (const e of entries) {
@@ -388,7 +423,7 @@ export function listInstances(root, tmuxSession = DEFAULT_TMUX_SESSION) {
       const instances = readInstancesOf(join(dir, e.name));
       if (!instances.length) continue;
       const cap = instances.find((i) => i.capability)?.capability;
-      out.push({ name: e.name, kind: "capability", capability: cap, description: cap ? `capability agent (${cap})` : "capability agent", dir: join(dir, e.name), instances });
+      out.push({ name: e.name, kind: cap ? "capability" : "local", capability: cap, description: cap ? `capability agent (${cap})` : "local agent", dir: join(dir, e.name), instances });
       seen.add(e.name);
     }
   }

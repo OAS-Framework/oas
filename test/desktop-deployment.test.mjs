@@ -109,10 +109,15 @@ test("reader parity (clean fixture, unconditional): kernel resolves and matches 
   assert.equal(r.team.name, k.team.name, "team name parity");
   assert.deepEqual(reader.teamAgentRoots(r.team.scope), core.teamAgentRoots(k.team.scope), "agents roots parity");
 
-  // souls (persistent + tmp)
+  // souls (persistent + local). The reader implements the LOCAL SOULS
+  // semantics from main (030ad49: kind "local" replaces the public "tmp",
+  // scope-sibling local-agents/); this branch's in-tree kernel may predate
+  // that — normalize the legacy kind so parity tracks names + local-ness,
+  // not the rename.
+  const normKind = (k) => (k === "tmp" ? "local" : k);
   assert.deepEqual(
-    reader.listAgents(rootA).map((a) => `${a.kind}:${a.name}`).sort(),
-    core.listAgents(rootA).map((a) => `${a.kind}:${a.name}`).sort(),
+    reader.listAgents(rootA).map((a) => `${normKind(a.kind)}:${a.name}`).sort(),
+    core.listAgents(rootA).map((a) => `${normKind(a.kind)}:${a.name}`).sort(),
     "listAgents parity (kinds and names)");
   assert.equal(reader.findAgent(rootA, "dev").name, core.findAgent(rootA, "dev").name, "findAgent parity");
 
@@ -125,7 +130,13 @@ test("reader parity (clean fixture, unconditional): kernel resolves and matches 
   const mineHelper = reader.findCapabilityAgent(ctx, rootA, "helper");
   const theirHelper = core.findCapabilityAgent(ctx, rootA, "helper");
   assert.equal(mineHelper._soulDir, theirHelper._soulDir, "capability soul dir parity");
-  assert.equal(mineHelper._dir, theirHelper._dir, "capability instances home parity");
+  // instances-home: the reader uses the NEW scope-sibling local-agents/
+  // (main 030ad49); a pre-local-souls in-tree kernel still homes nested
+  // under the root. Accept either until the kernel lands on this branch.
+  const scopeSibling = join(dirname(rootA), "local-agents", "helper");
+  const nestedLegacy = join(rootA, "local-agents", "helper");
+  assert.equal(mineHelper._dir, scopeSibling, "reader homes capability instances in the scope sibling");
+  assert.ok([scopeSibling, nestedLegacy].includes(theirHelper._dir), "kernel homes in a known local-agents location");
   assert.deepEqual(reader.capabilitySkillDirs("clean.cap", ctx).map((s) => s.dir), core.capabilitySkillDirs("clean.cap", ctx), "skill dirs parity");
 
   // instances
@@ -144,6 +155,62 @@ test("reader parity: listInstances shape matches the kernel", () => {
     mine.map((a) => ({ name: a.name, instances: a.instances.map((i) => i.instance).sort() })).sort((x, y) => x.name.localeCompare(y.name)),
     theirs.map((a) => ({ name: a.name, instances: a.instances.map((i) => i.instance).sort() })).sort((x, y) => x.name.localeCompare(y.name)),
     "same souls and instance names");
+});
+
+test("reader: local souls (scope-sibling local-agents/) are first-class roster citizens", () => {
+  const scope = mkdtempSync(join(tmpdir(), "oas-reader-local-"));
+  // committed persistent soul under agents/, LOCAL soul under the SIBLING
+  // local-agents/ (gitignored by kernel contract — invisible to git, fully
+  // visible to the app)
+  const root = join(scope, "agents");
+  mkdirSync(join(root, "dev", "soul"), { recursive: true });
+  writeFileSync(join(root, "dev", "soul", "soul.yaml"), "name: dev\ndescription: committed soul\n");
+  const localBase = join(scope, "local-agents");
+  mkdirSync(join(localBase, "my-local", "soul"), { recursive: true });
+  writeFileSync(join(localBase, "my-local", "soul", "soul.yaml"), "name: my-local\ndescription: machine-local soul\nkind: local\n");
+  mkdirSync(join(localBase, "my-local", "instances", "my-local-1"), { recursive: true });
+  writeFileSync(join(localBase, "my-local", "instances", "my-local-1", "instance.json"),
+    JSON.stringify({ instance: "my-local-1", agent: "my-local" }));
+  // legacy kind: tmp reads as local
+  mkdirSync(join(localBase, "old-tmp", "soul"), { recursive: true });
+  writeFileSync(join(localBase, "old-tmp", "soul", "soul.yaml"), "name: old-tmp\nkind: tmp\n");
+
+  const agents = reader.listAgents(root);
+  const byName = new Map(agents.map((a) => [a.name, a]));
+  assert.ok(byName.has("dev"), "persistent soul listed");
+  assert.equal(byName.get("my-local").kind, "local", "sibling local soul listed as kind local");
+  assert.equal(byName.get("old-tmp").kind, "local", "legacy kind tmp normalizes to local");
+  // findAgent resolves local souls by name (brain/spawn-validation seam)
+  assert.equal(reader.findAgent(root, "my-local").kind, "local");
+  assert.equal(reader.findAgent(root, "my-local")._dir, join(localBase, "my-local"), "soul dir is the scope sibling");
+  // instances of local souls surface in the roster walk
+  const inst = reader.listInstances(root).find((a) => a.name === "my-local");
+  assert.ok(inst, "local soul appears in listInstances");
+  assert.deepEqual(inst.instances.map((i) => i.instance), ["my-local-1"], "its instance surfaces");
+});
+
+test("reader: an ALL-LOCAL scope (no agents/ at all) resolves and rosters", () => {
+  const scope = mkdtempSync(join(tmpdir(), "oas-reader-alllocal-"));
+  const localBase = join(scope, "local-agents");
+  mkdirSync(join(localBase, "solo", "soul"), { recursive: true });
+  writeFileSync(join(localBase, "solo", "soul", "soul.yaml"), "name: solo\ndescription: only local souls here\n");
+  // root discovery: canonical root is the (absent) sibling agents/
+  const root = reader.findAgentsRoot(scope);
+  assert.equal(root, join(scope, "agents"), "canonical root beside local-agents, even when absent");
+  // walking up from INSIDE local-agents/ finds the same root
+  assert.equal(reader.findAgentsRoot(join(localBase, "solo")), join(scope, "agents"));
+  // the roster still lists the local soul through the absent root
+  const agents = reader.listAgents(root);
+  assert.deepEqual(agents.map((a) => `${a.kind}:${a.name}`), ["local:solo"], "all-local scope rosters its souls");
+  // team scopes count all-local members
+  const team = mkdtempSync(join(tmpdir(), "oas-reader-teamlocal-"));
+  writeFileSync(join(team, "oas-config.yaml"), "name: t\nteam:\n  name: t\n");
+  mkdirSync(join(team, "member-a", "agents"), { recursive: true });          // classic member
+  mkdirSync(join(team, "member-b", "local-agents", "x", "soul"), { recursive: true }); // all-local member
+  writeFileSync(join(team, "member-b", "local-agents", "x", "soul", "soul.yaml"), "name: x\n");
+  const roots = reader.teamAgentRoots(team);
+  assert.ok(roots.includes(join(team, "member-a", "agents")), "classic member root found");
+  assert.ok(roots.includes(join(team, "member-b", "agents")), "all-local member surfaces via its canonical (absent) agents root");
 });
 
 test("reader: malformed configs and souls degrade instead of throwing", () => {
