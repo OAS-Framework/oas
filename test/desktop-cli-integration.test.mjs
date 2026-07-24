@@ -25,11 +25,12 @@ appendFileSync(${JSON.stringify(log)}, JSON.stringify({ argv, cwd: process.cwd()
 if (argv[0] === "version" && argv.includes("--json")) {
   process.stdout.write(JSON.stringify({ schemaVersion: 1, name: "@oas-framework/oas", version: ${JSON.stringify(version)}, desktopApi: ${JSON.stringify(desktopApi)} }));
   // Liar modes (review 0b83988): print a VALID probe, then exit nonzero or
-  // hang past the probe timeout — either must be rejected by discovery.
+  // REALLY hang past the probe timeout — either must be rejected by
+  // discovery. if/else if throughout: fallthrough to the trailing exit(2)
+  // previously made the "hanger" exit in 0.058s (review 6b90702).
   if (${JSON.stringify(probeHangMs)} > 0) { setTimeout(() => process.exit(0), ${JSON.stringify(probeHangMs)}); }
   else process.exit(${JSON.stringify(probeExit)});
-}
-if (argv[0] === "spawn" && argv.includes("--json")) {
+} else if (argv[0] === "spawn" && argv.includes("--json")) {
   const agent = argv[1];
   const tf = argv[argv.indexOf("--task-file") + 1];
   const task = readFileSync(tf, "utf8");
@@ -39,13 +40,13 @@ if (argv[0] === "spawn" && argv.includes("--json")) {
     launched: true, warnings: [], tmux: { session: "pi-agents", window: agent + "-t1" },
     taskEcho: task } }));
   process.exit(0);
-}
-if (argv[0] === "okf" && argv[1] === "harvest" && argv.includes("--json")) {
+} else if (argv[0] === "okf" && argv[1] === "harvest" && argv.includes("--json")) {
   process.stdout.write(JSON.stringify({ schemaVersion: 1, ok: true, result: { harvest: "skipped", reason: "no pending notes" } }));
   process.exit(0);
+} else {
+  process.stderr.write("unexpected argv: " + argv.join(" "));
+  process.exit(2);
 }
-process.stderr.write("unexpected argv: " + argv.join(" "));
-process.exit(2);
 `);
   // PATH is intentionally hostile in these tests (/nonexistent), so the
   // launcher must not rely on env lookup: absolute node, absolute script.
@@ -121,16 +122,34 @@ test("desktop server: a CLI that prints a valid probe but exits nonzero (or hang
     assert.ok(tried, "liar recorded in diagnostics");
     assert.match(tried.reason, /probe failed/, "rejected as a probe failure, not by payload");
   } finally { proc.kill(); }
-  // timeout case: valid probe printed, process hangs past the 8s probe timeout.
-  // The server kills it (killSignal SIGKILL) and the candidate must reject.
+  // timeout case: valid probe printed, process REALLY hangs past the 8s
+  // probe timeout. The server kills it (killSignal SIGKILL) and the
+  // candidate must reject. Assert independently that (a) the fixture
+  // actually hangs and (b) the reprobe crossed the production timeout —
+  // review 6b90702 caught the previous "hanger" exiting in 0.058s via
+  // fallthrough, leaving the timeout path untested.
   const dir2 = mkdtempSync(join(tmpdir(), "oas-clihang-"));
   const hanger = fakeCli(dir2, { probeHangMs: 20000 });
+  // (a) the fixture hangs: run it directly and confirm it is still alive
+  // after 1s (then kill it).
+  {
+    const direct = spawn(hanger.bin, ["version", "--json"], { stdio: "ignore" });
+    let exited = false;
+    direct.on("exit", () => { exited = true; });
+    await new Promise((r) => setTimeout(r, 1000));
+    assert.equal(exited, false, "hanger fixture really hangs (no fallthrough exit)");
+    direct.kill("SIGKILL");
+  }
   const r2 = await startServer({ OAS_DESKTOP_OAS_BIN: hanger.bin, PATH: "/nonexistent", SHELL: "/bin/false" });
   try {
+    const t0 = Date.now();
     const s2 = await (await fetch(`http://127.0.0.1:${r2.port}/api/cli/reprobe`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })).json();
+    const elapsed = Date.now() - t0;
     assert.equal(s2.ok, false, `hanging liar accepted: ${JSON.stringify(s2)}`);
     const tried2 = s2.tried.find((t) => t.path === hanger.real);
     assert.ok(tried2 && /probe failed/.test(tried2.reason), "timeout rejected as probe failure");
+    // (b) the production 8s probe timeout actually elapsed for this candidate
+    assert.ok(elapsed >= 7500, `reprobe crossed the probe timeout (took ${elapsed}ms)`);
   } finally { r2.proc.kill(); }
 });
 

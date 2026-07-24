@@ -33,7 +33,14 @@ initTheme();
 // ── ctx (shared by all views) ─────────────────────────────────────────────
 async function api(pathname, opts) {
   const r = await desk.api(pathname, opts);
-  if (!r.ok) throw new Error(r.body?.error || `HTTP ${r.status} for ${pathname}`);
+  if (!r.ok) {
+    // Mark RECEIVED HTTP errors so consumers (cli-status settled-state
+    // classification) can distinguish them from transport failures, which
+    // reject inside desk.api itself.
+    const err = new Error(r.body?.error || `HTTP ${r.status} for ${pathname}`);
+    err.status = r.status;
+    throw err;
+  }
   return r.body;
 }
 

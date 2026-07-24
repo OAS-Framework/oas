@@ -24,6 +24,35 @@ const jsonCtx = (state) => ({
   }),
 });
 
+test("cli-status: a RECEIVED 404 (absent endpoint) settles as unavailable and cards; transport failure stays transient (review 6b90702)", async () => {
+  // Older backend: /api/cli does not exist → the endpoint 404s. That is a
+  // SETTLED absent-endpoint state and must card from pristine state.
+  cs.resetCliStateForTests();
+  const notFoundCtx = { api: async () => ({ ok: false, status: 404, json: async () => ({ error: "not found" }) }) };
+  await cs.refreshCli(notFoundCtx);
+  assert.equal(cs.cliAvailable(), false);
+  assert.equal(cs.cliKnownUnavailable(), true, "404 settles → recovery card shows (absent endpoint case)");
+  // shell-proxy shape: api() throws a status-tagged Error on non-2xx — same settling
+  cs.resetCliStateForTests();
+  const proxy404Ctx = { api: async () => { const e = new Error("HTTP 404 for /api/cli"); e.status = 404; throw e; } };
+  await cs.refreshCli(proxy404Ctx);
+  assert.equal(cs.cliKnownUnavailable(), true, "status-tagged proxy error settles too");
+  // TRANSPORT failure (no status tag) from pristine state: stays pending —
+  // no card, and mutations stay disabled (fail-closed).
+  cs.resetCliStateForTests();
+  const downCtx = { api: async () => { throw new Error("fetch failed: ECONNREFUSED"); } };
+  await cs.refreshCli(downCtx);
+  assert.equal(cs.cliStatus(), null);
+  assert.equal(cs.cliKnownUnavailable(), false, "transport failure is transient — not carded");
+  assert.equal(cs.cliAvailable(), false, "but mutations stay disabled (fail-closed)");
+  // and a transport failure AFTER a settled state keeps that state (no flapping)
+  const state = { get: payload(false), post: payload(false), reprobes: [] };
+  await cs.refreshCli(jsonCtx(state));
+  assert.equal(cs.cliKnownUnavailable(), true);
+  await cs.refreshCli(downCtx);
+  assert.equal(cs.cliKnownUnavailable(), true, "settled state survives a transient blip");
+});
+
 test("refreshCli/reprobeCli update shared state and notify subscribers", async () => {
   const state = { get: payload(false), post: payload(true), reprobes: [] };
   const ctx = jsonCtx(state);

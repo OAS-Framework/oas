@@ -10,7 +10,7 @@
 
    This module owns the fetch/refresh/subscribe state and the card DOM so
    every mutation surface renders the SAME card; views only mount it. */
-import { escapeHtml, apiJson, postJson } from "./common.mjs";
+import { escapeHtml } from "./common.mjs";
 
 export const INSTALL_COMMAND = "npm install -g @oas-framework/oas@0.18.0";
 export const DOCS_URL = "https://github.com/OAS-Framework/oas/blob/main/docs/desktop-cli-api.md";
@@ -34,19 +34,46 @@ export function onCliChange(fn) { listeners.add(fn); return () => listeners.dele
 export function resetCliStateForTests() { cli = null; settledUnknown = false; emit(); }
 function emit() { for (const fn of [...listeners]) { try { fn(cli); } catch { /* listener errors stay local */ } } }
 
+/** Fetch a CLI endpoint distinguishing TRANSPORT failure (throw — keep last
+ * state) from a RECEIVED HTTP error (settled — an older backend's 404 on
+ * /api/cli is the contract's "absent endpoint" case and must card).
+ * ctx.api has three shapes: a Response-like ({ok,status,json}), the shell
+ * proxy's parsed body (throws err.status-tagged Errors on non-2xx), or a
+ * plain object. */
+async function fetchCliEndpoint(ctx, pathname, opts) {
+  let r;
+  try {
+    r = await ctx.api(pathname, opts);
+  } catch (e) {
+    // The shell's api() tags RECEIVED HTTP errors with .status; anything
+    // untagged is a transport failure and stays transient.
+    if (typeof e?.status === "number") return { received: true, error: true, status: e.status };
+    throw e;
+  }
+  if (!r || typeof r.json !== "function") {
+    if (r && r.ok === false) return { received: true, error: true };  // proxy-shape non-2xx
+    return { received: true, body: r };
+  }
+  let body = null;
+  try { body = await r.json(); } catch { /* non-JSON body */ }
+  if (!r.ok) return { received: true, error: true, status: r.status };
+  return { received: true, body };
+}
+
 /** Refresh from GET /api/cli (cheap — server-side cached probe state). */
 export async function refreshCli(ctx) {
   try {
-    const d = await apiJson(ctx, "/api/cli");
-    // A response ARRIVED — the probe is SETTLED either way:
+    const r = await fetchCliEndpoint(ctx, "/api/cli");
+    // A response was RECEIVED — the probe is SETTLED either way:
     //   status shape        → that state (ok / known-unavailable + card);
-    //   anything else       → settled-unknown (older backend / garbage):
-    //                         disabled AND carded — users need recovery;
-    //                         "disabled with no card forever" is not
-    //                         acceptable (binding UX clarification).
+    //   HTTP error (404…)   → settled "absent endpoint" — carded;
+    //   non-status payload  → settled-unknown (older backend / garbage) —
+    //                         carded. "Disabled with no card forever" is
+    //                         not acceptable (binding UX clarification).
+    const d = r.body;
     cli = d && typeof d.ok === "boolean" ? d : null;
     settledUnknown = !cli;
-  } catch { /* server unreachable — keep last state (transient; no flapping) */ }
+  } catch { /* TRANSPORT failure — keep last state (transient; no flapping) */ }
   emit();
   return cli;
 }
@@ -54,10 +81,15 @@ export async function refreshCli(ctx) {
 /** POST /api/cli/reprobe — Retry and Choose-binary trigger. */
 export async function reprobeCli(ctx, bin) {
   try {
-    const d = await postJson(ctx, "/api/cli/reprobe", bin ? { bin } : {});
+    const r = await fetchCliEndpoint(ctx, "/api/cli/reprobe", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(bin ? { bin } : {}),
+    });
+    const d = r.body;
     cli = d && typeof d.ok === "boolean" ? d : null;   // same settled semantics
     settledUnknown = !cli;
-  } catch { /* keep last state */ }
+  } catch { /* transport failure — keep last state */ }
   emit();
   return cli;
 }
