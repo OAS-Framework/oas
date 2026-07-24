@@ -1,6 +1,7 @@
 # Knowledge Log
 
 ## 2026-07-24
+* **Creation**: [hasownproperty-vs-truthiness](/lessons/hasownproperty-vs-truthiness.md) records that manifest command lookup must distinguish absent keys from declared-but-falsy values before assigning error codes.
 * **Update**: [test-conventions](/playbooks/test-conventions.md) records that capability fixtures under `.agents/capabilities/` need an `oas-config.yaml` discovery level or tests can accidentally assert `E_UNKNOWN_COMMAND`.
 * **Update**: [json-envelope-dispatch-boundary](/lessons/json-envelope-dispatch-boundary.md) records the whole-dispatch try/catch pattern, `NOT_DISPATCHED` sentinel, manifest command validation, and stable dispatcher failure codes.
 * **Update**: [release-tag-driven-ci](/playbooks/release-tag-driven-ci.md) records idempotent same-tag retry rules for npm publication and GitHub Release asset publication.
