@@ -2,6 +2,8 @@
 
 ## 2026-07-24
 
+* **Update**: [capability-defined-agents](/architecture/capability-defined-agents.md) records that by-name instance lookups must use `findInstanceHome(root, name)` so capability-agent homes under `local-agents/<name>/instances/` are included.
+* **Update**: [spawn-lineage-explicit-only](/decisions/spawn-lineage-explicit-only.md) records the grep-all-Markdown rule for migrating agent-facing `oas spawn` recipes when spawn semantics change.
 * **Creation**: [spawn-lineage-explicit-only](/decisions/spawn-lineage-explicit-only.md) records explicit-only spawn parentage and adds the Decisions section to the bundle index.
 * **Creation**: [task-flag-boolean-crash](/lessons/task-flag-boolean-crash.md) records the missing value-carrying flag boolean foot-gun behind the `--task` spawn crash.
 

@@ -23,6 +23,11 @@ Agent-driven spawn surfaces pass explicit parentage: `oas-okf harvest` spawns
 pass `parent: inst`; the review injection's maintainer spawn example uses
 `--parent "$OAS_INSTANCE"`; the oas skill documents the rule.
 
+When changing spawn semantics again, migrate every agent-facing spawn recipe,
+not just kernel docs. Grep Markdown for `oas spawn` across soul skills,
+injections, and documentation so live agents do not keep following stale
+recipes.
+
 # Why not "env only when alive"
 
 Aliveness checks cannot distinguish a human terminal inside an agent's tmux
