@@ -12,16 +12,20 @@
 //      target. Repeated opens of the same target (clicks, re-renders,
 //      polling, focus, reconnect, stale async completion) REUSE the existing
 //      terminal — they never create a second viewer.
-//   2. HARD CAP: at most `max` (default 6) simultaneous terminals. A distinct
-//      open beyond the cap is REJECTED, visibly and actionably — never a
-//      silent eviction, never a silent extra create.
+//   2. HARD CAP: at most `max` (default 20) simultaneous terminals. A
+//      distinct open beyond the cap is REJECTED, visibly and actionably —
+//      never a silent eviction, never a silent extra create.
 //
 // The registry is pure and synchronous; main.mjs's term:open handler is
 // synchronous end to end (openTerm uses execFileSync/pty.spawn), so
 // plan()->create->commit() is atomic on the single main thread and
 // concurrent IPC opens cannot interleave to exceed the cap.
 
-export const MAX_TERMINALS = 6;
+// The cap is the machine-protecting ceiling, not a UX preference: it exists
+// so the app can never fan out enough attached tmux clients + ptys to hang
+// the host. 20 is a generous working ceiling (operator-directed) well below
+// the fan-out that caused the hang.
+export const MAX_TERMINALS = 20;
 
 /**
  * @param {{ max?: number }} [opts]

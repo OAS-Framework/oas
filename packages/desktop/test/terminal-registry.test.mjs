@@ -62,24 +62,24 @@ test("100 repeated opens of the SAME target create exactly one viewer", () => {
   assert.equal(app.live(), 1);
 });
 
-test("7 DISTINCT opens → 6 created + the 7th rejected actionably; no silent create/evict", () => {
-  const app = makeApp();
+test("N DISTINCT opens → cap created + the next rejected actionably; no silent create/evict", () => {
+  const app = makeApp({ max: 6 }); // explicit small cap — tests the mechanism, not the production value
   for (let i = 1; i <= 6; i++) {
     const r = app.open("pi-agents", `dev-${i}`);
     assert.ok(r.id !== undefined, `open ${i} created`);
   }
   assert.equal(app.live(), 6);
   const seventh = app.open("pi-agents", "dev-7");
-  assert.equal(seventh.capped, true, "7th distinct open is capped");
+  assert.equal(seventh.capped, true, "the over-cap distinct open is capped");
   assert.equal(seventh.max, 6);
   assert.equal(seventh.active, 6);
   assert.equal(seventh.id, undefined, "no id handed out");
-  assert.equal(app.viewers(), 6, "no 7th viewer was created (no silent create)");
+  assert.equal(app.viewers(), 6, "no over-cap viewer was created (no silent create)");
   assert.equal(app.live(), 6, "no eviction of an existing terminal (no silent evict)");
 });
 
 test("closing a terminal frees exactly one slot; a new distinct open then succeeds", () => {
-  const app = makeApp();
+  const app = makeApp({ max: 6 });
   const ids = [];
   for (let i = 1; i <= 6; i++) ids.push(app.open("pi-agents", `dev-${i}`).id);
   assert.equal(app.open("pi-agents", "dev-7").capped, true, "at cap");
@@ -106,7 +106,7 @@ test("out-of-order concurrent opens cannot exceed the cap (synchronous check+com
   // The handler is synchronous, so 'concurrent' IPC calls are serialized on
   // the main thread. Interleave distinct opens and closes in an adversarial
   // order and assert the live count NEVER exceeds the cap.
-  const app = makeApp();
+  const app = makeApp({ max: 6 });
   const ops = [];
   for (let i = 1; i <= 20; i++) ops.push(["open", `dev-${i}`]);
   // sprinkle closes of not-yet-open ids (no-ops) and real ones
@@ -147,8 +147,18 @@ test("app quit releases every slot back to baseline zero", () => {
   assert.ok(r.id !== undefined);
 });
 
-test("MAX_TERMINALS is 6 (bump requires a human release-blocker review)", () => {
-  assert.equal(MAX_TERMINALS, 6);
+test("MAX_TERMINALS is 20 (operator-directed working ceiling; a change is a resource-policy decision)", () => {
+  assert.equal(MAX_TERMINALS, 20);
+});
+
+test("the production default cap is enforced end to end (open MAX+1 distinct → the last is capped)", () => {
+  const app = makeApp(); // default = MAX_TERMINALS
+  for (let i = 1; i <= MAX_TERMINALS; i++) assert.ok(app.open("pi-agents", `d-${i}`).id !== undefined, `open ${i}`);
+  assert.equal(app.live(), MAX_TERMINALS);
+  const over = app.open("pi-agents", `d-${MAX_TERMINALS + 1}`);
+  assert.equal(over.capped, true, "the (MAX+1)th distinct open is capped");
+  assert.equal(over.max, MAX_TERMINALS);
+  assert.equal(app.live(), MAX_TERMINALS, "no eviction, no over-cap create");
 });
 
 test("terminalTargetKey: distinct session/window pairs never collide; same pair is stable", () => {
