@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 import {
-  collapseKey, hasInstanceChildren, treeGuideSegments, filterInstanceTree, instanceVisibleInTree,
+  collapseKey, hasInstanceChildren, instanceRepoLabel, treeGuideSegments, filterInstanceTree, instanceVisibleInTree,
   captureTreeRenderState, configureDisclosure, rosterResponseOwns,
 } from "../renderer/instance-tree.mjs";
 
@@ -43,6 +43,13 @@ test("tree guides terminate final siblings and continue only real ancestor branc
   const onlyBranch = flat.slice(0, 3);
   assert.deepEqual(treeGuideSegments(onlyBranch, onlyBranch[2]), ["none", "end"],
     "descendants do not extend an exhausted parent sibling line");
+});
+
+test("instance repo label prefers roster name and falls back to path basename", () => {
+  assert.equal(instanceRepoLabel({ repoName: "oas", repo: "/tmp/ignored" }), "oas");
+  assert.equal(instanceRepoLabel({ repo: "/work/projects/desktop-app" }), "desktop-app");
+  assert.equal(instanceRepoLabel({ workspace: "/work/team" }), "team");
+  assert.equal(instanceRepoLabel({}), "workspace");
 });
 
 test("instance tree detects disclosure parents and survives malformed cycles", () => {

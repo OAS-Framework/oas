@@ -20,10 +20,10 @@ test("workspace label: A→B with deferred A completing last keeps B", async () 
 
   bGate.resolve({ id: "B", name: "Workspace B" });
   assert.equal(await b, true);
-  assert.equal(dom.window.document.getElementById("ws").textContent, "· Workspace B");
+  assert.equal(dom.window.document.getElementById("ws").textContent, "Workspace B");
   aGate.resolve({ id: "A", name: "Workspace A" });
   assert.equal(await a, false);
-  assert.equal(dom.window.document.getElementById("ws").textContent, "· Workspace B");
+  assert.equal(dom.window.document.getElementById("ws").textContent, "Workspace B");
   dom.window.close();
 });
 
@@ -32,7 +32,7 @@ test("workspace label reset clears text and invalidates an in-flight response", 
   const label = createWorkspaceLabel(dom.window.document.getElementById("ws"));
   const stale = label.begin();
   label.reset();
-  assert.equal(dom.window.document.getElementById("ws").textContent, "");
+  assert.equal(dom.window.document.getElementById("ws").textContent, "Resolving…");
   assert.equal(stale({ name: "stale" }), false);
   dom.window.close();
 });

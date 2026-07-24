@@ -52,6 +52,18 @@ oas retire <instance> [--delete-branch]
 Do not spawn on your own judgment. Spawn when the human asks or a documented
 workflow requires it.
 
+### Instance naming
+
+Name an instance for both **who it is** and **what this incarnation does**:
+`<soul-name>-<descriptive-role>`. Use a short, lowercase kebab-case role or
+purpose suffix (for example, `ux-designer-desktop-ux` or
+`reviewer-terminal-safety`), not an opaque number or generic word. When the
+full soul name would make the result unwieldy, abbreviate it to a recognizable,
+unambiguous form while preserving the descriptive suffix. Pass that suffix via
+`oas spawn --purpose <descriptive-role>` when spawning, or use the complete
+pattern as the explicit name with `oas create`. Never put secrets, user data,
+or volatile task details in an instance name.
+
 To self-retire, first finish memory/commit/reporting requirements, report final
 status, then run `oas retire <own-instance> --self`. Never retire merely to
 clean up; retirement deletes the instance home.

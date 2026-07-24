@@ -19,7 +19,7 @@ import { createTabChrome, tabKeyAction, focusAfterLastTab } from "./tab-a11y.mjs
 import { createIntentGate, prepareOwnedOpen } from "./open-intent.mjs";
 import { createWorkspaceLabel } from "./workspace-label.mjs";
 import {
-  collapseKey, hasInstanceChildren, treeGuideSegments, filterInstanceTree, instanceVisibleInTree,
+  collapseKey, hasInstanceChildren, instanceRepoLabel, treeGuideSegments, filterInstanceTree, instanceVisibleInTree,
   captureTreeRenderState, configureDisclosure, rosterResponseOwns,
 } from "./instance-tree.mjs";
 import {
@@ -245,8 +245,9 @@ function renderContextRoster(instances) {
         name.className = "ctx-name";
         name.textContent = i.instance;
         const meta = document.createElement("span");
-        meta.className = "ctx-meta";
-        meta.textContent = i.task || i.agent || "";
+        meta.className = "ctx-meta ctx-repo-label";
+        meta.textContent = instanceRepoLabel(i);
+        meta.title = `Repository: ${meta.textContent}`;
         copy.append(name, meta);
         row.append(dot, copy);
         row.addEventListener("click", () => openTerminalTab(i.instance));

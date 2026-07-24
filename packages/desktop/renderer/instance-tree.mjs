@@ -6,6 +6,12 @@ export function hasInstanceChildren(instances, instance) {
   return instances.some((candidate) => candidate.parentInstance === instance);
 }
 
+export function instanceRepoLabel(instance) {
+  if (instance.repoName) return instance.repoName;
+  const path = instance.repo || instance.workspace || "";
+  return String(path).split("/").filter(Boolean).at(-1) || "workspace";
+}
+
 /** VS Code-style guide segments for one row in a flattened parent-first tree.
  * `continue` is an ancestor/sibling vertical; `branch` has a later sibling and
  * an elbow; `end` is the final sibling, stopping at its elbow; `none` suppresses

@@ -3,7 +3,10 @@
 export function createWorkspaceLabel(element) {
   let generation = 0;
   const render = (workspace) => {
-    element.textContent = workspace?.name ? `· ${workspace.name}` : "";
+    const id = workspace?.id || "";
+    const name = workspace?.name || id.split("/").filter(Boolean).at(-1) || "";
+    element.textContent = name || "Resolving…";
+    element.title = id ? `Active workspace: ${id}` : "Resolving active workspace";
   };
   return {
     begin() {
