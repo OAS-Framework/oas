@@ -1,6 +1,8 @@
 # Knowledge Log
 
 ## 2026-07-24
+* **Creation**: promoted [never launch packaged GUI apps from agent sessions on operator machines](/lessons/no-packaged-gui-launches-local.md) from the oas-desktop-engineer-desktop-dist notes.
+* **Update**: clarified [headless Electron verification](/lessons/electron-headless-verification.md) and [Electron smoke process reaping](/lessons/electron-smoke-process-group-reaping.md): packaged-app launch smoke is CI-only on operator machines, process-group reapers are not sufficient for local packaged GUI launches, and cleanup must be path-scoped until respawning orphans stay gone.
 * **Creation**: promoted [review loops need a scope ratchet](/lessons/review-loop-scope-ratchet.md) from the oas-desktop-engineer-desktop-dist notes.
 * **Fix**: merged the admitted-root re-resolution note into [file endpoint guard](/lessons/file-endpoint-realpath-guard.md) and [regression test layering](/lessons/regression-tests-bug-layer.md): `/api/file` roots are canonicalized exactly once at admission and passed as immutable strings, while guard tests must mutation-check the exact layer with pre-captured roots or other production-path doubles.
 * **Update**: merged the untrusted-root symlink review note into [file endpoint guard](/lessons/file-endpoint-realpath-guard.md) and [Electron smoke process group reaping](/lessons/electron-smoke-process-group-reaping.md): workspace-derived file API roots need lstat plus canonical-parent validation before the realpath guard trusts them, and smoke reapers must keep process groups tracked after leader exit with signal-safe proc-reaper tests.
