@@ -1,5 +1,10 @@
 # Knowledge Log
 
+## 2026-07-24
+
+* **Creation**: [spawn-lineage-explicit-only](/decisions/spawn-lineage-explicit-only.md) records explicit-only spawn parentage and adds the Decisions section to the bundle index.
+* **Creation**: [task-flag-boolean-crash](/lessons/task-flag-boolean-crash.md) records the missing value-carrying flag boolean foot-gun behind the `--task` spawn crash.
+
 ## 2026-07-21
 
 - Seeded the starter bundle from the founding oas-expert sessions and the

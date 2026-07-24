@@ -10,6 +10,10 @@ read what the current task needs, not everything.
 
 # Sections
 
+## Decisions
+
+* [decisions/spawn-lineage-explicit-only.md](decisions/spawn-lineage-explicit-only.md) - parentInstance now comes only from an explicit --parent/o.parent or the attached-mode workDir-owner fallback; OAS_INSTANCE/PI_AGENT_INSTANCE env vars are never consulted, because env inheritance is not evidence of intent.
+
 ## Architecture
 
 * [architecture/kernel-and-cli-shape.md](architecture/kernel-and-cli-shape.md) - the kernel/CLI split, agents-root layout, and the dependency-free YAML subset.
@@ -23,6 +27,7 @@ read what the current task needs, not everything.
 * [lessons/marketplace-trust-and-hoisted-paths.md](lessons/marketplace-trust-and-hoisted-paths.md) - marketplace-over-bundled migration: trust at acquisition and the lock-sourced hoisted-path exemption.
 * [lessons/init-acquires-before-config-exists.md](lessons/init-acquires-before-config-exists.md) - mid-init the config chain cannot rediscover a just-acquired capability; use the acquisition result directly.
 * [lessons/team-scope-and-cross-repo-spawn.md](lessons/team-scope-and-cross-repo-spawn.md) - team boundary scan, cross-repo spawn as a CLI resolution change, and why instance lookups stay local-first.
+* [lessons/task-flag-boolean-crash.md](lessons/task-flag-boolean-crash.md) - bin/oas.mjs flag() yields boolean true when the next argv token starts with "--"; oas spawn dev --task --purpose x passed task=true into spawnInstance and crashed mid-scaffold at task.trim(), while task delivery itself was never broken.
 
 ## Playbooks
 
