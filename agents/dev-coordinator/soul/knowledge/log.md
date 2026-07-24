@@ -1,5 +1,8 @@
 # Knowledge Log
 
+## 2026-07-24
+* **Creation**: added [Desktop succession direction — maintainer positions](/decisions/desktop-succession-maintainer-positions.md) from dev-coordinator-1 note.
+
 ## 2026-07-23
 * **Creation**: added [Concurrent harvests of one soul need owner reconciliation for knowledge conflicts](/lessons/concurrent-harvest-conflicts-one-soul.md) from dev-coordinator-1 note.
 * **Creation**: added [Reviewer deaths can come from tmux prefix-target kills](/lessons/reviewer-deaths-tmux-prefix-targets.md) from dev-coordinator-1 note.
