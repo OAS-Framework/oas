@@ -12,13 +12,19 @@ on:
   pull_request:
     paths:
       - "packages/desktop/**"
-      - ".github/workflows/build-installers.yml"
-      - ".github/workflows/release.yml"
+      - ".github/workflows/**"
 
 # Verify-only: read the repo, write nothing. No publish/release/attestation
-# permissions exist here.
+# permissions exist here (contents: read is all upload-artifact needs).
 permissions:
   contents: read
+
+# Own concurrency group — must NOT reuse the release workflow's concurrency
+# group, so a build-verify run can never collide with or cancel a real
+# release. Superseded runs on the same ref are cancelled to avoid pile-up.
+concurrency:
+  group: build-installers-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build-installers:

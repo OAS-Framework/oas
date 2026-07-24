@@ -156,3 +156,16 @@ test("build-installers workflow is VERIFY-ONLY (no publish/release/tag surface)"
   assert.match(bi, /npm run dist:smoke/, "runs the installed-artifact smoke");
   assert.match(bi, /upload-artifact/, "uploads the distributables for inspection");
 });
+
+test("build-installers workflow: own concurrency group (never release.yml's), no tag-push trigger", () => {
+  const bi = readFileSync(new URL("../.github/workflows/build-installers.yml", import.meta.url), "utf8");
+  // must not collide with a real release run
+  assert.ok(!/group:\s*release\b/.test(bi), "must NOT reuse release.yml's concurrency group: release");
+  assert.match(bi, /concurrency:\s*\n\s*group:\s*build-installers/, "declares its own build-installers concurrency group");
+  // triggered by PR + manual only, never by a tag push (that is release.yml)
+  assert.ok(!/on:\s*[\s\S]*push:\s*[\s\S]*tags/.test(bi), "must not trigger on tag push (release.yml owns tags)");
+  assert.match(bi, /workflow_dispatch:/, "manual trigger present");
+  assert.match(bi, /pull_request:/, "pull_request trigger present");
+  // its job name must not be the release matrix job name
+  assert.ok(!/^\s*desktop-build:/m.test(bi), "distinct job name from release.yml's desktop-build");
+});
