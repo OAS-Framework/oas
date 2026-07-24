@@ -11,3 +11,5 @@ When removing shipped-dormant Desktop surfaces, treat the deletion as a cross-bu
 Before calling the removal done, grep the feature names case-insensitively across `.mjs`, `.cjs`, `.html`, `.css`, and `.md` files and across all test roots. Route-family remnants are easy to miss because a deleted view can still be reintroduced by a shared classifier or helper.
 
 Pin the absence with an inventory test near the desktop bundle, such as `packages/desktop/test/inventory.test.mjs`. The test should assert that the removed modules do not exist, helpers and routes are absent from server source, route families exclude the deleted kinds, and renderer files no longer import or style them. Include at least one positive assertion for a kept surface, such as `/api/file`, so the test cannot pass merely because it scanned an empty or wrong tree.
+
+Absence greps over shipped sources also match explanatory comments. When a removal test for strings such as `lib/core.mjs` or `FRAMEWORK_ROOT` fails only because a comment names the removed bridge, reword the comment (for example, "kernel module" or "framework-root override") rather than weakening the test or excluding comments.
