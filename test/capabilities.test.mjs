@@ -921,6 +921,16 @@ test("traversal names are rejected: --parent and retire cannot reach outside ins
     // Kernel retire with a traversal name also refuses.
     assert.throws(() => core.retireInstance(root, "../../dev/soul", { tmuxSession: "oas-test-nosuch" }), /no instance named/);
     assert.ok(existsSync(join(soul, "soul.yaml")));
+    // A VALIDLY NAMED symlink inside instances/ that points OUTSIDE must also be
+    // rejected — this exercises the realpath containment guard independently of
+    // the charset regex (the target's basename intentionally matches the name).
+    const outside = join(base, "outside", "dev-linked");
+    mkdirSync(outside, { recursive: true });
+    writeFileSync(join(outside, "precious.txt"), "keep me");
+    symlinkSync(outside, join(root, "dev", "instances", "dev-linked"));
+    assert.equal(core.findInstanceHome(root, "dev-linked"), undefined, "escaping symlink rejected by containment");
+    assert.throws(() => core.retireInstance(root, "dev-linked", { tmuxSession: "oas-test-nosuch" }), /no instance named/);
+    assert.ok(existsSync(join(outside, "precious.txt")), "symlink target untouched");
     // Real instance still retires normally.
     core.retireInstance(root, "dev-real", { tmuxSession: "oas-test-nosuch" });
     assert.ok(!existsSync(real.home));

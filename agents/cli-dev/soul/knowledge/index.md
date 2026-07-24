@@ -24,6 +24,7 @@ read what the current task needs, not everything.
 
 ## Lessons
 
+* [lessons/caller-controlled-instance-name-containment.md](lessons/caller-controlled-instance-name-containment.md) - findInstanceHome must reject names outside the instance-name charset and verify a realpath-resolved hit is the named immediate child of instances/ before any kernel function uses a caller-supplied instance name as a path.
 * [lessons/marketplace-trust-and-hoisted-paths.md](lessons/marketplace-trust-and-hoisted-paths.md) - marketplace-over-bundled migration: trust at acquisition and the lock-sourced hoisted-path exemption.
 * [lessons/init-acquires-before-config-exists.md](lessons/init-acquires-before-config-exists.md) - mid-init the config chain cannot rediscover a just-acquired capability; use the acquisition result directly.
 * [lessons/team-scope-and-cross-repo-spawn.md](lessons/team-scope-and-cross-repo-spawn.md) - team boundary scan, cross-repo spawn as a CLI resolution change, and why instance lookups stay local-first.
