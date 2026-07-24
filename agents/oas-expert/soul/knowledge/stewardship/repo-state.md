@@ -64,17 +64,18 @@ than letting the file grow stale.
 
 ## In flight
 
-- PR #19 (`feature/desktop-app`) scope expanded by direct human direction on
-  2026-07-24 after maintainer round 1 RETURN. It now owns the complete
-  pre-release succession: desktop-owned bundled backend plus immediate removal
-  of oas.web and `oas pane`/`lib/control-pane`, alongside the clean-runner CI
-  fix. Prior transitional approval is void; the substantially changed head
-  receives a fresh four-gate maintainer review. At reviewed head 047acbb the
-  self-owned backend still bridges directly to adjacent `lib/core.mjs`; this is
-  allowed at merge only as explicit release-blocking distribution debt, not as
-  the final standalone architecture. No release follows the merge until the
-  installed-CLI/no-OAS boundary, installer distribution, and migration
-  diagnostics are operational.
+- PR #19 (`feature/desktop-app`) expanded final head `047acbb` received
+  maintainer round-2 RETURN. Direction, clean CI/full scratch gate, scaffold
+  probe, desktop ownership/removal, retirement diagnostics, and capability
+  lock integrity passed. Security/correctness blocker: shared
+  `findInstanceHome(root, name)` accepts path traversal — malformed `--parent
+  ../../dev/soul` is accepted, and the same argument to `oas retire` deletes
+  the canonical soul. Coordinator must harden name + immediate-child
+  containment, add spawn/retire regressions, clear two diff-check whitespace
+  errors, then return a new green head. The direct `lib/core.mjs` bridge is
+  allowed at merge only as explicit release-blocking distribution debt; no
+  release follows until the installed-CLI/no-OAS boundary, installer
+  distribution, and migration diagnostics are operational.
 - Desktop succession work continues in the durable desktop-engineer soul;
   relevant TUI/web-panel knowledge must migrate before the old souls retire.
   The amended binding architecture is recorded in the [desktop panel succession
