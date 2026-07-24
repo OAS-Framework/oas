@@ -2,8 +2,8 @@
 type: Lesson
 title: Guard file-serving paths by realpathing requests and roots
 description: The /api/file endpoint must realpath both the requested file and each allowed root, then require exact-root or root-plus-separator containment so dotdot, symlink, and sibling-prefix escapes fail closed.
-tags: [desktop-backend, file-endpoint, security, path-traversal]
-timestamp: 2026-07-22
+tags: [desktop-backend, file-endpoint, security, path-traversal, local-souls]
+timestamp: 2026-07-24
 ---
 
 # The guard shape
@@ -23,8 +23,10 @@ timestamp: 2026-07-22
 # Allowed roots
 
 For the desktop viewers, the file endpoint's allowed roots are the workspace
-agents roots plus each known instance's home, `<home>/work`, and repo from the
-roster snapshot.
+agents roots plus each workspace's sibling `local-agents/` directory and each
+known instance's home, `<home>/work`, and repo from the roster snapshot. Local
+souls live outside the agents root, so omitting the sibling `local-agents/` root
+makes brain and markdown views 403 on their files.
 
 # Rule
 

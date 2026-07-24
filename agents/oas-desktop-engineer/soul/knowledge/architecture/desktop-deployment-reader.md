@@ -1,8 +1,8 @@
 ---
 type: Concept
 title: Desktop deployment reader and mutation degradation after kernel bridge removal
-description: Removing the desktop server's direct lib/core.mjs bridge split app-owned tolerant read discovery in deployment.mjs from mutation requests, which validate first and then degrade with a stable cli-unavailable 503 until the CLI adapter lands.
-tags: [desktop, backend, deployment, packaging, cli-boundary]
+description: The desktop deployment reader owns read-only deployment discovery after kernel bridge removal, mirrors first-class local souls under sibling local-agents/ directories, and leaves mutations to validation plus cli-unavailable degradation until the CLI adapter lands.
+tags: [desktop, backend, deployment, packaging, cli-boundary, local-souls]
 timestamp: 2026-07-24
 ---
 
@@ -31,6 +31,31 @@ more tolerant or more self-contained:
   resolution, because a packaged app has no framework checkout;
 - capability manifest paths still keep the realpath containment guard so
   manifest entries cannot escape their package root.
+
+# Local souls
+
+Kernel commit 030ad49 made local souls first-class: full souls with memory,
+skills, and instances live in `<scope>/local-agents/`, a sibling of `agents/`
+rather than nested inside it, and are auto-gitignored by the kernel. The desktop
+reader mirrors those semantics:
+
+- `localAgentsDirOf(root) = join(dirname(root), "local-agents")`; legacy nested
+  `<root>/local-agents` and `<root>/tmp-agents` are still read.
+- All-local scopes are deployments. `findRoot` walking up from inside
+  `local-agents/` resolves to the canonical sibling `agents/` root even when it
+  is absent, and team-scope member detection counts members that have only
+  `local-agents/`.
+- The public soul kind is `local`; old `kind: tmp` soul files normalize to
+  `local` at read time, and spawn-card chips key off `kind === "local"`.
+- Capability instance homes use the scope-sibling local-agents base too.
+- While a branch's in-tree kernel predates the change, parity tests should
+  compare kinds through a `tmp` to `local` normalizer and accept both
+  instance-home locations; tighten those expectations when the kernel change
+  lands on the branch.
+
+A live check against `~/oas` showed local `ux-designer`, `memory-harvest`, and
+`xx` entries in the roster, brain serving a local soul's skills and knowledge,
+and `/api/file` serving a local soul's `AGENTS.md`.
 
 # Mutation boundary
 

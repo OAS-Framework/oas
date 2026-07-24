@@ -1,6 +1,7 @@
 # Knowledge Log
 
 ## 2026-07-24
+* **Update**: merged the local-souls desktop reader note into [desktop deployment reader](/architecture/desktop-deployment-reader.md) and [file endpoint guard](/lessons/file-endpoint-realpath-guard.md): first-class local souls live under sibling `<scope>/local-agents/`, normalize legacy `tmp` kind to `local`, participate in all-local scopes and capability instance homes, and require the sibling directory in `/api/file` allowed roots.
 * **Creation**: promoted [smoke scripts that launch Electron must reap by process group on every exit path](/lessons/electron-smoke-process-group-reaping.md) from the oas-desktop-engineer-desktop-dist notes.
 * **Creation**: promoted [shared degradation state must treat unknown as capable](/lessons/degradation-state-unknown-capable.md) from the oas-desktop-engineer-desktop-dist notes.
 * **Update**: merged the renderer theme token raw-fallback gotcha into [desktop renderer views port of the panel](/architecture/desktop-renderer-views-port.md): `var(--warn)` should not carry raw fallback literals when the token is defined in theme.css.
