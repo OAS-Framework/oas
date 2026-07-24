@@ -94,22 +94,24 @@ export function pushRecent(recents, path, max = 10) {
  * @param {boolean} io.serverOwned                 the current server is app-owned
  * @param {Set<string>} io.advertised
  * @returns {{ ok: true, workspace: object, action: "already-advertised" | "replace-server" }
- *          | { ok: false, reason: string }}
+ *          | { ok: false, code: "not-found"|"not-suggested"|"not-a-workspace"|"foreign-server", reason: string }}
+ *   code is the STABLE machine discriminator (renderer switches on it);
+ *   reason is human-renderable prose and may be reworded freely.
  */
 export function decideAdd(requestedPath, io) {
   let canonical;
-  try { canonical = io.realpath(requestedPath); } catch { return { ok: false, reason: "path does not exist" }; }
+  try { canonical = io.realpath(requestedPath); } catch { return { ok: false, code: "not-found", reason: "path does not exist" }; }
   // Provenance: only suggestion-set members or an explicit picker path may
   // enter the privileged flow — a renderer cannot inject arbitrary paths.
   if (!io.fromPicker && !io.suggestedPaths.has(canonical) && !io.suggestedPaths.has(requestedPath)) {
-    return { ok: false, reason: "path is not in the suggestion set (use the directory picker)" };
+    return { ok: false, code: "not-suggested", reason: "path is not in the suggestion set (use the directory picker)" };
   }
   const ws = io.validate(canonical);
-  if (!ws) return { ok: false, reason: "not an OAS workspace (no team scope or agents root)" };
+  if (!ws) return { ok: false, code: "not-a-workspace", reason: "not an OAS workspace (no team scope or agents root)" };
   if (io.advertised.has(ws.id)) return { ok: true, workspace: ws, action: "already-advertised" };
   if (!io.serverOwned) {
     // Never mutate or kill a foreign server — fail closed with a reason.
-    return { ok: false, reason: "the panel server on this port is not owned by the app — cannot extend its workspaces" };
+    return { ok: false, code: "foreign-server", reason: "the panel server on this port is not owned by the app — cannot extend its workspaces" };
   }
   return { ok: true, workspace: ws, action: "replace-server" };
 }
@@ -121,5 +123,104 @@ export function createGenerations() {
   return {
     next(verb) { const g = (gens.get(verb) || 0) + 1; gens.set(verb, g); return g; },
     isCurrent(verb, g) { return gens.get(verb) === g; },
+  };
+}
+
+/**
+ * Transactional add executor — the effectful lifecycle around decideAdd,
+ * extracted so its ordering/rollback properties are testable (review wsadd:
+ * privileged state committed before readiness/currency; kill/spawn raced;
+ * readiness accepted any 2xx).
+ *
+ * Properties:
+ *  - SERIALIZED: adds run one at a time (in-flight adds queue); a request
+ *    superseded while queued or during readiness commits NOTHING.
+ *  - STAGED: the prospective --dir list is passed to the server replacement
+ *    but workspaceDirs/recents are committed only AFTER readiness; on any
+ *    failure the previous server configuration is RESTORED (respawn with
+ *    the old dirs).
+ *  - Readiness = identity match (isCompatible on /api/version response,
+ *    i.e. serverCompatible against the local oas.json — any 2xx is NOT
+ *    enough during a same-port race) AND the new workspace id advertised.
+ *
+ * @param {object} io
+ * @param {() => string[]} io.getDirs            current committed dir list
+ * @param {(dirs: string[]) => void} io.commitDirs
+ * @param {(path: string) => void} io.commitRecent
+ * @param {(dirs: string[]) => Promise<void>} io.replaceServer  stop owned server
+ *        (awaiting its exit) and start one with `dirs`; must not return
+ *        until the old process released the port. Implementations must
+ *        INVALIDATE any cached advertised-workspace state when the
+ *        replacement starts — the executor repopulates it only from the
+ *        server that successfully becomes current (readiness or restore).
+ * @param {() => Promise<boolean>} io.refreshAdvertised  repopulate the cached
+ *        advertised set from the CURRENT server; returns whether the server
+ *        ANSWERED (an unreachable just-spawned server is not success — the
+ *        executor retries until it answers or attempts exhaust)
+ * @param {() => Promise<{ok:boolean,status?:number,body?:any}|null>} io.probeVersion
+ * @param {(v: any) => boolean} io.isCompatible  serverCompatible(v, local).compatible
+ * @param {(id: string) => Promise<boolean>} io.advertises
+ * @param {(ms: number) => Promise<void>} [io.delay]
+ * @param {number} [io.attempts]
+ * @returns {(workspace: { id: string, path: string }, isCurrent: () => boolean) => Promise<object>}
+ */
+export function createAddExecutor(io) {
+  const delay = io.delay || ((ms) => new Promise((ok) => setTimeout(ok, ms)));
+  const attempts = io.attempts ?? 40;
+  let chain = Promise.resolve();
+
+  async function run(workspace, isCurrent) {
+    if (!isCurrent()) return { ok: false, code: "superseded", reason: "superseded by a newer request" };
+    const previousDirs = io.getDirs();
+    const stagedDirs = [...previousDirs, workspace.path];
+    await io.replaceServer(stagedDirs);
+    // Post-stage lifecycle: EVERY non-commit exit — timeout, supersession,
+    // OR a throw from any probe/compat/advertise callback — must restore
+    // the previous configuration AND its trust state (review wsadd2:
+    // thrown readiness errors bypassed rollback; allowedWs kept entries
+    // from the rolled-back staged server).
+    let committed = false;
+    let thrown = null;
+    try {
+      for (let i = 0; i < attempts; i++) {
+        const v = await io.probeVersion();
+        if (v?.ok && io.isCompatible(v) && await io.advertises(workspace.id)) {
+          if (!isCurrent()) break; // superseded during readiness — roll back
+          io.commitDirs(stagedDirs);
+          io.commitRecent(workspace.path);
+          committed = true;
+          return { ok: true, workspace };
+        }
+        await delay(250);
+      }
+    } catch (e) {
+      thrown = e;
+    } finally {
+      if (!committed) {
+        // restore the previous server, then rebuild advertised state from
+        // the RESTORED server — readiness-aware: the fresh child is not
+        // guaranteed to be listening yet (spawn returns immediately), and a
+        // connection-refused refresh is NOT success; retry with an identity
+        // check until it answers or attempts exhaust (review wsadd3).
+        await io.replaceServer(previousDirs).catch(() => { /* best-effort restore */ });
+        for (let i = 0; i < attempts; i++) {
+          try {
+            const v = await io.probeVersion();
+            if (v?.ok && io.isCompatible(v) && await io.refreshAdvertised()) break;
+          } catch { /* not up yet */ }
+          await delay(250);
+        }
+      }
+    }
+    if (thrown) return { ok: false, code: "server-error", reason: `readiness check failed: ${thrown.message || thrown}` };
+    return isCurrent()
+      ? { ok: false, code: "server-timeout", reason: "replacement server did not advertise the new workspace in time" }
+      : { ok: false, code: "superseded", reason: "superseded by a newer request" };
+  }
+
+  return (workspace, isCurrent) => {
+    const p = chain.then(() => run(workspace, isCurrent));
+    chain = p.catch(() => { /* keep the chain alive after failures */ });
+    return p;
   };
 }

@@ -81,12 +81,16 @@ test("decideAdd: canonicalizes (symlink) then validates; nonexistent fails", () 
   assert.equal(r.ok, true);
   assert.equal(r.workspace.id, "/w/real");
   assert.equal(r.action, "replace-server");
-  assert.match(decideAdd("/w/gone", addIo()).reason, /does not exist/);
+  const gone = decideAdd("/w/gone", addIo());
+  assert.equal(gone.code, "not-found");
+  assert.match(gone.reason, /does not exist/);
 });
 
 test("decideAdd: provenance — non-suggested paths rejected unless from the picker", () => {
   const io = addIo({ suggestedPaths: new Set() });
-  assert.match(decideAdd("/w/real", io).reason, /not in the suggestion set/);
+  const rej = decideAdd("/w/real", io);
+  assert.equal(rej.code, "not-suggested");
+  assert.match(rej.reason, /not in the suggestion set/);
   const picked = decideAdd("/w/real", addIo({ suggestedPaths: new Set(), fromPicker: true }));
   assert.equal(picked.ok, true, "explicit picker path allowed through the same validation");
 });
@@ -94,6 +98,7 @@ test("decideAdd: provenance — non-suggested paths rejected unless from the pic
 test("decideAdd: foreign server fails closed; already-advertised short-circuits", () => {
   const foreign = decideAdd("/w/real", addIo({ serverOwned: false }));
   assert.equal(foreign.ok, false);
+  assert.equal(foreign.code, "foreign-server");
   assert.match(foreign.reason, /not owned by the app/);
   const dup = decideAdd("/w/real", addIo({ advertised: new Set(["/w/real"]) }));
   assert.deepEqual(dup, { ok: true, workspace: dup.workspace, action: "already-advertised" });
@@ -102,6 +107,7 @@ test("decideAdd: foreign server fails closed; already-advertised short-circuits"
 test("decideAdd: non-workspace paths rejected even from the picker", () => {
   const r = decideAdd("/w/junk", addIo({ fromPicker: true, realpath: (p) => p }));
   assert.equal(r.ok, false);
+  assert.equal(r.code, "not-a-workspace");
   assert.match(r.reason, /not an OAS workspace/);
 });
 
@@ -115,4 +121,197 @@ test("generations: reverse completion — a stale request's completion is not cu
   const s1 = gens.next("suggestions");
   assert.equal(gens.isCurrent("suggestions", s1), true);
   assert.equal(gens.isCurrent("add", g2), true);
+});
+
+// createAddExecutor: the effectful lifecycle (review wsadd) — staged commit,
+// restore-on-failure, identity-checked readiness, serialization, and
+// reverse-completion around real deferred effects (not just the counter).
+import { createAddExecutor } from "../packages/desktop/workspace-registry.mjs";
+
+function execHarness(over = {}) {
+  const state = {
+    dirs: ["/w/base"],
+    committedDirs: null,
+    recents: [],
+    serverDirs: ["/w/base"],   // what the running server was started with
+    replacements: [],
+    probes: 0,
+  };
+  const io = {
+    getDirs: () => [...state.dirs],
+    commitDirs: (d) => { state.dirs = d; state.committedDirs = d; },
+    commitRecent: (p) => state.recents.push(p),
+    replaceServer: async (d) => { state.serverDirs = d; state.replacements.push([...d]); state.advertisedValid = false; },
+    refreshAdvertised: async () => { state.advertisedValid = true; state.refreshes = (state.refreshes || 0) + 1; return true; },
+    probeVersion: async () => { state.probes++; return over.version ?? { ok: true, body: { capability: "oas.web", version: "1" } }; },
+    isCompatible: over.isCompatible ?? ((v) => v?.body?.capability === "oas.web"),
+    advertises: over.advertises ?? (async () => true),
+    delay: async () => {},
+    attempts: 3,
+  };
+  return { state, exec: createAddExecutor(io) };
+}
+
+test("executor: success commits dirs+recents AFTER readiness", async () => {
+  const { state, exec } = execHarness();
+  const r = await exec({ id: "/w/new", path: "/w/new" }, () => true);
+  assert.equal(r.ok, true);
+  assert.deepEqual(state.dirs, ["/w/base", "/w/new"]);
+  assert.deepEqual(state.recents, ["/w/new"]);
+  assert.deepEqual(state.replacements, [["/w/base", "/w/new"]], "single replacement with staged dirs");
+});
+
+test("executor: readiness timeout commits NOTHING and restores the previous server config", async () => {
+  const { state, exec } = execHarness({ advertises: async () => false });
+  const r = await exec({ id: "/w/new", path: "/w/new" }, () => true);
+  assert.equal(r.code, "server-timeout");
+  assert.deepEqual(state.dirs, ["/w/base"], "dirs not committed");
+  assert.deepEqual(state.recents, [], "recents not committed");
+  assert.deepEqual(state.replacements.at(-1), ["/w/base"], "server restored to previous dirs");
+});
+
+test("executor: identity mismatch during readiness is not accepted (any-2xx insufficient)", async () => {
+  const { state, exec } = execHarness({ isCompatible: () => false });
+  const r = await exec({ id: "/w/new", path: "/w/new" }, () => true);
+  assert.equal(r.code, "server-timeout");
+  assert.ok(state.probes >= 3, "kept probing rather than accepting the wrong server");
+  assert.deepEqual(state.dirs, ["/w/base"]);
+});
+
+test("executor: superseded DURING readiness rolls back and commits nothing", async () => {
+  let current = true;
+  const { state, exec } = execHarness({ advertises: async () => { current = false; return true; } });
+  const r = await exec({ id: "/w/new", path: "/w/new" }, () => current);
+  assert.equal(r.code, "superseded");
+  assert.deepEqual(state.dirs, ["/w/base"], "stale request committed nothing");
+  assert.deepEqual(state.replacements.at(-1), ["/w/base"], "restored");
+});
+
+test("executor: superseded BEFORE start performs no effects at all", async () => {
+  const { state, exec } = execHarness();
+  const r = await exec({ id: "/w/new", path: "/w/new" }, () => false);
+  assert.equal(r.code, "superseded");
+  assert.deepEqual(state.replacements, [], "no server replacement for a stale request");
+});
+
+test("executor: adds serialize — the second waits for the first, effects in order", async () => {
+  const order = [];
+  let release;
+  const gate = new Promise((ok) => { release = ok; });
+  const { exec } = (() => {
+    const h = execHarness();
+    const orig = h.io ?? null;
+    return h;
+  })();
+  // custom harness with a blocking first replacement
+  const state = { dirs: ["/w/base"], replacements: [] };
+  const io = {
+    getDirs: () => [...state.dirs],
+    commitDirs: (d) => { state.dirs = d; order.push(["commit", d.at(-1)]); },
+    commitRecent: () => {},
+    replaceServer: async (d) => {
+      order.push(["replace", d.at(-1)]);
+      state.replacements.push(d);
+      if (d.at(-1) === "/w/one" && state.replacements.length === 1) await gate;
+    },
+    probeVersion: async () => ({ ok: true }),
+    isCompatible: () => true,
+    advertises: async () => true,
+    refreshAdvertised: async () => {},
+    delay: async () => {},
+    attempts: 2,
+  };
+  const run = createAddExecutor(io);
+  const p1 = run({ id: "/w/one", path: "/w/one" }, () => true);
+  const p2 = run({ id: "/w/two", path: "/w/two" }, () => true);
+  await new Promise((ok) => setImmediate(ok));
+  assert.deepEqual(order, [["replace", "/w/one"]], "second add queued behind the first");
+  release();
+  await p1; await p2;
+  assert.deepEqual(order, [
+    ["replace", "/w/one"], ["commit", "/w/one"],
+    ["replace", "/w/two"], ["commit", "/w/two"],
+  ], "strictly serialized; second staged on the first's committed dirs");
+  assert.deepEqual(state.dirs, ["/w/base", "/w/one", "/w/two"]);
+});
+
+test("executor: a THROWING readiness callback still restores and reports server-error", async () => {
+  // review wsadd2: rejections from probe/compat/advertise bypassed rollback,
+  // leaving the staged privileged configuration live.
+  for (const broken of [
+    { probeVersion: (() => { let n = 0; return async () => { if (n++ < 2) throw new Error("probe exploded"); return { ok: true, body: {} }; }; })() },
+    { isCompatible: (() => { let n = 0; return (v) => { if (n++ < 2) throw new Error("manifest parse failed"); return true; }; })() },
+    { advertises: async () => { throw new Error("panel unreachable"); } },
+  ]) {
+    const { state, exec } = execHarness(broken.isCompatible ? { isCompatible: broken.isCompatible } : {});
+    // patch the harness io pieces that execHarness doesn't parameterize
+    const io = {
+      getDirs: () => [...state.dirs],
+      commitDirs: (d) => { state.dirs = d; },
+      commitRecent: (p) => state.recents.push(p),
+      replaceServer: async (d) => { state.serverDirs = d; state.replacements.push([...d]); state.advertisedValid = false; },
+      refreshAdvertised: async () => { state.advertisedValid = true; return true; },
+      probeVersion: broken.probeVersion ?? (async () => ({ ok: true, body: { capability: "oas.web", version: "1" } })),
+      isCompatible: broken.isCompatible ?? ((v) => true),
+      advertises: broken.advertises ?? (async () => true),
+      delay: async () => {},
+      attempts: 2,
+    };
+    const run = createAddExecutor(io);
+    const r = await run({ id: "/w/new", path: "/w/new" }, () => true);
+    assert.equal(r.code, "server-error", `throwing ${Object.keys(broken)} reports server-error`);
+    assert.deepEqual(state.dirs, ["/w/base"], "nothing committed");
+    assert.deepEqual(state.replacements.at(-1), ["/w/base"], "previous server restored");
+    assert.equal(state.advertisedValid, true, "advertised state repopulated from the restored server");
+  }
+});
+
+test("executor: rollback also rolls back the advertised trust state", async () => {
+  // review wsadd2: allowedWs kept the staged server's entries after restore
+  // — replaceServer invalidates; only readiness or refreshAdvertised (post-
+  // restore) repopulate.
+  const { state, exec } = execHarness({ advertises: async () => false });
+  const r = await exec({ id: "/w/new", path: "/w/new" }, () => true);
+  assert.equal(r.code, "server-timeout");
+  assert.equal(state.advertisedValid, true, "restore path refreshed advertised state from the current server");
+  assert.equal(state.refreshes, 1, "exactly one refresh, after the restore");
+});
+
+test("executor: success path does NOT call refreshAdvertised (readiness already populated it)", async () => {
+  const { state, exec } = execHarness();
+  await exec({ id: "/w/new", path: "/w/new" }, () => true);
+  assert.equal(state.refreshes ?? 0, 0);
+});
+
+test("executor: restore is readiness-aware — refresh retried until the restored server ANSWERS", async () => {
+  // review wsadd3: the restored child is not listening immediately after
+  // spawn; a single connection-refused refresh treated as success left
+  // allowedWs empty. The executor must retry (identity-checked) until the
+  // restored server answers.
+  const state = { dirs: ["/w/base"], replacements: [], refreshCalls: 0, refreshOk: 0 };
+  let restoredUpAfter = 2; // restored server answers on the 3rd probe
+  let phase = "staged";
+  const io = {
+    getDirs: () => [...state.dirs],
+    commitDirs: (d) => { state.dirs = d; },
+    commitRecent: () => {},
+    replaceServer: async (d) => { state.replacements.push([...d]); phase = d.length === 1 ? "restored" : "staged"; },
+    probeVersion: async () => {
+      if (phase === "staged") return { ok: true, body: {} };            // staged server answers but never advertises
+      state.refreshCalls++;
+      if (state.refreshCalls <= restoredUpAfter) return null;           // restored server not up yet
+      return { ok: true, body: {} };
+    },
+    isCompatible: () => true,
+    advertises: async () => false, // staged readiness never satisfied → restore path
+    refreshAdvertised: async () => { state.refreshOk++; return true; },
+    delay: async () => {},
+    attempts: 6,
+  };
+  const run = createAddExecutor(io);
+  const r = await run({ id: "/w/new", path: "/w/new" }, () => true);
+  assert.equal(r.code, "server-timeout");
+  assert.deepEqual(state.replacements.at(-1), ["/w/base"], "restored");
+  assert.ok(state.refreshCalls > restoredUpAfter, "kept probing the restored server until it answered");
+  assert.equal(state.refreshOk, 1, "advertised state rebuilt exactly once, from the ANSWERING restored server");
 });

@@ -1,9 +1,9 @@
 ---
 type: Decision
 title: Privileged workspace add contract
-description: Desktop workspace-add suggestions come only from bounded validated sources, adds are provenance-gated or native-picker-gated, foreign servers fail closed, and stale completions are generation-guarded.
+description: Desktop workspace-add suggestions come only from bounded validated sources, adds are provenance-gated or native-picker-gated, foreign servers fail closed, and add transitions commit only after serialized identity/readiness checks.
 tags: [desktop, workspace, security, ipc, discovery]
-timestamp: 2026-07-23
+timestamp: 2026-07-24
 ---
 
 The desktop workspace-add flow (`packages/desktop/workspace-registry.mjs` plus
@@ -22,14 +22,19 @@ The desktop workspace-add flow (`packages/desktop/workspace-registry.mjs` plus
   read: entries must be absolute paths, still resolve as workspaces, and stay
   capped. A tampered userData file degrades to an empty list.
 - **Foreign servers fail closed.** Server replacement may mutate or kill only
-  the app-owned child. A replacement is ready only when `/api/version` identity
-  matches the local checkout and `/api/panel.workspaces` advertises the new id;
-  this extends the [server identity probe](server-reuse-identity-probe.md)
+  the app-owned child. Replacement waits for the old child to exit before port
+  rebinding, and exit listeners clear ownership only when the global still
+  points at the exiting child. A replacement is ready only when `/api/version`
+  identity matches the local checkout and `/api/panel.workspaces` advertises the
+  new id; this extends the [server identity probe](server-reuse-identity-probe.md)
   rule.
 - **Terminals survive server replacement by architecture.** Desktop terminal
   viewers attach directly to tmux, not oas-web, so ptys keep streaming through
   server replacement; keep restating this in lifecycle tests whenever server
   replacement changes. See [Desktop terminal is a direct tmux attach via node-pty](desktop-terminal-direct-attach.md).
-- **Generation tokens make stale completions inert.** Each workspace-add verb
-  needs a generation guard so late suggestion/add completions cannot apply after
-  the user or runtime has moved on.
+- **Generation tokens guard completions, not pre-commit mutations.** Each
+  workspace-add verb needs a generation guard so late completions cannot apply
+  after the user or runtime has moved on, but add requests must also serialize,
+  stage prospective dirs/recents/server effects, verify identity/readiness and
+  generation currency, then commit. Any failure restores the previous state. See
+  [Privileged state transitions are transactions](privileged-state-transitions-transactions.md).

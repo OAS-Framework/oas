@@ -17,8 +17,9 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { apiUrl, apiInit } from "./api-url.mjs";
 import { openTerm, sweepViewers } from "./tmux-target.mjs";
-import { ensureServerOnPort } from "./server-compat.mjs";
-import { validateWorkspace, workspaceSuggestions, parseRecents, pushRecent, decideAdd, createGenerations } from "./workspace-registry.mjs";
+import { ensureServerOnPort, serverCompatible } from "./server-compat.mjs";
+import { createServerHost, createServerAdapter } from "./server-host.mjs";
+import { validateWorkspace, workspaceSuggestions, parseRecents, pushRecent, decideAdd, createGenerations, createAddExecutor } from "./workspace-registry.mjs";
 
 const require = createRequire(import.meta.url);
 const pty = require("node-pty");
@@ -40,7 +41,24 @@ const WORKSPACE = resolve(argDir || process.env.OAS_DESKTOP_DIR || REPO_ROOT);
 const workspaceDirs = [WORKSPACE];
 
 // ---- oas-web server management ----------------------------------------
-let serverChild = null; // set only when WE spawned it
+// Server host (server-host.mjs): owns the child lifecycle, the ownership-
+// through-transition invariant, and trust-state invalidation on replace.
+const serverHost = createServerHost({
+  spawnChild: (dirs, onPort) => {
+    const bin = join(REPO_ROOT, "capabilities", "oas-web", "bin", "oas-web.mjs");
+    if (!existsSync(bin)) throw new Error(`oas-web server not found at ${bin} and no usable server on port ${onPort}`);
+    const child = spawn(process.execPath, [bin, "start", "--port", String(onPort), ...dirs.flatMap((d) => ["--dir", d])], {
+      stdio: ["ignore", "pipe", "pipe"],
+      cwd: WORKSPACE,
+    });
+    child.stdout.on("data", (d) => process.stdout.write(`[oas-web] ${d}`));
+    child.stderr.on("data", (d) => process.stderr.write(`[oas-web] ${d}`));
+    return child;
+  },
+  // trust state belongs to the outgoing server — stale entries must never
+  // validate ?ws= or decideAdd; repopulated only from the current server.
+  onInvalidate: () => { allowedWs = new Set(); },
+});
 let wsId = null;        // verified workspace id on the server we use
 let allowedWs = new Set(); // workspace ids the connected server advertises
 
@@ -89,17 +107,15 @@ async function freePort(from) {
   throw new Error(`no free port in ${from}..${from + 49}`);
 }
 
-function spawnServer(onPort) {
-  const bin = join(REPO_ROOT, "capabilities", "oas-web", "bin", "oas-web.mjs");
-  if (!existsSync(bin)) throw new Error(`oas-web server not found at ${bin} and no usable server on port ${port}`);
-  serverChild = spawn(process.execPath, [bin, "start", "--port", String(onPort), ...workspaceDirs.flatMap((d) => ["--dir", d])], {
-    stdio: ["ignore", "pipe", "pipe"],
-    cwd: WORKSPACE,
-  });
-  serverChild.stdout.on("data", (d) => process.stdout.write(`[oas-web] ${d}`));
-  serverChild.stderr.on("data", (d) => process.stderr.write(`[oas-web] ${d}`));
-  serverChild.on("exit", () => { serverChild = null; });
-}
+// Port-committing adapter (server-host.mjs): the production wiring between
+// selection and the host — commits the module port before the child starts.
+const serverAdapter = createServerAdapter({
+  host: serverHost,
+  getPort: () => port,
+  setPort: (p) => { port = p; },
+});
+const spawnServer = (onPort, dirs = workspaceDirs) => serverAdapter.spawnServer(onPort, dirs);
+const replaceServer = (dirs) => serverAdapter.replaceServer(dirs);
 
 async function ensureServer() {
   // ensureServerOnPort (server-compat.mjs) is the testable seam for the
@@ -173,6 +189,18 @@ function writeRecents(recents) {
 
 let lastSuggested = new Set(); // canonical paths offered by the latest suggestions call
 
+const executeAdd = createAddExecutor({
+  getDirs: () => [...workspaceDirs],
+  commitDirs: (dirs) => { workspaceDirs.length = 0; workspaceDirs.push(...dirs); },
+  commitRecent: (p) => writeRecents(pushRecent(readRecents(), p)),
+  replaceServer,
+  refreshAdvertised: async () => (await panelWorkspaces()) !== null, // true only when the server ANSWERED
+  probeVersion,
+  // any 2xx is NOT enough during a same-port race — identity must match
+  isCompatible: (v) => serverCompatible(v, localServerIdentity()).compatible,
+  advertises: async (id) => { await panelWorkspaces(); return allowedWs.has(id); },
+});
+
 ipcMain.handle("workspace:suggestions", async (e) => {
   guard(e);
   const gen = wsGens.next("suggestions");
@@ -196,37 +224,21 @@ async function performAdd(requestedPath, fromPicker) {
     validate: wsValidate,
     suggestedPaths: lastSuggested,
     fromPicker,
-    serverOwned: !!serverChild,
+    serverOwned: serverHost.owned(),
     advertised: allowedWs,
   });
-  if (!decision.ok) return { ok: false, reason: decision.reason };
+  if (!decision.ok) return { ok: false, code: decision.code, reason: decision.reason };
   const ws = decision.workspace;
   if (decision.action === "already-advertised") return { ok: true, workspace: ws };
-  // Replace ONLY our own server with the extended --dir set. Terminals are
-  // unaffected: viewer sessions attach to tmux, not to the oas-web process.
-  workspaceDirs.push(ws.path);
-  writeRecents(pushRecent(readRecents(), ws.path));
-  try { serverChild.kill(); } catch { /* already gone */ }
-  serverChild = null;
-  spawnServer(port);
-  // readiness: /api/version identity match AND the new id advertised
-  for (let i = 0; i < 40; i++) {
-    const v = await probeVersion();
-    if (v?.ok) {
-      await panelWorkspaces();
-      if (allowedWs.has(ws.id)) {
-        if (!wsGens.isCurrent("add", gen)) return { ok: false, reason: "superseded by a newer request" };
-        return { ok: true, workspace: ws };
-      }
-    }
-    await new Promise((ok) => setTimeout(ok, 250));
-  }
-  return { ok: false, reason: "replacement server did not advertise the new workspace in time" };
+  // Transactional executor (workspace-registry.mjs): serialized adds, staged
+  // dirs, identity-checked readiness, commit-after-ready, restore-on-failure.
+  // Terminals are unaffected throughout: viewers attach to tmux, not oas-web.
+  return executeAdd(ws, () => wsGens.isCurrent("add", gen));
 }
 
 ipcMain.handle("workspace:add", async (e, requestedPath) => {
   guard(e);
-  if (typeof requestedPath !== "string" || !requestedPath.startsWith("/")) return { ok: false, reason: "bad path" };
+  if (typeof requestedPath !== "string" || !requestedPath.startsWith("/")) return { ok: false, code: "bad-path", reason: "path must be an absolute string" };
   return performAdd(requestedPath, false);
 });
 
@@ -237,7 +249,7 @@ ipcMain.handle("workspace:pick", async (e) => {
   // check — canonicalization and workspace validation still apply).
   const win = BrowserWindow.fromWebContents(e.sender);
   const r = await dialog.showOpenDialog(win, { properties: ["openDirectory"] });
-  if (r.canceled || !r.filePaths?.[0]) return { ok: false, reason: "cancelled" };
+  if (r.canceled || !r.filePaths?.[0]) return { ok: false, code: "cancelled", reason: "picker cancelled" };
   return performAdd(r.filePaths[0], true);
 });
 
@@ -375,7 +387,7 @@ function shutdown() {
   }
   ptys.clear();
   sweepOrphanViewers();
-  if (serverChild) { try { serverChild.kill(); } catch { /* best-effort */ } serverChild = null; }
+  serverHost.stop();
 }
 app.on("before-quit", shutdown);
 // SIGTERM/SIGINT (e.g. `kill <pid>`, Ctrl-C from a launcher shell) do not run
