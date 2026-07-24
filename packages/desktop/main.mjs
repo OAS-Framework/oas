@@ -17,8 +17,8 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { apiUrl, apiInit } from "./api-url.mjs";
 import { openTerm, sweepViewers } from "./tmux-target.mjs";
-import { ensureServerOnPort } from "./server-compat.mjs";
-import { validateWorkspace, workspaceSuggestions, parseRecents, pushRecent, decideAdd, createGenerations } from "./workspace-registry.mjs";
+import { ensureServerOnPort, serverCompatible } from "./server-compat.mjs";
+import { validateWorkspace, workspaceSuggestions, parseRecents, pushRecent, decideAdd, createGenerations, createAddExecutor } from "./workspace-registry.mjs";
 
 const require = createRequire(import.meta.url);
 const pty = require("node-pty");
@@ -89,16 +89,36 @@ async function freePort(from) {
   throw new Error(`no free port in ${from}..${from + 49}`);
 }
 
-function spawnServer(onPort) {
+function spawnServer(onPort, dirs = workspaceDirs) {
   const bin = join(REPO_ROOT, "capabilities", "oas-web", "bin", "oas-web.mjs");
   if (!existsSync(bin)) throw new Error(`oas-web server not found at ${bin} and no usable server on port ${port}`);
-  serverChild = spawn(process.execPath, [bin, "start", "--port", String(onPort), ...workspaceDirs.flatMap((d) => ["--dir", d])], {
+  // Capture the child locally: the exit listener clears the global ONLY if
+  // it still points at THIS child — an old child's late exit must never
+  // erase the reference to (and ownership of) its replacement.
+  const child = spawn(process.execPath, [bin, "start", "--port", String(onPort), ...dirs.flatMap((d) => ["--dir", d])], {
     stdio: ["ignore", "pipe", "pipe"],
     cwd: WORKSPACE,
   });
-  serverChild.stdout.on("data", (d) => process.stdout.write(`[oas-web] ${d}`));
-  serverChild.stderr.on("data", (d) => process.stderr.write(`[oas-web] ${d}`));
-  serverChild.on("exit", () => { serverChild = null; });
+  child.stdout.on("data", (d) => process.stdout.write(`[oas-web] ${d}`));
+  child.stderr.on("data", (d) => process.stderr.write(`[oas-web] ${d}`));
+  child.on("exit", () => { if (serverChild === child) serverChild = null; });
+  serverChild = child;
+  return child;
+}
+
+/** Stop the owned server (awaiting actual process exit so the port is
+ * released — kill() only signals) and start one with `dirs`. */
+async function replaceServer(dirs) {
+  const old = serverChild;
+  if (old) {
+    serverChild = null; // we own the transition; old's exit listener is now a no-op
+    await new Promise((done) => {
+      const t = setTimeout(() => { try { old.kill("SIGKILL"); } catch { /* gone */ } }, 3000);
+      old.once("exit", () => { clearTimeout(t); done(); });
+      try { old.kill(); } catch { clearTimeout(t); done(); }
+    });
+  }
+  spawnServer(port, dirs);
 }
 
 async function ensureServer() {
@@ -173,6 +193,17 @@ function writeRecents(recents) {
 
 let lastSuggested = new Set(); // canonical paths offered by the latest suggestions call
 
+const executeAdd = createAddExecutor({
+  getDirs: () => [...workspaceDirs],
+  commitDirs: (dirs) => { workspaceDirs.length = 0; workspaceDirs.push(...dirs); },
+  commitRecent: (p) => writeRecents(pushRecent(readRecents(), p)),
+  replaceServer,
+  probeVersion,
+  // any 2xx is NOT enough during a same-port race — identity must match
+  isCompatible: (v) => serverCompatible(v, localServerIdentity()).compatible,
+  advertises: async (id) => { await panelWorkspaces(); return allowedWs.has(id); },
+});
+
 ipcMain.handle("workspace:suggestions", async (e) => {
   guard(e);
   const gen = wsGens.next("suggestions");
@@ -199,29 +230,13 @@ async function performAdd(requestedPath, fromPicker) {
     serverOwned: !!serverChild,
     advertised: allowedWs,
   });
-  if (!decision.ok) return { ok: false, reason: decision.reason };
+  if (!decision.ok) return { ok: false, code: decision.code, reason: decision.reason };
   const ws = decision.workspace;
   if (decision.action === "already-advertised") return { ok: true, workspace: ws };
-  // Replace ONLY our own server with the extended --dir set. Terminals are
-  // unaffected: viewer sessions attach to tmux, not to the oas-web process.
-  workspaceDirs.push(ws.path);
-  writeRecents(pushRecent(readRecents(), ws.path));
-  try { serverChild.kill(); } catch { /* already gone */ }
-  serverChild = null;
-  spawnServer(port);
-  // readiness: /api/version identity match AND the new id advertised
-  for (let i = 0; i < 40; i++) {
-    const v = await probeVersion();
-    if (v?.ok) {
-      await panelWorkspaces();
-      if (allowedWs.has(ws.id)) {
-        if (!wsGens.isCurrent("add", gen)) return { ok: false, code: "superseded", reason: "superseded by a newer request" };
-        return { ok: true, workspace: ws };
-      }
-    }
-    await new Promise((ok) => setTimeout(ok, 250));
-  }
-  return { ok: false, code: "server-timeout", reason: "replacement server did not advertise the new workspace in time" };
+  // Transactional executor (workspace-registry.mjs): serialized adds, staged
+  // dirs, identity-checked readiness, commit-after-ready, restore-on-failure.
+  // Terminals are unaffected throughout: viewers attach to tmux, not oas-web.
+  return executeAdd(ws, () => wsGens.isCurrent("add", gen));
 }
 
 ipcMain.handle("workspace:add", async (e, requestedPath) => {

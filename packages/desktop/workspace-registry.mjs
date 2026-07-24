@@ -125,3 +125,69 @@ export function createGenerations() {
     isCurrent(verb, g) { return gens.get(verb) === g; },
   };
 }
+
+/**
+ * Transactional add executor — the effectful lifecycle around decideAdd,
+ * extracted so its ordering/rollback properties are testable (review wsadd:
+ * privileged state committed before readiness/currency; kill/spawn raced;
+ * readiness accepted any 2xx).
+ *
+ * Properties:
+ *  - SERIALIZED: adds run one at a time (in-flight adds queue); a request
+ *    superseded while queued or during readiness commits NOTHING.
+ *  - STAGED: the prospective --dir list is passed to the server replacement
+ *    but workspaceDirs/recents are committed only AFTER readiness; on any
+ *    failure the previous server configuration is RESTORED (respawn with
+ *    the old dirs).
+ *  - Readiness = identity match (isCompatible on /api/version response,
+ *    i.e. serverCompatible against the local oas.json — any 2xx is NOT
+ *    enough during a same-port race) AND the new workspace id advertised.
+ *
+ * @param {object} io
+ * @param {() => string[]} io.getDirs            current committed dir list
+ * @param {(dirs: string[]) => void} io.commitDirs
+ * @param {(path: string) => void} io.commitRecent
+ * @param {(dirs: string[]) => Promise<void>} io.replaceServer  stop owned server
+ *        (awaiting its exit) and start one with `dirs`; must not return
+ *        until the old process released the port
+ * @param {() => Promise<{ok:boolean,status?:number,body?:any}|null>} io.probeVersion
+ * @param {(v: any) => boolean} io.isCompatible  serverCompatible(v, local).compatible
+ * @param {(id: string) => Promise<boolean>} io.advertises
+ * @param {(ms: number) => Promise<void>} [io.delay]
+ * @param {number} [io.attempts]
+ * @returns {(workspace: { id: string, path: string }, isCurrent: () => boolean) => Promise<object>}
+ */
+export function createAddExecutor(io) {
+  const delay = io.delay || ((ms) => new Promise((ok) => setTimeout(ok, ms)));
+  const attempts = io.attempts ?? 40;
+  let chain = Promise.resolve();
+
+  async function run(workspace, isCurrent) {
+    if (!isCurrent()) return { ok: false, code: "superseded", reason: "superseded by a newer request" };
+    const previousDirs = io.getDirs();
+    const stagedDirs = [...previousDirs, workspace.path];
+    await io.replaceServer(stagedDirs);
+    for (let i = 0; i < attempts; i++) {
+      const v = await io.probeVersion();
+      if (v?.ok && io.isCompatible(v) && await io.advertises(workspace.id)) {
+        if (!isCurrent()) break; // superseded during readiness — roll back
+        io.commitDirs(stagedDirs);
+        io.commitRecent(workspace.path);
+        return { ok: true, workspace };
+      }
+      await delay(250);
+    }
+    // failure or superseded: restore the previous configuration — nothing
+    // was committed, but the running server has the staged dirs.
+    await io.replaceServer(previousDirs).catch(() => { /* best-effort restore */ });
+    return isCurrent()
+      ? { ok: false, code: "server-timeout", reason: "replacement server did not advertise the new workspace in time" }
+      : { ok: false, code: "superseded", reason: "superseded by a newer request" };
+  }
+
+  return (workspace, isCurrent) => {
+    const p = chain.then(() => run(workspace, isCurrent));
+    chain = p.catch(() => { /* keep the chain alive after failures */ });
+    return p;
+  };
+}

@@ -122,3 +122,113 @@ test("generations: reverse completion — a stale request's completion is not cu
   assert.equal(gens.isCurrent("suggestions", s1), true);
   assert.equal(gens.isCurrent("add", g2), true);
 });
+
+// createAddExecutor: the effectful lifecycle (review wsadd) — staged commit,
+// restore-on-failure, identity-checked readiness, serialization, and
+// reverse-completion around real deferred effects (not just the counter).
+import { createAddExecutor } from "../packages/desktop/workspace-registry.mjs";
+
+function execHarness(over = {}) {
+  const state = {
+    dirs: ["/w/base"],
+    committedDirs: null,
+    recents: [],
+    serverDirs: ["/w/base"],   // what the running server was started with
+    replacements: [],
+    probes: 0,
+  };
+  const io = {
+    getDirs: () => [...state.dirs],
+    commitDirs: (d) => { state.dirs = d; state.committedDirs = d; },
+    commitRecent: (p) => state.recents.push(p),
+    replaceServer: async (d) => { state.serverDirs = d; state.replacements.push([...d]); },
+    probeVersion: async () => { state.probes++; return over.version ?? { ok: true, body: { capability: "oas.web", version: "1" } }; },
+    isCompatible: over.isCompatible ?? ((v) => v?.body?.capability === "oas.web"),
+    advertises: over.advertises ?? (async () => true),
+    delay: async () => {},
+    attempts: 3,
+  };
+  return { state, exec: createAddExecutor(io) };
+}
+
+test("executor: success commits dirs+recents AFTER readiness", async () => {
+  const { state, exec } = execHarness();
+  const r = await exec({ id: "/w/new", path: "/w/new" }, () => true);
+  assert.equal(r.ok, true);
+  assert.deepEqual(state.dirs, ["/w/base", "/w/new"]);
+  assert.deepEqual(state.recents, ["/w/new"]);
+  assert.deepEqual(state.replacements, [["/w/base", "/w/new"]], "single replacement with staged dirs");
+});
+
+test("executor: readiness timeout commits NOTHING and restores the previous server config", async () => {
+  const { state, exec } = execHarness({ advertises: async () => false });
+  const r = await exec({ id: "/w/new", path: "/w/new" }, () => true);
+  assert.equal(r.code, "server-timeout");
+  assert.deepEqual(state.dirs, ["/w/base"], "dirs not committed");
+  assert.deepEqual(state.recents, [], "recents not committed");
+  assert.deepEqual(state.replacements.at(-1), ["/w/base"], "server restored to previous dirs");
+});
+
+test("executor: identity mismatch during readiness is not accepted (any-2xx insufficient)", async () => {
+  const { state, exec } = execHarness({ isCompatible: () => false });
+  const r = await exec({ id: "/w/new", path: "/w/new" }, () => true);
+  assert.equal(r.code, "server-timeout");
+  assert.ok(state.probes >= 3, "kept probing rather than accepting the wrong server");
+  assert.deepEqual(state.dirs, ["/w/base"]);
+});
+
+test("executor: superseded DURING readiness rolls back and commits nothing", async () => {
+  let current = true;
+  const { state, exec } = execHarness({ advertises: async () => { current = false; return true; } });
+  const r = await exec({ id: "/w/new", path: "/w/new" }, () => current);
+  assert.equal(r.code, "superseded");
+  assert.deepEqual(state.dirs, ["/w/base"], "stale request committed nothing");
+  assert.deepEqual(state.replacements.at(-1), ["/w/base"], "restored");
+});
+
+test("executor: superseded BEFORE start performs no effects at all", async () => {
+  const { state, exec } = execHarness();
+  const r = await exec({ id: "/w/new", path: "/w/new" }, () => false);
+  assert.equal(r.code, "superseded");
+  assert.deepEqual(state.replacements, [], "no server replacement for a stale request");
+});
+
+test("executor: adds serialize — the second waits for the first, effects in order", async () => {
+  const order = [];
+  let release;
+  const gate = new Promise((ok) => { release = ok; });
+  const { exec } = (() => {
+    const h = execHarness();
+    const orig = h.io ?? null;
+    return h;
+  })();
+  // custom harness with a blocking first replacement
+  const state = { dirs: ["/w/base"], replacements: [] };
+  const io = {
+    getDirs: () => [...state.dirs],
+    commitDirs: (d) => { state.dirs = d; order.push(["commit", d.at(-1)]); },
+    commitRecent: () => {},
+    replaceServer: async (d) => {
+      order.push(["replace", d.at(-1)]);
+      state.replacements.push(d);
+      if (d.at(-1) === "/w/one" && state.replacements.length === 1) await gate;
+    },
+    probeVersion: async () => ({ ok: true }),
+    isCompatible: () => true,
+    advertises: async () => true,
+    delay: async () => {},
+    attempts: 2,
+  };
+  const run = createAddExecutor(io);
+  const p1 = run({ id: "/w/one", path: "/w/one" }, () => true);
+  const p2 = run({ id: "/w/two", path: "/w/two" }, () => true);
+  await new Promise((ok) => setImmediate(ok));
+  assert.deepEqual(order, [["replace", "/w/one"]], "second add queued behind the first");
+  release();
+  await p1; await p2;
+  assert.deepEqual(order, [
+    ["replace", "/w/one"], ["commit", "/w/one"],
+    ["replace", "/w/two"], ["commit", "/w/two"],
+  ], "strictly serialized; second staged on the first's committed dirs");
+  assert.deepEqual(state.dirs, ["/w/base", "/w/one", "/w/two"]);
+});
