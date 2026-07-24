@@ -66,6 +66,13 @@ module.exports = {
     identity: null,
   },
   linux: {
+    // Filesystem-safe binary/package name. WITHOUT this, electron-builder
+    // derives executableName from the SCOPED package name
+    // "@oas-framework/desktop" → "@oas-frameworkdesktop", which contains
+    // "@"/"/" and FAILS the AppImage/DEB build ('characters that cannot be
+    // safely used in file paths') — the v0.18.x Linux leg never went green
+    // without it. Scoped to linux so the mac .app stays "OAS Desktop.app".
+    executableName: "oas-desktop",
     target: ["AppImage", "deb"],
     category: "Development",
     // tmux is a hard runtime prerequisite (terminal attach path).

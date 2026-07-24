@@ -111,3 +111,27 @@ test("desktop package scripts invoked by the workflow exist and run", () => {
     Object.keys(desktopPkg.devDependencies || {}).some((d) => d.includes("electron-builder")) || /electron-builder/.test(desktopPkg.scripts.dist),
     "dist script is electron-builder packaging");
 });
+
+test("electron-builder declares a filesystem-safe Linux executableName (AppImage/DEB name guard)", () => {
+  // Without a safe executableName, electron-builder derives it from the
+  // SCOPED package name "@oas-framework/desktop" → "@oas-frameworkdesktop",
+  // whose "@"/"/" fail the Linux AppImage/DEB build ("characters that cannot
+  // be safely used in file paths"). This guards that regressing.
+  const cfg = readFileSync(new URL("../packages/desktop/electron-builder.config.cjs", import.meta.url), "utf8");
+  const m = cfg.match(/executableName:\s*["']([^"']+)["']/);
+  assert.ok(m, "electron-builder.config.cjs must declare an executableName (Linux name safety)");
+  const name = m[1];
+  // filesystem-safe: no scoped-name metacharacters, path separators, or spaces
+  assert.match(name, /^[a-z0-9][a-z0-9._-]*$/, `executableName "${name}" must be filesystem-safe (lowercase alnum/._- only)`);
+  assert.ok(!/[@/\\ ]/.test(name), `executableName "${name}" must not contain @ / \\ or spaces`);
+});
+
+test("release desktop-build matrix does not fail-fast (one leg must not mask the others)", () => {
+  // The Linux leg failing fast previously CANCELLED the mac legs, hiding
+  // whether they built. Each matrix leg must report independently.
+  const desktopJob = yml.indexOf("desktop-build:");
+  assert.ok(desktopJob > 0, "desktop-build job present");
+  const nextJob = yml.indexOf("\n  publish:", desktopJob);
+  const jobText = yml.slice(desktopJob, nextJob > 0 ? nextJob : undefined);
+  assert.match(jobText, /fail-fast:\s*false/, "desktop-build matrix sets fail-fast: false");
+});

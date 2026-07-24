@@ -134,6 +134,10 @@ jobs:
   desktop-build:
     needs: build-and-test
     strategy:
+      # One leg's failure must NOT cancel the others (review: the Linux leg
+      # failed fast and masked whether mac arm64/x64 actually built). Each
+      # matrix leg reports independently.
+      fail-fast: false
       matrix:
         include:
           - os: macos-14          # macOS arm64: DMG + ZIP
