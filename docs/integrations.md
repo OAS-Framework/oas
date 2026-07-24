@@ -105,14 +105,11 @@ the `linear-tasks` skill, and an advisory spawn hook. It uses
 `LINEAR_API_KEY`; secrets never belong in OAS config. See
 `capabilities/oas-linear/README.md` for its support boundary.
 
-### `oas.web`
-
-The web panel capability contributes `oas web start [--port] [--dir] [--open]`
-— a localhost, zero-dependency control panel: live instance roster, terminal-
-faithful session views (tmux capture), type-into-terminal interaction for pi
-and claude sessions, and a Jira epic/Agent-Roster drawer when `oas.jira` meta
-is present. Binds 127.0.0.1 only; it can type into your terminals, so never
-expose it. It is not a fundamental layer — activate it additively.
+> **Removed: `oas.web`.** The browser web-panel capability was retired in
+> favor of the OAS Desktop app (`packages/desktop/`), which bundles the same
+> zero-dependency loopback server. If an `oas-lock.json` or `oas-config.yaml`
+> still names `oas.web`, remove that entry — the capability no longer exists
+> in the marketplace. Full migration steps: [docs/desktop-succession.md](desktop-succession.md).
 
 ## Build an integration
 

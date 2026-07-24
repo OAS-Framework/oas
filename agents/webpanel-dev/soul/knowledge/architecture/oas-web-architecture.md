@@ -3,7 +3,7 @@ type: Concept
 title: oas-web architecture — zero-dependency localhost server plus single-file UI
 description: The oas.web capability is a two-file system — bin/oas-web.mjs (a zero-dependency node:http server on 127.0.0.1) and ui/panel.html (a single self-contained HTML/CSS/JS page) — that reuses the kernel's control-pane model and tmux as its only seams to the agents.
 tags: [oas-web, architecture, capability, http, tmux]
-timestamp: 2026-07-22
+timestamp: 2026-07-23
 ---
 
 # Shape
@@ -17,14 +17,30 @@ The web panel lives in `capabilities/oas-web/` and is deliberately tiny:
   - `POST /api/spawn` — spawns an agent in an allowlisted workspace root,
     with `task: ""` meaning "await instructions" (see
     [spawn endpoint](spawn-endpoint.md)).
-  - `GET /api/session/<instance>?lines=n` — raw ANSI tmux `capture-pane` text plus pane geometry, cursor state, and history depth.
-  - `GET /api/chat/<instance>?limit=n` — parsed structured transcript turns.
-  - `POST /api/keys` — sends browser keydown bytes into the tmux pane and is
+  - `GET /api/brain/<agent>?ws=<id>` — returns soul artifact paths, package-level
+    capability-agent skills, and workspace-scoped running-state for the desktop
+    brain view while resolving agent names through kernel lookup seams (see
+    [agent brain endpoint](agent-brain-endpoint-and-view.md)).
+  - `GET /api/session/<instance>?ws=<id>&lines=n` — raw ANSI tmux `capture-pane` text plus pane geometry, cursor state, and history depth.
+  - `GET /api/chat/<instance>?ws=<id>&limit=n` — parsed structured transcript turns.
+  - `GET /api/file` — guarded file reads for desktop viewers; realpaths the
+    requested path and every allowed root before containment checks (see
+    [the file guard lesson](/lessons/file-endpoint-realpath-guard.md)).
+  - `GET /api/diff` — worktree diff/stat reads for desktop viewers; derives
+    `<home>/work` rather than using `inst.work` and parses NUL-delimited git
+    rename stats (see [the work-mode lesson](/lessons/instance-work-mode-not-path.md)
+    and [the rename parsing lesson](/lessons/git-rename-stats-nul-parsing.md)).
+  - `POST /api/keys?ws=<id>` — sends browser keydown bytes into the tmux pane and is
     the panel's only text-input path (see [raw key passthrough](raw-key-passthrough-and-host-guard.md)
     and [the input-surface decision](/decisions/terminal-input-unification.md)).
-  - `POST /api/interrupt/<instance>` — sends Ctrl-C.
-  - `GET /api/jira/<instance>` — epic + Agent Roster via `acli` when
+  - `POST /api/interrupt/<instance>?ws=<id>` — sends Ctrl-C.
+  - `GET /api/jira/<instance>?ws=<id>` — epic + Agent Roster via `acli` when
     `capabilityMeta["oas.jira"]` is present.
+  Instance-addressed routes (`session`, `keys`, `interrupt`, `jira`, `chat`,
+  and `diff`) forward `?ws=` when the UI has a selected workspace, so
+  `findInstance(name, wsId)` resolves same-named instances strictly inside that
+  workspace — unscoped global lookup is ambiguous when instance names collide
+  across workspaces; see [the workspace-scoping lesson](/lessons/workspace-scoped-instance-routing.md).
 - `ui/panel.html` — all CSS, JS, rendering, panes, and polling loops in one
   file. No build step, no framework. Hard-refresh (Cmd-Shift-R) is the deploy.
   The current shell has an editor-style panes array, focused-pane key routing,
@@ -36,10 +52,18 @@ The web panel lives in `capabilities/oas-web/` and is deliberately tiny:
 - **Roster**: `lib/control-pane/model.mjs` `collectControlPane(root)` — same
   data as the TUI (`oas pane`). Slow collection runs in the hidden
   `oas-web.mjs collect` child-process path; the serving process answers
-  `/api/panel` and `findInstance` from an in-memory snapshot so key/input
-  endpoints are not blocked by roster rebuilds. The kernel is found in-tree
+  `/api/panel` and `findInstance(name, wsId)` from an in-memory snapshot so
+  key/input endpoints are not blocked by roster rebuilds, and scoped instance
+  lookups fail closed inside the supplied workspace instead of falling back to a
+  global first match. Callers that have resolved a workspace must pass that
+  workspace id so same-named instances in other workspaces do not leak into
+  running-state or terminal decisions (see
+  [the scoped snapshot lookup lesson](/lessons/workspace-scoped-snapshot-lookups.md)). The kernel is found in-tree
   (`../../..`) or, for marketplace installs, via `oas root` (a copied package
-  must never assume it sits inside the kernel tree).
+  must never assume it sits inside the kernel tree). Control-pane instance
+  objects expose `work` as the work mode, not a filesystem path; endpoints that
+  need a work tree derive `<home>/work` from `inst.home` (see
+  [the work-mode lesson](/lessons/instance-work-mode-not-path.md)).
 - **Session view + input**: tmux only — `capture-pane` to read and raw
   `/api/keys` delivery through `send-keys` / `paste-buffer` to write. The
   terminal's own input line is the sole input surface; do not reintroduce a
@@ -62,20 +86,35 @@ Session attach is staged for perceived speed: paint a cached frame immediately
 when available, fetch a short `/api/session?lines=120` tail so the pane becomes
 interactive quickly, then background-backfill the deep `/api/session?lines=2000`
 scrollback. The server keeps a 2.5s instance-registry cache around
-`findInstance()` so session polls do not rebuild `collectControlPane` for every
-workspace on each request, and `paneInfo()` keeps pane size/history/cursor lookup
-to one tmux `display-message` round-trip. The requested `lines` value is part of
-the render signature so a tail paint cannot suppress the later deep backfill; see
+`findInstance(name, wsId)` so session polls do not rebuild `collectControlPane`
+for every workspace on each request, and `paneInfo()` keeps pane
+size/history/cursor lookup to one tmux metadata query. The requested `lines`
+value is part of the render signature so a tail paint cannot suppress the later
+deep backfill; see
 [the fast-attach lesson](/lessons/fast-attach-cache-tail-backfill.md).
+
+Tmux targets are exact-match anchored as validated `=session:=window` strings so
+stale rosters cannot prefix-match similarly named live windows. When missing
+panes must fail closed, pane metadata reads use `list-panes` rather than
+`display-message`, because `display-message` can fall back to a default context;
+see [the tmux target anchoring lesson](/lessons/tmux-anchored-targets-and-display-message-fallback.md).
 
 # Security invariant
 
 The server binds **127.0.0.1 only** and must stay that way: this process can
 type into your terminals. Remote use is ssh port-forward, never a public
-bind. All POST endpoints also require loopback `Host` and, when present,
-loopback `Origin`, so DNS rebinding cannot turn a hostile page into terminal
-input. Endpoints that accept path-shaped browser parameters, currently
-`/api/spawn`'s `agentsRoot`, must resolve them against server-computed workspace
-roots rather than trusting arbitrary paths. `EADDRINUSE` is handled with a
-friendly message (a panel is probably already running; `--port <n>` or
+bind. Every request requires a loopback `Host`; POST endpoints also require a
+loopback `Origin` when present. The Host check must run before GET handlers too
+because file-serving APIs such as `/api/file` and `/api/diff` can leak workspace
+files to a DNS-rebinding page; see
+[the all-request Host guard lesson](/lessons/loopback-host-guard-all-requests.md).
+The server sends no CORS headers; external dev harnesses cannot fetch
+its API cross-origin and should use a same-origin proxy such as
+`packages/desktop/renderer/harness-server.mjs` for renderer work.
+Browser-provided paths are selectors or targets constrained by
+server-computed allowlists, never ambient filesystem authority: `/api/spawn`'s
+`agentsRoot` must resolve against workspace roots, and `/api/file` must realpath
+both the requested file and each allowed root before requiring exact-root or
+root-plus-separator containment. `EADDRINUSE` is handled with a friendly message
+(a panel is probably already running; `--port <n>` or
 `pkill -f "oas-web.mjs start"`).
