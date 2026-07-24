@@ -202,6 +202,41 @@ test("capability dispatch --json failures are one stdout envelope with stable co
   assert.equal(parseOnly(r.stdout).error.code, "E_CONFIG_BROKEN");
 });
 
+test("capability dispatch --json: broken manifests and malformed command values still emit one envelope", () => {
+  // Reviewer repro 1: an instance whose metadata carries a team snapshot plus
+  // a malformed capability oas.json in the context — manifest discovery throws
+  // AFTER the metadata try, which previously escaped with empty stdout.
+  const base = temp(); const { repo } = fixtureSoul(base);
+  opsCapability(repo);
+  write(join(repo, "oas-config.yaml"), "name: fixture\n"); // config level so .agents/capabilities is discovered
+  write(join(repo, ".agents", "capabilities", "owned", "broken", "oas.json"), "{malformed");
+  const home = join(base, "instance"); mkdirSync(home);
+  write(join(home, "instance.json"), JSON.stringify({
+    repo, capabilities: [{ id: "acme.ops" }],
+    team: { name: "t", id: "t1", scope: base }, // team snapshot: metadata parse succeeds
+  }));
+  const env = { ...process.env, PI_AGENT_HOME: home };
+  let r = spawnSync(process.execPath, [CLI, "ops", "ping", "--json"], { cwd: home, encoding: "utf8", env });
+  assert.notEqual(r.status, 0);
+  const doc1 = parseOnly(r.stdout); // throws if stdout is empty or contaminated
+  assert.equal(doc1.ok, false);
+  assert.ok(["E_CAPABILITY_BROKEN", "E_CONFIG_BROKEN"].includes(doc1.error.code), doc1.error.code);
+
+  // Reviewer repro 2: a manifest command value that is not a string
+  // (commands: { ping: 42 }) — previously crashed at .split() with no envelope.
+  const base2 = temp(); const { repo: repo2 } = fixtureSoul(base2);
+  const dir = join(repo2, ".agents", "capabilities", "owned", "ops");
+  write(join(repo2, "oas-config.yaml"), "name: fixture\n");
+  write(join(dir, "oas.json"), JSON.stringify({ capability: "acme.ops", command: "ops", version: "1.0.0", compatibility: { oas: ">=0.6.2" }, description: "Ops.", commands: { ping: 42 } }));
+  const home2 = join(base2, "instance"); mkdirSync(home2);
+  write(join(home2, "instance.json"), JSON.stringify({ repo: repo2, capabilities: [{ id: "acme.ops" }] }));
+  r = spawnSync(process.execPath, [CLI, "ops", "ping", "--json"], { cwd: home2, encoding: "utf8", env: { ...process.env, PI_AGENT_HOME: home2 } });
+  assert.notEqual(r.status, 0);
+  const doc2 = parseOnly(r.stdout);
+  assert.equal(doc2.error.code, "E_CAPABILITY_BROKEN");
+  assert.match(doc2.error.message, /non-empty string/);
+});
+
 test("oas okf harvest --json end-to-end through the CLI dispatcher", () => {
   const base = temp(); const { repo, root } = fixtureSoul(base);
   // Activate oas.okf as a config-owned capability by pointing an owned package
