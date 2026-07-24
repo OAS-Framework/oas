@@ -135,3 +135,24 @@ test("release desktop-build matrix does not fail-fast (one leg must not mask the
   const jobText = yml.slice(desktopJob, nextJob > 0 ? nextJob : undefined);
   assert.match(jobText, /fail-fast:\s*false/, "desktop-build matrix sets fail-fast: false");
 });
+
+test("build-installers workflow is VERIFY-ONLY (no publish/release/tag surface)", () => {
+  const bi = readFileSync(new URL("../.github/workflows/build-installers.yml", import.meta.url), "utf8");
+  // zero publish surface — the whole point is installer evidence without any release action
+  assert.ok(!/npm publish/.test(bi), "must not npm publish");
+  assert.ok(!/gh release|actions\/create-release|softprops\/action-gh-release/.test(bi), "must not create a GitHub Release");
+  assert.ok(!/npm version|git tag|GITHUB_REF_NAME/.test(bi), "must not tag or bump versions");
+  assert.ok(!/NPM_TOKEN|NODE_AUTH_TOKEN/.test(bi), "must not reference publish tokens");
+  assert.ok(!/attest-build-provenance/.test(bi), "no attestation (that's the release job)");
+  // read-only permissions
+  assert.match(bi, /permissions:\s*\n\s*contents:\s*read/, "permissions: contents: read only");
+  // same 3-leg matrix as the release desktop-build, fail-fast:false
+  assert.match(bi, /fail-fast:\s*false/, "independent per-leg evidence");
+  for (const leg of ["macos-14", "macos-13", "ubuntu-latest"]) {
+    assert.ok(bi.includes(leg), `matrix includes ${leg}`);
+  }
+  // it does build + smoke
+  assert.match(bi, /npm run dist\b/, "builds installers");
+  assert.match(bi, /npm run dist:smoke/, "runs the installed-artifact smoke");
+  assert.match(bi, /upload-artifact/, "uploads the distributables for inspection");
+});

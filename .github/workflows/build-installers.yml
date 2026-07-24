@@ -1,0 +1,83 @@
+name: Build Installers (verify-only)
+
+# Real green Linux+mac installer evidence on PR / on demand — WITHOUT any
+# publish surface. The release matrix (release.yml desktop-build) only runs
+# on a tag push, so installers were never built in PR CI; the Linux AppImage
+# executableName blocker was therefore only caught by a failed real release.
+# This job builds every matrix leg and uploads the artifacts to eyeball their
+# names, permanently closing that blind spot. It ships nothing: no package
+# upload, no GitHub release, no tag, no version bump.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "packages/desktop/**"
+      - ".github/workflows/build-installers.yml"
+      - ".github/workflows/release.yml"
+
+# Verify-only: read the repo, write nothing. No publish/release/attestation
+# permissions exist here.
+permissions:
+  contents: read
+
+jobs:
+  build-installers:
+    strategy:
+      # One leg's failure must NOT cancel the others — the whole point is
+      # independent green/red evidence per platform.
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14          # macOS arm64: DMG + ZIP
+            arch: arm64
+          - os: macos-13          # macOS x64: DMG + ZIP
+            arch: x64
+          - os: ubuntu-latest     # Linux x64: AppImage + DEB
+            arch: x64
+    runs-on: ${{ matrix.os }}
+    env:
+      # Unsigned/not notarized — disable certificate discovery (same as the
+      # release matrix). No signing secrets are referenced here.
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # The packaged Electron app's launch smoke needs a display on Linux;
+      # xvfb-run provides a headless one. (macOS runners launch directly.)
+      - name: Install xvfb (Linux only, for the packaged-launch smoke)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+
+      - name: Install deps (root + packages/desktop)
+        run: |
+          npm ci
+          npm --prefix packages/desktop ci
+
+      - name: Build unsigned installers
+        working-directory: packages/desktop
+        run: npm run dist
+
+      # Installed-artifact smoke: inventory + node-pty under the packaged
+      # Electron ABI + headless app launch. OAS_SMOKE_SKIP_LAUNCH is NOT set
+      # here (the script refuses it under GITHUB_ACTIONS), so the launch
+      # phase runs — xvfb-run supplies the display on Linux.
+      - name: Installed-artifact smoke
+        working-directory: packages/desktop
+        run: |
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            xvfb-run -a npm run dist:smoke
+          else
+            npm run dist:smoke
+          fi
+
+      # Upload the distributables so the produced AppImage/DEB/DMG/ZIP names
+      # can be eyeballed (proves the executableName/package naming is clean).
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installers-${{ matrix.os }}-${{ matrix.arch }}
+          path: packages/desktop/dist/oas-desktop-*
+          if-no-files-found: error
