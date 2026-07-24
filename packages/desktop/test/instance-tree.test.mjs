@@ -56,11 +56,20 @@ test("DOM rerender preserves focused disclosure/terminal identity and scroll acr
   assert.equal(list.scrollTop, 73);
 
   restore = captureTreeRenderState(list);
-  paint(); // polling refresh rebuild
+  paint(); // polling refresh/reorder rebuild
+  const replacement = list.querySelector("button");
+  const nativeFocus = replacement.focus.bind(replacement);
+  let focusOptions;
+  replacement.focus = (options) => {
+    focusOptions = options;
+    nativeFocus(options);
+    list.scrollTop = 0; // simulate Chromium scrolling the focused/reordered row
+  };
   list.scrollTop = 5;
   assert.equal(restore(), true);
+  assert.deepEqual(focusOptions, { preventScroll: true });
   assert.equal(dom.window.document.activeElement.dataset.treeInstance, "root");
-  assert.equal(list.scrollTop, 73);
+  assert.equal(list.scrollTop, 73, "saved scroll is reapplied after focus-induced scrolling");
   dom.window.close();
 });
 

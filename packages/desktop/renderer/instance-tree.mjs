@@ -54,13 +54,19 @@ export function captureTreeRenderState(listEl) {
   } : null;
   const scrollTop = listEl.scrollTop;
   return () => {
-    listEl.scrollTop = scrollTop;
-    if (!identity?.instance || !identity?.control) return false;
+    if (!identity?.instance || !identity?.control) {
+      listEl.scrollTop = scrollTop;
+      return false;
+    }
     const replacement = [...listEl.querySelectorAll("[data-tree-instance][data-tree-control]")]
       .find((element) => element.dataset.treeInstance === identity.instance
         && element.dataset.treeControl === identity.control
         && !element.disabled);
-    replacement?.focus();
+    // Chromium normally scrolls focused controls into view. preventScroll is
+    // the primary guard; restoring afterward is a fallback for older engines
+    // and ensures row reordering cannot overwrite the user's saved position.
+    replacement?.focus({ preventScroll: true });
+    listEl.scrollTop = scrollTop;
     return listEl.ownerDocument.activeElement === replacement;
   };
 }
