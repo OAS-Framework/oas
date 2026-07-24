@@ -1,9 +1,9 @@
 # OAS Desktop
 
 The OAS Desktop app is the control panel for OAS deployments: the agent
-roster and hierarchy, brain/markdown/task/state views, real terminal attach
-to running agents' tmux sessions, and — with a compatible `oas` CLI
-installed — spawning agents and harvesting memory.
+roster and hierarchy, brain/markdown/task/state views, and real terminal
+attach to running agents' tmux sessions. With a compatible `oas` CLI
+installed it can also spawn agents from the Soul roster.
 
 ## Install
 
@@ -34,17 +34,17 @@ Gatekeeper will block the first launch:
 
 ### Linux: prerequisites
 
-`tmux` is required — the app attaches to your agents' tmux sessions and
-cannot function without it. The DEB declares the dependency; for the
-AppImage install it yourself (`apt install tmux`, `dnf install tmux`, …).
-If tmux is missing, the app tells you exactly that — it is a separate
-diagnosis from CLI availability.
+`tmux` is required for the integrated terminal — the app attaches to your
+agents' tmux sessions. Roster, brain, Markdown and CLI features work without
+it, but opening a terminal will fail until tmux is installed. The DEB
+declares the dependency; for the AppImage install it yourself
+(`apt install tmux`, `dnf install tmux`, …) and verify with `tmux -V`.
 
-### The `oas` CLI (for Spawn and Harvest)
+### The `oas` CLI (for Spawn)
 
 Reads — roster, hierarchy, brain, files, terminals — work with no CLI at
-all. Lifecycle actions (spawning agents, harvesting memory) run through an
-installed `oas` CLI with Desktop API v1:
+all. Spawning agents runs through an installed `oas` CLI with Desktop API
+v1:
 
 ```bash
 npm install -g @oas-framework/oas@0.18.0
@@ -53,29 +53,29 @@ npm install -g @oas-framework/oas@0.18.0
 Desktop 0.18 accepts CLI versions `>=0.18.0 <0.19.0` (released versions
 only; prereleases are rejected). The app discovers the CLI automatically
 (your PATH, the npm global prefix, a login shell) and re-probes on launch,
-app focus, and Retry. If discovery fails or finds an incompatible version,
-Spawn/Harvest disable behind one card showing what was detected, what is
-required, **Choose oas…** (pick the binary yourself — the choice persists),
-**Retry**, a docs link, and the copyable install command. The app never
-installs anything itself.
+app focus, and Retry. Until a compatible CLI is verified, the Soul roster's
+**Spawn** buttons are disabled behind one card showing what was detected,
+what is required, **Choose oas…** (pick the binary yourself — the choice
+persists), **Retry**, a docs link, and the copyable install command. The
+app never installs anything itself. (Memory harvest runs through the same
+CLI boundary in the backend; it has no dedicated button in this release.)
 
 The probe/mutation contract is specified in
 [desktop-cli-api.md](desktop-cli-api.md).
 
 ## Opening a workspace
 
-On first launch (or with no deployment in view) the app shows a workspace
-picker. Point it at an OAS workspace — a directory containing `agents/`,
-or `local-agents/` for machine-local souls, or a team scope whose
-`oas-config.yaml` declares `team:`. Team scopes show every member repo's
-agents under one roster with a workspace switcher.
+The app starts on the directory it was launched with (its own folder by
+default). To view a deployment, open the workspace switcher in the sidebar
+and choose **Add workspace → Browse**, then point it at an OAS workspace —
+a directory containing `agents/`, or `local-agents/` for machine-local
+souls, or a team scope whose `oas-config.yaml` declares `team:`. Team scopes
+show every member repo's agents under one roster with a workspace switcher.
+Added workspaces are remembered and offered as suggestions next time.
 
 Local souls (uncommitted, machine-local agents under `local-agents/`) are
 first-class: they appear in the roster with a `local` chip, their brains
-and knowledge render, and they spawn like any other soul.
-
-You can add workspaces at runtime (suggestions come from your team scope
-and validated recents, or a native folder picker). Launch flags for
+and knowledge render, and they spawn like any other soul. Launch flags for
 scripted use: `--dir <workspace>` and `OAS_DESKTOP_PORT`.
 
 ## Migrating from the web panel / TUI pane
@@ -111,11 +111,11 @@ The full breaking-change list is in the
 
 | Symptom | Cause / fix |
 | --- | --- |
-| "Compatible oas CLI required" card | No CLI, or version outside `>=0.18.0 <0.19.0`. Install/update, or **Choose oas…** to point at the right binary; **Retry** re-probes. |
-| Spawn/Harvest disabled, no card | The probe hasn't settled yet (transient, resolves in ms). If it persists, the backend is unreachable — restart the app. |
-| Terminals fail to open | tmux missing or no live session for that instance. Install tmux; check `tmux ls`. |
+| "Compatible oas CLI required" card | No CLI, or version outside `>=0.18.0 <0.19.0`. Install/update, or **Choose oas…** to point at the right binary; **Retry** re-probes. Spawn is disabled until a compatible CLI is verified. |
+| Spawn disabled, no card | The probe hasn't settled yet (transient, resolves in ms). If it persists, the backend is unreachable — restart the app. |
+| Terminals fail to open ("could not attach") | tmux missing, or no live session for that instance. Install tmux (`tmux -V`); check `tmux ls`. |
 | macOS "app is damaged / can't be opened" | Unsigned build + quarantine. Right-click → Open, or clear the quarantine attribute (above). |
-| Roster empty | The opened directory isn't an OAS workspace (needs `agents/` or `local-agents/`, or a team scope). Use the picker to select the right root. |
+| Roster empty | The opened directory isn't an OAS workspace (needs `agents/` or `local-agents/`, or a team scope). Use the workspace switcher → Add workspace to select the right root. |
 
 For bugs, attach the terminal output of the app (`OAS Desktop` prints
 server and CLI-discovery logs to stdout) and your platform/arch.
