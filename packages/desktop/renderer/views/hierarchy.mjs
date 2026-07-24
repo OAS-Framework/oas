@@ -92,13 +92,28 @@ export function layoutForest(instances) {
     n.children.forEach(mark);
   };
   roots.forEach(mark);
-  for (const n of [...byName.values()].sort(rank)) {
-    if (reachable.has(n)) continue;
-    const p = parentOf.get(n);
-    if (p) p.children = p.children.filter((child) => child !== n);
-    parentOf.delete(n);
-    roots.push(n);
-    mark(n);
+  for (const start of [...byName.values()].sort(rank)) {
+    if (reachable.has(start)) continue;
+
+    // Follow parent links from this node until the path repeats. `start` may
+    // be a valid descendant that merely sorts ahead of its malformed cycle;
+    // only nodes in the repeated suffix are eligible for promotion.
+    const path = [], pathIndex = new Map();
+    let cursorNode = start;
+    while (cursorNode && !reachable.has(cursorNode) && !pathIndex.has(cursorNode)) {
+      pathIndex.set(cursorNode, path.length);
+      path.push(cursorNode);
+      cursorNode = parentOf.get(cursorNode);
+    }
+    const cycle = cursorNode && pathIndex.has(cursorNode)
+      ? path.slice(pathIndex.get(cursorNode))
+      : [];
+    const promoted = cycle.length ? [...cycle].sort(rank)[0] : start;
+    const p = parentOf.get(promoted);
+    if (p) p.children = p.children.filter((child) => child !== promoted);
+    parentOf.delete(promoted);
+    roots.push(promoted);
+    mark(promoted);
   }
 
   roots.sort(rank);

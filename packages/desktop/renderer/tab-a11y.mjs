@@ -44,3 +44,13 @@ export function tabKeyAction(event, index, count) {
   if (key === "End") return { type: "move", index: count - 1 };
   return null;
 }
+
+/** Restore focus after the focused final tab is removed. The shell chooses the
+ * logical destination (Instances filter for terminals, active nav for an
+ * artifact's restored stage); this function performs the testable DOM move. */
+export function focusAfterLastTab(kind, { instancesEntry, stageEntry }) {
+  const target = kind === "terminal" ? instancesEntry : stageEntry;
+  if (!target || typeof target.focus !== "function") return false;
+  target.focus();
+  return target.ownerDocument?.activeElement === target;
+}

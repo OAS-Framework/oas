@@ -36,9 +36,16 @@ const ansi = [
 const pairs = [
   ...["fg", "muted", "faint", "accent"].flatMap((fg) => ["bg", "surface", "surface-2"].map((bg) => [fg, bg])),
   ...["ok", "warn", "danger"].flatMap((fg) => ["bg", "surface", "surface-2", "term-bg"].map((bg) => [fg, bg])),
-  ["chip-fg", "chip-bg"], ["term-fg", "term-bg"],
+  ["chip-fg", "chip-bg"], ["term-fg", "term-bg"], ["muted", "term-bg"],
+  ["fg", "term-bg"], ["accent", "term-bg"], ["violet", "term-bg"],
   ...ansi.map((fg) => [fg, "term-bg"]),
 ];
+
+test("theme text declarations use validated semantic tokens, not untested raw/derived colors", () => {
+  const unvalidated = [...css.matchAll(/(?:^|[;{])\s*color:\s*(color-mix\(|#[0-9a-f]{3,8}\b|var\([^;]+,)/gim)];
+  assert.deepEqual(unvalidated.map((m) => m[0].trim()), [],
+    "raw, fallback, and derived text colors must become named tokens included in the matrix");
+});
 
 for (const [name, palette] of [["dark", dark], ["light", light]]) {
   test(`theme contrast: ${name} text and ANSI pairings meet WCAG AA`, () => {

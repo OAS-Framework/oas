@@ -77,6 +77,19 @@ test("layoutForest: a pure cycle terminates with unique non-overlapping nodes", 
   assert.equal(new Set(nodes.map((n) => `${n.x}:${n.y}`)).size, 3);
 });
 
+test("layoutForest: a descendant sorting before idle cycle members keeps its valid parent edge", () => {
+  const { nodes } = hier.layoutForest([
+    { instance: "running-child", parentInstance: "cycle-b", running: true },
+    { instance: "cycle-a", parentInstance: "cycle-b", running: false },
+    { instance: "cycle-b", parentInstance: "cycle-a", running: false },
+  ]);
+  const at = (name) => nodes.find((n) => n.inst.instance === name);
+  assert.equal(nodes.filter((n) => n.y === 0).length, 1, "one actual cycle member—not its descendant—is promoted");
+  assert.ok(at("running-child").y > at("cycle-b").y, "valid child stays below its declared parent");
+  assert.ok(at("cycle-b").children.some((n) => n.inst.instance === "running-child"),
+    "cycle recovery does not sever the descendant edge");
+});
+
 test("ws generation: a deferred roster from workspace A never paints after switching to B", async () => {
   const gate = [];
   const payload = (name) => ({ ok: true, status: 200, json: async () => ({ instances: [{ instance: name, running: true }], workspaces: [], workspace: null }) });

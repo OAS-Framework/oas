@@ -15,7 +15,7 @@ import { createPalette, isPaletteShortcut } from "./palette.mjs";
 import { createViewLifecycle } from "./view-lifecycle.mjs";
 import { reserveKey, whenKeyFree } from "./tab-keys.mjs";
 import { createTerminalTab } from "./terminal-tab.mjs";
-import { createTabChrome, tabKeyAction } from "./tab-a11y.mjs";
+import { createTabChrome, tabKeyAction, focusAfterLastTab } from "./tab-a11y.mjs";
 import {
   terminalTabsForWorkspace, tabVisibleInContext, canActivateTab,
   fallbackTabForContext, terminalOpenOwnsWorkspace,
@@ -310,8 +310,19 @@ function closeTab(id, restoreFocus = false) {
     if (fallback) {
       activateTab(fallback[0]);
       if (restoreFocus) fallback[1].triggerEl.focus();
-    } else if (t.kind === "terminal") showInstances();
-    else { activeTab = null; showTabLayer(false); if (stage) setNavActive(stage.name); }
+    } else if (t.kind === "terminal") {
+      showInstances();
+      if (restoreFocus) focusAfterLastTab("terminal", {
+        instancesEntry: contextRosterEl?.querySelector(".ctx-filter"),
+      });
+    } else {
+      activeTab = null;
+      showTabLayer(false);
+      if (stage) setNavActive(stage.name);
+      if (restoreFocus) focusAfterLastTab("artifact", {
+        stageEntry: navEl.querySelector(".nav-item.active") || navEl.querySelector(".nav-item"),
+      });
+    }
   } else if (restoreFocus) {
     tabs.get(activeTab)?.triggerEl.focus();
   }
