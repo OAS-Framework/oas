@@ -22,4 +22,4 @@ The regression shape is raw GET requests with `Host: attacker.example` against `
 
 - [desktop backend architecture](/architecture/desktop-backend-architecture.md)
 - [Raw key passthrough and the loopback Host/Origin guards](/architecture/raw-key-passthrough-and-host-guard.md)
-- [Guard file-serving paths by realpathing requests and roots](/lessons/file-endpoint-realpath-guard.md)
+- [Guard file-serving paths with admitted canonical roots](/lessons/file-endpoint-realpath-guard.md)

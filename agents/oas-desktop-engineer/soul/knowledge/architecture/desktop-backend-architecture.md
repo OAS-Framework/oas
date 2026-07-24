@@ -25,9 +25,9 @@ The backend lives in `packages/desktop/server/` (migrated from the retired
     (see [agent brain endpoint](/architecture/agent-brain-endpoint-and-view.md)).
   - `GET /api/session/<instance>?ws=<id>&lines=n` — raw ANSI tmux `capture-pane` text plus pane geometry, cursor state, and history depth.
   - `GET /api/chat/<instance>?ws=<id>&limit=n` — parsed structured transcript turns.
-  - `GET /api/file` — guarded file reads for desktop viewers; realpaths the
-    requested path and every allowed root before containment checks (see
-    [the file guard lesson](/lessons/file-endpoint-realpath-guard.md)).
+  - `GET /api/file` — guarded file reads for desktop viewers; consumes
+    admitted canonical root strings and realpaths only the requested path before
+    containment checks (see [the file guard lesson](/lessons/file-endpoint-realpath-guard.md)).
   - `GET /api/diff` — worktree diff/stat reads for desktop viewers; derives
     `<home>/work` rather than using `inst.work` and parses NUL-delimited git
     rename stats (see [the work-mode lesson](/lessons/instance-work-mode-not-path.md)
