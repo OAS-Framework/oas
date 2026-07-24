@@ -9,7 +9,7 @@ import {
   escapeHtml, apiJson, postJson, ensureTheme,
   setWorkspace, onWorkspaceChange, renderWorkspaceSelect, wsQuery, workspaceGeneration,
 } from "./common.mjs";
-import { cliAvailable, cliStatus, refreshCli, onCliChange, cliCard } from "./cli-status.mjs";
+import { cliAvailable, cliKnownUnavailable, cliStatus, refreshCli, onCliChange, cliCard } from "./cli-status.mjs";
 
 const CSS = `
 .souls { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--bg); }
@@ -127,12 +127,12 @@ function renderGrid(s) {
   // No dynamic selector: agent names are roster data and may contain selector
   // metacharacters (and this module's CSS constant shadows the global, so
   // CSS.escape is not available here). Compare dataset identity instead.
-  // EXCEPTION (review d7becaf): a CLI-unavailable transition BYPASSES form
+  // EXCEPTION (review d7becaf): a CLI-not-available transition BYPASSES form
   // preservation — the launch race (form opened while CLI state was
   // unknown, probe lands ok:false) must not leave a live submit behind a
   // missing degradation card. The selection is invalidated so the rebuild
   // shows the card and disabled buttons; doSpawn independently re-checks.
-  const noCli = cliStatus() && !cliAvailable();
+  const noCli = !cliAvailable(); // frozen contract: unknown does NOT render capable
   if (noCli && s.sel) s.sel = null, s.selAgent = null;
   if (s.sel && [...(grid.querySelectorAll?.(".soul-card") || [])]
         .some((card) => card.dataset?.agent === s.sel && card.querySelector(".soul-form"))) return;
@@ -147,9 +147,13 @@ function renderGrid(s) {
   }
   if (!list.length) { grid.innerHTML = '<div class="empty" style="grid-column:1/-1">Nothing matches the filter.</div>'; return; }
   if (typeof grid.append !== "function") return; // non-DOM host (tests observe s.souls)
-  // One consistent degradation card ABOVE the roster when mutations are
+  // One consistent degradation card ABOVE the roster when the CLI is KNOWN
   // unavailable — reads (the soul cards, brain) stay fully usable below it.
-  if (state && s === state && cliStatus() && !cliAvailable()) {
+  // Unknown state (pre-probe) disables buttons WITHOUT the card: mutations
+  // require a verified compatible CLI (frozen contract), but flashing the
+  // card during the milliseconds before the launch probe resolves would be
+  // noise.
+  if (state && s === state && cliKnownUnavailable()) {
     if (s.cliCardHandle) s.cliCardHandle.dispose();
     s.cliCardHandle = cliCard(grid.ownerDocument, s.ctx);
     s.cliCardHandle.el.style.gridColumn = "1/-1";
@@ -160,7 +164,7 @@ function renderGrid(s) {
 
 function soulCard(s, a) {
   const attached = a.work === "attached"; // needs an owning instance's work tree
-  const noCli = cliStatus() && !cliAvailable(); // unknown-yet ≠ unavailable
+  const noCli = !cliAvailable();          // unknown OR unavailable — mutations need a verified CLI
   const open = s.sel === a.name && !attached && !noCli;
   const card = document.createElement("div");
   card.className = "soul-card" + (attached ? " attached" : "") + (open ? " open" : "");
@@ -188,7 +192,7 @@ function soulCard(s, a) {
         ? "Spawning requires a compatible installed oas CLI — see the card above"
         : `Spawn ${a.name}`;
     spawn.addEventListener("click", () => {
-      if (cliStatus() && !cliAvailable()) return; // state may have flipped since render
+      if (!cliAvailable()) return; // state may have flipped since render
       s.sel = a.name; s.selAgent = a; renderGrid(s);
       s.q("souls-grid").querySelector(".soul-form .fpurpose")?.focus();
     });
@@ -266,11 +270,10 @@ export async function waitForInstanceInPanel(s, name, isCurrent, { tries = 20, d
 export async function doSpawn(s, ui) {
   const a = s.selAgent;
   if (!a) return;
-  // CLI gate at SUBMIT time (review d7becaf): a form opened during the
-  // unknown-state launch race must not dispatch after the probe lands
-  // unavailable — the render-time disable alone cannot cover a form that
-  // was already open.
-  if (cliStatus() && !cliAvailable()) {
+  // CLI gate at SUBMIT time (review d7becaf): a form opened before a state
+  // flip must not dispatch — the render-time disable alone cannot cover a
+  // form that was already open. Mutations require a VERIFIED compatible CLI.
+  if (!cliAvailable()) {
     s.sel = null; s.selAgent = null;
     renderGrid(s); // repaints the degradation card + disabled buttons
     return;

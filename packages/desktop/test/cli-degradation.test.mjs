@@ -102,13 +102,13 @@ test("cli-status: a cached unavailable state transitions to UNKNOWN on an invali
   assert.equal(cs.cliAvailable(), false, "unknown is not 'available' — it is uncommitted");
 });
 
-test("spawn view: launch race — form opened while UNKNOWN closes and disables when the probe lands unavailable (review d7becaf)", async () => {
+test("spawn view: UNKNOWN state disables spawn WITHOUT the card; unavailable adds the card (frozen contract)", async () => {
   const doc = dom();
   globalThis.document = doc;
   try {
     const sp = await import("../renderer/views/spawn.mjs");
     const agents = [{ name: "dev", description: "d", kind: "persistent", work: "worktree", runtime: "pi", repo: "/r", repoName: "r", agentsRoot: "/ws/agents", workspace: "/ws" }];
-    // /api/cli answers a LEGACY shape first (state stays unknown), then unavailable
+    // /api/cli answers a LEGACY shape first → state resolves to UNKNOWN
     const state = { cliPayload: { legacy: true }, posts: [] };
     const ctx = {
       api: async (pathname, opts) => ({
@@ -126,21 +126,31 @@ test("spawn view: launch race — form opened while UNKNOWN closes and disables 
     const el = doc.createElement("div"); doc.body.append(el);
     sp.mount(el, ctx);
     await new Promise((r) => setTimeout(r, 20));
-    // state is UNKNOWN → spawn is possible; user opens the form
+    // FROZEN CONTRACT: unknown does NOT render capable — spawn disabled,
+    // but no card yet (the launch probe resolves in ms; the card is for
+    // KNOWN incompatibility).
     const spawnBtn = el.querySelector(".spawn-act");
-    assert.ok(spawnBtn && !spawnBtn.disabled, "unknown state leaves spawn enabled");
+    assert.ok(spawnBtn, "spawn button renders");
+    assert.equal(spawnBtn.disabled, true, "unknown state disables spawn (mutations need a VERIFIED CLI)");
+    assert.equal(el.querySelectorAll(".cli-card").length, 0, "no degradation card while merely unknown");
     spawnBtn.dispatchEvent(new doc.defaultView.Event("click"));
-    assert.ok(el.querySelector(".soul-form"), "form opened during the unknown window");
-    // the initial probe now lands UNAVAILABLE
+    assert.equal(el.querySelector(".soul-form"), null, "no form opens while unknown");
+    // the probe lands UNAVAILABLE → the card appears, buttons stay disabled
     state.cliPayload = payload(false);
     await cs.refreshCli(ctx);
     await new Promise((r) => setTimeout(r, 20));
-    // the transition must bypass form preservation: card shown, form gone
-    assert.equal(el.querySelector(".soul-form"), null, "open form closed on the unavailable transition");
-    assert.equal(el.querySelectorAll(".cli-card").length, 1, "degradation card appears");
-    assert.ok([...el.querySelectorAll(".spawn-act")].every((b) => b.disabled), "spawn buttons disabled");
-    // and even a STALE handle to the old form cannot dispatch: doSpawn re-checks
+    assert.equal(el.querySelectorAll(".cli-card").length, 1, "known-unavailable shows the card");
+    assert.ok([...el.querySelectorAll(".spawn-act")].every((b) => b.disabled), "spawn stays disabled");
+    // doSpawn re-check: even a stale direct call cannot dispatch
     assert.equal(state.posts.length, 0, "no spawn was ever dispatched");
+    // recovery: a compatible probe re-enables and opens forms again
+    state.cliPayload = payload(true);
+    await cs.refreshCli(ctx);
+    await new Promise((r) => setTimeout(r, 20));
+    const btn2 = el.querySelector(".spawn-act");
+    assert.ok(btn2 && !btn2.disabled, "verified CLI re-enables spawn");
+    btn2.dispatchEvent(new doc.defaultView.Event("click"));
+    assert.ok(el.querySelector(".soul-form"), "form opens once the CLI is verified");
     sp.unmount();
   } finally {
     delete globalThis.document;

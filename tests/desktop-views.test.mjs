@@ -12,6 +12,15 @@ import { fileURLToPath } from "node:url";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const RENDERER = join(ROOT, "packages", "desktop", "renderer");
 
+// doSpawn requires a VERIFIED compatible CLI (frozen contract) — seed the
+// shared cli-status state as available; the CLI dimension has its own suite.
+{
+  const cs = await import(new URL("../packages/desktop/renderer/views/cli-status.mjs", import.meta.url).href);
+  await cs.refreshCli({
+    api: async () => ({ ok: true, status: 200, json: async () => ({ ok: true, bin: "/seed/oas", version: "0.18.0", source: "path", required: { desktopApi: 1, range: ">=0.18.0 <0.19.0" }, probedAt: 1, tried: [] }) }),
+  });
+}
+
 test("views ship as .mjs with mount/unmount (shell imports ./views/<name>.mjs)", () => {
   for (const name of ["instances", "spawn"]) {
     const f = join(RENDERER, "views", `${name}.mjs`);
