@@ -215,18 +215,18 @@ async function performAdd(requestedPath, fromPicker) {
     if (v?.ok) {
       await panelWorkspaces();
       if (allowedWs.has(ws.id)) {
-        if (!wsGens.isCurrent("add", gen)) return { ok: false, reason: "superseded by a newer request" };
+        if (!wsGens.isCurrent("add", gen)) return { ok: false, code: "superseded", reason: "superseded by a newer request" };
         return { ok: true, workspace: ws };
       }
     }
     await new Promise((ok) => setTimeout(ok, 250));
   }
-  return { ok: false, reason: "replacement server did not advertise the new workspace in time" };
+  return { ok: false, code: "server-timeout", reason: "replacement server did not advertise the new workspace in time" };
 }
 
 ipcMain.handle("workspace:add", async (e, requestedPath) => {
   guard(e);
-  if (typeof requestedPath !== "string" || !requestedPath.startsWith("/")) return { ok: false, reason: "bad path" };
+  if (typeof requestedPath !== "string" || !requestedPath.startsWith("/")) return { ok: false, code: "bad-path", reason: "path must be an absolute string" };
   return performAdd(requestedPath, false);
 });
 
@@ -237,7 +237,7 @@ ipcMain.handle("workspace:pick", async (e) => {
   // check — canonicalization and workspace validation still apply).
   const win = BrowserWindow.fromWebContents(e.sender);
   const r = await dialog.showOpenDialog(win, { properties: ["openDirectory"] });
-  if (r.canceled || !r.filePaths?.[0]) return { ok: false, reason: "cancelled" };
+  if (r.canceled || !r.filePaths?.[0]) return { ok: false, code: "cancelled", reason: "picker cancelled" };
   return performAdd(r.filePaths[0], true);
 });
 

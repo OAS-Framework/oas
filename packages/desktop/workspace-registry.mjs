@@ -94,22 +94,24 @@ export function pushRecent(recents, path, max = 10) {
  * @param {boolean} io.serverOwned                 the current server is app-owned
  * @param {Set<string>} io.advertised
  * @returns {{ ok: true, workspace: object, action: "already-advertised" | "replace-server" }
- *          | { ok: false, reason: string }}
+ *          | { ok: false, code: "not-found"|"not-suggested"|"not-a-workspace"|"foreign-server", reason: string }}
+ *   code is the STABLE machine discriminator (renderer switches on it);
+ *   reason is human-renderable prose and may be reworded freely.
  */
 export function decideAdd(requestedPath, io) {
   let canonical;
-  try { canonical = io.realpath(requestedPath); } catch { return { ok: false, reason: "path does not exist" }; }
+  try { canonical = io.realpath(requestedPath); } catch { return { ok: false, code: "not-found", reason: "path does not exist" }; }
   // Provenance: only suggestion-set members or an explicit picker path may
   // enter the privileged flow — a renderer cannot inject arbitrary paths.
   if (!io.fromPicker && !io.suggestedPaths.has(canonical) && !io.suggestedPaths.has(requestedPath)) {
-    return { ok: false, reason: "path is not in the suggestion set (use the directory picker)" };
+    return { ok: false, code: "not-suggested", reason: "path is not in the suggestion set (use the directory picker)" };
   }
   const ws = io.validate(canonical);
-  if (!ws) return { ok: false, reason: "not an OAS workspace (no team scope or agents root)" };
+  if (!ws) return { ok: false, code: "not-a-workspace", reason: "not an OAS workspace (no team scope or agents root)" };
   if (io.advertised.has(ws.id)) return { ok: true, workspace: ws, action: "already-advertised" };
   if (!io.serverOwned) {
     // Never mutate or kill a foreign server — fail closed with a reason.
-    return { ok: false, reason: "the panel server on this port is not owned by the app — cannot extend its workspaces" };
+    return { ok: false, code: "foreign-server", reason: "the panel server on this port is not owned by the app — cannot extend its workspaces" };
   }
   return { ok: true, workspace: ws, action: "replace-server" };
 }

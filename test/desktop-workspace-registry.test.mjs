@@ -81,12 +81,16 @@ test("decideAdd: canonicalizes (symlink) then validates; nonexistent fails", () 
   assert.equal(r.ok, true);
   assert.equal(r.workspace.id, "/w/real");
   assert.equal(r.action, "replace-server");
-  assert.match(decideAdd("/w/gone", addIo()).reason, /does not exist/);
+  const gone = decideAdd("/w/gone", addIo());
+  assert.equal(gone.code, "not-found");
+  assert.match(gone.reason, /does not exist/);
 });
 
 test("decideAdd: provenance — non-suggested paths rejected unless from the picker", () => {
   const io = addIo({ suggestedPaths: new Set() });
-  assert.match(decideAdd("/w/real", io).reason, /not in the suggestion set/);
+  const rej = decideAdd("/w/real", io);
+  assert.equal(rej.code, "not-suggested");
+  assert.match(rej.reason, /not in the suggestion set/);
   const picked = decideAdd("/w/real", addIo({ suggestedPaths: new Set(), fromPicker: true }));
   assert.equal(picked.ok, true, "explicit picker path allowed through the same validation");
 });
@@ -94,6 +98,7 @@ test("decideAdd: provenance — non-suggested paths rejected unless from the pic
 test("decideAdd: foreign server fails closed; already-advertised short-circuits", () => {
   const foreign = decideAdd("/w/real", addIo({ serverOwned: false }));
   assert.equal(foreign.ok, false);
+  assert.equal(foreign.code, "foreign-server");
   assert.match(foreign.reason, /not owned by the app/);
   const dup = decideAdd("/w/real", addIo({ advertised: new Set(["/w/real"]) }));
   assert.deepEqual(dup, { ok: true, workspace: dup.workspace, action: "already-advertised" });
@@ -102,6 +107,7 @@ test("decideAdd: foreign server fails closed; already-advertised short-circuits"
 test("decideAdd: non-workspace paths rejected even from the picker", () => {
   const r = decideAdd("/w/junk", addIo({ fromPicker: true, realpath: (p) => p }));
   assert.equal(r.ok, false);
+  assert.equal(r.code, "not-a-workspace");
   assert.match(r.reason, /not an OAS workspace/);
 });
 
