@@ -17,7 +17,7 @@ import { reserveKey, whenKeyFree } from "./tab-keys.mjs";
 import { createTerminalTab } from "./terminal-tab.mjs";
 import { createTabChrome, tabKeyAction, focusAfterLastTab } from "./tab-a11y.mjs";
 import { createIntentGate, prepareOwnedOpen } from "./open-intent.mjs";
-import { createWorkspaceLabel, bindWorkspaceSelect } from "./workspace-label.mjs";
+import { createWorkspaceSwitcher } from "./workspace-switcher.mjs";
 import {
   collapseKey, hasInstanceChildren, instanceRepoLabel, treeGuideSegments, filterInstanceTree, instanceVisibleInTree,
   captureTreeRenderState, configureDisclosure, rosterResponseOwns,
@@ -124,9 +124,17 @@ let contextFilter = "";
 let contextInstances = [];
 let contextWorkspace = "";
 const collapsedInstances = new Set();
-const workspaceSelect = document.getElementById("ws-select");
-const workspaceLabel = createWorkspaceLabel(workspaceSelect);
-bindWorkspaceSelect(workspaceSelect, setWorkspace);
+const desktopBridge = window.oasDesktop;
+const unavailableWorkspaceService = () => Promise.reject(new Error("Workspace discovery is not available in this desktop service yet."));
+const workspaceLabel = createWorkspaceSwitcher({
+  document,
+  selectWorkspace: setWorkspace,
+  // Feature-detected while tui-dev lands the approved privileged contract.
+  // The final adapter names are intentionally isolated to these three lines.
+  discoverSuggestions: desktopBridge.workspaceSuggestions || unavailableWorkspaceService,
+  addWorkspace: desktopBridge.workspaceAdd || unavailableWorkspaceService,
+  pickWorkspace: desktopBridge.workspacePick || unavailableWorkspaceService,
+});
 
 function initContextRoster() {
   contextRosterEl = document.getElementById("instance-roster");
