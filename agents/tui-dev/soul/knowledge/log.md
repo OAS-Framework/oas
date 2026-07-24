@@ -1,6 +1,7 @@
 # Knowledge Log
 
 ## 2026-07-24
+* **Update**: AGENTS.md — deprecation banner added (desktop succession; surfaces removed, successor oas-desktop-engineer). Edit authorized by dev-coordinator-1; bundle intact.
 
 - **Update**: [regression-tests-bug-layer.md](regression-tests-bug-layer.md)
   — merged the composition-root lesson from tui-dev-desktop-shell notes: move every invariant-bearing `main.mjs` line into importable modules so regression tests cannot pass through local reimplementations.
