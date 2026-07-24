@@ -22,6 +22,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createReaper } from "./proc-reaper.mjs";
+import { runAbiProbe } from "./smoke-probes.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PKG = join(HERE, "..");
@@ -33,7 +34,7 @@ const ok = (msg) => console.log(`dist:smoke ok — ${msg}`);
 // The reaper (scripts/proc-reaper.mjs, unit-tested) owns the contract:
 // detached process groups, GROUP RETENTION until explicit reaping (leader
 // exit never drops a group — descendants can outlive it), async-only child
-// execution (runTracked; never execFileSync — synchronous execution blocks
+// execution (runTracked only; synchronous child execution is banned — it blocks
 // signal handlers and the watchdog, and its timeout kills only the
 // immediate PID). reapAll is installed on EVERY exit path — fail() calls
 // process.exit() which skips finally-blocks — plus a wall-clock watchdog.
@@ -101,26 +102,12 @@ if (!existsSync(app.exe)) fail(`packaged executable missing: ${app.exe}`);
     const mode = statSync(h).mode & 0o111;
     if (!mode) fail(`spawn-helper not executable in the package: ${h}`);
   }
-  const probe = `
-    const { createRequire } = require("node:module");
-    const req = createRequire(${JSON.stringify(join(app.resources, "app.asar", "main.mjs"))});
-    const pty = req("node-pty");
-    const p = pty.spawn("/bin/sh", ["-c", "echo pty-alive"], { cols: 20, rows: 5, cwd: "/tmp" });
-    let out = "";
-    p.onData((d) => { out += d; });
-    p.onExit(() => { console.log(out.includes("pty-alive") ? "PTY_OK" : "PTY_NO_OUTPUT"); process.exit(0); });
-    setTimeout(() => { console.log("PTY_TIMEOUT"); process.exit(1); }, 8000);
-  `;
-  // Async detached tracked run (never execFileSync — review 4e2667b): the
-  // probe spawns a node-pty TREE (electron + /bin/sh + spawn-helper); a
-  // hang must be group-killed while the watchdog stays responsive.
-  const r = await runTracked(app.exe, ["-e", probe], {
-    timeout: 30000,
-    env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
-  });
-  if (r.timedOut) fail("node-pty ABI probe timed out (group killed)");
-  if (!r.stdout.includes("PTY_OK")) fail(`node-pty ABI probe failed (exit ${r.code}): ${r.stdout.trim().slice(0, 300)}`);
-  ok("node-pty loads and spawns under the packaged Electron ABI (via app.asar)");
+  // Probe via the extracted runner (scripts/smoke-probes.mjs): the runner
+  // CONTRACTUALLY requires the reaper's runTracked — async, detached,
+  // group-tracked; reintroducing synchronous execution fails its tests.
+  const r = await runAbiProbe(reaper, app.exe, join(app.resources, "app.asar", "main.mjs"), { timeout: 30000 });
+  if (!r.ok) fail(r.detail);
+  ok(r.detail);
 }
 
 // ---- 3. packaged app launches and the renderer reaches the shell ------------

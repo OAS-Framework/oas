@@ -48,20 +48,30 @@ export function createReaper(io = {}) {
     groups.clear();
   }
 
-  /** Async, detached, group-tracked run: collects stdout, group-kills on
-   * timeout, resolves { stdout, code, timedOut }. */
+  /** Async, detached, group-tracked run: collects stdout+stderr, group-kills
+   * on timeout, resolves { stdout, stderr, code, timedOut }.
+   * Settles on CLOSE, not exit: Node guarantees stdio completion only at
+   * `close` — resolving on `exit` can race the final data events (review
+   * ac366f9: the ABI probe's PTY_OK could arrive after exit). stderr is
+   * consumed too so a chatty child can never back-pressure itself into a
+   * hang. Group reaping still happens at exit (descendants must not
+   * outlive the leader's window). */
   function runTracked(exe, args, { timeout, env } = {}) {
     return new Promise((resolve) => {
       const c = spawnTracked(exe, args, { stdio: ["ignore", "pipe", "pipe"], env });
-      let stdout = "", timedOut = false;
+      let stdout = "", stderr = "", timedOut = false, exitCode = null;
       c.stdout?.on("data", (d) => { stdout += d; });
+      c.stderr?.on("data", (d) => { stderr += d; });
       const t = setTimeout(() => { timedOut = true; reapGroup(c); }, timeout || 30000);
       c.on("exit", (code) => {
-        clearTimeout(t);
+        exitCode = code;
         reapGroup(c); // group may still hold descendants — reap regardless of leader exit
-        resolve({ stdout, code, timedOut });
       });
-      c.on("error", () => { clearTimeout(t); reapGroup(c); resolve({ stdout, code: -1, timedOut }); });
+      c.on("close", (code) => {
+        clearTimeout(t);
+        resolve({ stdout, stderr, code: exitCode ?? code, timedOut });
+      });
+      c.on("error", () => { clearTimeout(t); reapGroup(c); resolve({ stdout, stderr, code: -1, timedOut }); });
     });
   }
 

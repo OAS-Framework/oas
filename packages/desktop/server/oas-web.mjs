@@ -655,8 +655,15 @@ function fileRoots() {
     const base = reader.localAgentsDirOf(r);
     try {
       if (!lstatSync(base).isDirectory()) continue;          // symlink or non-dir: reject (lstat does NOT follow)
-      if (realpathSync(dirname(base)) !== realpathSync(dirname(r))) continue; // parent must be the real scope
-      roots.push(base);
+      // TOCTOU + tautology fix (review ac366f9): canonicalize the CANDIDATE
+      // itself and require the canonical base's parent to be the canonical
+      // scope — comparing dirname(base) to dirname(r) is true by
+      // construction and checks nothing. Push the IMMUTABLE realpath so a
+      // dir→symlink swap after this check cannot be re-resolved later by
+      // resolveGuardedFile into a different target.
+      const realBase = realpathSync(base);
+      if (dirname(realBase) !== realpathSync(dirname(r))) continue;
+      roots.push(realBase);
     } catch { /* absent — no local souls here */ }
   }
   for (const d of snapshot.byWs.values()) {

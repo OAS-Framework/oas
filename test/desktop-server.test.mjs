@@ -393,6 +393,42 @@ test("desktop server: a symlinked local-agents sibling never becomes an /api/fil
   } finally { proc.kill(); }
 });
 
+test("desktop server: dir→symlink swap after admission cannot re-resolve the local-agents root (TOCTOU)", async () => {
+  const { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  // Admission sees a REAL local-agents dir; a workspace process then swaps
+  // it for a symlink to a secret dir. Because fileRoots pushes the
+  // IMMUTABLE realpath captured at admission (review ac366f9), the later
+  // resolveGuardedFile canonicalization must not follow the swapped link.
+  const secret = mkdtempSync(join(tmpdir(), "oasweb-toctou-secret-"));
+  writeFileSync(join(secret, "secret.md"), "# TOCTOU-SECRET");
+  const scope = mkdtempSync(join(tmpdir(), "oasweb-toctou-ws-"));
+  mkdirSync(join(scope, "agents", "dev", "soul"), { recursive: true });
+  writeFileSync(join(scope, "agents", "dev", "soul", "soul.yaml"), "name: dev\ndescription: d\n");
+  mkdirSync(join(scope, "local-agents", "loc", "soul"), { recursive: true });
+  writeFileSync(join(scope, "local-agents", "loc", "soul", "AGENTS.md"), "# loc\n");
+  const port = 4000 + Math.floor(Math.random() * 2000);
+  const proc = spawn(process.execPath, [SRV, "start", "--port", String(port), "--dir", scope], { stdio: "ignore" });
+  try {
+    let up = false;
+    for (let i = 0; i < 40 && !up; i++) {
+      await new Promise((r) => setTimeout(r, 100));
+      try { await fetch(`http://127.0.0.1:${port}/api/panel`); up = true; } catch { /* retry */ }
+    }
+    assert.ok(up, "server came up");
+    const get = (p) => fetch(`http://127.0.0.1:${port}/api/file?path=${encodeURIComponent(p)}`);
+    // sanity: the real sibling serves before the swap
+    assert.equal((await get(join(scope, "local-agents", "loc", "soul", "AGENTS.md"))).status, 200, "real sibling serves pre-swap");
+    // THE SWAP: replace the directory with a symlink to the secret dir
+    rmSync(join(scope, "local-agents"), { recursive: true, force: true });
+    symlinkSync(secret, join(scope, "local-agents"));
+    for (const p of [join(scope, "local-agents", "secret.md"), join(secret, "secret.md")]) {
+      const r = await get(p);
+      assert.ok([403, 404].includes(r.status), `post-swap symlink target rejected (${p} → ${r.status})`);
+    }
+  } finally { proc.kill(); }
+});
+
 // ---- tmux target anchoring: prefix-match hazard (reviewer-death bug class) ----
 
 test("desktop server: tmux targets: exact-match anchoring fails closed for reads AND writes", (t) => {
