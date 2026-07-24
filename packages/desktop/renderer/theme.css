@@ -10,9 +10,10 @@
   --border: #2d333c;
   --fg: #e6edf3;          /* primary text  (13.9:1 on bg) */
   --muted: #9aa4b2;       /* secondary text (5.6:1 on surface) */
-  --faint: #6e7681;       /* tertiary/disabled */
+  --faint: #8b949e;       /* tertiary/disabled; AA where also used as metadata */
   --accent: #4493f8;      /* interactive */
   --accent-fg: #ffffff;
+  --violet: #c297ff;
   --ok: #3fb950; --warn: #d29922; --danger: #f85149;
   --chip-bg: #21262e; --chip-fg: #adb6c2;
   --sel: #1f6feb26;       /* selected wash */
@@ -41,23 +42,24 @@
   --surface-2: #f0e9d2;
   --border: #ddd4bc;
   --fg: #37424a;
-  --muted: #657b83;
-  --faint: #93a1a1;
-  --accent: #1f6fb2;
+  --muted: #56676d;
+  --faint: #55666b;
+  --accent: #155f96;
   --accent-fg: #ffffff;
-  --ok: #667f00; --warn: #9a6a00; --danger: #c73f3f;
-  --chip-bg: #ede5cc; --chip-fg: #62707a;
+  --violet: #7f3f98;
+  --ok: #465f00; --warn: #725500; --danger: #b52f35;
+  --chip-bg: #ede5cc; --chip-fg: #56676d;
   --sel: #1f6fb21f;
   --term-bg: #fdf6e3;
   --term-fg: #586e75;
   --term-sel: #d3c9a8;
   --shadow: 0 1px 3px rgb(88 110 117 / .14);
   /* solarized ANSI remap — base colors stay AA-readable on paper */
-  --ansi-black: #93a1a1; --ansi-red: #dc322f; --ansi-green: #859900; --ansi-yellow: #b58900;
-  --ansi-blue: #268bd2; --ansi-magenta: #d33682; --ansi-cyan: #2aa198; --ansi-white: #586e75;
-  --ansi-bright-black: #839496; --ansi-bright-red: #cb4b16; --ansi-bright-green: #6b7f00;
-  --ansi-bright-yellow: #8f6c00; --ansi-bright-blue: #1f6fb2; --ansi-bright-magenta: #b02e6d;
-  --ansi-bright-cyan: #1f8a82; --ansi-bright-white: #37424a;
+  --ansi-black: #55666b; --ansi-red: #b52f35; --ansi-green: #465f00; --ansi-yellow: #725500;
+  --ansi-blue: #155d91; --ansi-magenta: #9d2b61; --ansi-cyan: #0f6863; --ansi-white: #56676d;
+  --ansi-bright-black: #56676d; --ansi-bright-red: #a43a14; --ansi-bright-green: #4f6f00;
+  --ansi-bright-yellow: #725500; --ansi-bright-blue: #155f96; --ansi-bright-magenta: #9d2b61;
+  --ansi-bright-cyan: #0f6863; --ansi-bright-white: #37424a;
   --md-code-bg: #58637510; --md-rule: #5863752e;
   --graph-edge: #ddd4bc; --graph-edge-coord: #1f6fb2;
 }
@@ -154,41 +156,38 @@
 .oas-view .turn.user .utext { border-left: 3px solid var(--accent);
         background: color-mix(in srgb, var(--accent) 9%, var(--term-bg));
         border-radius: 6px; padding: 10px 14px; white-space: pre-wrap; word-break: break-word;
-        color: color-mix(in srgb, var(--accent) 55%, var(--term-fg)); font-weight: 500; }
+        color: var(--accent); font-weight: 500; }
 .oas-view .turn.ai .atext { white-space: pre-wrap; word-break: break-word; margin: 8px 0; }
 .oas-view .turn.ai .atext code { background: color-mix(in srgb, var(--term-fg) 10%, transparent);
         border-radius: 4px; padding: 0 4px; }
 .oas-view .turn.ai .atext code.block { display: block; padding: 10px 12px; margin: 8px 0; overflow-x: auto;
         background: color-mix(in srgb, var(--term-fg) 6%, transparent); border-radius: 6px; border: none; }
-.oas-view .turn.ai .atext b { color: color-mix(in srgb, var(--term-fg) 60%, #fff); }
-[data-theme="light"] .oas-view .turn.ai .atext b { color: #1f2328; }
+.oas-view .turn.ai .atext b { color: var(--fg); }
 .oas-view .tool { margin: 8px 0; }
 .oas-view .toolhead { display: flex; align-items: baseline; gap: 8px; cursor: pointer; user-select: none; }
 .oas-view .toolhead:hover .tcmd { text-decoration: underline; }
 .oas-view .toolhead .tverb { color: var(--ok); font-weight: 700; flex: none; }
 .oas-view .toolhead.running .tverb { color: var(--warn); animation: oas-pulse 1.2s ease-in-out infinite; }
 .oas-view .toolhead .tcmd { color: var(--term-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.oas-view .toolout { color: color-mix(in srgb, var(--term-fg) 62%, transparent); white-space: pre-wrap;
+.oas-view .toolout { color: var(--muted); white-space: pre-wrap;
                      word-break: break-all; font-size: 12px; padding: 3px 0 0 18px; }
-.oas-view .toolout.full { max-height: 360px; overflow-y: auto;
-                          color: color-mix(in srgb, var(--term-fg) 80%, transparent); }
-.oas-view .tool .more { color: color-mix(in srgb, var(--term-fg) 40%, transparent); padding-left: 18px;
-                        font-size: 11px; cursor: pointer; }
+.oas-view .toolout.full { max-height: 360px; overflow-y: auto; color: var(--term-fg); }
+.oas-view .tool .more { color: var(--muted); padding-left: 18px; font-size: 11px; cursor: pointer; }
 .oas-view .tool .more:hover { color: var(--term-fg); }
 .oas-view .tool.wf { border: 1px solid color-mix(in srgb, var(--term-fg) 18%, transparent);
                      border-radius: 8px; padding: 10px 14px; margin: 10px 0;
                      background: color-mix(in srgb, var(--term-fg) 5%, transparent); }
 .oas-view .wfhead { display: flex; align-items: baseline; gap: 8px; cursor: pointer; user-select: none; }
-.oas-view .wfmark { color: var(--violet, #a78bfa); }
+.oas-view .wfmark { color: var(--violet); }
 .oas-view .tool.wf .wfname { font-weight: 700; color: var(--term-fg); }
 .oas-view .tool.wf.running .wfmark { animation: oas-pulse 1.2s ease-in-out infinite; }
-.oas-view .wfstate { margin-left: auto; font-size: 11.5px; color: color-mix(in srgb, var(--term-fg) 60%, transparent);
+.oas-view .wfstate { margin-left: auto; font-size: 11.5px; color: var(--muted);
                      display: inline-flex; align-items: center; gap: 6px; }
 .oas-view .tool.wf.done .wfstate { color: var(--ok); }
 .oas-view .tool.wf.failed .wfstate { color: var(--danger); }
 .oas-view .tool.wf.running .wfstate { color: var(--warn); }
-.oas-view .wfdesc { color: color-mix(in srgb, var(--term-fg) 62%, transparent); font-size: 12px; margin-top: 4px; }
-.oas-view .thinking { color: color-mix(in srgb, var(--term-fg) 55%, transparent); font-size: 12px; margin: 6px 0; }
+.oas-view .wfdesc { color: var(--muted); font-size: 12px; margin-top: 4px; }
+.oas-view .thinking { color: var(--muted); font-size: 12px; margin: 6px 0; }
 .oas-view .thinking summary { cursor: pointer; list-style: none; user-select: none; }
 .oas-view .thinking summary::before { content: "▸ "; }
 .oas-view details[open].thinking summary::before { content: "▾ "; }
@@ -196,7 +195,7 @@
                              border-left: 2px solid color-mix(in srgb, var(--term-fg) 25%, transparent);
                              padding-left: 12px; margin-top: 4px; }
 .oas-view .working { display: flex; align-items: center; gap: 8px; padding: 10px 0 0;
-                     color: color-mix(in srgb, var(--term-fg) 65%, transparent); font-size: 12px; }
+                     color: var(--muted); font-size: 12px; }
 .oas-view .working .dots span { animation: oas-blink 1.4s infinite; }
 .oas-view .working .dots span:nth-child(2) { animation-delay: .2s; }
 .oas-view .working .dots span:nth-child(3) { animation-delay: .4s; }

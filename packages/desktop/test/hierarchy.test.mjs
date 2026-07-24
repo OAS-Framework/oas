@@ -49,6 +49,47 @@ test("layoutForest: a parentInstance missing from the roster makes the child a r
   assert.equal(nodes[0].y, 0, "orphan treated as a root");
 });
 
+test("layoutForest: malformed parent cycles are promoted and never disappear", () => {
+  const { nodes, width, height } = hier.layoutForest([
+    { instance: "healthy", running: true },
+    { instance: "cycle-a", parentInstance: "cycle-b", running: true },
+    { instance: "cycle-b", parentInstance: "cycle-a", running: true },
+    { instance: "cycle-child", parentInstance: "cycle-b", running: false },
+  ]);
+  assert.deepEqual(new Set(nodes.map((n) => n.inst.instance)),
+    new Set(["healthy", "cycle-a", "cycle-b", "cycle-child"]),
+    "healthy and cyclic components are all retained");
+  const at = (name) => nodes.find((n) => n.inst.instance === name);
+  assert.equal(at("cycle-a").y, 0, "deterministic first cycle node is promoted to root");
+  assert.ok(at("cycle-b").y > at("cycle-a").y, "remaining cycle edge becomes a valid child edge");
+  assert.ok(at("cycle-child").y > at("cycle-b").y, "valid descendants of cycle remain attached");
+  assert.ok(width > 0 && height > 0);
+});
+
+test("layoutForest: a pure cycle terminates with unique non-overlapping nodes", () => {
+  const { nodes } = hier.layoutForest([
+    { instance: "a", parentInstance: "c", running: true },
+    { instance: "b", parentInstance: "a", running: true },
+    { instance: "c", parentInstance: "b", running: true },
+  ]);
+  assert.equal(nodes.length, 3);
+  assert.equal(new Set(nodes.map((n) => n.inst.instance)).size, 3);
+  assert.equal(new Set(nodes.map((n) => `${n.x}:${n.y}`)).size, 3);
+});
+
+test("layoutForest: a descendant sorting before idle cycle members keeps its valid parent edge", () => {
+  const { nodes } = hier.layoutForest([
+    { instance: "running-child", parentInstance: "cycle-b", running: true },
+    { instance: "cycle-a", parentInstance: "cycle-b", running: false },
+    { instance: "cycle-b", parentInstance: "cycle-a", running: false },
+  ]);
+  const at = (name) => nodes.find((n) => n.inst.instance === name);
+  assert.equal(nodes.filter((n) => n.y === 0).length, 1, "one actual cycle member—not its descendant—is promoted");
+  assert.ok(at("running-child").y > at("cycle-b").y, "valid child stays below its declared parent");
+  assert.ok(at("cycle-b").children.some((n) => n.inst.instance === "running-child"),
+    "cycle recovery does not sever the descendant edge");
+});
+
 test("ws generation: a deferred roster from workspace A never paints after switching to B", async () => {
   const gate = [];
   const payload = (name) => ({ ok: true, status: 200, json: async () => ({ instances: [{ instance: name, running: true }], workspaces: [], workspace: null }) });

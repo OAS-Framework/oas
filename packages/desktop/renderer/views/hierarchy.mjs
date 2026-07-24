@@ -71,12 +71,51 @@ const NODE_W = 208, NODE_H = 58, GAP_X = 26, GAP_Y = 46, PAD = 40;
 export function layoutForest(instances) {
   const byName = new Map(instances.map((i) => [i.instance, { inst: i, children: [] }]));
   const roots = [];
+  const parentOf = new Map();
   for (const n of byName.values()) {
     const p = n.inst.parentInstance && byName.get(n.inst.parentInstance);
-    if (p && p !== n) p.children.push(n); else roots.push(n);
+    if (p && p !== n) { p.children.push(n); parentOf.set(n, p); }
+    else roots.push(n);
   }
   const rank = (a, b) => (a.inst.running === b.inst.running
     ? a.inst.instance.localeCompare(b.inst.instance) : a.inst.running ? -1 : 1);
+
+  // A malformed parentInstance cycle has no natural root and used to vanish
+  // entirely. Mark normal root-reachable nodes, then promote one deterministic
+  // node from every still-unreachable component and sever only its incoming
+  // edge. Because every node has at most one parent, that single cut breaks the
+  // component's cycle while retaining all nodes and all other valid edges.
+  const reachable = new Set();
+  const mark = (n) => {
+    if (reachable.has(n)) return;
+    reachable.add(n);
+    n.children.forEach(mark);
+  };
+  roots.forEach(mark);
+  for (const start of [...byName.values()].sort(rank)) {
+    if (reachable.has(start)) continue;
+
+    // Follow parent links from this node until the path repeats. `start` may
+    // be a valid descendant that merely sorts ahead of its malformed cycle;
+    // only nodes in the repeated suffix are eligible for promotion.
+    const path = [], pathIndex = new Map();
+    let cursorNode = start;
+    while (cursorNode && !reachable.has(cursorNode) && !pathIndex.has(cursorNode)) {
+      pathIndex.set(cursorNode, path.length);
+      path.push(cursorNode);
+      cursorNode = parentOf.get(cursorNode);
+    }
+    const cycle = cursorNode && pathIndex.has(cursorNode)
+      ? path.slice(pathIndex.get(cursorNode))
+      : [];
+    const promoted = cycle.length ? [...cycle].sort(rank)[0] : start;
+    const p = parentOf.get(promoted);
+    if (p) p.children = p.children.filter((child) => child !== promoted);
+    parentOf.delete(promoted);
+    roots.push(promoted);
+    mark(promoted);
+  }
+
   roots.sort(rank);
   let cursor = 0; // next free leaf x slot
   const place = (n, depth) => {

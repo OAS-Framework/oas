@@ -6,7 +6,7 @@
 // The shell owns tabs/navigation and provides ctx. The full roster (with
 // chat transcript, spawn, jira) lives in the ported views — the shell chrome
 // stays a thin rail so nothing is duplicated.
-import { currentWorkspace, groupInstances, onWorkspaceChange } from "./views/common.mjs";
+import { currentWorkspace, groupInstances, adoptWorkspace, onWorkspaceChange } from "./views/common.mjs";
 import {
   initTheme, toggleTheme, xtermTheme, onThemeChange,
   terminalTypography, setTerminalFontSize, setTerminalFontFamily, onTerminalTypographyChange,
@@ -15,6 +15,11 @@ import { createPalette, isPaletteShortcut } from "./palette.mjs";
 import { createViewLifecycle } from "./view-lifecycle.mjs";
 import { reserveKey, whenKeyFree } from "./tab-keys.mjs";
 import { createTerminalTab } from "./terminal-tab.mjs";
+import { createTabChrome, tabKeyAction, focusAfterLastTab } from "./tab-a11y.mjs";
+import {
+  collapseKey, hasInstanceChildren, filterInstanceTree, instanceVisibleInTree,
+  captureTreeRenderState, configureDisclosure, rosterResponseOwns,
+} from "./instance-tree.mjs";
 import {
   terminalTabsForWorkspace, tabVisibleInContext, canActivateTab,
   fallbackTabForContext, terminalOpenOwnsWorkspace,
@@ -88,7 +93,12 @@ function showTabLayer(on) {
   if (!on) {
     stageHost.style.display = "";
     activeTab = null;
-    for (const t of tabs.values()) t.tabEl.classList.remove("active");
+    for (const t of tabs.values()) {
+      t.tabEl.classList.remove("active");
+      t.triggerEl.setAttribute("aria-selected", "false");
+      t.triggerEl.tabIndex = -1;
+      t.paneEl.hidden = true;
+    }
   } else {
     stageHost.style.display = "none";
     updateContextTabs();
@@ -98,7 +108,7 @@ function showTabLayer(on) {
 function updateContextTabs() {
   for (const t of tabs.values()) {
     const visible = tabVisibleInContext(t, sidebarMode, currentWorkspace());
-    t.tabEl.style.display = visible ? "" : "none";
+    t.tabEl.hidden = !visible;
   }
 }
 
@@ -107,27 +117,36 @@ let sidebarMode = "overview";
 let contextRosterGen = 0;
 let contextRosterEl = null;
 let contextFilter = "";
+let contextInstances = [];
+let contextWorkspace = "";
+const collapsedInstances = new Set();
 
 function initContextRoster() {
   contextRosterEl = document.getElementById("instance-roster");
   const input = contextRosterEl.querySelector(".ctx-filter");
-  input.addEventListener("input", (e) => { contextFilter = e.target.value.toLowerCase(); refreshContextRoster(); });
+  input.addEventListener("input", (e) => {
+    contextFilter = e.target.value.toLowerCase();
+    renderContextRoster(contextInstances);
+  });
+  refreshContextRoster();
 }
 
 function setSidebarMode(mode) {
   sidebarMode = mode;
-  const sidebar = document.getElementById("sidebar");
-  const instances = mode === "instances";
-  sidebar.classList.toggle("instances-mode", instances);
-  if (contextRosterEl) contextRosterEl.hidden = !instances;
   if (typeof tabs !== "undefined") updateContextTabs();
 }
 
 async function refreshContextRoster() {
-  if (!contextRosterEl || sidebarMode !== "instances") return;
+  if (!contextRosterEl) return;
   const myGen = ++contextRosterGen;
   const ws = currentWorkspace();
-  const owns = () => myGen === contextRosterGen && sidebarMode === "instances" && currentWorkspace() === ws;
+  const owns = (responseWs = ws) => rosterResponseOwns({
+    dispatchWorkspace: ws,
+    responseWorkspace: responseWs,
+    currentWorkspace: currentWorkspace(),
+    dispatchGeneration: myGen,
+    currentGeneration: contextRosterGen,
+  });
   const listEl = contextRosterEl.querySelector(".ctx-list");
   let panel;
   try {
@@ -136,18 +155,28 @@ async function refreshContextRoster() {
     if (owns()) listEl.innerHTML = `<div class="ctx-empty">Roster unavailable: ${e.message}</div>`;
     return;
   }
-  if (!owns()) return;
-  renderContextRoster(panel.instances || []);
+  const resolvedWs = panel.workspace?.id || ws;
+  if (!owns(resolvedWs)) return;
+  if (!currentWorkspace() && resolvedWs) adoptWorkspace(resolvedWs);
+  contextWorkspace = resolvedWs;
+  contextInstances = panel.instances || [];
+  renderContextRoster(contextInstances);
 }
 
 function renderContextRoster(instances) {
   const listEl = contextRosterEl.querySelector(".ctx-list");
+  const restoreTreeState = captureTreeRenderState(listEl);
   listEl.innerHTML = "";
-  const visible = instances.filter((i) => !contextFilter ||
-    [i.instance, i.agent, i.repoName, i.task].some((v) => String(v || "").toLowerCase().includes(contextFilter)));
+  const matching = filterInstanceTree(instances, contextFilter);
+  const ws = contextWorkspace || currentWorkspace();
+  const filtering = !!contextFilter.trim();
+  const visible = matching.filter((i) => instanceVisibleInTree(
+    i, instances, collapsedInstances, ws, filtering,
+  ));
   contextRosterEl.querySelector(".ctx-count").textContent = `${instances.filter((i) => i.running).length}/${instances.length}`;
   if (!visible.length) {
     listEl.innerHTML = `<div class="ctx-empty">${instances.length ? "Nothing matches." : "No instances."}</div>`;
+    restoreTreeState();
     return;
   }
   for (const [, repos] of groupInstances(visible)) {
@@ -157,13 +186,15 @@ function renderContextRoster(instances) {
       rh.textContent = repo;
       listEl.append(rh);
       for (const i of items) {
-        const row = document.createElement("button");
+        const rowWrap = document.createElement("div");
+        rowWrap.className = "ctx-tree-row";
+        rowWrap.style.setProperty("--depth", String(i.depth || 0));
         const activeKey = tabs.get(activeTab)?.key;
-        const isActive = activeKey === `term:${currentWorkspace()}:${i.instance}`;
-        row.className = "ctx-inst" + (i.running ? "" : " idle") + (isActive ? " active" : "");
-        row.style.setProperty("--depth", String(i.depth || 0));
-        row.disabled = !i.running;
-        row.title = i.running ? `Open ${i.instance} terminal` : `${i.instance} is idle`;
+        const isActive = activeKey === `term:${ws}:${i.instance}`;
+        const key = collapseKey(ws, i.instance);
+        const hasChildren = hasInstanceChildren(instances, i.instance);
+        const collapsed = collapsedInstances.has(key);
+
         // One guide per REAL ancestry depth — not a one-level .child class.
         const guides = document.createElement("span");
         guides.className = "ctx-guides";
@@ -173,6 +204,30 @@ function renderContextRoster(instances) {
           guide.style.left = `${10 + d * 14}px`;
           guides.append(guide);
         }
+        const disclosure = document.createElement("button");
+        disclosure.type = "button";
+        disclosure.className = `ctx-disclosure${hasChildren ? "" : " empty"}`;
+        disclosure.tabIndex = hasChildren ? 0 : -1;
+        if (hasChildren) {
+          configureDisclosure(disclosure, {
+            instance: i.instance, collapsed, filtering,
+            onToggle: () => {
+              if (collapsed) collapsedInstances.delete(key); else collapsedInstances.add(key);
+              renderContextRoster(contextInstances);
+            },
+          });
+        } else {
+          disclosure.textContent = "▾";
+          disclosure.setAttribute("aria-hidden", "true");
+        }
+
+        const row = document.createElement("button");
+        row.type = "button";
+        row.dataset.treeInstance = i.instance;
+        row.dataset.treeControl = "terminal";
+        row.className = "ctx-inst" + (i.running ? "" : " idle") + (isActive ? " active" : "");
+        row.disabled = !i.running;
+        row.title = i.running ? `Open ${i.instance} terminal` : `${i.instance} is idle`;
         const dot = document.createElement("span");
         dot.className = `ctx-dot ${i.running ? "on" : "off"}`;
         const copy = document.createElement("span");
@@ -184,12 +239,14 @@ function renderContextRoster(instances) {
         meta.className = "ctx-meta";
         meta.textContent = i.task || i.agent || "";
         copy.append(name, meta);
-        row.append(guides, dot, copy);
+        row.append(dot, copy);
         row.addEventListener("click", () => openTerminalTab(i.instance));
-        listEl.append(row);
+        rowWrap.append(guides, disclosure, row);
+        listEl.append(rowWrap);
       }
     }
   }
+  restoreTreeState();
 }
 
 async function showInstances() {
@@ -219,7 +276,7 @@ async function showInstances() {
 // ── tabs ──────────────────────────────────────────────────────────────────
 const tabbar = document.getElementById("tabbar");
 const tabhost = document.getElementById("tabhost");
-const tabs = new Map(); // id -> { tabEl, paneEl, title, key, onClose, onShow }
+const tabs = new Map(); // id -> { tabEl, triggerEl, closeEl, paneEl, title, key, onClose, onShow }
 let nextTabId = 1;
 let activeTab = null;
 
@@ -229,26 +286,32 @@ let activeTab = null;
  * KEYED open must `await whenKeyFree(key)` first: a reopen during a closed
  * tab's deferred cleanup queues behind it instead of being dropped or torn
  * down by the stale lifecycle. */
+function onTabKeydown(e, id) {
+  const visible = [...tabs].filter(([, t]) => !t.tabEl.hidden);
+  const at = visible.findIndex(([tid]) => tid === id);
+  if (at < 0) return;
+  const action = tabKeyAction(e, at, visible.length);
+  if (!action) return;
+  e.preventDefault();
+  if (action.type === "close") { closeTab(id, true); return; }
+  const [nextId, tab] = visible[action.index];
+  if (activateTab(nextId)) tab.triggerEl.focus();
+}
+
 function addTab({ title, key, kind = "artifact", workspace = null, onClose, onShow }) {
   if (key) {
     for (const [tid, t] of tabs) if (t.key === key) { activateTab(tid); return null; }
   }
   const id = nextTabId++;
-  const tabEl = document.createElement("div");
-  tabEl.className = "tab";
-  const label = document.createElement("span");
-  label.textContent = title;
-  const close = document.createElement("span");
-  close.className = "close";
-  close.textContent = "×";
-  tabEl.append(label, close);
-  const paneEl = document.createElement("div");
-  paneEl.className = "tab-pane";
+  const { tabEl, triggerEl, closeEl, paneEl } = createTabChrome(
+    document, id, title, navigator.platform.includes("Mac"),
+  );
   tabbar.append(tabEl);
   tabhost.append(paneEl);
-  tabEl.addEventListener("click", (e) => { if (e.target !== close) activateTab(id); });
-  close.addEventListener("click", () => closeTab(id));
-  tabs.set(id, { tabEl, paneEl, title, key, kind, workspace, onClose, onShow });
+  triggerEl.addEventListener("click", () => activateTab(id));
+  triggerEl.addEventListener("keydown", (e) => onTabKeydown(e, id));
+  closeEl.addEventListener("click", (e) => { e.stopPropagation(); closeTab(id, true); });
+  tabs.set(id, { tabEl, triggerEl, closeEl, paneEl, title, key, kind, workspace, onClose, onShow });
   activateTab(id);
   return { id, paneEl };
 }
@@ -269,14 +332,18 @@ function activateTab(id) {
   }
   showTabLayer(true);
   for (const [tid, t] of tabs) {
-    t.tabEl.classList.toggle("active", tid === id);
-    t.paneEl.classList.toggle("active", tid === id);
+    const selected = tid === id;
+    t.tabEl.classList.toggle("active", selected);
+    t.triggerEl.setAttribute("aria-selected", String(selected));
+    t.triggerEl.tabIndex = selected ? 0 : -1;
+    t.paneEl.classList.toggle("active", selected);
+    t.paneEl.hidden = !selected;
   }
   tabs.get(id)?.onShow?.();
   return true;
 }
 
-function closeTab(id) {
+function closeTab(id, restoreFocus = false) {
   const t = tabs.get(id);
   if (!t) return;
   // onClose may return a promise (deferred cleanup while a mount is pending);
@@ -291,9 +358,24 @@ function closeTab(id) {
   tabs.delete(id);
   if (activeTab === id) {
     const fallback = fallbackTabForContext(tabs, sidebarMode, currentWorkspace());
-    if (fallback) activateTab(fallback[0]);
-    else if (t.kind === "terminal") showInstances();
-    else { activeTab = null; showTabLayer(false); if (stage) setNavActive(stage.name); }
+    if (fallback) {
+      activateTab(fallback[0]);
+      if (restoreFocus) fallback[1].triggerEl.focus();
+    } else if (t.kind === "terminal") {
+      showInstances();
+      if (restoreFocus) focusAfterLastTab("terminal", {
+        instancesEntry: contextRosterEl?.querySelector(".ctx-filter"),
+      });
+    } else {
+      activeTab = null;
+      showTabLayer(false);
+      if (stage) setNavActive(stage.name);
+      if (restoreFocus) focusAfterLastTab("artifact", {
+        stageEntry: navEl.querySelector(".nav-item.active") || navEl.querySelector(".nav-item"),
+      });
+    }
+  } else if (restoreFocus) {
+    tabs.get(activeTab)?.triggerEl.focus();
   }
 }
 
@@ -496,15 +578,18 @@ api("/api/panel").then((p) => {
   document.getElementById("ws-name").textContent = p.workspace?.name ? `· ${p.workspace.name}` : "";
 }).catch(() => {});
 
-// Contextual instance roster: the ONE shell sidebar becomes the recursive
-// roster in Instances mode (no view-owned second sidebar).
+// Persistent recursive instance tree: always available below the three nav
+// surfaces, with no second/contextual sidebar and no width jump.
 initContextRoster();
 onWorkspaceChange(() => {
   contextRosterGen++;
+  contextInstances = [];
+  contextWorkspace = currentWorkspace();
   updateContextTabs();
   if (sidebarMode === "instances") showInstances();
+  else refreshContextRoster();
 });
-setInterval(() => { if (sidebarMode === "instances") refreshContextRoster(); }, 4000);
+setInterval(() => refreshContextRoster(), 4000);
 
 // Home surface: the agent hierarchy — running instances and how they relate.
 showStage("hierarchy");
