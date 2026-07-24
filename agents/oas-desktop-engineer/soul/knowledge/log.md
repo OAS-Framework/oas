@@ -1,6 +1,7 @@
 # Knowledge Log
 
 ## 2026-07-24
+* **Creation**: promoted [retired capabilities map](/lessons/retired-capabilities-map.md) from the oas-desktop-engineer-migration notes.
 * **Update**: merged the bundled-server identity fixture collision gotcha into [server reuse identity probe](/lessons/server-reuse-identity-probe.md): mismatch fixtures must use impossible sentinel values.
 * **Creation**: promoted [migrated roster model kernel seam injection](/lessons/migrated-roster-model-kernel-seam-injection.md) from the oas-desktop-engineer-migration notes.
 * **Creation**: promoted [node-pty spawn-helper exec bit](/lessons/node-pty-spawn-helper-exec-bit.md) from the oas-desktop-engineer-migration notes.
