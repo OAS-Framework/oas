@@ -13,3 +13,4 @@ node_modules/
 # aweb workspace (keys, certs — never commit)
 .aw/
 packages/desktop/renderer/vendor/
+packages/desktop/dist/
