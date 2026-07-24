@@ -149,7 +149,13 @@ export function createGenerations() {
  * @param {(path: string) => void} io.commitRecent
  * @param {(dirs: string[]) => Promise<void>} io.replaceServer  stop owned server
  *        (awaiting its exit) and start one with `dirs`; must not return
- *        until the old process released the port
+ *        until the old process released the port. Implementations must
+ *        INVALIDATE any cached advertised-workspace state when the
+ *        replacement starts — the executor repopulates it only from the
+ *        server that successfully becomes current (readiness or restore).
+ * @param {() => Promise<void>} io.refreshAdvertised  repopulate the cached
+ *        advertised set from the CURRENT server (called after restore so
+ *        rollback also rolls back trust state)
  * @param {() => Promise<{ok:boolean,status?:number,body?:any}|null>} io.probeVersion
  * @param {(v: any) => boolean} io.isCompatible  serverCompatible(v, local).compatible
  * @param {(id: string) => Promise<boolean>} io.advertises
@@ -167,19 +173,36 @@ export function createAddExecutor(io) {
     const previousDirs = io.getDirs();
     const stagedDirs = [...previousDirs, workspace.path];
     await io.replaceServer(stagedDirs);
-    for (let i = 0; i < attempts; i++) {
-      const v = await io.probeVersion();
-      if (v?.ok && io.isCompatible(v) && await io.advertises(workspace.id)) {
-        if (!isCurrent()) break; // superseded during readiness — roll back
-        io.commitDirs(stagedDirs);
-        io.commitRecent(workspace.path);
-        return { ok: true, workspace };
+    // Post-stage lifecycle: EVERY non-commit exit — timeout, supersession,
+    // OR a throw from any probe/compat/advertise callback — must restore
+    // the previous configuration AND its trust state (review wsadd2:
+    // thrown readiness errors bypassed rollback; allowedWs kept entries
+    // from the rolled-back staged server).
+    let committed = false;
+    let thrown = null;
+    try {
+      for (let i = 0; i < attempts; i++) {
+        const v = await io.probeVersion();
+        if (v?.ok && io.isCompatible(v) && await io.advertises(workspace.id)) {
+          if (!isCurrent()) break; // superseded during readiness — roll back
+          io.commitDirs(stagedDirs);
+          io.commitRecent(workspace.path);
+          committed = true;
+          return { ok: true, workspace };
+        }
+        await delay(250);
       }
-      await delay(250);
+    } catch (e) {
+      thrown = e;
+    } finally {
+      if (!committed) {
+        // restore the previous server, then repopulate advertised state
+        // from the RESTORED server — never leave staged trust behind.
+        await io.replaceServer(previousDirs).catch(() => { /* best-effort restore */ });
+        await io.refreshAdvertised().catch(() => { /* advertised set stays empty until the next probe */ });
+      }
     }
-    // failure or superseded: restore the previous configuration — nothing
-    // was committed, but the running server has the staged dirs.
-    await io.replaceServer(previousDirs).catch(() => { /* best-effort restore */ });
+    if (thrown) return { ok: false, code: "server-error", reason: `readiness check failed: ${thrown.message || thrown}` };
     return isCurrent()
       ? { ok: false, code: "server-timeout", reason: "replacement server did not advertise the new workspace in time" }
       : { ok: false, code: "superseded", reason: "superseded by a newer request" };

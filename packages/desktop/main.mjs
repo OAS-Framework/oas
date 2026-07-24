@@ -41,6 +41,7 @@ const workspaceDirs = [WORKSPACE];
 
 // ---- oas-web server management ----------------------------------------
 let serverChild = null; // set only when WE spawned it
+let serverTransition = false; // an app-owned replacement is in flight — ownership persists across it
 let wsId = null;        // verified workspace id on the server we use
 let allowedWs = new Set(); // workspace ids the connected server advertises
 
@@ -107,18 +108,31 @@ function spawnServer(onPort, dirs = workspaceDirs) {
 }
 
 /** Stop the owned server (awaiting actual process exit so the port is
- * released — kill() only signals) and start one with `dirs`. */
+ * released — kill() only signals) and start one with `dirs`. Ownership is
+ * preserved for the WHOLE transition via serverTransition: a second add
+ * arriving mid-replacement must still see an app-owned server (it queues in
+ * the executor) rather than failing as foreign and superseding the first. */
 async function replaceServer(dirs) {
-  const old = serverChild;
-  if (old) {
-    serverChild = null; // we own the transition; old's exit listener is now a no-op
-    await new Promise((done) => {
-      const t = setTimeout(() => { try { old.kill("SIGKILL"); } catch { /* gone */ } }, 3000);
-      old.once("exit", () => { clearTimeout(t); done(); });
-      try { old.kill(); } catch { clearTimeout(t); done(); }
-    });
+  serverTransition = true;
+  // trust-state invalidation: the advertised-workspace set belongs to the
+  // OUTGOING server — clear it now; it is repopulated only from the server
+  // that successfully becomes current (readiness probe, or refreshAdvertised
+  // after a restore). Stale entries must never validate ?ws= or decideAdd.
+  allowedWs = new Set();
+  try {
+    const old = serverChild;
+    if (old) {
+      serverChild = null; // we own the transition; old's exit listener is now a no-op
+      await new Promise((done) => {
+        const t = setTimeout(() => { try { old.kill("SIGKILL"); } catch { /* gone */ } }, 3000);
+        old.once("exit", () => { clearTimeout(t); done(); });
+        try { old.kill(); } catch { clearTimeout(t); done(); }
+      });
+    }
+    spawnServer(port, dirs);
+  } finally {
+    serverTransition = false;
   }
-  spawnServer(port, dirs);
 }
 
 async function ensureServer() {
@@ -198,6 +212,7 @@ const executeAdd = createAddExecutor({
   commitDirs: (dirs) => { workspaceDirs.length = 0; workspaceDirs.push(...dirs); },
   commitRecent: (p) => writeRecents(pushRecent(readRecents(), p)),
   replaceServer,
+  refreshAdvertised: async () => { await panelWorkspaces(); }, // repopulates allowedWs from the CURRENT server
   probeVersion,
   // any 2xx is NOT enough during a same-port race — identity must match
   isCompatible: (v) => serverCompatible(v, localServerIdentity()).compatible,
@@ -227,7 +242,7 @@ async function performAdd(requestedPath, fromPicker) {
     validate: wsValidate,
     suggestedPaths: lastSuggested,
     fromPicker,
-    serverOwned: !!serverChild,
+    serverOwned: !!serverChild || serverTransition,
     advertised: allowedWs,
   });
   if (!decision.ok) return { ok: false, code: decision.code, reason: decision.reason };

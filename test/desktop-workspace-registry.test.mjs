@@ -141,7 +141,8 @@ function execHarness(over = {}) {
     getDirs: () => [...state.dirs],
     commitDirs: (d) => { state.dirs = d; state.committedDirs = d; },
     commitRecent: (p) => state.recents.push(p),
-    replaceServer: async (d) => { state.serverDirs = d; state.replacements.push([...d]); },
+    replaceServer: async (d) => { state.serverDirs = d; state.replacements.push([...d]); state.advertisedValid = false; },
+    refreshAdvertised: async () => { state.advertisedValid = true; state.refreshes = (state.refreshes || 0) + 1; },
     probeVersion: async () => { state.probes++; return over.version ?? { ok: true, body: { capability: "oas.web", version: "1" } }; },
     isCompatible: over.isCompatible ?? ((v) => v?.body?.capability === "oas.web"),
     advertises: over.advertises ?? (async () => true),
@@ -216,6 +217,7 @@ test("executor: adds serialize — the second waits for the first, effects in or
     probeVersion: async () => ({ ok: true }),
     isCompatible: () => true,
     advertises: async () => true,
+    refreshAdvertised: async () => {},
     delay: async () => {},
     attempts: 2,
   };
@@ -231,4 +233,99 @@ test("executor: adds serialize — the second waits for the first, effects in or
     ["replace", "/w/two"], ["commit", "/w/two"],
   ], "strictly serialized; second staged on the first's committed dirs");
   assert.deepEqual(state.dirs, ["/w/base", "/w/one", "/w/two"]);
+});
+
+test("executor: a THROWING readiness callback still restores and reports server-error", async () => {
+  // review wsadd2: rejections from probe/compat/advertise bypassed rollback,
+  // leaving the staged privileged configuration live.
+  for (const broken of [
+    { probeVersion: async () => { throw new Error("probe exploded"); } },
+    { isCompatible: () => { throw new Error("manifest parse failed"); } },
+    { advertises: async () => { throw new Error("panel unreachable"); } },
+  ]) {
+    const { state, exec } = execHarness(broken.isCompatible ? { isCompatible: broken.isCompatible } : {});
+    // patch the harness io pieces that execHarness doesn't parameterize
+    const io = {
+      getDirs: () => [...state.dirs],
+      commitDirs: (d) => { state.dirs = d; },
+      commitRecent: (p) => state.recents.push(p),
+      replaceServer: async (d) => { state.serverDirs = d; state.replacements.push([...d]); state.advertisedValid = false; },
+      refreshAdvertised: async () => { state.advertisedValid = true; },
+      probeVersion: broken.probeVersion ?? (async () => ({ ok: true, body: { capability: "oas.web", version: "1" } })),
+      isCompatible: broken.isCompatible ?? ((v) => true),
+      advertises: broken.advertises ?? (async () => true),
+      delay: async () => {},
+      attempts: 2,
+    };
+    const run = createAddExecutor(io);
+    const r = await run({ id: "/w/new", path: "/w/new" }, () => true);
+    assert.equal(r.code, "server-error", `throwing ${Object.keys(broken)} reports server-error`);
+    assert.deepEqual(state.dirs, ["/w/base"], "nothing committed");
+    assert.deepEqual(state.replacements.at(-1), ["/w/base"], "previous server restored");
+    assert.equal(state.advertisedValid, true, "advertised state repopulated from the restored server");
+  }
+});
+
+test("executor: rollback also rolls back the advertised trust state", async () => {
+  // review wsadd2: allowedWs kept the staged server's entries after restore
+  // — replaceServer invalidates; only readiness or refreshAdvertised (post-
+  // restore) repopulate.
+  const { state, exec } = execHarness({ advertises: async () => false });
+  const r = await exec({ id: "/w/new", path: "/w/new" }, () => true);
+  assert.equal(r.code, "server-timeout");
+  assert.equal(state.advertisedValid, true, "restore path refreshed advertised state from the current server");
+  assert.equal(state.refreshes, 1, "exactly one refresh, after the restore");
+});
+
+test("executor: success path does NOT call refreshAdvertised (readiness already populated it)", async () => {
+  const { state, exec } = execHarness();
+  await exec({ id: "/w/new", path: "/w/new" }, () => true);
+  assert.equal(state.refreshes ?? 0, 0);
+});
+
+test("ownership persists across a deferred server replacement — second add queues instead of failing foreign", async () => {
+  // review wsadd2: replaceServer cleared the child ref before awaiting exit
+  // (up to 3s); a second add in that window derived serverOwned=false, got
+  // foreign-server, and its generation superseded the first. Model main.mjs's
+  // composition: ownership = !!child || transition-in-flight.
+  let child = { pid: 1 };
+  let transition = false;
+  const serverOwned = () => !!child || transition;
+  const order = [];
+  let releaseExit;
+  const exitGate = new Promise((ok) => { releaseExit = ok; });
+  const io = {
+    getDirs: () => ["/w/base"],
+    commitDirs: () => {},
+    commitRecent: () => {},
+    replaceServer: async (d) => {
+      transition = true;                    // main.mjs: serverTransition = true
+      try {
+        const old = child;
+        if (old) { child = null; order.push("await-exit"); await exitGate; }
+        child = { pid: 2 };
+        order.push(`spawn:${d.at(-1)}`);
+      } finally { transition = false; }
+    },
+    refreshAdvertised: async () => {},
+    probeVersion: async () => ({ ok: true }),
+    isCompatible: () => true,
+    advertises: async () => true,
+    delay: async () => {},
+    attempts: 2,
+  };
+  const run = createAddExecutor(io);
+  const p1 = run({ id: "/w/one", path: "/w/one" }, () => true);
+  await new Promise((ok) => setImmediate(ok));
+  // mid-transition: old child killed (ref null), exit not yet awaited
+  assert.equal(child, null, "child ref cleared during transition");
+  assert.equal(serverOwned(), true, "ownership PERSISTS through the transition");
+  // a second add admitted now (decideAdd would pass serverOwned) queues in
+  // the executor rather than racing
+  const p2 = run({ id: "/w/two", path: "/w/two" }, () => true);
+  releaseExit();
+  const [r1, r2] = [await p1, await p2];
+  assert.equal(r1.ok, true);
+  assert.equal(r2.ok, true);
+  assert.deepEqual(order, ["await-exit", "spawn:/w/one", "await-exit", "spawn:/w/two"], "strictly serialized transitions");
 });
