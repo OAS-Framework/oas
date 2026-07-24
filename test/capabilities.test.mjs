@@ -676,3 +676,25 @@ test("owned capabilities at a non-git scope are discovered and config-owned trus
   // No git repo: install's gitignore maintenance must not have created one here.
   assert.equal(existsSync(join(ws, ".agents", "capabilities", ".gitignore")), false);
 });
+
+test("retired oas.web: config, install, and lock paths all give actionable migration diagnostics", () => {
+  const base = temp(); const repo = join(base, "repo"); mkdirSync(repo);
+  // config activation of the retired capability names the migration, not "no manifest"
+  write(join(repo, "oas-config.yaml"), `capabilities:\n  additive:\n    oas.web:\n      global: true\n`);
+  assert.throws(() => resolveOasConfig(repo), /oas\.web web panel was retired[\s\S]*OAS Desktop app[\s\S]*Remove the oas\.web entry/,
+    "config activation explains the retirement and the fix");
+  // explicit install of the retired id explains instead of "not a marketplace capability"
+  const inst = spawnSync(process.execPath, [CLI, "install", "oas.web", "--dir", repo], { encoding: "utf8" });
+  assert.notEqual(inst.status, 0);
+  assert.match(inst.stderr + inst.stdout, /retired.*OAS Desktop app/s, "explicit install names the successor");
+  assert.doesNotMatch(inst.stderr + inst.stdout, /not a marketplace capability/, "no unexplained missing-capability failure");
+  // bare install with a stale lock entry reports RETIRED (actionable), and doctor warns
+  const repo2 = join(base, "repo2"); mkdirSync(repo2);
+  write(join(repo2, "oas-config.yaml"), "capabilities:\n  additive: {}\n");
+  write(join(repo2, "oas-lock.json"), JSON.stringify({ capabilities: { "oas.web": { version: "0.9.6", integrity: "sha256-x", source: "marketplace:oas-web@0.9.6" } } }));
+  const restore = spawnSync(process.execPath, [CLI, "install", "--dir", repo2], { encoding: "utf8" });
+  assert.match(restore.stdout, /RETIRED\s+oas\.web.*Remove the oas\.web entry/s, "lock restore reports the retirement with the fix");
+  assert.doesNotMatch(restore.stdout + restore.stderr, /FAILED\s+oas\.web/, "retired lock entry is not an opaque failure");
+  const doctor = spawnSync(process.execPath, [CLI, "doctor", repo2], { encoding: "utf8" });
+  assert.match(doctor.stdout, /WARNING: oas\.web is locked in .*retired.*OAS Desktop app/s, "doctor surfaces the stale lock with migration guidance");
+});

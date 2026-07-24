@@ -19,7 +19,7 @@ import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { enableTmuxMouse, tmuxConfigPath, tmuxMouseEnabled } from "../lib/tmux-config.mjs";
 import {
-  LAYERS, LEGACY_HOME_CAPABILITIES_DIR, OAS_LOCK_FILE, OAS_VERSION, configChain,
+  LAYERS, LEGACY_HOME_CAPABILITIES_DIR, OAS_LOCK_FILE, OAS_VERSION, RETIRED_CAPABILITIES, configChain,
   acquireCapability, restoreCapabilities, marketplaceCapabilities,
   capabilityManifests, capabilityManifest, capabilityMissingRequires, capabilityIntegrity, capabilityTrust, capabilityExecutablePath,
   readCapabilityLocks, writeCapabilityLock,
@@ -171,7 +171,7 @@ function doctor(dir) {
   const locks = readCapabilityLocks(ctx);
   const mans = capabilityManifests(ctx);
   for (const [id, lock] of Object.entries(locks)) {
-    if (id === "oas.web") { console.log(`  WARNING: oas.web is locked in ${shortPath(lock._file)} but the capability was retired — the OAS Desktop app (packages/desktop) replaced the web panel; remove the lock entry and any config activation`); continue; }
+    if (RETIRED_CAPABILITIES[id]) { console.log(`  WARNING: ${id} is locked in ${shortPath(lock._file)} but ${RETIRED_CAPABILITIES[id]}`); continue; }
     if (!mans[id]) console.log(`  WARNING: ${id} is locked in ${shortPath(lock._file)} but not acquired — run \`oas install\``);
   }
   for (const [id, m] of Object.entries(mans)) {
@@ -380,6 +380,7 @@ function restore(dir) {
   for (const r of report) {
     if (r.status === "present") console.log(`ok        ${r.id}  (${shortPath(r.dir)})`);
     else if (r.status === "restored") console.log(`restored  ${r.id} → ${shortPath(r.dir)}  (${r.integrity})`);
+    else if (r.status === "retired") console.log(`RETIRED   ${r.id}  ${r.reason}`);
     else { failed++; console.log(`FAILED    ${r.id}  ${r.reason}`); }
   }
   if (failed) die(`${failed} capabilit${failed > 1 ? "ies" : "y"} could not be restored`);

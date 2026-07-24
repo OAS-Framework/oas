@@ -109,7 +109,7 @@ the `linear-tasks` skill, and an advisory spawn hook. It uses
 > favor of the OAS Desktop app (`packages/desktop/`), which bundles the same
 > zero-dependency loopback server. If an `oas-lock.json` or `oas-config.yaml`
 > still names `oas.web`, remove that entry — the capability no longer exists
-> in the marketplace.
+> in the marketplace. Full migration steps: [docs/desktop-succession.md](desktop-succession.md).
 
 ## Build an integration
 
