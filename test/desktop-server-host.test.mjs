@@ -103,7 +103,7 @@ test("occupied-port branch through the PRODUCTION adapter: selected port reaches
     panelWorkspaces: async () => [{ id: "/w/base", name: "base" }],
     matchWorkspace: () => "/w/base",
     probeVersion: async () => ({ ok: false, status: 404, body: null }), // incompatible occupant
-    local: { capability: "oas.web", version: "1" },
+    local: { capability: "@oas-framework/desktop", version: "1" },
     port: modulePort,
     freePort: async (from) => from + 3, // picks 4824
     spawnServer: (p) => adapter.spawnServer(p, ["/w/base"]),

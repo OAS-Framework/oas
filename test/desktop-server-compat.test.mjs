@@ -1,8 +1,8 @@
 // Regression for the phase-2 hook: the desktop must not reuse an OLDER
-// installed oas-web that answers /api/panel (workspace covered) but lacks
+// installed server that answers /api/panel (workspace covered) but lacks
 // the desktop endpoints — /api/brain 404s and Brain looks broken. Reuse
 // requires GET /api/version to identify THIS checkout (capability+version
-// match against capabilities/oas-web/oas.json).
+// match against packages/desktop/package.json).
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
@@ -14,8 +14,8 @@ import { spawn } from "node:child_process";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const LOCAL = (() => {
-  const m = JSON.parse(readFileSync(join(ROOT, "capabilities", "oas-web", "oas.json"), "utf8"));
-  return { capability: m.capability, version: m.version };
+  const m = JSON.parse(readFileSync(join(ROOT, "packages", "desktop", "package.json"), "utf8"));
+  return { capability: m.name, version: m.version };
 })();
 
 test("matching capability+version is compatible (reuse)", () => {
@@ -23,16 +23,16 @@ test("matching capability+version is compatible (reuse)", () => {
   assert.equal(r.compatible, true);
 });
 
-test("404 on /api/version (older oas-web) is incompatible — spawn own server", () => {
+test("404 on /api/version (older server) is incompatible — spawn own server", () => {
   const r = serverCompatible({ ok: false, status: 404, body: { error: "not found" } }, LOCAL);
   assert.equal(r.compatible, false);
-  assert.match(r.reason, /older oas-web/);
+  assert.match(r.reason, /older server/);
 });
 
 test("network failure, wrong capability, and version mismatch are incompatible", () => {
   assert.equal(serverCompatible(null, LOCAL).compatible, false);
   assert.equal(serverCompatible({ ok: true, body: { capability: "other.thing", version: LOCAL.version } }, LOCAL).compatible, false);
-  assert.equal(serverCompatible({ ok: true, body: { capability: LOCAL.capability, version: "0.1.0" } }, LOCAL).compatible, false);
+  assert.equal(serverCompatible({ ok: true, body: { capability: LOCAL.capability, version: "0.0.0-other" } }, LOCAL).compatible, false);
   assert.equal(serverCompatible({ ok: true, body: null }, LOCAL).compatible, false);
 });
 
@@ -70,7 +70,7 @@ test("fake older server: /api/panel answers, /api/version 404s → selectServer 
   try {
     const choice = await selectAgainst(`http://127.0.0.1:${server.address().port}`);
     assert.equal(choice.action, "spawn", "older server must not be reused");
-    assert.match(choice.reason, /older oas-web/);
+    assert.match(choice.reason, /older server/);
   } finally { server.close(); }
 });
 
@@ -178,15 +178,15 @@ test("ensureServerOnPort defaults to the real selectServer when no select is inj
   } finally { server.close(); }
 });
 
-test("REAL oas-web serves /api/version matching its oas.json → reuse through the seam", async (t) => {
-  // Boots the actual capabilities/oas-web/bin/oas-web.mjs — removing the
+test("REAL bundled server serves /api/version matching its package identity → reuse through the seam", async (t) => {
+  // Boots the actual packages/desktop/server/oas-web.mjs — removing the
   // /api/version route (or breaking its identity payload) fails THIS test.
   const free = await new Promise((ok, bad) => {
     const s = createServer();
     s.once("error", bad);
     s.listen(0, "127.0.0.1", () => { const p = s.address().port; s.close(() => ok(p)); });
   });
-  const bin = join(ROOT, "capabilities", "oas-web", "bin", "oas-web.mjs");
+  const bin = join(ROOT, "packages", "desktop", "server", "oas-web.mjs");
   const child = spawn(process.execPath, [bin, "start", "--port", String(free), "--dir", ROOT], { stdio: ["ignore", "pipe", "pipe"] });
   const url = `http://127.0.0.1:${free}`;
   try {
@@ -198,10 +198,10 @@ test("REAL oas-web serves /api/version matching its oas.json → reuse through t
       try { up = (await fetch(`${url}/api/panel`, { signal: AbortSignal.timeout(500) })).ok; }
       catch { await new Promise((ok) => setTimeout(ok, 250)); }
     }
-    if (!up) return t.skip("oas-web did not come up (environment)");
+    if (!up) return t.skip("server did not come up (environment)");
     const v = await fetch(`${url}/api/version`);
     assert.equal(v.ok, true, "real /api/version answers");
-    assert.deepEqual(await v.json(), LOCAL, "identity matches oas.json");
+    assert.deepEqual(await v.json(), LOCAL, "identity matches the desktop package");
     const choice = await selectAgainst(url);
     assert.equal(choice.action, "reuse", "the real current server is reused");
   } finally {

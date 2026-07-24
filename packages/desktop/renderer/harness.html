@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <!-- oas desktop — renderer view harness.
-     Develops the views against a running oas-web server without the Electron
+     Develops the views against a running backend server without the Electron
      shell: it supplies the contract ctx = { api, openFile, openTerminal }
      with a stub openTerminal (openFile routes into the markdown view), plus
      tab chrome and a theme toggle. Bare imports resolve via the importmap:
@@ -12,7 +12,7 @@
      served by harness-server's /node_modules route).
 
      Usage:
-       node capabilities/oas-web/bin/oas-web.mjs start --port 4821 --dir <ws>
+       node packages/desktop/server/oas-web.mjs start --port 4821 --dir <ws>
        node packages/desktop/renderer/harness-server.mjs --port 4899 --api http://127.0.0.1:4821
        open http://127.0.0.1:4899/
 -->
@@ -71,7 +71,7 @@
   };
 
   /* contract ctx — the shell provides the real one; the harness stubs the
-     cross-view hooks and points api() at the oas-web server. openFile routes
+     cross-view hooks and points api() at the backend server. openFile routes
      into the markdown view (its real cross-view behavior); openTerminal stays
      a stub (shell-owned terminal). */
   const ctx = {

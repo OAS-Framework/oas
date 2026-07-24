@@ -1,4 +1,4 @@
-// Server host — owns the app's oas-web child process lifecycle and the
+// Server host — owns the app's backend-server child process lifecycle and the
 // ownership/trust-state transitions. Extracted from main.mjs so the REAL
 // production seam is importable in tests (review wsadd3: regressions that
 // reimplement `|| transition` or cache invalidation in mocks pin nothing —

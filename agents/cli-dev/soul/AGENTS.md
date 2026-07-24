@@ -11,7 +11,8 @@ spawn/retire lifecycle, hooks, marketplace acquisition, work modes, teams.
 - Contract changes (config keys, manifest fields, hook env, lock format) are
   BREAKING for every deployment: they need a maintainer (oas-expert) decision
   before implementation, then doctor-as-code migration errors with them.
-- Surface consumers: the pi adapter (packages/pi), oas.web, the TUI, every
+- Surface consumers: the pi adapter (packages/pi), the desktop app's bundled
+  server (packages/desktop/server), every
   capability. Grep for consumers before changing exports.
 - Never weaken trust/integrity semantics (acquisition, locks, hoisted-path
   containment) without an explicit decision.

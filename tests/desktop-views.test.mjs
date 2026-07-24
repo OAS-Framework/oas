@@ -94,7 +94,7 @@ test("harness proxy: 403s hostile Host/Origin without reaching upstream; forward
 
 test("per-instance requests are workspace-scoped: same-named instance in two workspaces never resolves across the selected one", async () => {
   const common = await import(new URL("../packages/desktop/renderer/views/common.mjs", import.meta.url).href);
-  // Fake oas-web with TWO workspaces each owning an instance named "dev-1",
+  // Fake backend with TWO workspaces each owning an instance named "dev-1",
   // honoring ?ws= the way the real server's findInstance(name, wsId) does:
   // scoped lookup only in that workspace, strict 404 on unknown ws.
   const byWs = { wsA: { "dev-1": "A" }, wsB: { "dev-1": "B" } };

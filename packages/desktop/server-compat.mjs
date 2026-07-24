@@ -2,12 +2,12 @@
 // so the reuse decision is unit-testable (and mutation-checkable).
 //
 // Reusing ANY server that answers /api/panel is not enough: an OLDER
-// installed oas-web (e.g. a global panel on the default port) passes the
+// installed backend (e.g. an old oas-web panel on the default port) passes the
 // workspace probe while lacking the desktop endpoints (/api/version,
 // /api/brain, /api/file, /api/diff) — Brain then 404s and looks broken.
-// Reuse requires the server to identify itself as THIS checkout's oas-web:
-// GET /api/version must answer { capability: "oas.web", version } matching
-// the local capabilities/oas-web/oas.json. On any mismatch — 404 (older
+// Reuse requires the server to identify itself as THIS checkout's bundled server:
+// GET /api/version must answer { capability, version } matching
+// the local packages/desktop/package.json identity. On any mismatch — 404 (older
 // server), wrong capability, different version — the caller spawns its own
 // checkout's server on a free port and NEVER kills the foreign one.
 
@@ -17,12 +17,12 @@
  * @param {{ ok: boolean, status?: number, body?: any } | null} versionResponse
  *        result of probing GET /api/version (null = network failure)
  * @param {{ capability: string, version: string }} local
- *        this checkout's capabilities/oas-web/oas.json identity
+ *        this checkout's bundled-server identity (packages/desktop/package.json)
  * @returns {{ compatible: boolean, reason: string }}
  */
 export function serverCompatible(versionResponse, local) {
   if (!versionResponse || !versionResponse.ok) {
-    return { compatible: false, reason: "no /api/version (older oas-web without desktop endpoints)" };
+    return { compatible: false, reason: "no /api/version (older server without desktop endpoints)" };
   }
   const b = versionResponse.body || {};
   if (b.capability !== local.capability) {
@@ -58,7 +58,7 @@ export async function selectServer(io) {
     return { action: "spawn", portOccupied: true, reason: `serves ${existing.map((w) => w.name).join(", ")} — not the requested workspace` };
   }
   // Workspace coverage is necessary but NOT sufficient: an older installed
-  // oas-web answers /api/panel yet lacks the desktop endpoints. Reuse only a
+  // server answers /api/panel yet lacks the desktop endpoints. Reuse only a
   // server that identifies as THIS checkout via /api/version.
   const compat = serverCompatible(await io.probeVersion(), io.local);
   if (!compat.compatible) return { action: "spawn", portOccupied: true, reason: `incompatible (${compat.reason})` };

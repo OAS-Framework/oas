@@ -4,7 +4,7 @@
    persisted under the SAME key as the web panel so the two products feel
    like one) and derives the xterm.js theme object from the live tokens. */
 
-const KEY = "oasweb.theme"; // shared with capabilities/oas-web panel
+const KEY = "oasweb.theme"; // legacy key name kept so existing user prefs survive
 
 const listeners = new Set();
 const terminalListeners = new Set();

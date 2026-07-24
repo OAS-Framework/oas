@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /* oas desktop — dev harness server (NOT part of the app).
-   Serves the renderer directory and proxies /api/* to a running oas-web
-   server, so the harness page is same-origin with the API (oas-web sends no
+   Serves the renderer directory and proxies /api/* to a running backend
+   server, so the harness page is same-origin with the API (the server sends no
    CORS headers, and its loopback origin guard governs POSTs — same-origin
    keeps both happy, exactly like the real shell's ctx.api).
 
@@ -20,7 +20,7 @@ const TYPES = { ".html": "text/html", ".js": "text/javascript", ".mjs": "text/ja
 export function createHarnessServer(api) {
   return createServer((req, res) => {
     const url = new URL(req.url, "http://localhost");
-    // Same DNS-rebinding guard as oas-web itself: the harness can reach
+    // Same DNS-rebinding guard as the backend itself: the harness can reach
     // mutating endpoints upstream, so a hostile page resolving to 127.0.0.1
     // must be rejected HERE — never launder a forged origin into a trusted one.
     const okHost = (h) => h === "127.0.0.1" || h === "localhost" || h === "[::1]" || h === "::1";
@@ -31,7 +31,7 @@ export function createHarnessServer(api) {
     }
     if (!okHost(host) || !originOk) { res.writeHead(403, { "content-type": "application/json" }); res.end(JSON.stringify({ error: "forbidden origin" })); return; }
     if (url.pathname.startsWith("/api/")) {
-      // Proxy to the oas-web server, preserving method/body AND the browser's
+      // Proxy to the backend server, preserving method/body AND the browser's
       // own Origin header (already validated loopback above — the upstream
       // loopback guard understands it; forging a trusted origin would defeat
       // the guard). Host is rewritten only so the request routes upstream.
@@ -40,7 +40,7 @@ export function createHarnessServer(api) {
         method: req.method,
         headers: { ...req.headers, host: `${api.hostname}:${api.port}` },
       }, (up) => { res.writeHead(up.statusCode, up.headers); up.pipe(res); });
-      p.on("error", (e) => { res.writeHead(502, { "content-type": "application/json" }); res.end(JSON.stringify({ error: `oas-web unreachable at ${api}: ${e.message}` })); });
+      p.on("error", (e) => { res.writeHead(502, { "content-type": "application/json" }); res.end(JSON.stringify({ error: `backend unreachable at ${api}: ${e.message}` })); });
       req.pipe(p);
       return;
     }

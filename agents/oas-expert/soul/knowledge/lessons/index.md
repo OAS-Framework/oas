@@ -1,5 +1,6 @@
 # Lessons
 
+* [Root test discovery requires dependency installation for private nested packages](private-nested-package-ci-install.md) - When a root test command discovers tests inside a private nested package that is not an npm workspace, CI must install that package's lockfile as well as the root lockfile.
 * [Vanished agent window + no verdict — completed-but-event-dropped vs killed](window-gone-completed-vs-killed-triage.md) - After a subagent's tmux window disappears with no verdict mail event, do not assume it was killed; discriminate completed-but-channel-fault from external kill with `aw mail inbox --show-all` and the session log tail.
 * [Bare `node --test` recurses into agent worktrees — runs stale sibling test suites](bare-node-test-recurses-into-agent-worktrees.md) - Bare node --test with no path arguments walks the whole cwd tree except node_modules, including agents/*/instances/*/work checkouts; pin test scripts to explicit globs to avoid running stale sibling suites.
 * [tmux target prefix matching can kill foreign windows](tmux-target-exact-matching.md) - tmux `-t session:window` targets prefix-match unless anchored with `=`; exact `=<session>:=<window>` targets and nonexistent test sessions prevent retire tests from killing live siblings.

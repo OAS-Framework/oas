@@ -1,5 +1,5 @@
 /* oas desktop — Jira view: epic + Agent Roster panel per instance, from
-   GET /api/jira/<instance> (feature-parity port of the oas-web jira endpoint;
+   GET /api/jira/<instance> (feature-parity port of the panel jira endpoint;
    the browser panel exposed the API but this is its first full surface).
    Only instances whose oas.jira capability meta is present are listed.
    Contract: mount(el, ctx) / unmount(). Plain ES module + DOM. */

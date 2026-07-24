@@ -3,8 +3,8 @@
 // Responsibilities (per the desktop-app contract):
 //   * window + security posture: contextIsolation ON, nodeIntegration OFF,
 //     all privileged work behind explicit IPC channels.
-//   * server management: connect to a running oas-web server (default
-//     127.0.0.1:4820) or spawn `capabilities/oas-web/bin/oas-web.mjs start`
+//   * server management: connect to a running desktop backend server (default
+//     127.0.0.1:4820) or spawn the bundled `server/oas-web.mjs start`
 //     as a child; the renderer's ctx.api() proxies to it over IPC.
 //   * integrated terminal: node-pty running `tmux attach-session` per
 //     terminal tab, bytes streamed to xterm.js over IPC. Closing a tab kills
@@ -37,22 +37,23 @@ const argDir = (() => {
 })();
 const WORKSPACE = resolve(argDir || process.env.OAS_DESKTOP_DIR || REPO_ROOT);
 // Mutable workspace set: startup workspace plus runtime-added ones — the
-// repeated --dir list an app-owned oas-web is (re)started with.
+// repeated --dir list an app-owned server is (re)started with.
 const workspaceDirs = [WORKSPACE];
 
-// ---- oas-web server management ----------------------------------------
+// ---- backend server management ----------------------------------------
 // Server host (server-host.mjs): owns the child lifecycle, the ownership-
 // through-transition invariant, and trust-state invalidation on replace.
 const serverHost = createServerHost({
   spawnChild: (dirs, onPort) => {
-    const bin = join(REPO_ROOT, "capabilities", "oas-web", "bin", "oas-web.mjs");
-    if (!existsSync(bin)) throw new Error(`oas-web server not found at ${bin} and no usable server on port ${onPort}`);
+    const bin = join(HERE, "server", "oas-web.mjs");
+    if (!existsSync(bin)) throw new Error(`desktop backend server not found at ${bin} and no usable server on port ${onPort}`);
     const child = spawn(process.execPath, [bin, "start", "--port", String(onPort), ...dirs.flatMap((d) => ["--dir", d])], {
       stdio: ["ignore", "pipe", "pipe"],
       cwd: WORKSPACE,
+      env: { ...process.env, OAS_DESKTOP_FRAMEWORK_ROOT: REPO_ROOT },
     });
-    child.stdout.on("data", (d) => process.stdout.write(`[oas-web] ${d}`));
-    child.stderr.on("data", (d) => process.stderr.write(`[oas-web] ${d}`));
+    child.stdout.on("data", (d) => process.stdout.write(`[oas-desktop-server] ${d}`));
+    child.stderr.on("data", (d) => process.stderr.write(`[oas-desktop-server] ${d}`));
     return child;
   },
   // trust state belongs to the outgoing server — stale entries must never
@@ -73,10 +74,10 @@ async function panelWorkspaces() {
   } catch { return null; }
 }
 
-/** This checkout's oas-web identity, for the reuse compatibility probe. */
+/** This checkout's bundled-server identity, for the reuse compatibility probe. */
 function localServerIdentity() {
-  const m = JSON.parse(readFileSync(join(REPO_ROOT, "capabilities", "oas-web", "oas.json"), "utf8"));
-  return { capability: m.capability, version: m.version };
+  const m = JSON.parse(readFileSync(join(HERE, "package.json"), "utf8"));
+  return { capability: m.name, version: m.version };
 }
 
 /** Probe GET /api/version on the current port; null on network failure. */
@@ -134,13 +135,13 @@ async function ensureServer() {
     const ws = await panelWorkspaces();
     if (ws) {
       const id = matchWorkspace(ws);
-      if (!id) throw new Error(`spawned oas-web serves ${ws.map((w) => w.id).join(", ")} — does not cover ${WORKSPACE}`);
+      if (!id) throw new Error(`spawned backend serves ${ws.map((w) => w.id).join(", ")} — does not cover ${WORKSPACE}`);
       wsId = id;
       return { spawned: true };
     }
     await new Promise((ok) => setTimeout(ok, 250));
   }
-  throw new Error("spawned oas-web server but it never answered /api/panel");
+  throw new Error("spawned backend server but it never answered /api/panel");
 }
 
 // ---- IPC hardening -------------------------------------------------------
@@ -169,7 +170,7 @@ const wsValidate = (p) => validateWorkspace(p, {
 });
 
 function teamSiblingsOf(p) {
-  // Sibling workspaces within p's team scope — same seams as oas-web's
+  // Sibling workspaces within p's team scope — same seams as the server's
   // workspaceEntry: the team scope's child repos that themselves validate.
   try {
     const cfg = core?.resolveOasConfig(p);
@@ -232,7 +233,7 @@ async function performAdd(requestedPath, fromPicker) {
   if (decision.action === "already-advertised") return { ok: true, workspace: ws };
   // Transactional executor (workspace-registry.mjs): serialized adds, staged
   // dirs, identity-checked readiness, commit-after-ready, restore-on-failure.
-  // Terminals are unaffected throughout: viewers attach to tmux, not oas-web.
+  // Terminals are unaffected throughout: viewers attach to tmux, not the backend.
   return executeAdd(ws, () => wsGens.isCurrent("add", gen));
 }
 
@@ -391,7 +392,7 @@ function shutdown() {
 }
 app.on("before-quit", shutdown);
 // SIGTERM/SIGINT (e.g. `kill <pid>`, Ctrl-C from a launcher shell) do not run
-// before-quit on their own — without this the spawned oas-web child leaks.
+// before-quit on their own — without this the spawned backend child leaks.
 for (const sig of ["SIGTERM", "SIGINT", "SIGHUP"]) {
   process.on(sig, () => { shutdown(); app.quit(); });
 }

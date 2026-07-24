@@ -3,12 +3,12 @@
 //
 // Discovery is BOUNDED and deterministic — never arbitrary filesystem
 // scanning: (a) workspaces the app already knows, (b) team-scope siblings of
-// known workspaces (via the same core seams oas-web's workspaceEntry uses),
+// known workspaces (via the same core seams the server's workspaceEntry uses),
 // (c) a persisted recently-added list. Every candidate must resolve to a
 // real OAS config/team scope AT SUGGESTION TIME; `reason` says why it is
 // offered. workspace:add canonicalizes, re-validates, persists to a recents
 // store (path-validated on read-back — never trusted blindly), and the
-// caller replaces only an app-OWNED oas-web server.
+// caller replaces only an app-OWNED backend server.
 
 /**
  * Validate a directory as an OAS workspace and resolve its identity.

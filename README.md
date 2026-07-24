@@ -249,7 +249,7 @@ The reference implementation ships as two npm packages from this repo:
 
 - `lib/core.mjs` — the runtime-neutral kernel.
 - `bin/oas.mjs` — the CLI: agent operations (`status`, `create`, `spawn`,
-  `retire`), the live [`oas pane`](docs/control-pane.md) TUI, config (`doctor`,
+  `retire`), config (`doctor`,
   `init`, `use`, `install`, `root`), and active capability commands
   (`oas okf harvest`). The same commands work from pi, Claude Code, or a plain
   shell.

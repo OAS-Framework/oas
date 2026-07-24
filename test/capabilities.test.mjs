@@ -676,3 +676,94 @@ test("owned capabilities at a non-git scope are discovered and config-owned trus
   // No git repo: install's gitignore maintenance must not have created one here.
   assert.equal(existsSync(join(ws, ".agents", "capabilities", ".gitignore")), false);
 });
+
+test("retired oas.web: config, install, and lock paths all give actionable migration diagnostics", () => {
+  const base = temp(); const repo = join(base, "repo"); mkdirSync(repo);
+  // config activation of the retired capability names the migration, not "no manifest"
+  write(join(repo, "oas-config.yaml"), `capabilities:\n  additive:\n    oas.web:\n      global: true\n`);
+  assert.throws(() => resolveOasConfig(repo), /oas\.web web panel was retired[\s\S]*OAS Desktop app[\s\S]*Remove the oas\.web entry/,
+    "config activation explains the retirement and the fix");
+  // doctor must diagnose the stale activation cleanly (text and JSON), not crash
+  const docText = spawnSync(process.execPath, [CLI, "doctor", repo], { encoding: "utf8" });
+  assert.notEqual(docText.status, 0);
+  assert.match(docText.stderr, /retired.*OAS Desktop app.*Remove the oas\.web entry/s, "doctor (text) emits the cleanup instruction");
+  assert.doesNotMatch(docText.stderr, /at resolveCapabilities|at file:/, "doctor (text) does not dump a stack trace");
+  const docJson = spawnSync(process.execPath, [CLI, "doctor", repo, "--json"], { encoding: "utf8" });
+  assert.notEqual(docJson.status, 0);
+  const dj = JSON.parse(docJson.stdout);
+  assert.deepEqual(dj.retired, ["oas.web"], "doctor --json reports the retired id");
+  assert.match(dj.error, /Remove the oas\.web entry/, "doctor --json carries the cleanup instruction");
+  // explicit install of the retired id explains instead of "not a marketplace capability"
+  const inst = spawnSync(process.execPath, [CLI, "install", "oas.web", "--dir", repo], { encoding: "utf8" });
+  assert.notEqual(inst.status, 0);
+  assert.match(inst.stderr + inst.stdout, /retired.*OAS Desktop app/s, "explicit install names the successor");
+  assert.doesNotMatch(inst.stderr + inst.stdout, /not a marketplace capability/, "no unexplained missing-capability failure");
+  // bare install with a stale lock entry reports RETIRED (actionable), and doctor warns
+  const repo2 = join(base, "repo2"); mkdirSync(repo2);
+  write(join(repo2, "oas-config.yaml"), "capabilities:\n  additive: {}\n");
+  write(join(repo2, "oas-lock.json"), JSON.stringify({ capabilities: { "oas.web": { version: "0.9.6", integrity: "sha256-x", source: "marketplace:oas-web@0.9.6" } } }));
+  const restore = spawnSync(process.execPath, [CLI, "install", "--dir", repo2], { encoding: "utf8" });
+  assert.match(restore.stdout, /RETIRED\s+oas\.web.*Remove the oas\.web entry/s, "lock restore reports the retirement with the fix");
+  assert.doesNotMatch(restore.stdout + restore.stderr, /FAILED\s+oas\.web/, "retired lock entry is not an opaque failure");
+  const doctor = spawnSync(process.execPath, [CLI, "doctor", repo2], { encoding: "utf8" });
+  assert.match(doctor.stdout, /WARNING: oas\.web is locked in .*retired.*OAS Desktop app/s, "doctor surfaces the stale lock with migration guidance");
+  const doctorJson2 = spawnSync(process.execPath, [CLI, "doctor", repo2, "--json"], { encoding: "utf8" });
+  assert.equal(doctorJson2.status, 0, "lock-only state resolves");
+  const dj2 = JSON.parse(doctorJson2.stdout);
+  assert.equal(dj2.retiredLocks?.[0]?.id, "oas.web", "doctor --json lists the stale retired lock");
+  assert.match(dj2.retiredLocks[0].reason, /Remove the oas\.web entry/, "JSON lock report carries the fix");
+});
+
+test("retired oas.web: a STALE INSTALLED ARTIFACT never bypasses the retirement diagnostics", () => {
+  // The migration's own upgrade state: the user hasn't deleted the stale
+  // installed copy yet. Presence must not short-circuit retirement.
+  const base = temp(); const repo = join(base, "repo"); mkdirSync(repo);
+  const staleDir = join(repo, ".agents", "capabilities", "installed", "oas-web");
+  write(join(staleDir, "oas.json"), JSON.stringify({ capability: "oas.web", version: "0.9.6", description: "stale web panel copy" }));
+  write(join(repo, "oas-lock.json"), JSON.stringify({ capabilities: { "oas.web": { version: "0.9.6", integrity: "sha256-x", source: "marketplace:oas-web@0.9.6" } } }));
+  // config activation with the artifact present still throws the retirement guidance
+  write(join(repo, "oas-config.yaml"), `capabilities:\n  additive:\n    oas.web:\n      global: true\n`);
+  assert.throws(() => resolveOasConfig(repo), /retired[\s\S]*OAS Desktop app[\s\S]*Remove the oas\.web entry/,
+    "stale artifact does not let config activation succeed");
+  // explicit install with the artifact present must not exit "Already acquired"
+  const inst = spawnSync(process.execPath, [CLI, "install", "oas.web", "--dir", repo], { encoding: "utf8" });
+  assert.notEqual(inst.status, 0, "explicit install of a retired id fails even when an artifact is present");
+  assert.match(inst.stderr, /retired.*OAS Desktop app/s);
+  assert.doesNotMatch(inst.stdout, /Already acquired/, "presence does not short-circuit retirement");
+  // bare install must report RETIRED, never ok/present
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive: {}\n");
+  const restore = spawnSync(process.execPath, [CLI, "install", "--dir", repo], { encoding: "utf8" });
+  assert.match(restore.stdout, /RETIRED\s+oas\.web/s, "lock restore reports RETIRED despite the present artifact");
+  assert.doesNotMatch(restore.stdout, /ok\s+oas\.web/, "no 'ok' for a retired capability's stale artifact");
+  // doctor's acquired listing flags the stale artifact with the deletion hint
+  const doctor = spawnSync(process.execPath, [CLI, "doctor", repo], { encoding: "utf8" });
+  assert.match(doctor.stdout, /oas\.web[\s\S]*WARNING: artifact of a retired capability[\s\S]*also delete/, "doctor names the stale installed copy with delete guidance");
+});
+
+test("retired oas.web: non-installed origins and source-manifest retirement are handled safely", () => {
+  const base = temp();
+  // owned origin: doctor warns WITHOUT destructive delete guidance
+  const repo = join(base, "repo"); mkdirSync(repo);
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive: {}\n");
+  write(join(repo, ".agents", "capabilities", "owned", "oas-web", "oas.json"),
+    JSON.stringify({ capability: "oas.web", version: "0.9.6", description: "owned copy" }));
+  const doc = spawnSync(process.execPath, [CLI, "doctor", repo], { encoding: "utf8" });
+  assert.match(doc.stdout, /WARNING: artifact of a retired capability/, "owned retired artifact is flagged");
+  assert.match(doc.stdout, /remove its declaration/, "non-installed origin gets declaration guidance");
+  assert.doesNotMatch(doc.stdout, /also delete/, "no delete instruction for an owned source tree");
+  // doctor --json reports the artifact in retiredArtifacts
+  const docJson = spawnSync(process.execPath, [CLI, "doctor", repo, "--json"], { encoding: "utf8" });
+  const dj = JSON.parse(docJson.stdout);
+  assert.equal(dj.retiredArtifacts?.[0]?.id, "oas.web", "doctor --json lists the retired artifact");
+  assert.match(dj.retiredArtifacts[0].origin, /^owned:/, "artifact record carries the origin");
+  // local-path acquisition of a package whose MANIFEST declares a retired id is rejected and cleaned up
+  const src = join(base, "ext-pkg"); mkdirSync(src);
+  write(join(src, "oas.json"), JSON.stringify({ capability: "oas.web", version: "0.9.9", description: "external" }));
+  const target = join(base, "target"); mkdirSync(target);
+  write(join(target, "oas-config.yaml"), "capabilities:\n  additive: {}\n");
+  const inst = spawnSync(process.execPath, [CLI, "install", src, "--dir", target], { encoding: "utf8" });
+  assert.notEqual(inst.status, 0, "path install of a retired-manifest package fails");
+  assert.match(inst.stderr, /declares capability "oas\.web".*retired/s, "failure names the manifest's retired id");
+  assert.equal(existsSync(join(target, ".agents", "capabilities", "installed", "ext-pkg")), false, "destination artifact removed");
+  assert.equal(existsSync(join(target, "oas-lock.json")), false, "no lock entry written");
+});
