@@ -1,6 +1,7 @@
 # Knowledge Log
 
 ## 2026-07-24
+* **Creation**: promoted [review loops need a scope ratchet](/lessons/review-loop-scope-ratchet.md) from the oas-desktop-engineer-desktop-dist notes.
 * **Fix**: merged the admitted-root re-resolution note into [file endpoint guard](/lessons/file-endpoint-realpath-guard.md) and [regression test layering](/lessons/regression-tests-bug-layer.md): `/api/file` roots are canonicalized exactly once at admission and passed as immutable strings, while guard tests must mutation-check the exact layer with pre-captured roots or other production-path doubles.
 * **Update**: merged the untrusted-root symlink review note into [file endpoint guard](/lessons/file-endpoint-realpath-guard.md) and [Electron smoke process group reaping](/lessons/electron-smoke-process-group-reaping.md): workspace-derived file API roots need lstat plus canonical-parent validation before the realpath guard trusts them, and smoke reapers must keep process groups tracked after leader exit with signal-safe proc-reaper tests.
 * **Update**: merged the local-souls desktop reader note into [desktop deployment reader](/architecture/desktop-deployment-reader.md) and [file endpoint guard](/lessons/file-endpoint-realpath-guard.md): first-class local souls live under sibling `<scope>/local-agents/`, normalize legacy `tmp` kind to `local`, participate in all-local scopes and capability instance homes, and require the sibling directory in `/api/file` allowed roots.
