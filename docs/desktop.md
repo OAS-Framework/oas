@@ -24,7 +24,7 @@ build-provenance attestations are published for every asset
 
 ### macOS: unsigned build
 
-The 0.18.1 installers are **unsigned and not notarized** (no signing
+The 0.18.2 installers are **unsigned and not notarized** (no signing
 credentials exist yet — nothing about this release claims otherwise).
 Gatekeeper will block the first launch:
 
@@ -47,7 +47,7 @@ all. Spawning agents runs through an installed `oas` CLI with Desktop API
 v1:
 
 ```bash
-npm install -g @oas-framework/oas@0.18.1
+npm install -g @oas-framework/oas@0.18.2
 ```
 
 Desktop 0.18 accepts CLI versions `>=0.18.0 <0.19.0` (released versions
@@ -80,17 +80,17 @@ scripted use: `--dir <workspace>` and `OAS_DESKTOP_PORT`.
 
 ## Migrating from the web panel / TUI pane
 
-0.18.1 removes the legacy `oas.web` browser panel, `oas pane`, and the
+0.18.2 removes the legacy `oas.web` browser panel, `oas pane`, and the
 `@oas-framework/oas/control-pane` export. The Desktop app replaces all
 three. Migration:
 
-1. Update the CLI everywhere: `npm install -g @oas-framework/oas@0.18.1`.
+1. Update the CLI everywhere: `npm install -g @oas-framework/oas@0.18.2`.
 2. Run `oas doctor` at each workspace scope and follow its guidance to
    remove stale `oas.web` config entries, locks, and installed artifacts.
 3. Install the Desktop app (above) and open your workspace.
 
 The full breaking-change list is in the
-[v0.18.1 release notes](release-notes/v0.18.1.md).
+[v0.18.2 release notes](release-notes/v0.18.2.md).
 
 ## Security posture
 

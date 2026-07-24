@@ -17,7 +17,7 @@ prints exactly one JSON object on stdout:
 {"schemaVersion":1,"name":"@oas-framework/oas","version":"<installed version>","desktopApi":1}
 ```
 
-`version` is the installed package's exact semver (e.g. `0.18.1`).
+`version` is the installed package's exact semver (e.g. `0.18.2`).
 Desktop 0.18 accepts `desktopApi === 1` and semver `>=0.18.0 <0.19.0`.
 
 ## Envelope

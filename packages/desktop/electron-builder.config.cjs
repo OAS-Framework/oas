@@ -1,8 +1,8 @@
-// OAS Desktop — electron-builder configuration (v0.18.0 public matrix).
+// OAS Desktop — electron-builder configuration (v0.18.2 public matrix).
 //
 // Contract (desktop-dist): macOS arm64/x64 DMG+ZIP, Linux x64 AppImage+DEB,
 // artifacts named oas-desktop-* under packages/desktop/dist/ (the release
-// workflow uploads `desktop-<os>-<arch>` from that glob). 0.18.0 ships
+// workflow uploads `desktop-<os>-<arch>` from that glob). 0.18.2 ships
 // UNSIGNED and NOT notarized — no credentials exist; certificate
 // auto-discovery is disabled (CSC_IDENTITY_AUTO_DISCOVERY=false in CI and
 // identity:null here so local builds behave identically). Linux declares
@@ -60,7 +60,7 @@ module.exports = {
     //   npm run dist -- --x64   on an arm64 runner.
     target: ["dmg", "zip"],
     category: "public.app-category.developer-tools",
-    // UNSIGNED (0.18.0): no Developer ID exists. identity:null disables
+    // UNSIGNED (0.18.2): no Developer ID exists. identity:null disables
     // signing entirely — release notes and docs state the Gatekeeper
     // implications; nothing may claim signing or notarization.
     identity: null,
