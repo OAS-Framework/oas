@@ -8,10 +8,13 @@ timestamp: 2026-07-24
 
 # In flight / next
 
-1. **Desktop panel succession**: ship and stabilize the private Electron app as
-   a standalone GitHub-Release product; move its backend under the desktop
-   package; gate mutations on an installed OAS CLI; then run the one-release
-   deprecation and removal sequence for oas.web and `oas pane`. Migrate relevant
+1. **Desktop panel succession**: PR #19 now owns the complete pre-release cut —
+   move the backend under the private desktop package and immediately remove
+   oas.web plus `oas pane`/`lib/control-pane` as a documented breaking impact.
+   Before release, replace PR #19's explicitly temporary adjacent-core bridge
+   with installed-CLI mutations and observation-only no-OAS behavior; block the
+   next release until desktop installers and migration diagnostics are
+   operational, and migrate relevant
    TUI/web-panel knowledge into the durable desktop-engineer soul before the
    old developer souls retire. See the [binding decision](/decisions/desktop-panel-succession.md).
 2. **Capability registry/npm acquisition**: git/path artifacts are

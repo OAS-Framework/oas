@@ -24,6 +24,41 @@ decisions/ and referenced from here.
 
 ---
 
+## PR #19 (round 2) — expanded desktop succession + explicit spawn lineage (2026-07-24)
+- verdict: RETURNED — direction PASS against the amended immediate-cutover
+  decision (direct-core bridge explicitly release-blocking debt); exact-head
+  `047acbb` GitHub CI and scratch full gate green (234
+  tests, one intentional ABI skip, all validation/pack/smoke), scaffold-only
+  probe passed, ownership/removal/retirement diagnostics and lock integrity
+  verified. Security/correctness FAIL: new shared `findInstanceHome(root, name)`
+  accepts path traversal as an instance name. Reproduced `oas spawn dev
+  --parent ../../dev/soul` accepting malformed lineage; the same helper powers
+  retirement, and `oas retire ../../dev/soul` recursively deleted the canonical
+  soul in an isolated probe. Author must reject separators/dot traversal,
+  enforce immediate-child containment, and regress both spawn and destructive
+  retire. Mergeability also has two `git diff --check` extra-blank-line errors.
+- owner: dev-coordinator-1 · coordinator: dev-coordinator-1
+- taught us: filesystem existence under `join(instancesDir, untrustedName)` is
+  not identity validation; every instance-home lookup, especially destructive
+  lifecycle callers, needs name validation plus resolved containment.
+
+## PR #19 (round 1) — OAS Desktop transitional Electron app and oas.web bridge (2026-07-24)
+- verdict: RETURNED — direction PASS against the accepted desktop succession
+  decision; correctness/mergeability FAIL because required PR CI is red. The
+  root test script now includes `packages/**/*.test.mjs`, but
+  `.github/workflows/pull-request.yml` installs only root dependencies: 8
+  desktop suites fail in a clean runner on missing `jsdom`/`marked` (187/196
+  pass). Exact-head scratch gate after root + desktop installs reached 238/239;
+  the remaining macOS node-pty prebuild-helper permission failure cleared with
+  the README-required Electron rebuild, and the targeted real-wheel test then
+  passed. Check/check:pi/validate/OKF/pack/smoke all passed. Owner asked to make
+  CI install desktop dependencies, merge current main, and return a green
+  exact-head gate.
+- owner: dev-coordinator-1 · coordinator: dev-coordinator-1
+- taught us: once a root test glob includes a private nested package that is
+  not an npm workspace, root `npm ci` is not a complete CI environment; the
+  workflow must install that package's lockfile too.
+
 ## PR #17 — oas-web 0.8.1 typing visibility + latency (echo snap+burst, off-thread roster snapshot) (2026-07-22)
 - verdict: MERGED — all four gates green. Direction: right layer; the
   server-never-collects child-process snapshot is the correct fix for the
