@@ -9,6 +9,7 @@
  *   GET  /api/panel                 roster JSON (instances, git, task, tmux state)
  *   GET  /api/agents                available agents (souls) per workspace root
  *   POST /api/spawn                 { agent, agentsRoot, task?, purpose? } → spawn an instance
+ *                                   (mutations require the installed `oas` CLI; see cliUnavailable)
  *   GET  /api/session/<instance>?lines=n   ANSI pane capture of the live session
  *   POST /api/keys/<instance>       { data } → raw key bytes into the session (no Enter)
  *   POST /api/interrupt/<instance>  sends Ctrl-C (Escape for pi/claude prompts stays manual)
@@ -30,18 +31,6 @@ import { homedir } from "node:os";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
-/** Kernel root: the app is in-tree at packages/desktop/server → repo root is
- * three levels up. OAS_DESKTOP_FRAMEWORK_ROOT overrides for packaged builds
- * where the app resolves the kernel itself. */
-const FRAMEWORK_ROOT = (() => {
-  const env = process.env.OAS_DESKTOP_FRAMEWORK_ROOT;
-  if (env && existsSync(join(env, "lib", "core.mjs"))) return resolve(env);
-  const rel = join(HERE, "..", "..", "..");
-  if (existsSync(join(rel, "lib", "core.mjs"))) return rel;
-  console.error(`oas-desktop server: cannot find the OAS kernel (lib/core.mjs) at ${rel} — set OAS_DESKTOP_FRAMEWORK_ROOT`);
-  process.exit(1);
-})();
-
 const args = process.argv.slice(2);
 const sub = args[0];
 const flag = (name) => {
@@ -58,9 +47,12 @@ if (sub !== "start" && sub !== "collect") {
   process.exit(1);
 }
 
-const core = await import(pathToFileURL(join(FRAMEWORK_ROOT, "lib", "core.mjs")).href);
+// App-owned READ-ONLY deployment reader — the packaged app never imports the
+// framework checkout's kernel module and accepts no framework-root
+// override; all lifecycle mutations go through the installed `oas` CLI.
+const reader = await import(pathToFileURL(join(HERE, "deployment.mjs")).href);
 const model = await import(pathToFileURL(join(HERE, "model.mjs")).href);
-model.initModel(core);
+model.initModel(reader);
 
 /** Workspaces in view. Each --dir registers one (repeatable); no --dir means
  * the cwd. Every context resolves to its team scope (or config scope) so the
@@ -72,14 +64,14 @@ const DEBUG = flag("debug") === true || process.env.OASWEB_DEBUG === "1";
 function workspaceEntry(ctx) {
   let team, roots = [], scope = ctx;
   try {
-    const r = core.resolveOasConfig(ctx);
-    if (r.team) { team = r.team; scope = r.team.scope; roots = core.teamAgentRoots(r.team.scope); }
+    const r = reader.resolveDeployment(ctx);
+    if (r.team) { team = r.team; scope = r.team.scope; roots = reader.teamAgentRoots(r.team.scope); }
     else {
       const level = r.chain?.find((c) => c._level !== process.env.HOME)?._level;
       if (level) scope = level;
     }
   } catch { /* fall through to local root */ }
-  if (!roots.length) { try { roots = [core.ensureRoot(ctx)]; } catch { roots = []; } }
+  if (!roots.length) { const root = reader.findAgentsRoot(ctx); roots = root ? [root] : []; }
   return { id: scope, name: scope.split("/").pop(), scope, team: team || null, roots };
 }
 function workspaces() {
@@ -122,9 +114,9 @@ function panelData(wsId) {
 }
 
 /** Available agents (souls) of a workspace — what `oas spawn <agent>` could
- * start. Same kernel seams as the CLI: core.listAgents per agents root, plus
+ * start. Same read-only seams as the reader: listAgents per agents root, plus
  * capability-defined agents (packages' `agents:` souls) active in the root's
- * context — the CLI resolves those via findCapabilityAgent. */
+ * context. */
 function agentsData(wsId) {
   const ws = wsId ? workspaceById(wsId) : workspaces()[0];
   const agents = [];
@@ -137,15 +129,14 @@ function agentsData(wsId) {
       workspace: context, repoName: resolve(context, a.repo || ".").split("/").pop(),
     });
     try {
-      const local = core.listAgents(root);
+      const local = reader.listAgents(root);
       const seen = new Set(local.map((a) => a.name));
       for (const a of local) pushAgent(a);
-      // Capability-defined agents (kind "capability") — full soul via the same
-      // resolver the CLI's spawn fallback uses.
-      for (const c of core.listCapabilityAgents(context)) {
+      // Capability-defined agents (kind "capability") — read-only resolution.
+      for (const c of reader.listCapabilityAgents(context)) {
         if (seen.has(c.name)) continue;
         seen.add(c.name);
-        const soul = core.findCapabilityAgent(context, root, c.name);
+        const soul = reader.findCapabilityAgent(context, root, c.name);
         if (soul) pushAgent(soul);
       }
     } catch { /* one broken root must not hide the rest */ }
@@ -155,30 +146,27 @@ function agentsData(wsId) {
 }
 
 /** Spawn an instance of an available agent. Default is NO TASK — the instance
- * comes up awaiting instruction (the user talks to it through the panel). */
-function spawnAgent({ agent, agentsRoot, task, purpose }) {
+ * comes up awaiting instruction (the user talks to it through the panel).
+ * Lifecycle mutations are the installed `oas` CLI's job — the app never
+ * reimplements kernel spawn logic. Until the CLI adapter is wired, the
+ * request VALIDATES against the read-only reader and then reports a stable
+ * cli-unavailable error the UI can act on. */
+function spawnAgent({ agent, agentsRoot }) {
   const name = String(agent || "");
   const root = resolve(String(agentsRoot || ""));
   // agentsRoot must be one of the workspace roots this server was started for —
   // never spawn into an arbitrary caller-supplied directory.
   const known = workspaces().flatMap((w) => w.roots);
   if (!known.some((r) => resolve(r) === root)) throw new Error(`unknown agents root "${agentsRoot}"`);
-  const def = core.findAgent(root, name)
-    // CLI parity: capability-defined agents (a package's `agents:` soul active
-    // in this context) resolve via findCapabilityAgent and home locally.
-    || core.findCapabilityAgent(dirname(root), root, name);
+  const def = reader.findAgent(root, name)
+    || reader.findCapabilityAgent(dirname(root), root, name);
   if (!def) throw new Error(`unknown agent "${name}"`);
-  const r = core.spawnInstance(root, def, {
-    purpose: purpose ? String(purpose) : undefined,
-    task: task ? String(task) : "",
-    // Lineage: server-mediated spawns are OPERATOR-origin (a human clicked the
-    // button) — no `parent` is passed, and spawnInstance never reads ambient
-    // OAS_INSTANCE/PI_AGENT_INSTANCE (this server process may have inherited an
-    // agent's env from the shell it was born in; that is not parentage).
-    repo: def.repo || core.defaultRepo(core.workspaceOf(root)) || undefined,
-  });
-  return { instance: r.instance, agent: r.agent, home: r.home, work: r.work,
-           branch: r.branch || null, launched: r.launched, warnings: r.warnings || [] };
+  // Mutation boundary: spawning is `oas spawn --json` through the discovered
+  // CLI (desktop CLI API v1). The adapter lands with the CLI locator; a
+  // request that reaches this point without it gets the degradation error.
+  const err = new Error("spawning requires a compatible installed oas CLI — the desktop app does not bundle a kernel");
+  err.code = "cli-unavailable";
+  throw err;
 }
 
 /* ── Non-blocking roster snapshot ──
@@ -417,7 +405,7 @@ function skillEntry(skillDir) {
   const p = join(skillDir, "SKILL.md");
   if (!existsSync(p)) return null;
   let meta = {};
-  try { meta = core.parseFrontmatter(readFileSync(p, "utf8")).meta || {}; } catch { /* unreadable skill */ }
+  try { meta = reader.parseFrontmatter(readFileSync(p, "utf8")).meta || {}; } catch { /* unreadable skill */ }
   return { name: meta.name || basename(skillDir), path: p, description: String(meta.description || "").trim() };
 }
 function mdTree(dir) {
@@ -442,7 +430,7 @@ function brainData(agentName, wsId) {
   const ws = wsId ? workspaceById(wsId) : workspaces()[0];
   let def, root;
   for (const r of ws?.roots || []) {
-    def = core.findAgent(r, agentName) || core.findCapabilityAgent(dirname(r), r, agentName);
+    def = reader.findAgent(r, agentName) || reader.findCapabilityAgent(dirname(r), r, agentName);
     if (def) { root = r; break; }
   }
   if (!def) return null;
@@ -468,7 +456,7 @@ function brainData(agentName, wsId) {
   let packageSkills = [];
   if (def.capability) {
     try {
-      packageSkills = core.capabilitySkillDirs(def.capability, dirname(root))
+      packageSkills = reader.capabilitySkillDirs(def.capability, dirname(root))
         .flatMap((p) => expandSkillPath(p, existsSync, listSkills, skillEntry));
     } catch { /* manifest unreadable — no package skills */ }
   }
@@ -621,7 +609,12 @@ const server = createServer(async (req, res) => {
       if (typeof body.agent !== "string" || !body.agent || typeof body.agentsRoot !== "string" || !body.agentsRoot)
         return send(res, 400, { error: "body needs { agent, agentsRoot }" });
       try { return send(res, 200, { spawned: true, ...spawnAgent(body) }); }
-      catch (e) { return send(res, 409, { error: String(e.message || e).slice(0, 300) }); }
+      catch (e) {
+        // Stable code for the degradation UI: cli-unavailable means "install
+        // or choose a compatible oas CLI", not "bad request".
+        const status = e.code === "cli-unavailable" ? 503 : 409;
+        return send(res, status, { error: String(e.message || e).slice(0, 300), ...(e.code ? { code: e.code } : {}) });
+      }
     }
     if (req.method === "GET" && path === "/api/file") {
       const r = fileData(url.searchParams.get("path") || "");

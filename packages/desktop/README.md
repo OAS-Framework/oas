@@ -42,7 +42,10 @@ The shell has three navigation contexts:
 - `server/oas-web.mjs` — the bundled zero-dependency backend: a loopback-only
   `node:http` server exposing the `/api/*` surface (roster, spawn, brain,
   session capture, keys, file). `server/model.mjs` is the roster
-  collector. Binds 127.0.0.1 only — it can type into your terminals.
+  collector; `server/deployment.mjs` is the app-owned READ-ONLY deployment
+  reader (the app never imports the framework kernel — lifecycle mutations
+  require a compatible installed `oas` CLI). Binds 127.0.0.1 only — it can
+  type into your terminals.
 - `preload.cjs` — contextBridge surface (`window.oasDesktop`); renderer runs
   with contextIsolation on, nodeIntegration off.
 - `renderer/shell.mjs` — contextual single sidebar, stage host, artifact-tab

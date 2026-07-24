@@ -242,12 +242,15 @@ test("desktop server: /api/agents lists persistent AND capability-defined agents
     assert.equal((await post({ agent: "reviewer", agentsRoot: "/tmp" })).status, 409, "foreign agentsRoot rejected");
     const root = d.agents[0].agentsRoot;
     assert.equal((await post({ agent: "no-such-agent", agentsRoot: root })).status, 409, "unknown agent rejected");
-    // capability agent RESOLVES through the spawn path (attached mode fails on
-    // workDir, proving findCapabilityAgent found the soul — not "unknown agent")
+    // capability agent RESOLVES through the spawn path: validation passes
+    // (not "unknown agent") and the mutation boundary answers with the
+    // stable cli-unavailable degradation (503) — the app never bundles a
+    // kernel; spawning requires a compatible installed oas CLI.
     const r = await post({ agent: "reviewer", agentsRoot: root });
-    assert.equal(r.status, 409);
-    const err = (await r.json()).error;
-    assert.ok(!/unknown agent/.test(err), `reviewer resolves via findCapabilityAgent (got: ${err})`);
+    assert.equal(r.status, 503, "mutation without a CLI adapter degrades, not crashes");
+    const body = await r.json();
+    assert.ok(!/unknown agent/.test(body.error), `reviewer resolves via findCapabilityAgent (got: ${body.error})`);
+    assert.equal(body.code, "cli-unavailable", "stable degradation code for the UI");
   } finally { proc.kill(); }
 });
 

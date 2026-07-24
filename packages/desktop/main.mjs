@@ -20,22 +20,23 @@ import { openTerm, sweepViewers } from "./tmux-target.mjs";
 import { ensureServerOnPort, serverCompatible } from "./server-compat.mjs";
 import { createServerHost, createServerAdapter } from "./server-host.mjs";
 import { validateWorkspace, workspaceSuggestions, parseRecents, pushRecent, decideAdd, createGenerations, createAddExecutor } from "./workspace-registry.mjs";
+import { resolveDeployment, teamAgentRoots } from "./server/deployment.mjs";
 
 const require = createRequire(import.meta.url);
 const pty = require("node-pty");
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-// packages/desktop → repo root two levels up (in-tree layout).
-const REPO_ROOT = resolve(HERE, "..", "..");
 
 let port = Number(process.env.OAS_DESKTOP_PORT || 4820);
 const base = () => `http://127.0.0.1:${port}`;
-// Workspace the panel shows: --dir <path> or OAS_DESKTOP_DIR or the repo root.
+// Workspace the panel shows: --dir <path> or OAS_DESKTOP_DIR or the cwd the
+// app was launched from. The packaged app never infers a framework repo root
+// — with no OAS deployment in view the renderer shows the workspace picker.
 const argDir = (() => {
   const i = process.argv.indexOf("--dir");
   return i >= 0 && process.argv[i + 1] ? process.argv[i + 1] : undefined;
 })();
-const WORKSPACE = resolve(argDir || process.env.OAS_DESKTOP_DIR || REPO_ROOT);
+const WORKSPACE = resolve(argDir || process.env.OAS_DESKTOP_DIR || process.cwd());
 // Mutable workspace set: startup workspace plus runtime-added ones — the
 // repeated --dir list an app-owned server is (re)started with.
 const workspaceDirs = [WORKSPACE];
@@ -50,7 +51,7 @@ const serverHost = createServerHost({
     const child = spawn(process.execPath, [bin, "start", "--port", String(onPort), ...dirs.flatMap((d) => ["--dir", d])], {
       stdio: ["ignore", "pipe", "pipe"],
       cwd: WORKSPACE,
-      env: { ...process.env, OAS_DESKTOP_FRAMEWORK_ROOT: REPO_ROOT },
+      env: { ...process.env },
     });
     child.stdout.on("data", (d) => process.stdout.write(`[oas-desktop-server] ${d}`));
     child.stderr.on("data", (d) => process.stderr.write(`[oas-desktop-server] ${d}`));
@@ -158,14 +159,14 @@ function guard(e) { if (!trustedFrame(e)) throw new Error("forbidden: untrusted 
 // ---- IPC: workspace suggestions + runtime add ---------------------------
 // Privileged side of the runtime workspace switcher (phase-2 hook 3; the
 // renderer modal is the designer's). Discovery is bounded: known dirs, team
-// siblings via the kernel's own seams, validated recents. workspace:add
-// only ever replaces an app-OWNED server; foreign servers fail closed.
-const core = await import(pathToFileURL(join(REPO_ROOT, "lib", "core.mjs")).href).catch(() => null);
+// siblings via the app-owned read-only deployment reader, validated recents.
+// workspace:add only ever replaces an app-OWNED server; foreign servers fail
+// closed.
 const wsGens = createGenerations();
 const RECENTS_FILE = () => join(app.getPath("userData"), "workspace-recents.json");
 
 const wsValidate = (p) => validateWorkspace(p, {
-  resolveConfig: (path) => core ? core.resolveOasConfig(path) : null,
+  resolveConfig: (path) => resolveDeployment(path),
   hasAgentsRoot: (path) => existsSync(join(path, "agents")) && lstatSync(join(path, "agents")).isDirectory(),
 });
 
@@ -173,10 +174,10 @@ function teamSiblingsOf(p) {
   // Sibling workspaces within p's team scope — same seams as the server's
   // workspaceEntry: the team scope's child repos that themselves validate.
   try {
-    const cfg = core?.resolveOasConfig(p);
+    const cfg = resolveDeployment(p);
     const scope = cfg?.team?.scope;
     if (!scope) return [];
-    return core.teamAgentRoots(scope).map((root) => dirname(root)).filter((d) => d !== p);
+    return teamAgentRoots(scope).map((root) => dirname(root)).filter((d) => d !== p);
   } catch { return []; }
 }
 
