@@ -105,7 +105,7 @@ if (!existsSync(app.exe)) fail(`packaged executable missing: ${app.exe}`);
   // Probe via the extracted runner (scripts/smoke-probes.mjs): the runner
   // CONTRACTUALLY requires the reaper's runTracked — async, detached,
   // group-tracked; reintroducing synchronous execution fails its tests.
-  const r = await runAbiProbe(reaper, app.exe, join(app.resources, "app.asar", "main.mjs"), { timeout: 30000 });
+  const r = await runAbiProbe(reaper, app.exe, join(app.resources, "app.asar", "main.mjs"), { timeout: PHASE_BUDGET_MS.abiProbe });
   if (!r.ok) fail(r.detail);
   ok(r.detail);
 }
@@ -150,18 +150,26 @@ if (process.env.OAS_SMOKE_SKIP_LAUNCH === "1") {
   }
   const viewerBaseline = await oasdeskViewerCount(); // null when tmux absent
   let launchError = null;
-  const drainTail = async () => { await awaitClose(child, { drainMs: 2000 }); return childLog.slice(-1500); };
+  // drainTail: return the current bounded output tail. Only wait for a
+  // final flush when the child has ALREADY EXITED (a live child's tail is
+  // already current, and awaiting its 'close' would block until the
+  // watchdog — review 7bdaf1e-r2 finding 2). awaitClose is total-bounded
+  // regardless, so even the exited path cannot hang.
+  const drainTail = async () => { if (childExit !== null) await awaitClose(child, { drainMs: 2000 }); return childLog.slice(-1500); };
   try {
-    // The CDP port is our child's, read from its DevToolsActivePort file
-    // (race-free, identity-bound). childExited aborts the wait fast.
+    // ONE shared launchReady deadline across the port wait AND the /json
+    // poll (review 7bdaf1e-r2 finding 1: spending launchReady twice made
+    // worst-case success 240s > the 180s watchdog — the premature-kill this
+    // commit exists to prevent). /json answers ~immediately after
+    // DevToolsActivePort is written, so sharing the budget is ample.
+    const launchDeadline = Date.now() + PHASE_BUDGET_MS.launchReady;
     const portRes = await readDevToolsPort(userData, { join, existsSync, readFileSync, now: () => Date.now(), sleep: (ms) => new Promise((r) => setTimeout(r, ms)) }, {
-      timeoutMs: PHASE_BUDGET_MS.launchReady, pollMs: 250, childExited: () => childExit !== null,
+      timeoutMs: Math.max(0, launchDeadline - Date.now()), pollMs: 250, childExited: () => childExit !== null,
     });
     if (portRes.error) throw new Error(`${portRes.error} (app alive=${!childExit}); output tail:\n${await drainTail()}`);
     const port = portRes.port;
-    const t0 = Date.now();
     let targets = null, lastDiag = 0;
-    while (!targets && Date.now() - t0 < PHASE_BUDGET_MS.launchReady) {
+    while (!targets && Date.now() < launchDeadline) {
       if (childExit) throw new Error(`packaged app exited during startup (code=${childExit.code} sig=${childExit.sig}); output tail:\n${await drainTail()}`);
       await new Promise((r) => setTimeout(r, 500));
       try {
@@ -171,7 +179,7 @@ if (process.env.OAS_SMOKE_SKIP_LAUNCH === "1") {
       } catch { /* not up yet */ }
       if (!targets && Date.now() - lastDiag > 10_000) {
         lastDiag = Date.now();
-        console.log(`dist:smoke … waiting for CDP (${Math.round((Date.now() - t0) / 1000)}s; app alive=${!childExit})`);
+        console.log(`dist:smoke … waiting for CDP (${Math.round((launchDeadline - Date.now()) / 1000)}s budget left; app alive=${!childExit})`);
       }
     }
     if (!targets) throw new Error(`packaged app never exposed its renderer over CDP within ${PHASE_BUDGET_MS.launchReady / 1000}s (app alive=${!childExit}); output tail:\n${await drainTail()}`);

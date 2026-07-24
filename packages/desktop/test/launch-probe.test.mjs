@@ -70,10 +70,10 @@ test("readDevToolsPort: tolerates a mid-write file (partial/garbage) then succee
   const base = io(files, clock);
   base.existsSync = () => true;
   let reads = 0;
-  base.readFileSync = () => { reads++; return reads < 3 ? "" : "51999\n/ws"; }; // empty first, then valid
+  base.readFileSync = () => { reads++; if (reads === 1) throw new Error("EBUSY: file busy mid-write"); return reads < 4 ? "" : "51999\n/ws"; }; // throw, then empty, then valid
   const r = await readDevToolsPort("/ud", base, { timeoutMs: 90_000, pollMs: 100 });
   assert.equal(r.port, 51999);
-  assert.ok(reads >= 3, "retried past the partial writes");
+  assert.ok(reads >= 4, "retried past the throw AND the partial writes");
 });
 
 function fakeChild() {
@@ -94,12 +94,19 @@ test("awaitClose: settles on 'close', not 'exit' (data between exit and close is
   assert.equal(settled, true, "settles once stdio closed");
 });
 
-test("awaitClose: a wedged stream cannot hang \u2014 drain timeout bounds it", async () => {
-  const c = fakeChild();
+test("awaitClose: a LIVE child (never exits/closes) is bounded by drainMs (review 7bdaf1e-r2 finding 2)", async () => {
+  const c = fakeChild();                                 // no exit, no close ever
   let fired = 0;
-  const fakeSt = (fn) => { fired++; fn(); return 1; };  // fire the drain timer immediately
-  const p = awaitClose(c, { drainMs: 2000, setTimeout: fakeSt, clearTimeout: () => {} });
-  c.emit("exit", 0);                                     // exit but 'close' never comes
-  await p;                                               // resolves via the drain timeout
-  assert.equal(fired, 1, "drain timeout armed and fired");
+  const fakeSt = (fn) => { fired++; fn(); return 1; };   // fire the total-bound timer immediately
+  await awaitClose(c, { drainMs: 2000, setTimeout: fakeSt, clearTimeout: () => {} });
+  assert.equal(fired, 1, "total bound armed at call and resolved without any exit/close");
+});
+
+test("awaitClose: close resolves before the bound and clears the timer", async () => {
+  const c = fakeChild();
+  let cleared = 0;
+  const p = awaitClose(c, { drainMs: 5000, setTimeout: () => 7, clearTimeout: () => { cleared++; } });
+  c.emit("close", 0);
+  await p;
+  assert.equal(cleared, 1, "the total-bound timer is cleared when close wins");
 });

@@ -55,19 +55,17 @@ export async function readDevToolsPort(userDataDir, io, { timeoutMs = 90_000, po
 /**
  * Resolve when the child's stdio is fully drained: Node guarantees stdio
  * completion at 'close', not 'exit' (review ee04a44-r2 finding 3 — the same
- * rule the reaper already codified). Awaits 'close' but no longer than
- * drainMs after 'exit' so a wedged stream cannot hang the smoke.
+ * rule the reaper already codified). TOTAL-BOUNDED by drainMs from the call
+ * (review 7bdaf1e-r2 finding 2): a still-LIVE child has no pending flush, so
+ * the caller must never block on its 'close' — the timer, armed immediately,
+ * guarantees the wait cannot exceed drainMs whether or not the child has
+ * exited. 'close' resolves earlier when it arrives.
  */
 export function awaitClose(child, { drainMs = 2000, setTimeout: st = setTimeout, clearTimeout: ct = clearTimeout } = {}) {
   return new Promise((resolve) => {
-    let done = false;
-    const finish = () => { if (!done) { done = true; resolve(); } };
-    if (child.exitCode !== null || child.signalCode !== null) {
-      const t = st(finish, drainMs);
-      child.on?.("close", () => { ct(t); finish(); });
-      return;
-    }
+    let done = false, timer = null;
+    const finish = () => { if (done) return; done = true; if (timer !== null) ct(timer); resolve(); };
+    timer = st(finish, drainMs);            // TOTAL bound, armed at call — live or exited
     child.on?.("close", finish);
-    child.on?.("exit", () => { const t = st(finish, drainMs); child.on?.("close", () => { ct(t); finish(); }); });
   });
 }
