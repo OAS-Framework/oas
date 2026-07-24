@@ -72,6 +72,18 @@ function offerTmuxMouseScrolling() {
 }
 
 // ---------- doctor ----------
+/** Doctor must diagnose, not crash: a stale activation of a retired
+ * capability fails config resolution — surface the cleanup instruction
+ * cleanly (text or JSON) instead of an uncaught stack trace. */
+function resolveForDoctor(ctx, soulName, { json } = {}) {
+  try { return resolveOasConfig(ctx, soulName); }
+  catch (e) {
+    const retiredId = Object.keys(RETIRED_CAPABILITIES).find((id) => String(e.message).includes(`"${id}"`) && String(e.message).includes("retired"));
+    if (!retiredId) throw e;
+    if (json) { console.log(JSON.stringify({ context: ctx, error: e.message, retired: [retiredId] }, null, 2)); process.exit(1); }
+    die(`${e.message}`);
+  }
+}
 function doctorComposition(ctx, soulName) {
   if (!soulName) return undefined;
   const root = findRoot(ctx);
@@ -82,7 +94,7 @@ function doctorComposition(ctx, soulName) {
 function doctorJson(dir) {
   const ctx = resolve(dir || process.cwd());
   const soulName = flag("soul");
-  const r = resolveOasConfig(ctx, soulName);
+  const r = resolveForDoctor(ctx, soulName, { json: true });
   const mans = capabilityManifests(ctx);
   const composition = doctorComposition(ctx, soulName);
   console.log(JSON.stringify({
@@ -99,6 +111,9 @@ function doctorJson(dir) {
     injects: r.injects,
     capabilities: r.capabilities.map((c) => ({ id: c.id, layer: c.layer, command: c.command, origin: c.origin, provenance: c.provenance, settings: c.settings, skills: c.skills, inject: c.inject, hooks: Object.keys(c.hooks || {}), trust: c.trust })),
     acquired: Object.fromEntries(Object.entries(mans).map(([n, m]) => [n, { layer: m.layer, command: m.command, version: m.version, dir: m._dir, origin: m._origin, description: m.description }])),
+    retiredLocks: Object.entries(readCapabilityLocks(ctx))
+      .filter(([id]) => RETIRED_CAPABILITIES[id])
+      .map(([id, lock]) => ({ id, file: lock._file, reason: RETIRED_CAPABILITIES[id] })),
     composedInstructions: composition?.text,
     instructionBlocks: composition?.blocks,
   }, null, 2));
@@ -108,7 +123,7 @@ function doctor(dir) {
   const ctx = resolve(dir || process.cwd());
   const soulName = flag("soul");
   const chain = configChain(ctx);
-  const r = resolveOasConfig(ctx, soulName);
+  const r = resolveForDoctor(ctx, soulName);
   console.log(`oas doctor — resolved from ${shortPath(ctx)}\n`);
 
   // Kernel/bridge version skew (published in lockstep from one tag).

@@ -683,6 +683,16 @@ test("retired oas.web: config, install, and lock paths all give actionable migra
   write(join(repo, "oas-config.yaml"), `capabilities:\n  additive:\n    oas.web:\n      global: true\n`);
   assert.throws(() => resolveOasConfig(repo), /oas\.web web panel was retired[\s\S]*OAS Desktop app[\s\S]*Remove the oas\.web entry/,
     "config activation explains the retirement and the fix");
+  // doctor must diagnose the stale activation cleanly (text and JSON), not crash
+  const docText = spawnSync(process.execPath, [CLI, "doctor", repo], { encoding: "utf8" });
+  assert.notEqual(docText.status, 0);
+  assert.match(docText.stderr, /retired.*OAS Desktop app.*Remove the oas\.web entry/s, "doctor (text) emits the cleanup instruction");
+  assert.doesNotMatch(docText.stderr, /at resolveCapabilities|at file:/, "doctor (text) does not dump a stack trace");
+  const docJson = spawnSync(process.execPath, [CLI, "doctor", repo, "--json"], { encoding: "utf8" });
+  assert.notEqual(docJson.status, 0);
+  const dj = JSON.parse(docJson.stdout);
+  assert.deepEqual(dj.retired, ["oas.web"], "doctor --json reports the retired id");
+  assert.match(dj.error, /Remove the oas\.web entry/, "doctor --json carries the cleanup instruction");
   // explicit install of the retired id explains instead of "not a marketplace capability"
   const inst = spawnSync(process.execPath, [CLI, "install", "oas.web", "--dir", repo], { encoding: "utf8" });
   assert.notEqual(inst.status, 0);
@@ -697,4 +707,9 @@ test("retired oas.web: config, install, and lock paths all give actionable migra
   assert.doesNotMatch(restore.stdout + restore.stderr, /FAILED\s+oas\.web/, "retired lock entry is not an opaque failure");
   const doctor = spawnSync(process.execPath, [CLI, "doctor", repo2], { encoding: "utf8" });
   assert.match(doctor.stdout, /WARNING: oas\.web is locked in .*retired.*OAS Desktop app/s, "doctor surfaces the stale lock with migration guidance");
+  const doctorJson2 = spawnSync(process.execPath, [CLI, "doctor", repo2, "--json"], { encoding: "utf8" });
+  assert.equal(doctorJson2.status, 0, "lock-only state resolves");
+  const dj2 = JSON.parse(doctorJson2.stdout);
+  assert.equal(dj2.retiredLocks?.[0]?.id, "oas.web", "doctor --json lists the stale retired lock");
+  assert.match(dj2.retiredLocks[0].reason, /Remove the oas\.web entry/, "JSON lock report carries the fix");
 });
