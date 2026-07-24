@@ -1,6 +1,8 @@
 # Knowledge Log
 
 ## 2026-07-24
+* **Creation**: [json-mode-cli-contract](/lessons/json-mode-cli-contract.md) records the stdout-envelope/stderr-progress discipline required by machine-readable CLI modes such as Desktop API v1 `oas spawn --json`.
+* **Update**: [test-conventions](/playbooks/test-conventions.md) records the real-tmux idempotence rule: unique instance slugs and cleanup for tests that launch tmux windows.
 * **Update**: AGENTS.md — stale surface-consumer reference (oas.web, the TUI) updated to the desktop app's bundled server (desktop succession). Edit authorized by dev-coordinator-1.
 
 * **Creation**: [caller-controlled-instance-name-containment](/lessons/caller-controlled-instance-name-containment.md) records the traversal fix: validate caller-supplied instance names and confirm realpath containment before using by-name instance paths.
