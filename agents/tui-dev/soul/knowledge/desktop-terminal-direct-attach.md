@@ -3,7 +3,7 @@ type: Decision
 title: Desktop terminal is a direct tmux attach via node-pty
 description: The desktop app's integrated terminal spawns node-pty running `tmux attach-session` against an isolated per-tab tmux viewer session that contains only a link-window to the exact source window and pipes bytes over IPC to xterm.js.
 tags: [desktop, tmux, node-pty, xterm, terminal, exact-match]
-timestamp: 2026-07-23
+timestamp: 2026-07-24
 ---
 
 Per the desktop-app contract (binding): tmux stays the durable session host;
@@ -11,7 +11,8 @@ the Electron terminal is a **viewer client**. Main process preflights the exact
 source session/window with [the exact-match target helper](anchor-tmux-attach-targets.md),
 creates a per-tab [isolated link-window viewer session](desktop-terminal-link-window-viewer-isolation.md)
 that contains only that exact source window, locks the viewer's prefix/root
-window-navigation keys, then spawns
+window-navigation keys while preserving scrollback through a [provisioned locked
+key table](provision-locked-key-tables.md), then spawns
 `pty.spawn("tmux", ["attach-session", "-t", "=<viewer>"])` per tab. Bytes stream
 over IPC channels (`term:data:<id>` / `term:write` / `term:resize` /
 `term:close`), and xterm.js + fit addon render in the isolated renderer.
