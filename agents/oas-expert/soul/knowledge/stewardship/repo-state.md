@@ -64,18 +64,18 @@ than letting the file grow stale.
 
 ## In flight
 
-- PR #19 (`feature/desktop-app`) at 4dd2c12 (2026-07-24): maintainer round 1
-  RETURNED. Direction is accepted; correctness/mergeability is blocked by red
-  PR CI because the root test glob includes private desktop suites while the
-  workflow installs only root dependencies (8 missing-jsdom/marked failures).
-  Coordinator is to install desktop dependencies in CI, merge current main,
-  and return the exact green head. The branch adds the private Electron app
-  under `packages/desktop/` using oas.web as an explicitly transitional
-  in-tree backend.
-- Desktop succession follow-ups being briefed: standalone installer/release
-  distribution, stability-gated oas.web + `oas pane` sunset, and migration into
-  a durable desktop-engineer soul. Binding architecture is recorded in the
-  [desktop panel succession decision](/decisions/desktop-panel-succession.md).
+- PR #19 (`feature/desktop-app`) scope expanded by direct human direction on
+  2026-07-24 after maintainer round 1 RETURN. It now owns the complete
+  pre-release succession: desktop-owned bundled backend plus immediate removal
+  of oas.web and `oas pane`/`lib/control-pane`, alongside the clean-runner CI
+  fix. Prior transitional approval is void; the substantially changed head
+  receives a fresh four-gate maintainer review. No release follows the merge
+  until desktop installer distribution and migration diagnostics are
+  operational.
+- Desktop succession work continues in the durable desktop-engineer soul;
+  relevant TUI/web-panel knowledge must migrate before the old souls retire.
+  The amended binding architecture is recorded in the [desktop panel succession
+  decision](/decisions/desktop-panel-succession.md).
 
 ## Recent deliveries
 
