@@ -293,6 +293,11 @@ test("live tmux: real wheel events through an attached pty client — installed 
   try {
     // node-pty lives in packages/desktop's node_modules — resolve from there
     ptyMod = createRequire(join(RENDERER_PKG, "package.json"))("node-pty");
+    // ABI probe: after `npm run rebuild` node-pty targets the Electron ABI
+    // and plain-node spawns fail with posix_spawnp — skip rather than fail
+    // (CI's fresh npm ci builds the node ABI and runs this test for real).
+    const probePty = ptyMod.spawn("true", [], { name: "xterm", cols: 10, rows: 5 });
+    probePty.kill();
   }
   catch { return t.skip("node-pty not available/built for this node ABI"); }
   const sock = `/tmp/oaswhl-${process.pid}.sock`;
