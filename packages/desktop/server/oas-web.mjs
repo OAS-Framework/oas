@@ -14,6 +14,9 @@
  *   POST /api/keys/<instance>       { data } → raw key bytes into the session (no Enter)
  *   POST /api/interrupt/<instance>  sends Ctrl-C (Escape for pi/claude prompts stays manual)
 
+ *   GET  /api/cli                   CLI discovery status (bin, version, required range, tried)
+ *   POST /api/cli/reprobe           re-run discovery; body { bin? } prioritizes a user-chosen binary
+ *   POST /api/harvest/<instance>    `oas okf harvest --json` with cwd fixed to the instance home
  *   GET  /api/brain/<agent>?ws=<id> agent "brain" JSON: soul (AGENTS.md, skills,
  *                                   knowledge tree) + per-instance artifacts (abs paths)
  *   GET  /api/file?path=<abs>       text file content, guarded to workspace roots + agent homes
@@ -24,7 +27,7 @@
  */
 import { createServer } from "node:http";
 import { execFile, execFileSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync, statSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync, realpathSync, accessSync, constants as fsConstants } from "node:fs";
 import { basename, dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { homedir } from "node:os";
@@ -53,6 +56,8 @@ if (sub !== "start" && sub !== "collect") {
 const reader = await import(pathToFileURL(join(HERE, "deployment.mjs")).href);
 const model = await import(pathToFileURL(join(HERE, "model.mjs")).href);
 model.initModel(reader);
+const locator = await import(pathToFileURL(join(HERE, "..", "cli-locator.mjs")).href);
+const adapter = await import(pathToFileURL(join(HERE, "..", "cli-adapter.mjs")).href);
 
 /** Workspaces in view. Each --dir registers one (repeatable); no --dir means
  * the cwd. Every context resolves to its team scope (or config scope) so the
@@ -145,13 +150,12 @@ function agentsData(wsId) {
   return { workspace: ws ? { id: ws.id, name: ws.name } : null, agents };
 }
 
-/** Spawn an instance of an available agent. Default is NO TASK — the instance
- * comes up awaiting instruction (the user talks to it through the panel).
- * Lifecycle mutations are the installed `oas` CLI's job — the app never
- * reimplements kernel spawn logic. Until the CLI adapter is wired, the
- * request VALIDATES against the read-only reader and then reports a stable
- * cli-unavailable error the UI can act on. */
-function spawnAgent({ agent, agentsRoot }) {
+/** Spawn an instance of an available agent through the discovered `oas` CLI
+ * (Desktop CLI API v1) — the app never reimplements kernel spawn logic.
+ * Default is NO TASK: the instance comes up awaiting instruction.
+ * Validation errors THROW (→ 409); domain/CLI results RESOLVE with the
+ * envelope so stable error codes reach the UI. */
+async function spawnAgent({ agent, agentsRoot, task, purpose }) {
   const name = String(agent || "");
   const root = resolve(String(agentsRoot || ""));
   // agentsRoot must be one of the workspace roots this server was started for —
@@ -161,12 +165,83 @@ function spawnAgent({ agent, agentsRoot }) {
   const def = reader.findAgent(root, name)
     || reader.findCapabilityAgent(dirname(root), root, name);
   if (!def) throw new Error(`unknown agent "${name}"`);
-  // Mutation boundary: spawning is `oas spawn --json` through the discovered
-  // CLI (desktop CLI API v1). The adapter lands with the CLI locator; a
-  // request that reaches this point without it gets the degradation error.
-  const err = new Error("spawning requires a compatible installed oas CLI — the desktop app does not bundle a kernel");
-  err.code = "cli-unavailable";
-  throw err;
+  // Mutation boundary: a compatible installed CLI is required — degradation,
+  // not a bundled kernel.
+  if (!cliState.ok) {
+    const err = new Error("spawning requires a compatible installed oas CLI — the desktop app does not bundle a kernel");
+    err.code = "cli-unavailable";
+    throw err;
+  }
+  const env = await adapter.cliSpawn(cliState.bin, {
+    agent: name,
+    workspaceDir: dirname(root),          // the workspace context owning this agents root
+    task: task ? String(task) : "",
+    purpose: purpose ? String(purpose) : undefined,
+  });
+  if (!env.ok) {
+    const err = new Error(env.error.message || "spawn failed");
+    err.code = env.error.code || "E_SPAWN_FAILED";
+    throw err;
+  }
+  const r = env.result;
+  return { instance: r.instance, agent: r.agent, home: r.home, work: r.work,
+           branch: r.branch ?? null, launched: !!r.launched, warnings: r.warnings || [],
+           tmux: r.tmux ?? null };
+}
+
+/* ── CLI discovery (Desktop CLI API v1) ──
+   The server is the privileged process that runs mutations, so it owns the
+   probe. The persisted user-chosen binary arrives from the Electron main
+   process as --oas-bin (main owns persistence in userData); re-probe runs at
+   startup, on explicit /api/cli/reprobe (app focus, Retry, choose). */
+let cliState = { ok: false, probedAt: 0, tried: [] };
+// User-chosen binary: seeded from --oas-bin (main passes the persisted pick
+// at server start) and updated by /api/cli/reprobe {bin} — top candidate on
+// every subsequent probe until replaced.
+let chosenBin = typeof flag("oas-bin") === "string" ? flag("oas-bin") : null;
+const cliIo = {
+  persisted: () => chosenBin,
+  env: process.env,
+  isExecutableFile: (p) => {
+    try { const st = statSync(p); if (!st.isFile()) return false; accessSync(p, fsConstants.X_OK); return true; }
+    catch { return false; }
+  },
+  canonicalize: (p) => realpathSync(p),
+  npmGlobalBin: () => {
+    try {
+      const prefix = execFileSync("npm", ["prefix", "-g"], { encoding: "utf8", timeout: 5000 }).trim();
+      return prefix ? join(prefix, "bin") : null;
+    } catch { return null; }
+  },
+  loginShellWhich: () => {
+    try {
+      const sh = process.env.SHELL || "/bin/sh";
+      const out = execFileSync(sh, ["-l", "-c", "command -v oas"], { encoding: "utf8", timeout: 5000 }).trim();
+      return out && out.startsWith("/") ? out : null;
+    } catch { return null; }
+  },
+};
+const probeBin = (path) => new Promise((ok, bad) => {
+  execFile(path, ["version", "--json"], { encoding: "utf8", timeout: 8000, shell: false },
+    (err, stdout) => (err && !stdout ? bad(err) : ok({ stdout })));
+});
+async function reprobeCli(chosen) {
+  if (chosen) chosenBin = chosen;
+  const r = await locator.discover(cliIo, probeBin);
+  cliState = { ...r, probedAt: Date.now() };
+  return cliState;
+}
+/** Stable diagnostics for the degradation card. */
+function cliStatus() {
+  return {
+    ok: !!cliState.ok,
+    bin: cliState.bin || null,
+    version: cliState.version || null,
+    source: cliState.source || null,
+    required: { desktopApi: locator.DESKTOP_API, range: ">=0.18.0 <0.19.0" },
+    probedAt: cliState.probedAt || null,
+    tried: cliState.tried || [],
+  };
 }
 
 /* ── Non-blocking roster snapshot ──
@@ -604,17 +679,42 @@ const server = createServer(async (req, res) => {
       const d = brainData(bm[1], url.searchParams.get("ws") || undefined);
       return d ? send(res, 200, d) : send(res, 404, { error: `unknown agent "${bm[1]}"` });
     }
+    if (req.method === "GET" && path === "/api/cli") {
+      return send(res, 200, cliStatus());
+    }
+    if (req.method === "POST" && path === "/api/cli/reprobe") {
+      // Re-probe triggers (contract): launch, app focus, explicit Retry, and
+      // after choosing a binary — main/renderer call this; body may carry a
+      // user-chosen absolute path which becomes the top-priority candidate.
+      const body = await readBody(req);
+      const chosen = typeof body.bin === "string" && body.bin.startsWith("/") ? body.bin : undefined;
+      await reprobeCli(chosen);
+      return send(res, 200, cliStatus());
+    }
     if (req.method === "POST" && path === "/api/spawn") {
       const body = await readBody(req);
       if (typeof body.agent !== "string" || !body.agent || typeof body.agentsRoot !== "string" || !body.agentsRoot)
         return send(res, 400, { error: "body needs { agent, agentsRoot }" });
-      try { return send(res, 200, { spawned: true, ...spawnAgent(body) }); }
+      try { return send(res, 200, { spawned: true, ...(await spawnAgent(body)) }); }
       catch (e) {
         // Stable code for the degradation UI: cli-unavailable means "install
         // or choose a compatible oas CLI", not "bad request".
         const status = e.code === "cli-unavailable" ? 503 : 409;
         return send(res, status, { error: String(e.message || e).slice(0, 300), ...(e.code ? { code: e.code } : {}) });
       }
+    }
+    const hm = path.match(/^\/api\/harvest\/([A-Za-z0-9._-]+)$/);
+    if (hm && req.method === "POST") {
+      // Desktop v1 mutation 2: `oas okf harvest --json`, cwd FIXED by this
+      // privileged backend to the RESOLVED instance home — the caller only
+      // names an instance; it can never steer the cwd.
+      const inst = findInstance(hm[1], url.searchParams.get("ws") || undefined);
+      if (!inst) return send(res, 404, { error: `unknown instance "${hm[1]}"` });
+      if (!cliState.ok) return send(res, 503, { error: "harvest requires a compatible installed oas CLI", code: "cli-unavailable" });
+      if (!inst.home || !existsSync(inst.home)) return send(res, 409, { error: "instance home not found on disk" });
+      const env = await adapter.cliHarvest(cliState.bin, inst.home);
+      if (!env.ok) return send(res, 502, { error: env.error.message || "harvest failed", code: env.error.code || "E_HARVEST_FAILED" });
+      return send(res, 200, env.result);
     }
     if (req.method === "GET" && path === "/api/file") {
       const r = fileData(url.searchParams.get("path") || "");
@@ -674,4 +774,9 @@ server.listen(port, "127.0.0.1", () => {
   console.log("Bound to 127.0.0.1 only. This process can type into your agent terminals — do not expose it.");
 });
 refreshSnapshot();                       // initial roster snapshot, off-thread
+reprobeCli().then((s) => {
+  console.log(s.ok
+    ? `oas-desktop server: oas CLI ${s.version} at ${s.bin} (${s.source})`
+    : `oas-desktop server: no compatible oas CLI found — reads and terminals work; Spawn/Harvest disabled (${(s.tried || []).length} candidate(s) tried)`);
+});
 setInterval(refreshSnapshot, 3000).unref(); // keep it fresh; child skipped if one is running
