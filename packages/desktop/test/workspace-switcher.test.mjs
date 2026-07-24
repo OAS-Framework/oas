@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { JSDOM } from "jsdom";
 import { workspaceChoiceLabels, createWorkspaceSwitcher } from "../renderer/workspace-switcher.mjs";
+import { createAddExecutor } from "../workspace-registry.mjs";
 
 const html = readFileSync(new URL("../renderer/index.html", import.meta.url), "utf8");
 const deferred = () => {
@@ -207,6 +208,37 @@ test("resolved add domain failure renders prose and never switches", async () =>
   assert.equal(document.getElementById("ws-dialog-status").textContent, "This server is managed outside the app.");
   assert.equal(document.activeElement, document.getElementById("ws-confirm"));
   assert.deepEqual(selected, []);
+  dom.window.close();
+});
+
+test("production add executor server-error renders reason and never switches", async () => {
+  let dirs = [B.path];
+  const executor = createAddExecutor({
+    getDirs: () => dirs,
+    commitDirs: (next) => { dirs = next; },
+    commitRecent: () => assert.fail("server-error must not commit recents"),
+    replaceServer: async () => {},
+    probeVersion: async () => { throw new Error("probe exploded"); },
+    isCompatible: () => true,
+    advertises: async () => true,
+    refreshAdvertised: async () => true,
+    delay: async () => {},
+    attempts: 1,
+  });
+  const { dom, document, selected, controller } = setup({
+    discoverSuggestions: async () => ({ stale: false, suggestions: [A] }),
+    addWorkspace: async () => executor(A, () => true),
+  });
+  controller.begin()(B, [B]);
+  await controller.openModal();
+  document.querySelector(".ws-suggestion").click();
+  document.getElementById("ws-confirm").click();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(document.getElementById("ws-dialog-status").textContent,
+    "readiness check failed: probe exploded");
+  assert.equal(document.activeElement, document.getElementById("ws-confirm"));
+  assert.deepEqual(selected, []);
+  assert.deepEqual(dirs, [B.path]);
   dom.window.close();
 });
 
