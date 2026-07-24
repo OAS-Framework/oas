@@ -111,25 +111,68 @@ if (!existsSync(app.exe)) fail(`packaged executable missing: ${app.exe}`);
 }
 
 // ---- 3. packaged app launches and the renderer reaches the shell ------------
-{
-  const port = 9500 + Math.floor(Math.random() * 400);
+// (CI-oriented phase: on operator machines run only the static phases — see
+// the soul's no-GUI-launches policy; OAS_SMOKE_SKIP_LAUNCH=1 skips this.)
+if (process.env.OAS_SMOKE_SKIP_LAUNCH === "1") {
+  ok("launch phase skipped (OAS_SMOKE_SKIP_LAUNCH=1) — CI runs it");
+} else {
+  // Transient-failure hardening (integration rehearsal saw one "renderer
+  // never exposed over CDP" on a first run — investigated, three defects):
+  //  1. the debugging port was random with NO bind verification: a stale
+  //     listener (e.g. an orphaned previous smoke) answers /json with ITS
+  //     targets, or the new app fails to bind silently → pick a VERIFIED
+  //     free port before launching;
+  //  2. a startup crash burned the whole budget as "not up yet" with
+  //     stdio ignored → fail fast on child exit and surface captured
+  //     stderr for diagnosis;
+  //  3. first-run cold starts (Gatekeeper scan of an unsigned app, cold
+  //     page cache on loaded runners) can legitimately exceed 30s → the
+  //     readiness budget is 90s, still bounded, with progress diagnostics
+  //     every 10s. NOT a blind retry: one launch, one bounded wait,
+  //     structured failure output.
+  const { createServer: createNetServer } = await import("node:net");
+  async function freePort(from) {
+    for (let p = from; p < from + 100; p++) {
+      const ok2 = await new Promise((res) => {
+        const s = createNetServer();
+        s.once("error", () => res(false));
+        s.listen(p, "127.0.0.1", () => s.close(() => res(true)));
+      });
+      if (ok2) return p;
+    }
+    fail("no free CDP port available");
+  }
+  const port = await freePort(9500 + Math.floor(Math.random() * 300));
+  const backendPort = await freePort(10000 + Math.floor(Math.random() * 1500));
   const userData = mkdtempSync(join(tmpdir(), "oas-desktop-smoke-"));
   const args = [`--remote-debugging-port=${port}`, `--user-data-dir=${userData}`,
     "--no-sandbox", "--disable-gpu", "--dir", userData /* empty workspace: picker path, no deployment needed */];
   // spawnTracked: detached process group + registered for unconditional
-  // reaping on every exit path (see leak-proofing block above).
-  const child = spawnTracked(app.exe, args, { stdio: "ignore", env: { ...process.env, OAS_DESKTOP_PORT: String(10000 + Math.floor(Math.random() * 2000)) } });
+  // reaping on every exit path (see leak-proofing block above). stderr is
+  // CAPTURED (not ignored) so a startup crash is diagnosable.
+  const child = spawnTracked(app.exe, args, { stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, OAS_DESKTOP_PORT: String(backendPort) } });
+  let childLog = "", childExit = null;
+  child.stdout?.on("data", (d) => { childLog += d; });
+  child.stderr?.on("data", (d) => { childLog += d; });
+  child.on("exit", (code, sig) => { childExit = { code, sig }; });
   try {
-    let targets = null;
-    for (let i = 0; i < 60 && !targets; i++) {
+    const LAUNCH_BUDGET_MS = 90_000;
+    const t0 = Date.now();
+    let targets = null, lastDiag = 0;
+    while (!targets && Date.now() - t0 < LAUNCH_BUDGET_MS) {
+      if (childExit) fail(`packaged app exited during startup (code=${childExit.code} sig=${childExit.sig}); output tail:\n${childLog.slice(-1500)}`);
       await new Promise((r) => setTimeout(r, 500));
       try {
         const res = await fetch(`http://127.0.0.1:${port}/json`);
         const list = await res.json();
         targets = list.find((t) => t.type === "page" && /index\.html/.test(t.url || ""));
       } catch { /* not up yet */ }
+      if (!targets && Date.now() - lastDiag > 10_000) {
+        lastDiag = Date.now();
+        console.log(`dist:smoke … waiting for CDP (${Math.round((Date.now() - t0) / 1000)}s; app alive=${!childExit})`);
+      }
     }
-    if (!targets) fail("packaged app never exposed its renderer over CDP");
+    if (!targets) fail(`packaged app never exposed its renderer over CDP within ${LAUNCH_BUDGET_MS / 1000}s (app alive=${!childExit}); output tail:\n${childLog.slice(-1500)}`);
     // Evaluate in the page: the shell booted if the nav rail rendered.
     const ws = new WebSocket(targets.webSocketDebuggerUrl);
     const result = await new Promise((resolve, reject) => {
