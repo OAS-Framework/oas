@@ -14,6 +14,36 @@
 //    the caller rebinds the port, and invalidates the advertised trust
 //    state at transition start via onInvalidate() — stale entries from the
 //    outgoing server must never validate anything.
+/**
+ * Port-committing adapter between the selection seam (ensureServerOnPort /
+ * the add executor) and the host — THE production wiring, importable so
+ * regressions exercise it rather than a reimplementation (review wsadd5:
+ * a test-local wrapper left `port = onPort` deletable without failures).
+ *
+ * The invariant it owns: the port is COMMITTED (setPort) before the child
+ * starts, so the child's --port, readiness probes, and the API proxy always
+ * agree — ensureServerOnPort selects a fresh port BEFORE the caller's
+ * module-level port is reassigned.
+ *
+ * @param {object} io
+ * @param {{ start: Function, replace: Function }} io.host   createServerHost instance
+ * @param {() => number} io.getPort
+ * @param {(p: number) => void} io.setPort
+ * @returns {{ spawnServer: (onPort: number, dirs: string[]) => any,
+ *             replaceServer: (dirs: string[]) => Promise<void> }}
+ */
+export function createServerAdapter(io) {
+  return {
+    spawnServer(onPort, dirs) {
+      io.setPort(onPort); // commit BEFORE start — probes/proxy must agree with the child
+      return io.host.start([...dirs], onPort);
+    },
+    async replaceServer(dirs) {
+      await io.host.replace([...dirs], io.getPort());
+    },
+  };
+}
+
 export function createServerHost(io) {
   // io: spawnChild(dirs, port) -> child (kill(sig?), once/on("exit", cb));
   //     onInvalidate() -> void (clear advertised/trust caches)

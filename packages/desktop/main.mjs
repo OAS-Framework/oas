@@ -18,7 +18,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { apiUrl, apiInit } from "./api-url.mjs";
 import { openTerm, sweepViewers } from "./tmux-target.mjs";
 import { ensureServerOnPort, serverCompatible } from "./server-compat.mjs";
-import { createServerHost } from "./server-host.mjs";
+import { createServerHost, createServerAdapter } from "./server-host.mjs";
 import { validateWorkspace, workspaceSuggestions, parseRecents, pushRecent, decideAdd, createGenerations, createAddExecutor } from "./workspace-registry.mjs";
 
 const require = createRequire(import.meta.url);
@@ -107,20 +107,15 @@ async function freePort(from) {
   throw new Error(`no free port in ${from}..${from + 49}`);
 }
 
-function spawnServer(onPort, dirs = workspaceDirs) {
-  // ensureServerOnPort selects the port BEFORE assigning the module-level
-  // `port` — commit it here so the child, readiness probes, and the API
-  // proxy all agree (review wsadd4: the extraction discarded onPort and the
-  // child launched against the old occupied port).
-  port = onPort;
-  return serverHost.start(workspaceDirs === dirs ? [...dirs] : dirs, onPort);
-}
-
-/** Replace the owned server — the host owns exit-await/ownership/trust
- * invariants; this wrapper binds the dirs and the CURRENT port. */
-async function replaceServer(dirs) {
-  await serverHost.replace(dirs, port);
-}
+// Port-committing adapter (server-host.mjs): the production wiring between
+// selection and the host — commits the module port before the child starts.
+const serverAdapter = createServerAdapter({
+  host: serverHost,
+  getPort: () => port,
+  setPort: (p) => { port = p; },
+});
+const spawnServer = (onPort, dirs = workspaceDirs) => serverAdapter.spawnServer(onPort, dirs);
+const replaceServer = (dirs) => serverAdapter.replaceServer(dirs);
 
 async function ensureServer() {
   // ensureServerOnPort (server-compat.mjs) is the testable seam for the

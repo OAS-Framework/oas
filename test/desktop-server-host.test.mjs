@@ -5,7 +5,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { createServerHost } from "../packages/desktop/server-host.mjs";
+import { createServerHost, createServerAdapter } from "../packages/desktop/server-host.mjs";
 
 function fakeChild() {
   const c = new EventEmitter();
@@ -86,30 +86,43 @@ test("stop() kills and clears; owned() false afterwards", () => {
   assert.ok(c.killed.length >= 1);
 });
 
-test("occupied-port branch: the freshly selected port reaches the spawned child (real composition)", async () => {
-  // review wsadd4: main.mjs's spawnServer discarded onPort after the host
-  // extraction — on the occupied/incompatible path ensureServerOnPort picks
-  // a free port and calls spawnServer(newPort) BEFORE reassigning the
-  // module-level port, so the child launched on the OLD port. Model main's
-  // exact wiring: a module-level port, a spawnServer wrapper committing
-  // onPort, composed through the REAL ensureServerOnPort + createServerHost.
+test("occupied-port branch through the PRODUCTION adapter: selected port reaches the child", async () => {
+  // review wsadd5: a test-local spawnServer wrapper pinned nothing — this
+  // composes the REAL createServerAdapter (the module main.mjs uses) with
+  // the real ensureServerOnPort and createServerHost. Deleting setPort from
+  // the adapter, or the port param from host.start, fails here.
   const { ensureServerOnPort } = await import("../packages/desktop/server-compat.mjs");
   let modulePort = 4820;
   const { state, host } = makeHost();
-  const spawnServer = (onPort) => { modulePort = onPort; return host.start(["/w/base"], onPort); };
+  const adapter = createServerAdapter({
+    host,
+    getPort: () => modulePort,
+    setPort: (p) => { modulePort = p; },
+  });
   const r = await ensureServerOnPort({
-    // occupied by an incompatible server:
     panelWorkspaces: async () => [{ id: "/w/base", name: "base" }],
     matchWorkspace: () => "/w/base",
-    probeVersion: async () => ({ ok: false, status: 404, body: null }),
+    probeVersion: async () => ({ ok: false, status: 404, body: null }), // incompatible occupant
     local: { capability: "oas.web", version: "1" },
     port: modulePort,
-    freePort: async (from) => from + 3,      // picks 4824
-    spawnServer,
+    freePort: async (from) => from + 3, // picks 4824
+    spawnServer: (p) => adapter.spawnServer(p, ["/w/base"]),
     log: () => {},
   });
   assert.equal(r.spawned, true);
   assert.equal(r.port, 4824, "selection reported the new port");
-  assert.equal(state.spawned[0].port, 4824, "child launched on the NEW port, not the occupied one");
-  assert.equal(modulePort, 4824, "module port committed before spawn — probes and proxy agree");
+  assert.equal(state.spawned[0].port, 4824, "child launched on the NEW port via the production adapter");
+  assert.equal(modulePort, 4824, "port committed before spawn — probes and proxy agree");
+});
+
+test("replacement through the PRODUCTION adapter forwards the CURRENT port", async () => {
+  let modulePort = 4820;
+  const { state, host } = makeHost();
+  const adapter = createServerAdapter({ host, getPort: () => modulePort, setPort: (p) => { modulePort = p; } });
+  adapter.spawnServer(4824, ["/w/base"]);         // startup committed 4824
+  const replacing = adapter.replaceServer(["/w/base", "/w/new"]);
+  state.spawned[0].exitNow();
+  await replacing;
+  assert.equal(state.spawned[1].port, 4824, "replacement child inherits the committed port");
+  assert.deepEqual(state.spawned[1].dirs, ["/w/base", "/w/new"]);
 });
