@@ -148,3 +148,59 @@ test("Soul roster: delayed switch refresh cannot erase a newer B spawn form", as
     if (oldWindow === undefined) delete globalThis.window; else globalThis.window = oldWindow;
   }
 });
+
+
+test("Soul roster: the periodic refresh never wipes an open spawn form's typed task text", async () => {
+  const dom = new JSDOM("<!doctype html><html><head></head><body><div id=host></div></body></html>", { url: "http://localhost" });
+  const oldDocument = globalThis.document;
+  const oldWindow = globalThis.window;
+  const oldSetInterval = globalThis.setInterval;
+  globalThis.document = dom.window.document;
+  globalThis.window = dom.window;
+  const polls = [];
+  globalThis.setInterval = (fn) => { polls.push(fn); return { fake: true }; };
+  const common = await import("../renderer/views/common.mjs");
+  const spawn = await import("../renderer/views/spawn.mjs");
+  const previousWs = common.currentWorkspace();
+  const agent = { name: "dev", agentsRoot: "/a", description: "", runtime: "pi", work: "workspace", repo: true, repoName: "r" };
+  const posts = [];
+  const ctx = {
+    api: (pathname, opts = {}) => {
+      if (opts.method === "POST") {
+        posts.push(JSON.parse(opts.body));
+        return Promise.resolve({ ok: true, status: 200, json: async () => ({ instance: "i1", launched: true }) });
+      }
+      return Promise.resolve({ ok: true, status: 200, json: async () => pathname.startsWith("/api/agents")
+        ? { agents: [agent] }
+        : { instances: [{ instance: "i1" }], workspace: { id: "w" }, workspaces: [] } });
+    },
+    openTerminal: () => {},
+  };
+  try {
+    common.setWorkspace("w");
+    spawn.mount(dom.window.document.getElementById("host"), ctx);
+    await tick(); await tick();
+    // user opens the spawn form and types a multiline task (NOT submitted yet)
+    dom.window.document.querySelector(".spawn-act").click();
+    const taskEl = dom.window.document.querySelector(".ftask");
+    taskEl.value = "important multiline\ntask text";
+    // the periodic roster poll fires while the user is still typing
+    await polls[0]();
+    await tick(); await tick();
+    assert.equal(dom.window.document.querySelector(".ftask"), taskEl,
+      "poll must not rebuild the grid under an open form (a fresh empty form silently drops the task)");
+    assert.equal(taskEl.value, "important multiline\ntask text");
+    // user submits — the typed task must reach POST /api/spawn intact
+    dom.window.document.querySelector(".fspawn").click();
+    await tick(); await tick(); await tick();
+    assert.equal(posts[0].task, "important multiline\ntask text",
+      "the spawned instance must receive the typed task, newlines included");
+  } finally {
+    spawn.unmount();
+    common.setWorkspace(previousWs);
+    globalThis.setInterval = oldSetInterval;
+    dom.window.close();
+    if (oldDocument === undefined) delete globalThis.document; else globalThis.document = oldDocument;
+    if (oldWindow === undefined) delete globalThis.window; else globalThis.window = oldWindow;
+  }
+});
