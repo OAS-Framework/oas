@@ -113,6 +113,29 @@ test("add workspace modal discovers, filters, selects and confirms a suggestion"
   dom.window.close();
 });
 
+test("filtering out the selected suggestion clears it and prevents hidden submission", async () => {
+  const C = { id: "/org-c/tools", path: "/org-c/tools", name: "tools" };
+  const mutations = [];
+  const { dom, document, controller } = setup({
+    discoverSuggestions: async () => ({ stale: false, suggestions: [A, C] }),
+    addWorkspace: async (path) => { mutations.push(path); return { ok: true, workspace: A }; },
+  });
+  controller.begin()(B, [B]);
+  await controller.openModal();
+  document.querySelector('.ws-suggestion[data-workspace-id="/org-a/oas"]').click();
+  assert.equal(document.getElementById("ws-confirm").disabled, false);
+  const search = document.getElementById("ws-suggestion-search");
+  search.value = "tools";
+  search.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+  assert.equal(document.querySelectorAll(".ws-suggestion").length, 1);
+  assert.equal(document.querySelector(".ws-suggestion").dataset.workspaceId, "/org-c/tools");
+  assert.equal(document.querySelector('.ws-suggestion[aria-checked="true"]'), null);
+  assert.equal(document.getElementById("ws-confirm").disabled, true);
+  document.getElementById("ws-confirm").dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+  assert.deepEqual(mutations, []);
+  dom.window.close();
+});
+
 test("picker success uses its completed add result and picker cancellation is silent", async () => {
   const C = { id: "/org-c/tools", path: "/org-c/tools", name: "tools", team: { name: "gamma" } };
   let pickResult = { ok: false, code: "cancelled", reason: "not rendered" };

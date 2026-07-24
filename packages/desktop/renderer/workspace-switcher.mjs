@@ -96,8 +96,13 @@ export function createWorkspaceSwitcher({
       const haystack = `${candidateName(candidate)} ${candidateId(candidate)} ${candidate.team?.name || ""} ${candidate.reason || ""}`.toLocaleLowerCase();
       return !query || haystack.includes(query);
     });
-    const selectedId = candidateId(selected);
+    let selectedId = candidateId(selected);
     const selectedIsVisible = visible.some((candidate) => candidateId(candidate) === selectedId);
+    if (selected && !selectedIsVisible) {
+      selected = null;
+      selectedId = "";
+      confirm.disabled = true;
+    }
     visible.forEach((candidate, index) => {
       const id = candidateId(candidate);
       const button = document.createElement("button");
