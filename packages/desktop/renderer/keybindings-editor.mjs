@@ -97,6 +97,15 @@ export function createKeybindingsEditor({ doc = document, isMac } = {}) {
 
     const render = () => {
       endRecording(); // a rerender invalidates any in-flight capture
+      // Preserve keyboard focus across the rebuild (review 267c551): remember
+      // which row control owned focus (keyed by action id + control kind) and
+      // restore it on the replacement node, else fall back into the dialog so
+      // Tab can never restart from <body> outside the trap.
+      const focused = doc.activeElement;
+      const hadDialogFocus = overlay.contains(focused);
+      const focusKey = hadDialogFocus && focused?.dataset?.actionId
+        ? { id: focused.dataset.actionId, kind: focused.classList.contains("kb-reset") ? "kb-reset" : "kb-chord" }
+        : null;
       body.innerHTML = "";
       const groups = groupActions();
       if (!groups.length) {
@@ -104,15 +113,24 @@ export function createKeybindingsEditor({ doc = document, isMac } = {}) {
         d.className = "kb-empty";
         d.textContent = "No actions registered.";
         body.append(d);
-        return;
+      } else {
+        for (const group of groups) {
+          const h = doc.createElement("h3");
+          h.className = "kb-context";
+          h.textContent = group.label;
+          body.append(h);
+          for (const action of group.actions) body.append(row(action));
+        }
       }
-      for (const group of groups) {
-        const h = doc.createElement("h3");
-        h.className = "kb-context";
-        h.textContent = group.label;
-        body.append(h);
-        for (const action of group.actions) body.append(row(action));
+      if (focusKey) {
+        const controls = [...body.querySelectorAll(".kb-chord, .kb-reset")];
+        const target = controls.find((el) => el.dataset.actionId === focusKey.id && el.classList.contains(focusKey.kind) && !el.hidden)
+          // a hidden per-row reset (row back at default) falls back to its chord button
+          ?? controls.find((el) => el.dataset.actionId === focusKey.id && el.classList.contains("kb-chord"));
+        if (target) { target.focus(); return; }
       }
+      // focus left the rebuilt rows (or was never keyed): keep it inside the dialog
+      if (hadDialogFocus && !overlay.contains(doc.activeElement)) overlay.querySelector(".kb-close").focus();
     };
 
     const row = (action) => {
@@ -128,10 +146,12 @@ export function createKeybindingsEditor({ doc = document, isMac } = {}) {
         <button type="button" class="kb-reset" title="Reset to default">↺</button>`;
       el.querySelector(".kb-label").textContent = action.label;
       const chordBtn = el.querySelector(".kb-chord");
+      chordBtn.dataset.actionId = action.id;
       chordBtn.textContent = chordStr ? formatChord(chordStr, isMac) : "unbound";
       chordBtn.classList.toggle("kb-unbound", !chordStr);
       chordBtn.setAttribute("aria-label", `Change shortcut for ${action.label}, currently ${chordStr ? formatChord(chordStr, isMac) : "unbound"}`);
       const resetBtn = el.querySelector(".kb-reset");
+      resetBtn.dataset.actionId = action.id;
       resetBtn.hidden = isDefault;
       resetBtn.setAttribute("aria-label", `Reset shortcut for ${action.label} to default`);
       resetBtn.addEventListener("click", () => resetBinding(action.id));

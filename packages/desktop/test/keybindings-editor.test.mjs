@@ -169,6 +169,54 @@ test("registration defaultChord displays honestly and Backspace-unbind disables 
   editor.close();
 });
 
+test("rerender keeps keyboard focus inside the modal (record/unbind/reset)", (t) => {
+  const { doc, editor } = setup(t);
+  setBinding("app.palette", "Mod+P"); // ensure the palette row has a visible reset
+  editor.open();
+  const dialog = doc.querySelector('[role="dialog"]');
+  const rowFor = (label) => [...doc.querySelectorAll(".kb-row")]
+    .find((r) => r.querySelector(".kb-label").textContent === label);
+
+  // record from a focused chord button: focus returns to the SAME row's button
+  const chordBtn = rowFor("Command palette").querySelector(".kb-chord");
+  chordBtn.focus();
+  chordBtn.click();
+  doc.dispatchEvent(key(doc, "j", { metaKey: true }));
+  assert.ok(dialog.contains(doc.activeElement), "focus stays in the dialog after recording");
+  assert.equal(doc.activeElement.dataset.actionId, "app.palette");
+  assert.ok(doc.activeElement.classList.contains("kb-chord"));
+
+  // Backspace-unbind: same containment
+  doc.activeElement.click();
+  doc.dispatchEvent(key(doc, "Backspace"));
+  assert.ok(dialog.contains(doc.activeElement), "focus stays after unbind");
+  assert.equal(doc.activeElement.dataset.actionId, "app.palette");
+
+  // per-row reset: the reset button disappears (row back at default) — focus
+  // falls back to the row's chord button, still inside the dialog
+  const resetBtn = rowFor("Command palette").querySelector(".kb-reset");
+  assert.equal(resetBtn.hidden, false);
+  resetBtn.focus();
+  resetBtn.click();
+  assert.ok(dialog.contains(doc.activeElement), "focus stays after per-row reset");
+  assert.equal(doc.activeElement.dataset.actionId, "app.palette");
+  assert.ok(doc.activeElement.classList.contains("kb-chord"), "hidden reset falls back to chord button");
+
+  // and the NEXT Tab cannot escape: it wraps within the dialog
+  const overlay = doc.querySelector(".kb-overlay");
+  const tab = key(doc, "Tab");
+  overlay.dispatchEvent(tab);
+  assert.ok(dialog.contains(doc.activeElement), "Tab after rerender remains trapped");
+
+  // reset-all from its own (non-row) button keeps focus in the dialog too
+  setBinding("tabs.close", "Mod+X");
+  const resetAll = doc.querySelector(".kb-reset-all");
+  resetAll.focus();
+  resetAll.click();
+  assert.ok(dialog.contains(doc.activeElement), "focus stays after reset-all");
+  editor.close();
+});
+
 test("Escape (outside recording) and overlay backdrop close the dialog; toggle works", (t) => {
   const { doc, editor } = setup(t);
   editor.open();
