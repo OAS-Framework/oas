@@ -809,8 +809,11 @@ test("Spawn modal: picker sends the anchor's agents root; E_RELATIVE_AMBIGUOUS s
     failNext = { error: "relation \"child\": instance name \"dev-1\" is ambiguous", code: "E_RELATIVE_AMBIGUOUS" };
     form.querySelector(".fspawn").click();
     await tick(); await tick(); await tick();
-    assert.match(form.querySelector(".fstatus").textContent, /several instances share the name "dev-1"/,
-      "ambiguity error explains the fix, not just the failure");
+    const status = form.querySelector(".fstatus").textContent;
+    assert.match(status, /instance name "dev-1" is ambiguous/,
+      "kernel message surfaces VERBATIM — case (d) inherited-edge ambiguity may name an instance the picker never sent");
+    assert.match(status, /if the ambiguous name is the anchor you picked/,
+      "picker guidance is a conditional hint, not an assumption about which name is ambiguous");
   } finally {
     spawn.unmount();
     common.setWorkspace(previousWs);

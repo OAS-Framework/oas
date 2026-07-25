@@ -584,10 +584,14 @@ export async function doSpawn(s, ui) {
   } catch (e) {
     if (owns()) {
       ui.status.classList?.add("err");
-      // Ambiguous anchor (kernel E_RELATIVE_AMBIGUOUS): same-named instances
-      // across roots — tell the user how to resolve, not just that it failed.
+      // Ambiguous relation identity (kernel E_RELATIVE_AMBIGUOUS). NOT always
+      // the picked anchor: sibling/parent relations copy bare-name edges from
+      // the anchor's instance.json, and an INHERITED edge can be the
+      // ambiguous one (contract case d). The kernel message names the
+      // conflicting instance and homes — surface it verbatim, and add the
+      // picker guidance only as a hint for the direct-anchor case.
       ui.status.textContent = e.code === "E_RELATIVE_AMBIGUOUS"
-        ? `Spawn failed: several instances share the name "${relativeTo}" — pick the entry showing its workspace tag so the spawn targets the right one.`
+        ? `Spawn failed: ${e.message} — if the ambiguous name is the anchor you picked, choose the entry showing its workspace tag.`
         : `Spawn failed: ${e.message || e}`;
     }
   } finally {
