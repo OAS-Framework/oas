@@ -154,7 +154,9 @@ test("Soul roster: delayed switch refresh cannot erase a newer B spawn form", as
     releaseBSpawn({ instance: "inst-B", launched: true });
     spawned = true;            // panel snapshot now includes the new instance
     await tick(); await tick(); await tick();
-    assert.deepEqual(opened, ["inst-B"]);
+    // openTerminal receives the COMPOSITE ref (name + selected root; the
+    // spawn result had no home here) — merged-state review @7dd1e7b
+    assert.deepEqual(opened, [{ instance: "inst-B", agentsRoot: "/wsB-soul/agents" }]);
   } finally {
     spawn.unmount();
     common.setWorkspace(previousWs);
@@ -892,4 +894,45 @@ test("Spawn modal picker: hostile paths stay inert; colliding root tags render d
     if (oldDocument === undefined) delete globalThis.document; else globalThis.document = oldDocument;
     if (oldWindow === undefined) delete globalThis.window; else globalThis.window = oldWindow;
   }
+});
+
+test("spawn: post-spawn poll and terminal open use COMPOSITE identity — a same-named twin never satisfies the wait (merged-state review @7dd1e7b)", async () => {
+  const spawn = await import("../renderer/views/spawn.mjs");
+  // twin with the SAME NAME but a different home is already in the panel;
+  // a bare-name match would return true on the first poll and the follow-up
+  // open would then refuse the ambiguous name
+  const twin = { instance: "dev-1", home: "/ws/local-agents/dev/instances/dev-1", agentsRoot: "/ws/local-agents" };
+  const mine = { instance: "dev-1", home: "/ws/agents/dev/instances/dev-1", agentsRoot: "/ws/agents" };
+  let polls = 0;
+  const panels = [
+    { instances: [twin] },           // roster lag: only the twin yet
+    { instances: [twin, mine] },     // catch-up: the spawned instance appears
+  ];
+  const s = { ctx: { api: () => { const p = panels[Math.min(polls++, 1)]; return Promise.resolve({ ok: true, status: 200, json: async () => p }); } } };
+  const ref = { instance: "dev-1", home: mine.home, agentsRoot: mine.agentsRoot };
+  const ok = await spawn.waitForInstanceInPanel(s, ref, () => true, { tries: 5, delayMs: 0, sleep: async () => {} });
+  assert.equal(ok, true, "wait succeeds once the composite identity appears");
+  assert.equal(polls, 2, "the twin alone did NOT satisfy the first poll — bare-name early success is the bug");
+  // legacy panels without home/agentsRoot fields still match by name
+  let polls2 = 0;
+  const s2 = { ctx: { api: () => { polls2++; return Promise.resolve({ ok: true, status: 200, json: async () => ({ instances: [{ instance: "dev-1" }] }) }); } } };
+  assert.equal(await spawn.waitForInstanceInPanel(s2, ref, () => true, { tries: 2, delayMs: 0, sleep: async () => {} }), true,
+    "identity-less roster rows keep matching by name (no regression for old servers)");
+  assert.equal(polls2, 1);
+});
+
+test("common: instanceApiPath carries the home qualifier for object refs (merged-state review @7dd1e7b)", async () => {
+  const common = await import("../renderer/views/common.mjs");
+  const prev = common.currentWorkspace();
+  try {
+    common.setWorkspace("w1");
+    // object ref → exact-home qualified (server refuses ambiguous bare names)
+    const p = common.instanceApiPath("keys", { instance: "dev-1", home: "/ws/agents/dev/instances/dev-1" });
+    assert.equal(p, `/api/keys/dev-1?home=${encodeURIComponent("/ws/agents/dev/instances/dev-1")}&ws=w1`);
+    // extra query composes with the qualifier
+    const p2 = common.instanceApiPath("session", { instance: "dev-1", home: "/h" }, "lines=200");
+    assert.equal(p2, `/api/session/dev-1?lines=200&home=${encodeURIComponent("/h")}&ws=w1`);
+    // legacy string ref unchanged
+    assert.equal(common.instanceApiPath("chat", "solo"), "/api/chat/solo?ws=w1");
+  } finally { common.setWorkspace(prev); }
 });

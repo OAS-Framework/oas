@@ -216,7 +216,8 @@ test("ws generation: a spawn begun in workspace A completing after a switch to B
     const p2 = doSpawn(s);
     release();
     await p2;
-    assert.deepEqual(opened, ["dev-1"]);
+    assert.deepEqual(opened, [{ instance: "dev-1", agentsRoot: "/a" }],
+      "open carries the composite ref (@7dd1e7b)");
   } finally {
     common.setWorkspace(prevWs);
   }
@@ -260,7 +261,7 @@ test("spawn op token: a stale workspace-A spawn completing during an in-flight B
     assert.equal(fields.ftask.value, "");
     assert.match(fields.fstatus.textContent, /Spawned inst-B/);
     assert.equal(fields.fspawn.disabled, false);
-    assert.deepEqual(opened, ["inst-B"]);
+    assert.deepEqual(opened, [{ instance: "inst-B", agentsRoot: "/b" }]);
   } finally {
     common.setWorkspace(prevWs);
   }
@@ -314,7 +315,7 @@ test("stale snapshot: spawn waits for the instance to appear in /api/panel befor
     common.setWorkspace("wsA");
     await doSpawn(s);
     assert.equal(panelCalls, 3, "must poll until the snapshot includes the new instance");
-    assert.deepEqual(opened, ["dev-new"], "auto-open fires only after the roster knows the instance");
+    assert.deepEqual(opened, [{ instance: "dev-new", agentsRoot: "/a" }], "auto-open fires only after the roster knows the instance");
   } finally {
     common.setWorkspace(prevWs);
   }

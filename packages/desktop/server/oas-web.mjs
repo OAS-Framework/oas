@@ -348,16 +348,32 @@ function snapshotPanel(wsId) {
   return id ? snapshot.byWs.get(id) : null;
 }
 /* OASWEB_FINDINST_BEGIN — workspace-scoped instance lookup, extracted by tests */
-function findInstance(name, wsId) {
+function findInstance(name, wsId, home) {
   if (!snapshot.byWs.size) snapshot = { at: Date.now(), byWs: collectNow() }; // cold start, once
   // With a ws scope, resolve ONLY in that workspace — same-named instances
   // exist across workspaces and "first match anywhere" picks the wrong one.
-  if (wsId) return snapshot.byWs.get(wsId)?.instances.find((i) => i.instance === name);
-  for (const d of snapshot.byWs.values()) {
-    const hit = d.instances.find((i) => i.instance === name);
-    if (hit) return hit;
-  }
-  return undefined;
+  // Same-named instances also exist across roots WITHIN one workspace, so
+  // "first match in the workspace" is equally wrong for a privileged route:
+  // an exact `home` qualifier resolves precisely; a bare name that matches
+  // MORE THAN ONE instance in scope returns the AMBIGUOUS sentinel and the
+  // route must refuse rather than act on an arbitrary pick (merged-state
+  // review @7dd1e7b).
+  const scope = wsId
+    ? (snapshot.byWs.get(wsId)?.instances || [])
+    : [...snapshot.byWs.values()].flatMap((d) => d.instances);
+  if (home) return scope.find((i) => i.instance === name && i.home === home);
+  const hits = scope.filter((i) => i.instance === name);
+  if (hits.length > 1) return findInstance.AMBIGUOUS;
+  return hits[0];
+}
+findInstance.AMBIGUOUS = Symbol("ambiguous-instance");
+/** Route helper: resolve or produce the 404/409 payload for send(). */
+function resolveInstanceOr(name, wsId, home) {
+  const inst = findInstance(name, wsId, home);
+  if (inst === findInstance.AMBIGUOUS)
+    return { error: { status: 409, body: { error: `instance name "${name}" is ambiguous in this workspace — pass the exact home qualifier`, code: "E_INSTANCE_AMBIGUOUS" } } };
+  if (!inst) return { error: { status: 404, body: { error: `unknown instance "${name}"` } } };
+  return { inst };
 }
 /* OASWEB_FINDINST_END */
 
@@ -655,7 +671,9 @@ function brainData(agentName, wsId) {
     // workspace — unscoped lookup let a same-named instance running in another
     // workspace mark this (possibly stopped) one as running (merged-state
     // review @f889619) and offer a terminal that can't resolve locally.
-    const live = findInstance(name, ws?.id);
+    // The HOME qualifier pins the exact instance — a same-named twin in
+    // another root of THIS workspace must not answer either (@7dd1e7b).
+    const live = findInstance(name, ws?.id, home);
     const notesDir = join(home, "notes");
     instances.push({
       instance: name, home, running: live ? !!live.running : false,
@@ -837,8 +855,9 @@ const server = createServer(async (req, res) => {
       // Desktop v1 mutation 2: `oas okf harvest --json`, cwd FIXED by this
       // privileged backend to the RESOLVED instance home — the caller only
       // names an instance; it can never steer the cwd.
-      const inst = findInstance(hm[1], url.searchParams.get("ws") || undefined);
-      if (!inst) return send(res, 404, { error: `unknown instance "${hm[1]}"` });
+      const r = resolveInstanceOr(hm[1], url.searchParams.get("ws") || undefined, url.searchParams.get("home") || undefined);
+      if (r.error) return send(res, r.error.status, r.error.body);
+      const inst = r.inst;
       if (!cliState.ok) return send(res, 503, { error: "harvest requires a compatible installed oas CLI", code: "cli-unavailable" });
       // SECURITY (review 53a20c7): the roster derives home from the
       // enumerated DIRECTORY (deployment.mjs never lets instance.json
@@ -858,8 +877,9 @@ const server = createServer(async (req, res) => {
     }
     const m = path.match(/^\/api\/(session|keys|interrupt|chat)\/([A-Za-z0-9._-]+)$/);
     if (m) {
-      const inst = findInstance(m[2], url.searchParams.get("ws") || undefined);
-      if (!inst) return send(res, 404, { error: `unknown instance "${m[2]}"` });
+      const r = resolveInstanceOr(m[2], url.searchParams.get("ws") || undefined, url.searchParams.get("home") || undefined);
+      if (r.error) return send(res, r.error.status, r.error.body);
+      const inst = r.inst;
       if (m[1] === "session" && req.method === "GET") {
         if (!inst.running) return send(res, 200, { running: false, text: "" });
         const info = paneInfo(inst);
