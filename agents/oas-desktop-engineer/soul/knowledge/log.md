@@ -1,6 +1,8 @@
 # Knowledge Log
 
 ## 2026-07-25
+* **Creation**: promoted [Real keybindings engine integration keeps defaults engine-owned](/lessons/real-keybindings-engine-integration.md) from the oas-desktop-engineer-keybindings-wiring notes.
+* **Update**: marked [keybindings wiring used a transitional stub engine with a frozen coordinator contract](/decisions/keybindings-stub-coordinator-contract.md) as historical after the real-engine integration and linked [the terminal allowlist lesson](/lessons/keybindings-terminal-allowlist-by-action-id.md) to the integration lesson.
 * **Creation**: promoted [keybindings wiring uses a transitional stub engine with a frozen coordinator contract](/decisions/keybindings-stub-coordinator-contract.md) from the oas-desktop-engineer-keybindings-wiring notes.
 * **Update**: merged the shell-nav palette command source-shape note into [Shell nav reachability needs an importable manifest](/lessons/shell-nav-reachability-manifest.md): `test/shell-nav.test.mjs` follows the `NAV.map(...)` palette command shape and should be updated with palette row changes while keeping stage actions NAV-derived.
 * **Creation**: promoted [Dialog chord recorders need a hoisted teardown reachable from close and rerender](/lessons/dialog-recorder-teardown-and-override-sanitization.md) from the oas-desktop-engineer-keybindings-core notes.
