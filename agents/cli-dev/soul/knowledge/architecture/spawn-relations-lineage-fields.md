@@ -1,0 +1,43 @@
+---
+type: Concept
+title: Spawn relations map to sparse lineage fields
+description: oas spawn relations use parentInstance for ordinary child and non-root sibling cases, siblingInstance only for root-sibling edges, and parent relation re-points the anchor through a slot-inheriting new parent.
+tags: [spawn, lineage, relations, kernel, cli]
+timestamp: 2026-07-25
+---
+
+# Shape
+
+`oas spawn --relation child|sibling|parent|unrelated --relative-to <instance>`
+records only the lineage fields that consumers need. `--parent <instance>` is
+sugar for the child relation.
+
+- **Child** records the anchor as `parentInstance` on the new instance.
+- **Sibling** does not add a new tree shape when the anchor already has a
+  parent: the new instance shares the anchor's `parentInstance`. When the
+  anchor is a root, the new instance records `siblingInstance: <anchor>` so the
+  root-level cluster stays connected without mutating the anchor. Hierarchy
+  consumers treat connected components over `parentInstance` and
+  `siblingInstance` edges as sibling clusters.
+- **Parent** is the only relation that mutates another instance's metadata: the
+  anchor's `instance.json` is re-pointed to `parentInstance = <new instance>`.
+  The new parent inherits the anchor's old `parentInstance` and `siblingInstance`
+  so it takes the anchor's previous slot in the tree. Delete the anchor's old
+  `siblingInstance`; the new parent carries that cluster edge and duplicate
+  edges confuse traversal.
+- **Unrelated** is normalized away before recording. Absent lineage fields mean
+  unrelated; consumers should never see `relation: "unrelated"` as stored
+  metadata.
+
+# Validation boundary
+
+Relation validation intentionally happens in both surfaces: the CLI returns
+stable pre-scaffold errors such as `E_BAD_ARGS` or `E_RELATIVE_NOT_FOUND`, while
+the kernel still throws for programmatic callers. Sibling and parent relations
+must read the anchor's `instance.json`; fail before scaffolding if it is missing
+or unreadable.
+
+This extends the explicit-lineage rule in
+[spawn-lineage-explicit-only](/decisions/spawn-lineage-explicit-only.md): the
+caller chooses the relation, but the recorded metadata stays sparse and local to
+the affected instances.

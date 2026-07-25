@@ -3,7 +3,7 @@ type: Playbook
 title: Test conventions in test/capabilities.test.mjs
 description: Kernel and CLI tests run node:test against temp directories with fixture souls, fake runtime binaries on PATH, and spawnSync of bin/oas.mjs for CLI behavior — follow these helpers instead of inventing new scaffolding.
 tags: [testing, conventions, fixtures, cli, tmux]
-timestamp: 2026-07-24
+timestamp: 2026-07-25
 ---
 
 # The house style
@@ -32,6 +32,13 @@ All kernel/CLI behavior tests live in `test/capabilities.test.mjs`
 
 # Gotchas
 
+- In `--json` CLI tests, spawn validation failures are stdout envelopes
+  (`{ ok: false, error: { ... } }`), not stderr text. Parse stdout for stable
+  error codes; reserve stderr assertions for non-JSON `die()` paths and JSON
+  mode progress notes.
+- A clean checkout needs dependencies installed in both the repo root and
+  `packages/desktop`; otherwise desktop tests can fail with missing transitive
+  ESM packages such as `marked` before the kernel/CLI change under test runs.
 - Config-chain discovery needs an `oas-config.yaml` at the level — a lock or
   installed store alone is invisible (see the init-acquisition lesson).
 - Capability fixture packages under `.agents/capabilities/` are discovered only

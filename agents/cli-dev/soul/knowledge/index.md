@@ -19,6 +19,7 @@ read what the current task needs, not everything.
 * [architecture/kernel-and-cli-shape.md](architecture/kernel-and-cli-shape.md) - the kernel/CLI split, agents-root layout, and the dependency-free YAML subset.
 * [architecture/config-cascade-closest-wins.md](architecture/config-cascade-closest-wins.md) - how resolveOasConfig walks the config chain with closest-declaration-wins semantics, and its validation gotchas.
 * [architecture/work-modes-and-workspace-mode.md](architecture/work-modes-and-workspace-mode.md) - the four work modes, packaged briefings as the contract, and workspace mode's boundary requirement and no-branch semantics.
+* [architecture/spawn-relations-lineage-fields.md](architecture/spawn-relations-lineage-fields.md) - oas spawn relations use parentInstance for ordinary child and non-root sibling cases, siblingInstance only for root-sibling edges, and parent relation re-points the anchor through a slot-inheriting new parent.
 * [architecture/capability-defined-agents.md](architecture/capability-defined-agents.md) - manifest `agents:` souls resolving on declaration, and the _dir/_soulDir split for instance homing.
 * [architecture/model-preference-lists.md](architecture/model-preference-lists.md) - comma-separated model preferences probed via `pi --list-models` with first-entry fallback.
 
