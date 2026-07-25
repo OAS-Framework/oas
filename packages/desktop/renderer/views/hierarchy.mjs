@@ -530,7 +530,7 @@ function onKey(s, e) {
   if (!list.length) return;
   if (e.key === "Escape") { s.sel = null; paintSelection(s); closePop(s); return; }
   if (e.key === "Enter" && s.sel) { e.preventDefault(); s.ctx.openTerminal(s.sel); return; }
-  const hit = resolveViewKey(e, s.viewActions, { context: "stage:hierarchy" });
+  const hit = resolveViewKey(e, s.viewActions);
   if (hit) {
     e.preventDefault();
     s.viewActions.find((a) => a.id === hit)?.run();

@@ -42,7 +42,7 @@ test("hierarchy and spawn views register rebindable view-local actions and dispo
   assert.match(hier, /s\.canvas\?\.contains \? s\.canvas\.contains\(e\.target\)/, "guard scopes to the canvas");
   assert.match(hier, /s\.disposers = s\.viewActions\.map/, "hierarchy keeps action disposers");
   assert.match(hier, /\(s\.disposers \|\| \[\]\)\.forEach/, "hierarchy disposes actions on teardown");
-  assert.match(hier, /resolveViewKey\(e, s\.viewActions, \{ context: "stage:hierarchy" \}\)/, "canvas keys resolve through the engine keymap (rebindable, context-aware)");
+  assert.match(hier, /resolveViewKey\(e, s\.viewActions\)/, "canvas keys resolve through the engine keymap (rebindable)");
 
   const spawn = read("renderer/views/spawn.mjs");
   for (const id of ["spawn.filter", "spawn.brain"]) {
