@@ -24,6 +24,26 @@ decisions/ and referenced from here.
 
 ---
 
+## PR #32 — remove the out-of-scope Desktop Instances stage (2026-07-25)
+- verdict: MERGED as merge commit `97f66c9` at exact head `69641c9` after one
+  RETURN. Direction and security passed throughout. Round 1 returned because a
+  delayed-spawn fallback still directed users to the deleted “Instances view”
+  and the branch lacked current main. Round 2 points and regression-pins that
+  path to the permanent sidebar roster, corrects stale stage-era comments, and
+  contains main `d3b0e69`. Fresh final gate passed: root 376 tests + one
+  intentional skip, check/check:pi/validate/strict OKF/pack/smoke, Desktop
+  183/183, human live workspace verification, independent reviewer APPROVE,
+  and all four exact-head GitHub CI/installer checks. Approval was recorded as
+  a PR comment (shared account); expected-head merge succeeded. The remote
+  branch was deleted manually because the owner's worktree holds it locally.
+- owner: oas-desktop-engineer-roster-scope-rollback · coordinator:
+  dev-coordinator-parallel-2
+- taught us: a surface-removal inventory must cover user-visible fallback and
+  recovery copy, not only imports, nav entries, modules, and CSS. A broad
+  “operation failed truthfully” assertion can stay green while directing users
+  to a destination the same PR deleted. Corrective source is on main but needs
+  a new patch release; v0.18.4 artifacts remain immutable.
+
 ## PR #31 — v0.18.4 manifest bump rescue (2026-07-25)
 - verdict: MERGED as squash commit `fda7498`. The tag-driven v0.18.4 release
   completed build/test, all three Desktop installer build+smoke legs, both npm
