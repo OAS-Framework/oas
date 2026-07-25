@@ -1206,6 +1206,23 @@ test("retire splices lineage: orphans inherit the retiree's links (parent-relati
     })();
     void rev4;
     assert.equal(metaOf(solo.instance).parentInstance, undefined, "anchor NOT re-pointed by the failed launch");
+    // Anchor-write failure AFTER successful scaffold/launch is COMPENSATED:
+    // make the anchor's instance.json unwritable, spawn a parent relation, and
+    // assert the spawn throws AND the new home is rolled back (no zombie).
+    const soloMetaPath = join(root, "dev", "instances", solo.instance, "instance.json");
+    execFileSync("chmod", ["444", soloMetaPath]);
+    execFileSync("chmod", ["555", dirname(soloMetaPath)]);
+    try {
+      assert.throws(
+        () => spawnInstance(root, agentDef, { instance: "dev-rev5", relation: "parent", relativeTo: solo.instance, launch: false }),
+        /failed to re-point anchor.*rolled back/s,
+        "anchor-write failure is compensated");
+    } finally {
+      execFileSync("chmod", ["755", dirname(soloMetaPath)]);
+      execFileSync("chmod", ["644", soloMetaPath]);
+    }
+    assert.equal(existsSync(join(root, "dev", "instances", "dev-rev5")), false, "rolled-back spawn leaves no home");
+    assert.equal(metaOf(solo.instance).parentInstance, undefined, "anchor unchanged after compensated failure");
     const peer = spawnInstance(root, agentDef, { instance: "dev-peer", relation: "sibling", relativeTo: solo.instance, launch: false });
     assert.equal(metaOf(peer.instance).siblingInstance, solo.instance);
     // Mixed edge types: reviewer R as parent over root-sibling peer absorbs
