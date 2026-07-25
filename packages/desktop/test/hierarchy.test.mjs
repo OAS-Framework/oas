@@ -231,6 +231,13 @@ test("cluster cards are anonymous: header carries counts only, never the derived
     assert.ok(head, "cluster card has a header");
     assert.equal(head.textContent, "1/2 running", "counts only — no cluster name");
     assert.ok(!head.textContent.includes("named-root"), "derived name never shown");
+    const card = el.querySelector(".hier-cluster");
+    assert.equal(card.getAttribute("aria-label"), "Cluster of 2 agents, 1 running",
+      "aria-label is counts-only — accessibility surfaces are part of the anonymity contract");
+    assert.ok(!card.getAttribute("aria-label").includes("named-root"), "derived name never spoken");
+    const soloCard = el.querySelector(".hier-solo");
+    assert.equal(soloCard.getAttribute("aria-label"), "Independent agents: 1",
+      "Independent is an allowed category label, not a cluster name");
     const soloHead = el.querySelector(".hier-solo .hier-chead");
     assert.ok(soloHead.textContent.startsWith("Independent"), "strip keeps its category label");
     un();
