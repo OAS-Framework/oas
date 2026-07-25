@@ -1003,6 +1003,41 @@ test("spawn relations: child/sibling/parent/unrelated, sugar equivalence, valida
   } finally { process.env.PATH = oldPath; }
 });
 
+test("retire splices lineage: orphans inherit the retiree's links (parent-relation reviewer cycle)", () => {
+  const base = temp(); const repo = join(base, "repo"); gitRepo(repo);
+  const root = join(repo, "agents");
+  write(join(root, "dev", "soul", "soul.yaml"), `name: dev\nkind: persistent\nrepo: ${repo}\nwork: checkout\nruntime: pi\n`);
+  write(join(root, "dev", "soul", "AGENTS.md"), "# dev\n");
+  mkdirSync(join(root, "dev", "instances"), { recursive: true });
+  const oldPath = process.env.PATH;
+  process.env.PATH = fakeRuntimes(base);
+  const metaOf = (name) => JSON.parse(readFileSync(join(root, "dev", "instances", name, "instance.json"), "utf8"));
+  try {
+    const agentDef = findAgent(root, "dev");
+    // coordinator → developer (child) → reviewer (parent relation over the developer).
+    const coord = spawnInstance(root, agentDef, { instance: "dev-coord", launch: false });
+    const developer = spawnInstance(root, agentDef, { instance: "dev-worker", relation: "child", relativeTo: coord.instance, launch: false });
+    const reviewer = spawnInstance(root, agentDef, { instance: "dev-rev", relation: "parent", relativeTo: developer.instance, launch: false });
+    assert.equal(reviewer.parentInstance, coord.instance, "reviewer takes the developer's slot under the coordinator");
+    assert.equal(metaOf(developer.instance).parentInstance, reviewer.instance);
+    // Reviewer retires → the developer returns to the coordinator (no dangling parent).
+    const r = retireInstance(root, reviewer.instance, { keepDir: false });
+    assert.ok(r.relinked?.some((x) => x.instance === developer.instance && x.parentInstance === coord.instance), "retire reports the splice");
+    assert.equal(metaOf(developer.instance).parentInstance, coord.instance, "developer re-pointed to its previous parent");
+    // Root-parent case: reviewer over a ROOT instance → on retire the root becomes a root again.
+    const solo = spawnInstance(root, agentDef, { instance: "dev-solo", launch: false });
+    const rev2 = spawnInstance(root, agentDef, { instance: "dev-rev2", relation: "parent", relativeTo: solo.instance, launch: false });
+    assert.equal(metaOf(solo.instance).parentInstance, rev2.instance);
+    retireInstance(root, rev2.instance, { keepDir: false });
+    assert.equal(metaOf(solo.instance).parentInstance, undefined, "root anchor is a root again after its reviewer retires");
+    // Sibling-link splice: root sibling link to a retiring instance is dropped.
+    const peer = spawnInstance(root, agentDef, { instance: "dev-peer", relation: "sibling", relativeTo: solo.instance, launch: false });
+    assert.equal(metaOf(peer.instance).siblingInstance, solo.instance);
+    retireInstance(root, solo.instance, { keepDir: false });
+    assert.equal(metaOf(peer.instance).siblingInstance, undefined, "dangling sibling link dropped on retire");
+  } finally { process.env.PATH = oldPath; }
+});
+
 test("lineage is deployment-local: --parent from an unrelated deployment is rejected", () => {
   const base = temp();
   // Deployment A: the caller's instance lives here.

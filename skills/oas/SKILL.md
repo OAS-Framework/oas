@@ -65,7 +65,8 @@ viewed as clusters of related agents, and the relation is how clusters form:
 - **parent** (`--relation parent --relative-to <you>`) — the new instance
   oversees YOU: your recorded lineage is re-pointed so it becomes your parent.
   Example: spawning a maintainer/reviewer of your own work — the reviewer sits
-  above you.
+  above you. When it later retires, lineage is spliced automatically: you
+  return to your previous parent (or top-level).
 - **sibling** (`--relation sibling --relative-to <you>`) — a peer at your
   level, in your cluster. Example: enlisting a peer coordinator in another
   repo, or an architecture coordinator helping you.

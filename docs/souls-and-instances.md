@@ -124,7 +124,10 @@ sugar for `--relative-to <instance> --relation child`):
 - **parent** — the NEW instance becomes the anchor's parent: it inherits the
   anchor's old lineage slot, and the anchor's `instance.json` is re-pointed so
   its `parentInstance` is the new instance (a reviewer/maintainer of your work
-  sits above you).
+  sits above you). Retirement splices lineage: when any instance retires,
+  instances pointing at it (parent or sibling links) inherit ITS links — so a
+  retired parent-relation reviewer hands its children back to the parent it
+  displaced, and no instance is left pointing at a missing one.
 - **sibling** — a peer in the anchor's cluster: it shares the anchor's parent
   when one exists; when the anchor is a root, the new instance records an
   explicit `siblingInstance` link so the cluster is still derivable from
