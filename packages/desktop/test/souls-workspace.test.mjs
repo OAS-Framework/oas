@@ -569,10 +569,11 @@ test("Spawn modal tracks CLI capability LIVE: relations flip disables/enables co
   await seed(true);
   const previousWs = common.currentWorkspace();
   const agent = { name: "dev", agentsRoot: "/a", description: "", runtime: "pi", work: "workspace", repo: true, repoName: "r" };
+  const posts = [];
   const ctx = {
     api: (pathname, opts = {}) => {
       if (pathname === "/api/cli" || pathname === "/api/cli/reprobe") return Promise.resolve({ ok: true, status: 200, json: async () => status(true) });
-      if (opts.method === "POST") return Promise.resolve({ ok: true, status: 200, json: async () => ({ instance: "x" }) });
+      if (opts.method === "POST") { posts.push(JSON.parse(opts.body)); return Promise.resolve({ ok: true, status: 200, json: async () => ({ instance: "x" }) }); }
       return Promise.resolve({ ok: true, status: 200, json: async () => pathname.startsWith("/api/agents")
         ? { agents: [agent] }
         : { instances: [{ instance: "coord-1", running: true }], workspace: { id: "w" }, workspaces: [] } });
@@ -602,12 +603,27 @@ test("Spawn modal tracks CLI capability LIVE: relations flip disables/enables co
     assert.match(note.textContent, /oas >= 0\.18\.3/, "note names the required version");
     assert.equal(doc.querySelector(".ftask").value, "typed task text", "typed fields survive the resync");
     assert.equal(rel.value, "child", "chosen relation value preserved (visible, disabled)");
+    // submitting the RETAINED related spawn on the downgraded CLI must fail
+    // IN THE FORM — no POST, fields preserved (review f35c1dc)
+    doc.querySelector(".fspawn").click();
+    await tick(); await tick();
+    assert.equal(posts.length, 0, "no POST dispatched for a related spawn on a relations-incapable CLI");
+    assert.match(doc.querySelector(".fstatus").textContent, /cannot spawn related instances/,
+      "form explains the failure and the way out");
+    assert.equal(doc.querySelector(".ftask").value, "typed task text", "typed task still preserved after the blocked submit");
+    assert.equal(rel.value, "child", "relation choice still preserved");
     // UPGRADE flips it back: controls re-enable, note clears, values intact
     await seed(true);
     assert.equal(rel.disabled, false, "upgrade re-enables the selector");
     assert.equal(ref.disabled, false, "picker re-enables (a real relation is selected)");
     assert.equal(doc.querySelector(".frelnote").hidden, true, "note clears");
     assert.equal(ref.value, "coord-1", "picked reference preserved");
+    // after the upgrade the same retained values DO dispatch
+    doc.querySelector(".fspawn").click();
+    await tick(); await tick(); await tick();
+    assert.equal(posts.length, 1, "upgrade lets the preserved related spawn through");
+    assert.equal(posts[0].relation, "child");
+    assert.equal(posts[0].relativeTo, "coord-1");
   } finally {
     spawn.unmount();
     await seedCliAvailable(); // restore shared CLI state for later suites

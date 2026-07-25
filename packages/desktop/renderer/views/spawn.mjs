@@ -451,6 +451,18 @@ export async function doSpawn(s, ui) {
     ui.status.textContent = `Spawn failed: the "${relation}" relation needs a reference instance.`;
     return;
   }
+  // Submit-time capability guard (review f35c1dc): a downgrade while the
+  // modal was open disables the relation CONTROLS but preserves their
+  // values — doSpawn reads them programmatically, so without this check the
+  // retained related spawn would dispatch and bounce off the server's
+  // cli-no-relations rejection. Fail in the form, keep every field: the
+  // user can switch the relation to "unrelated" to spawn with the old CLI,
+  // or upgrade and submit unchanged.
+  if (relation !== "unrelated" && !cliRelationsAvailable()) {
+    ui.status.classList?.add("err");
+    ui.status.textContent = `Spawn failed: the installed oas CLI cannot spawn related instances — set the relation to "unrelated" or upgrade the CLI.`;
+    return;
+  }
   ui.btn.disabled = true; ui.btn.textContent = "Spawning…";
   ui.status.classList?.remove("err"); ui.status.textContent = "";
   try {
