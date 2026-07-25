@@ -361,9 +361,14 @@ function openSpawnModal(s, a) {
     ref.setAttribute("aria-label", related
       ? `${rel.value[0].toUpperCase()}${rel.value.slice(1)} of which instance?` : "Which instance");
     const phrase = { child: "child of", sibling: "sibling of", parent: "parent of" };
-    desc.textContent = related && ref.value
-      ? `This instance will spawn as a ${phrase[rel.value]} ${ref.value}.`
-      : related ? `Pick the instance this one is a ${phrase[rel.value]}.` : "";
+    // The outcome sentence must never promise what submit will reject
+    // (review e9a9281): on a relations-incapable CLI the preserved related
+    // choice renders, but the phrase yields to an unavailable-state message
+    // consistent with the version note below it.
+    desc.textContent = !related ? ""
+      : !relations ? `Related spawn unavailable on the installed CLI — this would be a ${phrase[rel.value]} ${ref.value || "…"}.`
+      : ref.value ? `This instance will spawn as a ${phrase[rel.value]} ${ref.value}.`
+      : `Pick the instance this one is a ${phrase[rel.value]}.`;
     note.hidden = relations;
     note.textContent = relations ? "" : `Relations require oas >= ${relationsMinLabel()} — the installed CLI spawns unrelated instances only. Set the relation to "Unrelated" to spawn now.`;
   };

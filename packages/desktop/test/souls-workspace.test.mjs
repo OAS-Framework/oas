@@ -596,6 +596,9 @@ test("Spawn modal tracks CLI capability LIVE: relations flip disables/enables co
     rel.value = "child";
     rel.dispatchEvent(new dom.window.Event("change"));
     ref.value = "coord-1";
+    ref.dispatchEvent(new dom.window.Event("change"));
+    assert.match(doc.querySelector(".freldesc").textContent, /will spawn as a child of coord-1/,
+      "completed phrase announces the outcome while capable");
     // DOWNGRADE lands while the modal is open (app-focus re-probe)
     await seed(false);
     assert.equal(rel.disabled, false, "select stays usable after downgrade — recovery via 'unrelated'");
@@ -609,6 +612,14 @@ test("Spawn modal tracks CLI capability LIVE: relations flip disables/enables co
     assert.match(note.textContent, /oas >= 0\.18\.3/, "note names the required version");
     assert.equal(doc.querySelector(".ftask").value, "typed task text", "typed fields survive the resync");
     assert.equal(rel.value, "child", "chosen relation value preserved (visible, disabled)");
+    // the completed phrase must NOT keep promising the spawn that submit
+    // will reject (review e9a9281): it flips to an unavailable-state message
+    const desc = doc.querySelector(".freldesc");
+    assert.ok(!/will spawn as/.test(desc.textContent),
+      "outcome promise gone after the downgrade");
+    assert.match(desc.textContent, /unavailable on the installed CLI/,
+      "phrase states unavailability, consistent with the version note");
+    assert.match(desc.textContent, /child of coord-1/, "the preserved choice is still described");
     // submitting the RETAINED related spawn on the downgraded CLI must fail
     // IN THE FORM — no POST, fields preserved (review f35c1dc)
     doc.querySelector(".fspawn").click();
