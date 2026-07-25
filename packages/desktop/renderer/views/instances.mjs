@@ -7,9 +7,10 @@
    Contract: export mount(el, ctx) / unmount(). Plain ES module + DOM. */
 import {
   escapeHtml, miniMarkdown, apiJson, postJson, ensureTheme,
-  groupInstances, currentWorkspace, setWorkspace, adoptWorkspace, onWorkspaceChange,
+  currentWorkspace, setWorkspace, adoptWorkspace, onWorkspaceChange,
   renderWorkspaceSelect, wsQuery, instanceApiPath, workspaceGeneration,
 } from "./common.mjs";
+import { clusterInstances, instanceRepoLabel } from "../instance-tree.mjs";
 
 let state = null;
 
@@ -115,18 +116,21 @@ function renderRoster(s) {
     return;
   }
   if (!visible.length) { el.innerHTML = '<div class="empty">Nothing matches the filter.</div>'; return; }
-  for (const [wsName, repos] of groupInstances(visible)) {
+  // Roster grouped by agent CLUSTER (connected relations — spawn parentage
+  // plus sibling links), not per repo: the repo is a small label on each
+  // instance card. Unrelated instances are single-node clusters (no header).
+  for (const cluster of clusterInstances(visible)) {
+    const items = cluster.instances;
     const g = document.createElement("div");
-    const total = [...repos.values()].reduce((n, v) => n + v.length, 0);
-    const runningN = [...repos.values()].flat().filter((i) => i.running).length;
-    const h = document.createElement("div");
-    h.className = "ghead";
-    h.innerHTML = `${escapeHtml(wsName)} <span class="count">${runningN}/${total} running</span>`;
-    g.appendChild(h);
-    const multiRepo = repos.size > 1;
-    for (const [rName, items] of repos) {
+    if (items.length > 1) {
+      const runningN = items.filter((i) => i.running).length;
+      const h = document.createElement("div");
+      h.className = "ghead";
+      h.innerHTML = `◎ ${escapeHtml(cluster.key)} <span class="count">${runningN}/${items.length} running</span>`;
+      g.appendChild(h);
+    }
+    {
       const rbox = document.createElement("div");
-      if (multiRepo) { const rh = document.createElement("div"); rh.className = "rhead"; rh.textContent = rName; rbox.appendChild(rh); }
       for (const i of items) {
         const d = document.createElement("div");
         d.className = "inst" + (s.sel === i.instance ? " sel" : "") + (i.running ? "" : " idle") + (i.depth ? " child" : "");
@@ -134,6 +138,7 @@ function renderRoster(s) {
           <div class="iname"><span class="dot ${i.running ? "on" : ""}"></span>${escapeHtml(i.instance)}</div>
           <div class="itask">${escapeHtml((i.task || "").slice(0, 100))}</div>
           <div class="imeta">
+            <span class="chip">${escapeHtml(instanceRepoLabel(i))}</span>
             <span class="chip rt">${escapeHtml(i.runtime)}</span>
             <span class="chip">${escapeHtml(i.work)}${i.branch ? " · " + escapeHtml(i.branch) : ""}</span>
             ${i.git && i.git.dirty ? `<span class="chip dirty">±${Number(i.git.dirty)}</span>` : ""}

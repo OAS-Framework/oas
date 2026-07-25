@@ -8,7 +8,7 @@
  * process; the desktop renderer is its only client):
  *   GET  /api/panel                 roster JSON (instances, git, task, tmux state)
  *   GET  /api/agents                available agents (souls) per workspace root
- *   POST /api/spawn                 { agent, agentsRoot, task?, purpose? } → spawn an instance
+ *   POST /api/spawn                 { agent, agentsRoot, task?, purpose?, relation?, relativeTo? } → spawn an instance
  *                                   (mutations require the installed `oas` CLI; see cliUnavailable)
  *   GET  /api/session/<instance>?lines=n   ANSI pane capture of the live session
  *   POST /api/keys/<instance>       { data } → raw key bytes into the session (no Enter)
@@ -112,6 +112,12 @@ function panelData(wsId) {
       home: i.home, agentsRoot: i.agentsRoot,
       workspace: dirname(i.agentsRoot), repoName: (i.repo || dirname(i.agentsRoot)).split("/").pop(),
       parentInstance: i.parentInstance || null,
+      // Sibling links (feature/agent-relations): forward whichever shape the
+      // kernel roster carries — the renderer's instanceLinks() seam reads the
+      // same defensive set until the final field name is settled.
+      ...(i.siblingInstances !== undefined ? { siblingInstances: i.siblingInstances } : {}),
+      ...(i.siblings !== undefined ? { siblings: i.siblings } : {}),
+      ...(i.siblingInstance !== undefined ? { siblingInstance: i.siblingInstance } : {}),
       tmux: i.tmux, git: i.git, task: i.task, next: i.next,
       team: i.team || null,
     })),
@@ -155,7 +161,7 @@ function agentsData(wsId) {
  * Default is NO TASK: the instance comes up awaiting instruction.
  * Validation errors THROW (→ 409); domain/CLI results RESOLVE with the
  * envelope so stable error codes reach the UI. */
-async function spawnAgent({ agent, agentsRoot, task, purpose }) {
+async function spawnAgent({ agent, agentsRoot, task, purpose, relation, relativeTo }) {
   const name = String(agent || "");
   const root = resolve(String(agentsRoot || ""));
   // agentsRoot must be one of the workspace roots this server was started for —
@@ -172,11 +178,16 @@ async function spawnAgent({ agent, agentsRoot, task, purpose }) {
     err.code = "cli-unavailable";
     throw err;
   }
+  // Spawn-time relations: pass through to the CLI adapter, which owns the
+  // argv allowlist and pair validation (relation ⇔ relativeTo) — invalid
+  // values resolve as stable E_BAD_ARGS envelopes, never reach the CLI.
   const env = await adapter.cliSpawn(cliState.bin, {
     agent: name,
     workspaceDir: dirname(root),          // the workspace context owning this agents root
     task: task ? String(task) : "",
     purpose: purpose ? String(purpose) : undefined,
+    relation: relation ? String(relation) : undefined,
+    relativeTo: relativeTo ? String(relativeTo) : undefined,
   });
   if (!env.ok) {
     const err = new Error(env.error.message || "spawn failed");

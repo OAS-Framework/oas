@@ -127,3 +127,56 @@ test("first-launch deferred roster owns both completion orders but rejects a tru
   assert.equal(owns("wsB"), false);
   assert.equal(owns("wsA", 1, 2), false);
 });
+
+/* ── agent clusters (feature/agent-relations) ── */
+
+test("clusterInstances: connected components over parent + sibling links; unrelated are single-node clusters", async () => {
+  const { clusterInstances, instanceLinks } = await import("../renderer/instance-tree.mjs");
+  const roster = [
+    { instance: "coord-1", running: true },
+    { instance: "dev-a", parentInstance: "coord-1", running: true },
+    { instance: "dev-b", parentInstance: "coord-1", running: false },
+    { instance: "reviewer-1", parentInstance: "dev-a", running: true },
+    // sibling-linked pair, no shared parent — still one cluster
+    { instance: "peer-1", siblingInstances: ["peer-2"], running: false },
+    { instance: "peer-2", running: false },
+    // unrelated
+    { instance: "loner", running: true },
+  ];
+  const clusters = clusterInstances(roster);
+  const byKey = new Map(clusters.map((c) => [c.key, c.instances.map((i) => i.instance)]));
+  assert.equal(clusters.length, 3);
+  assert.deepEqual(byKey.get("coord-1"), ["coord-1", "dev-a", "reviewer-1", "dev-b"],
+    "cluster keeps parent-first tree order (running-first among siblings)");
+  assert.deepEqual(new Set(byKey.get("peer-1")), new Set(["peer-1", "peer-2"]),
+    "sibling link alone joins a cluster");
+  assert.deepEqual(byKey.get("loner"), ["loner"], "unrelated instance is its own cluster");
+  // depths: tree depth inside the cluster; sibling-only members at depth 0
+  const coord = clusters.find((c) => c.key === "coord-1").instances;
+  assert.deepEqual(coord.map((i) => i.depth), [0, 1, 2, 1]);
+  const peers = clusters.find((c) => byKey.get(c.key).includes("peer-2")).instances;
+  assert.ok(peers.every((i) => i.depth === 0), "sibling-linked peers sit at depth 0");
+  // link extractor reads defensive sibling shapes
+  assert.deepEqual(instanceLinks({ instance: "x", parentInstance: "p", siblingInstance: "s" }), ["p", "s"]);
+  assert.deepEqual(instanceLinks({ instance: "x", siblings: ["a", "x", ""] }), ["a"], "self/empty links dropped");
+});
+
+test("clusterInstances: malformed parent cycles keep every member visible", async () => {
+  const { clusterInstances } = await import("../renderer/instance-tree.mjs");
+  const roster = [
+    { instance: "a", parentInstance: "b", running: false },
+    { instance: "b", parentInstance: "a", running: false },
+  ];
+  const clusters = clusterInstances(roster);
+  assert.equal(clusters.length, 1);
+  assert.deepEqual(new Set(clusters[0].instances.map((i) => i.instance)), new Set(["a", "b"]));
+});
+
+test("clusterInstances: edges to instances outside the roster do not join or crash", async () => {
+  const { clusterInstances } = await import("../renderer/instance-tree.mjs");
+  const clusters = clusterInstances([
+    { instance: "x", parentInstance: "ghost", siblingInstances: ["phantom"], running: true },
+    { instance: "y", running: true },
+  ]);
+  assert.equal(clusters.length, 2, "dangling links leave both as single-node clusters");
+});

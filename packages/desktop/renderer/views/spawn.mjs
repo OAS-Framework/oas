@@ -43,7 +43,7 @@ let state = null;
 
 export function mount(el, ctx) {
   ensureTheme(el.ownerDocument);
-  const s = state = { el, ctx, souls: { agents: [] }, filterText: "", sel: null, timers: [], unsubWs: null, alive: true, spawnOp: 0 };
+  const s = state = { el, ctx, souls: { agents: [] }, panelInstances: [], filterText: "", sel: null, timers: [], unsubWs: null, alive: true, spawnOp: 0 };
   el.innerHTML = `
     <div class="oas-view" style="display:block">
       <style>${CSS}</style>
@@ -103,6 +103,7 @@ export async function refresh(s) {
   // agent list over B's after a switch
   if (!s.alive || myGen !== workspaceGeneration()) return;
   s.souls = souls;
+  s.panelInstances = panel.instances || []; // reference-instance picker source
   renderWorkspaceSelect(s.q("wssel"), panel.workspaces, panel.workspace?.id || "");
   renderGrid(s);
 }
@@ -212,16 +213,35 @@ function soulCard(s, a) {
 function spawnForm(s, a) {
   const f = document.createElement("div");
   f.className = "soul-form";
+  const refOptions = (s.panelInstances || [])
+    .map((i) => `<option value="${escapeHtml(i.instance)}">${escapeHtml(i.instance)}${i.running ? "" : " (idle)"}</option>`)
+    .join("");
   f.innerHTML = `
     <label>Purpose (optional — becomes part of the instance name)
       <input class="field fpurpose" placeholder="e.g. pr42" autocomplete="off"></label>
     <label>Task (optional — empty spawns an instance awaiting your instructions)
       <textarea class="field ftask" rows="4" placeholder="What should this instance do?"></textarea></label>
+    <label>Relation (optional — link the new instance to an existing one)
+      <select class="field frelation">
+        <option value="unrelated" selected>unrelated — no link</option>
+        <option value="child">child — nests under the reference instance</option>
+        <option value="sibling">sibling — peer in the reference instance's cluster</option>
+        <option value="parent">parent — becomes the reference instance's parent</option>
+      </select></label>
+    <label class="frelto-label" style="display:none">Reference instance
+      <select class="field frelto">
+        <option value="">— select an instance —</option>
+        ${refOptions}
+      </select></label>
     <div class="frow">
       <button class="act fspawn">Spawn</button>
       <button class="act fcancel">Cancel</button>
       <span class="fstatus"></span>
     </div>`;
+  // the picker only appears when a relation is chosen — unrelated needs none
+  f.querySelector(".frelation").addEventListener("change", (e) => {
+    f.querySelector(".frelto-label").style.display = e.target.value === "unrelated" ? "none" : "";
+  });
   f.addEventListener("click", (e) => e.stopPropagation()); // clicks in the form never re-select the card
   f.querySelector(".fcancel").addEventListener("click", () => { s.sel = null; renderGrid(s); });
   f.querySelector(".fspawn").addEventListener("click", () => doSpawn(s, {
@@ -229,7 +249,13 @@ function spawnForm(s, a) {
     status: f.querySelector(".fstatus"),
     purpose: () => f.querySelector(".fpurpose").value,
     task: () => f.querySelector(".ftask").value,
-    clear: () => { f.querySelector(".fpurpose").value = ""; f.querySelector(".ftask").value = ""; },
+    relation: () => f.querySelector(".frelation").value,
+    relativeTo: () => f.querySelector(".frelto").value,
+    clear: () => {
+      f.querySelector(".fpurpose").value = ""; f.querySelector(".ftask").value = "";
+      f.querySelector(".frelation").value = "unrelated"; f.querySelector(".frelto").value = "";
+      f.querySelector(".frelto-label").style.display = "none";
+    },
   }));
   return f;
 }
@@ -293,6 +319,15 @@ export async function doSpawn(s, ui) {
   const myGen = workspaceGeneration();       // capture at dispatch
   const myOp = ++s.spawnOp;                  // this spawn owns the form until superseded
   const owns = () => myOp === s.spawnOp && s.alive !== false;
+  // Relation pairing is validated BEFORE dispatch: a chosen relation needs a
+  // reference instance (the server would 409 anyway — fail it in the form).
+  const relation = ui.relation ? String(ui.relation() || "unrelated") : "unrelated";
+  const relativeTo = ui.relativeTo ? String(ui.relativeTo() || "") : "";
+  if (relation !== "unrelated" && !relativeTo) {
+    ui.status.classList?.add("err");
+    ui.status.textContent = `Spawn failed: the "${relation}" relation needs a reference instance.`;
+    return;
+  }
   ui.btn.disabled = true; ui.btn.textContent = "Spawning…";
   ui.status.classList?.remove("err"); ui.status.textContent = "";
   try {
@@ -301,6 +336,8 @@ export async function doSpawn(s, ui) {
       agentsRoot: a.agentsRoot,
       task: ui.task(),                       // "" = awaiting instructions (panel default)
       purpose: ui.purpose() || undefined,
+      relation: relation !== "unrelated" ? relation : undefined,
+      relativeTo: relation !== "unrelated" ? relativeTo : undefined,
     });
     if (myGen !== workspaceGeneration()) {
       // Workspace switched while the spawn was in flight: never auto-open.

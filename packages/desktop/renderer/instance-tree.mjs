@@ -2,6 +2,73 @@ export function collapseKey(workspace, instance) {
   return `${workspace || ""}\u0000${instance}`;
 }
 
+/** Names an instance is directly related to (undirected edge endpoints):
+ * its spawn parent plus any sibling links. The sibling field name is owned
+ * by the kernel contract (feature/agent-relations); until the final name is
+ * relayed we read the likely shapes defensively — an array of names
+ * (`siblingInstances`/`siblings`) or a single name (`siblingInstance`).
+ * Unknown/absent fields simply contribute no edges. */
+export function instanceLinks(instance) {
+  const out = [];
+  if (instance.parentInstance) out.push(instance.parentInstance);
+  const sib = instance.siblingInstances ?? instance.siblings ?? instance.siblingInstance;
+  for (const name of Array.isArray(sib) ? sib : sib ? [sib] : []) if (name) out.push(name);
+  return out.filter((name) => name && name !== instance.instance);
+}
+
+/** Group instances into agent CLUSTERS — connected components of the
+ * undirected relation graph (parent/child spawn edges + sibling links).
+ * Unrelated instances are single-node clusters. Within a cluster the
+ * parent/child tree ordering is kept (parent-first walk with depth);
+ * cluster members related only by sibling links sit at depth 0.
+ * Returns [{ key, instances: [{...instance, depth}] }] with clusters ranked
+ * running-first then by first member name, matching the roster sort. */
+export function clusterInstances(instances, { links = instanceLinks } = {}) {
+  const byName = new Map(instances.map((i) => [i.instance, i]));
+  // undirected adjacency — edges to names outside this roster are ignored
+  const adj = new Map(instances.map((i) => [i.instance, new Set()]));
+  for (const i of instances) {
+    for (const other of links(i)) {
+      if (!byName.has(other)) continue;
+      adj.get(i.instance).add(other);
+      adj.get(other).add(i.instance);
+    }
+  }
+  const rank = (a, b) => (a.running === b.running ? a.instance.localeCompare(b.instance) : a.running ? -1 : 1);
+  const seen = new Set();
+  const clusters = [];
+  for (const start of [...instances].sort(rank)) {
+    if (seen.has(start.instance)) continue;
+    // collect the component
+    const members = [];
+    const queue = [start.instance];
+    seen.add(start.instance);
+    while (queue.length) {
+      const name = queue.shift();
+      members.push(byName.get(name));
+      for (const next of adj.get(name) || []) if (!seen.has(next)) { seen.add(next); queue.push(next); }
+    }
+    // parent-first tree order INSIDE the component (cycle-safe: the walk
+    // visits each member once; leftovers append at depth 0)
+    const memberNames = new Set(members.map((i) => i.instance));
+    const kids = (p) => members.filter((i) => i.parentInstance === p.instance);
+    const roots = members.filter((i) => !i.parentInstance || !memberNames.has(i.parentInstance));
+    roots.sort(rank);
+    const ordered = [];
+    const placed = new Set();
+    const walk = (i, depth) => {
+      if (placed.has(i.instance)) return;
+      placed.add(i.instance);
+      ordered.push({ ...i, depth });
+      kids(i).sort(rank).forEach((k) => walk(k, depth + 1));
+    };
+    roots.forEach((r) => walk(r, 0));
+    for (const i of [...members].sort(rank)) walk(i, 0); // malformed cycles must not hide members
+    clusters.push({ key: ordered[0].instance, instances: ordered });
+  }
+  return clusters;
+}
+
 export function hasInstanceChildren(instances, instance) {
   return instances.some((candidate) => candidate.parentInstance === instance);
 }

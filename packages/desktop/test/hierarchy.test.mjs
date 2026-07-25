@@ -147,3 +147,21 @@ test("refresh after teardown (alive=false) never mutates state", async () => {
   await inFlight;
   assert.equal(s.panel.instances.length, 0, "post-unmount response must not paint");
 });
+
+test("layoutForest tolerates sibling-link fields — every instance placed, parent edges intact", () => {
+  // feature/agent-relations: rosters may carry sibling-link metadata; the
+  // hierarchy layout is parentInstance-driven and must neither crash nor
+  // drop sibling-linked nodes (they lay out as separate roots).
+  const { nodes } = hier.layoutForest([
+    { instance: "coord-1", running: true },
+    { instance: "dev-a", parentInstance: "coord-1", siblingInstances: ["dev-b"], running: true },
+    { instance: "dev-b", parentInstance: "coord-1", running: false },
+    { instance: "peer-1", siblingInstances: ["peer-2"], running: false },
+    { instance: "peer-2", siblingInstance: "peer-1", running: false },
+  ]);
+  assert.equal(nodes.length, 5, "sibling metadata never hides an instance");
+  const byName = new Map(nodes.map((n) => [n.inst.instance, n]));
+  assert.ok(byName.get("coord-1").children.some((c) => c.inst.instance === "dev-a"), "parent edges survive");
+  assert.equal(byName.get("peer-1").y, 0, "sibling-only nodes are roots");
+  assert.equal(byName.get("peer-2").y, 0);
+});
