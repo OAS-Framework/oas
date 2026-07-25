@@ -27,17 +27,23 @@ sugar for the child relation.
   edges confuse traversal.
 - **Unrelated** is normalized away before recording. Absent lineage fields mean
   unrelated; consumers should never see `relation: "unrelated"` as stored
-  metadata.
+  metadata. During option parsing, however, an explicit unrelated request must
+  survive as an `explicitUnrelated`-style fact until defaults and fallbacks have
+  run, so attached-mode auto-parenting does not treat explicit negation as an
+  omitted relation.
 
 # Validation boundary
 
 Relation validation intentionally happens in both surfaces: the CLI returns
 stable pre-scaffold errors such as `E_BAD_ARGS` or `E_RELATIVE_NOT_FOUND`, while
 the kernel still throws for programmatic callers. Sibling and parent relations
-must read the anchor's `instance.json`; fail before scaffolding if it is missing
-or unreadable.
+must read the anchor's `instance.json` in the kernel; fail before scaffolding and
+before lifecycle hooks if it is missing or unreadable. Re-read in the kernel even
+when the CLI already checked, because anchor state can change between the CLI
+check and the kernel read.
 
 This extends the explicit-lineage rule in
 [spawn-lineage-explicit-only](/decisions/spawn-lineage-explicit-only.md): the
 caller chooses the relation, but the recorded metadata stays sparse and local to
-the affected instances.
+the affected instances. The no-side-effects validation lesson is captured in
+[kernel-validation-before-side-effects](/lessons/kernel-validation-before-side-effects.md).

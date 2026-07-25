@@ -32,6 +32,10 @@ All kernel/CLI behavior tests live in `test/capabilities.test.mjs`
 
 # Gotchas
 
+- Rejected spawn options need side-effect assertions, not only error assertions:
+  after `spawnInstance` or the CLI rejects relation/anchor options, assert that
+  no instance directory remains. See
+  [kernel-validation-before-side-effects](/lessons/kernel-validation-before-side-effects.md).
 - In `--json` CLI tests, spawn validation failures are stdout envelopes
   (`{ ok: false, error: { ... } }`), not stderr text. Parse stdout for stable
   error codes; reserve stderr assertions for non-JSON `die()` paths and JSON

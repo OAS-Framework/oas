@@ -35,6 +35,7 @@ read what the current task needs, not everything.
 * [lessons/json-envelope-dispatch-boundary.md](lessons/json-envelope-dispatch-boundary.md) - A capability command's --json envelope guarantee is void unless the generic CLI dispatcher wraps the whole dispatch path, including manifest discovery, trust checks, command decoding, non-match fallthrough, and child spawn failures.
 * [lessons/release-workflow-static-tests.md](lessons/release-workflow-static-tests.md) - A cheap, robust way to regression-test a GitHub Actions release workflow's binding ordering guarantees is a node:test file asserting indexOf ordering and regexes over raw YAML, but script references still need spawned package-script tests.
 * [lessons/exact-tag-detached-head-refspec.md](lessons/exact-tag-detached-head-refspec.md) - Switching a release workflow checkout from main to github.sha preserves exact-tag integrity but leaves the runner in detached HEAD, so version-bump pushes must use a fully-qualified destination such as HEAD:refs/heads/<branch>.
+* [lessons/kernel-validation-before-side-effects.md](lessons/kernel-validation-before-side-effects.md) - spawnInstance options that can be rejected (relations, anchors) must be parsed and resolved before mkdir/hooks because CLI prechecks do not protect direct kernel callers.
 
 ## Playbooks
 

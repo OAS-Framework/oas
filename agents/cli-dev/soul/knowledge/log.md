@@ -1,6 +1,9 @@
 # Knowledge Log
 
 ## 2026-07-25
+* **Creation**: [kernel-validation-before-side-effects](/lessons/kernel-validation-before-side-effects.md) records that rejectable `spawnInstance` relation and anchor options must validate before mkdir/hooks, and that explicit unrelated must survive normalization until fallback handling.
+* **Update**: [spawn-relations-lineage-fields](/architecture/spawn-relations-lineage-fields.md) clarifies explicit unrelated normalization and kernel-side pre-scaffold anchor validation.
+* **Update**: [test-conventions](/playbooks/test-conventions.md) records that rejected spawn option tests must assert no instance directory remains.
 * **Creation**: [spawn-relations-lineage-fields](/architecture/spawn-relations-lineage-fields.md) records how `oas spawn --relation` maps child, sibling, parent, and unrelated relations onto sparse `parentInstance`/`siblingInstance` metadata and where validation belongs.
 * **Update**: [test-conventions](/playbooks/test-conventions.md) records `--json` spawn failure assertion discipline and the clean-checkout need to install dependencies in both the repo root and `packages/desktop` before desktop tests.
 * **Creation**: [exact-tag-detached-head-refspec](/lessons/exact-tag-detached-head-refspec.md) records that exact-tag release checkout leaves detached HEAD, so version-bump pushes need fully-qualified `HEAD:refs/heads/...` destinations and static regression coverage.
