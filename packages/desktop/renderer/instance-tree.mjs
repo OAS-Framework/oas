@@ -7,7 +7,7 @@ export function hasInstanceChildren(instances, instance) {
 }
 
 export function instanceRepoLabel(instance) {
-  if (instance.repoName) return instance.repoName;
+  if (instance.repoName) return String(instance.repoName);
   const path = instance.repo || instance.workspace || "";
   return String(path).split("/").filter(Boolean).at(-1) || "workspace";
 }
@@ -38,10 +38,13 @@ export function groupRosterFamilies(list, sortBy = "status") {
   const rank = rosterRank(sortBy);
   const repos = new Map();
   for (const i of list) {
-    const rName = instanceRepoLabel(i);
+    // instance.json is workspace-controlled: agent/repoName may arrive as
+    // non-strings through the reader. Coerce grouping keys so one malformed
+    // instance cannot throw in localeCompare and blank the whole roster.
+    const rName = String(instanceRepoLabel(i));
     if (!repos.has(rName)) repos.set(rName, new Map());
     const families = repos.get(rName);
-    const fName = i.agent || "?";
+    const fName = String(i.agent || "?");
     if (!families.has(fName)) families.set(fName, []);
     families.get(fName).push(i);
   }
