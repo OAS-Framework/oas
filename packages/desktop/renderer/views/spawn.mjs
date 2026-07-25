@@ -55,6 +55,14 @@ const CSS = `
                            background: none; color: var(--muted); font-size: 16px; cursor: pointer; }
 .spawn-dialog .close-act:hover { background: var(--surface-2); color: var(--fg); }
 .spawn-dialog .frelnote { font-size: 12px; color: var(--muted); }
+.spawn-dialog fieldset.frelgroup { border: 1px solid var(--border); border-radius: 8px; margin: 0;
+                                   padding: 8px 10px 10px; display: flex; flex-direction: column; gap: 8px; }
+.spawn-dialog fieldset.frelgroup legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
+.spawn-dialog .frelrow { display: flex; gap: 8px; align-items: center; }
+.spawn-dialog .frelrow .frelation { flex: 0 1 auto; }
+.spawn-dialog .frelrow .frelto { flex: 1 1 auto; min-width: 0; }
+.spawn-dialog .freldesc { font-size: 12px; color: var(--muted); min-height: 0; }
+.spawn-dialog .freldesc:empty { display: none; }
 `;
 
 let state = null;
@@ -293,19 +301,23 @@ function openSpawnModal(s, a) {
           <input class="field fpurpose" placeholder="e.g. pr42" autocomplete="off"></label>
         <label>Task (optional — empty spawns an instance awaiting your instructions)
           <textarea class="field ftask" rows="4" placeholder="What should this instance do?"></textarea></label>
-        <label>Relation — how this instance links into the agent hierarchy
-          <select class="field frelation" disabled>
-            <option value="unrelated" selected>unrelated — no link</option>
-            <option value="child">child — nests under the reference instance</option>
-            <option value="sibling">sibling — peer in the reference instance's cluster</option>
-            <option value="parent">parent — becomes the reference instance's parent</option>
-          </select></label>
-        <label class="frelto-label">Reference instance
-          <select class="field frelto" disabled>
-            <option value="">— select an instance —</option>
-            ${refOptions}
-          </select></label>
-        <div class="frelnote" hidden></div>
+        <fieldset class="frelgroup">
+          <legend>Relation to other agents</legend>
+          <div class="frelrow">
+            <select class="field frelation" aria-label="Relation">
+              <option value="unrelated" selected>Unrelated</option>
+              <option value="child">Child of…</option>
+              <option value="sibling">Sibling of…</option>
+              <option value="parent">Parent of…</option>
+            </select>
+            <select class="field frelto" disabled aria-label="Which instance">
+              <option value="">— which instance? —</option>
+              ${refOptions}
+            </select>
+          </div>
+          <div class="freldesc" aria-live="polite"></div>
+          <div class="frelnote" hidden></div>
+        </fieldset>
         <label>Runtime (optional — defaults to the agent's definition: ${escapeHtml(a.runtime || "pi")})
           <select class="field fruntime">
             <option value="" selected>agent default (${escapeHtml(a.runtime || "pi")})</option>
@@ -336,17 +348,30 @@ function openSpawnModal(s, a) {
   const syncRelationControls = () => {
     const relations = cliRelationsAvailable();
     const rel = f.querySelector(".frelation"), ref = f.querySelector(".frelto");
-    const note = f.querySelector(".frelnote");
+    const note = f.querySelector(".frelnote"), desc = f.querySelector(".freldesc");
     rel.disabled = false; // the select stays usable — gating is per-OPTION
     for (const opt of rel.querySelectorAll("option")) {
       if (opt.value !== "unrelated") opt.disabled = !relations;
     }
-    ref.disabled = !relations || rel.value === "unrelated";
+    const related = rel.value !== "unrelated";
+    ref.disabled = !relations || !related;
+    // one coherent choice: the picker's accessible name follows the chosen
+    // relation ("Child of which instance?"), and a plain-language phrase
+    // spells the outcome once both halves are picked
+    ref.setAttribute("aria-label", related
+      ? `${rel.value[0].toUpperCase()}${rel.value.slice(1)} of which instance?` : "Which instance");
+    const phrase = { child: "child of", sibling: "sibling of", parent: "parent of" };
+    desc.textContent = related && ref.value
+      ? `This instance will spawn as a ${phrase[rel.value]} ${ref.value}.`
+      : related ? `Pick the instance this one is a ${phrase[rel.value]}.` : "";
     note.hidden = relations;
-    note.textContent = relations ? "" : `Relations require oas >= ${relationsMinLabel()} — the installed CLI spawns unrelated instances only. Set the relation to "unrelated" to spawn now.`;
+    note.textContent = relations ? "" : `Relations require oas >= ${relationsMinLabel()} — the installed CLI spawns unrelated instances only. Set the relation to "Unrelated" to spawn now.`;
   };
   s.syncModalRelations = syncRelationControls;
   syncRelationControls();
+
+  // both halves of the grouped choice re-derive the state and phrase
+  f.querySelector(".frelto").addEventListener("change", syncRelationControls);
 
   // reference picker enables only when a real relation is chosen — kept
   // VISIBLE (disabled) so the hierarchy options are always in sight
