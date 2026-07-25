@@ -132,7 +132,8 @@ sugar for `--relative-to <instance> --relation child`):
 - **unrelated** (default) — no link, operator-origin, top-level.
 
 Attached-mode spawns without a relation still nest under the owner of the
-shared work tree. Any other spawn — including one from a shell that inherited
+shared work tree; an explicit `--relation unrelated` suppresses that
+auto-parenting. Any other spawn — including one from a shell that inherited
 an agent's environment variables — is operator-origin and appears top-level.
 Agents spawning sub-agents should pass `--parent "$OAS_INSTANCE"` (or the
 relation that fits).

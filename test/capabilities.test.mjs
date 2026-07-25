@@ -967,6 +967,29 @@ test("spawn relations: child/sibling/parent/unrelated, sugar equivalence, valida
   fail(/use one form, not both/, "--parent", anchor.instance, "--relation", "child", "--relative-to", anchor.instance);
   fail(/--relation needs a value/, "--relation", "--relative-to", anchor.instance);
   fail(/does not match any known instance/, "--relation", "sibling", "--relative-to", "no-such-instance");
+
+  // Explicit unrelated on an ATTACHED spawn suppresses the work-tree-owner
+  // auto-parenting (an explicit "no link" directive), while attached WITHOUT
+  // a relation still nests (behavior unchanged).
+  const agentDef = findAgent(root, "dev");
+  const oldPath = process.env.PATH;
+  process.env.PATH = fakeRuntimes(base);
+  try {
+    const att = spawnInstance(root, agentDef, { instance: "dev-att", work: "attached", workDir: join(anchor.home, "work"), launch: false });
+    assert.equal(att.parentInstance, anchor.instance, "attached without relation still auto-parents");
+    const attUn = spawnInstance(root, agentDef, { instance: "dev-att-un", work: "attached", workDir: join(anchor.home, "work"), relation: "unrelated", launch: false });
+    assert.equal(attUn.parentInstance, undefined, "explicit unrelated suppresses attached auto-parenting");
+    assert.equal(attUn.spawnOrigin, "operator");
+
+    // Direct-kernel rejection happens BEFORE scaffolding and hooks: no home dir remains.
+    const assertNoHome = (name, fn, re) => {
+      assert.throws(fn, re);
+      assert.equal(existsSync(join(root, "dev", "instances", name)), false, `${name}: no instance dir left behind`);
+    };
+    assertNoHome("dev-badrel", () => spawnInstance(root, agentDef, { instance: "dev-badrel", relation: "boss", relativeTo: anchor.instance, launch: false }), /unknown relation/);
+    assertNoHome("dev-norel", () => spawnInstance(root, agentDef, { instance: "dev-norel", relation: "sibling", launch: false }), /needs a relative-to/);
+    assertNoHome("dev-noanchor", () => spawnInstance(root, agentDef, { instance: "dev-noanchor", relation: "sibling", relativeTo: "no-such-instance", launch: false }), /was not found/);
+  } finally { process.env.PATH = oldPath; }
 });
 
 test("lineage is deployment-local: --parent from an unrelated deployment is rejected", () => {

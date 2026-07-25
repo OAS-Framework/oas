@@ -47,7 +47,7 @@ oas spawn <agent> [--task ...] [--purpose ...] [--relation child|sibling|parent|
 # new instance with --relation + --relative-to (--parent X is sugar for
 # --relative-to X --relation child). Without a relation the spawn is
 # operator-origin and appears top-level. Attached-mode spawns nest under the
-# work-tree owner automatically.
+# work-tree owner automatically (explicit --relation unrelated suppresses this).
 # when config declares team:, spawn/retire also resolve souls and instances
 # defined in sibling repos of the team scope (unique match wins; the instance
 # homes with its owning repo, works in that repo, resolves that repo's config)

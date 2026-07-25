@@ -711,8 +711,9 @@ function spawnCmd() {
   if (relation === "unrelated" && relativeTo) bail("E_BAD_ARGS", "--relation unrelated takes no --relative-to");
   if (parent && (relation || relativeTo)) bail("E_BAD_ARGS", "--parent is sugar for --relative-to <instance> --relation child — use one form, not both");
   if (parent) { relation = "child"; relativeTo = parent; }
-  if (relation === "unrelated") relation = undefined;
-  if (relativeTo) {
+  // NOTE: explicit "unrelated" is passed through to the kernel — it suppresses
+  // attached-mode auto-parenting (an explicit "no link" directive).
+  if (relativeTo && relation !== "unrelated") {
     // findInstanceHome also sees capability-defined agents' instance homes
     // (local-agents/<name>/ without a local soul) — e.g. a reviewer passing
     // --parent "$OAS_INSTANCE" from a capability agent.
