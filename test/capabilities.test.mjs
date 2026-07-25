@@ -5,7 +5,7 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSy
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import {
-  capabilityIntegrity, capabilityManifest, composeInstanceAgentsMd, createAgent, findAgent, resolveOasConfig,
+  capabilityIntegrity, capabilityManifest, composeInstanceAgentsMd, createAgent, findAgent, findInstanceHomes, resolveOasConfig,
   resolveClaudeBinary, resolveWorkMode, retireInstance, runLifecycleHooks, spawnInstance, writeCapabilityLock,
 } from "../lib/core.mjs";
 
@@ -1015,6 +1015,142 @@ test("spawn relations: child/sibling/parent/unrelated, sugar equivalence, valida
   } finally { process.env.PATH = oldPath; }
 });
 
+test("relation anchors are ambiguity-safe across same-named team instances", () => {
+  const base = temp();
+  const ws = join(base, "ws"); mkdirSync(ws, { recursive: true });
+  write(join(ws, "oas-config.yaml"), "team:\n  name: t\n");
+  const mkMember = (repoName) => {
+    const repo = join(ws, repoName); gitRepo(repo);
+    write(join(repo, "oas-config.yaml"), "capabilities:\n  additive: {}\n");
+    const root = join(repo, "agents");
+    write(join(root, "dev", "soul", "soul.yaml"), `name: dev\nkind: persistent\nrepo: ${repo}\nwork: checkout\nruntime: pi\n`);
+    write(join(root, "dev", "soul", "AGENTS.md"), "# dev\n");
+    mkdirSync(join(root, "dev", "instances"), { recursive: true });
+    return { repo, root };
+  };
+  const a = mkMember("repo-a");
+  const b = mkMember("repo-b");
+  const oldPath = process.env.PATH;
+  process.env.PATH = fakeRuntimes(base);
+  const metaOf = (root2, name2) => JSON.parse(readFileSync(join(root2, "dev", "instances", name2, "instance.json"), "utf8"));
+  try {
+    // Same-named anchor in both repos.
+    const bossA = spawnInstance(a.root, findAgent(a.root, "dev"), { instance: "dev-boss", launch: false });
+    const bossB = spawnInstance(b.root, findAgent(b.root, "dev"), { instance: "dev-boss", launch: false });
+    // From repo A, bare "dev-boss" matches BOTH — kernel resolution is
+    // local-first for the recorded edge, so the LOCAL one wins silently only
+    // when unambiguous... here both exist: without relativeRoot → ambiguous.
+    assert.throws(
+      () => spawnInstance(a.root, findAgent(a.root, "dev"), { instance: "dev-kid-x", relation: "child", relativeTo: "dev-boss", launch: false }),
+      (e) => e.code === "E_RELATIVE_AMBIGUOUS" && /matches multiple instances/.test(e.message),
+      "duplicate anchor names without --relative-root are rejected");
+    assert.equal(existsSync(join(a.root, "dev", "instances", "dev-kid-x")), false, "no stray home");
+    // relativeRoot picks the LOCAL one: round-trips, allowed.
+    const kidA = spawnInstance(a.root, findAgent(a.root, "dev"), { instance: "dev-kid-a", relation: "child", relativeTo: "dev-boss", relativeRoot: a.root, launch: false });
+    assert.equal(metaOf(a.root, kidA.instance).parentInstance, "dev-boss");
+    // relativeRoot picking the FOREIGN same-named one cannot round-trip from
+    // repo A (the local dev-boss shadows it) → rejected, not silently wrong.
+    assert.throws(
+      () => spawnInstance(a.root, findAgent(a.root, "dev"), { instance: "dev-kid-b", relation: "child", relativeTo: "dev-boss", relativeRoot: b.root, launch: false }),
+      (e) => e.code === "E_RELATIVE_AMBIGUOUS" && /shadowed/.test(e.message),
+      "cross-repo anchor shadowed by a same-named local instance is rejected");
+    // relation=parent reverse-edge check: an existing instance in the anchor's
+    // repo with the same name the NEW instance would take → rejected (the
+    // re-pointed anchor edge would resolve to the wrong instance).
+    spawnInstance(b.root, findAgent(b.root, "dev"), { instance: "dev-over", launch: false });
+    assert.throws(
+      () => spawnInstance(a.root, findAgent(a.root, "dev"), { instance: "dev-over", relation: "parent", relativeTo: bossA.instance, relativeRoot: a.root, launch: false }),
+      (e) => e.code === "E_RELATIVE_AMBIGUOUS" && /shadow the new instance/.test(e.message),
+      "parent relation rejects a shadowed reverse edge");
+    assert.equal(metaOf(a.root, bossA.instance).parentInstance, undefined, "anchor NOT re-pointed by the rejected spawn");
+    // Unique names keep working with zero new flags (no breaking change).
+    const uniq = spawnInstance(b.root, findAgent(b.root, "dev"), { instance: "dev-uniq-kid", relation: "child", relativeTo: bossB.instance === "dev-boss" ? "dev-over" : bossB.instance, launch: false });
+    assert.equal(metaOf(b.root, uniq.instance).parentInstance, "dev-over");
+
+    // INHERITED-edge round-trips (the subtle cases): sibling/parent copy names
+    // from the anchor's instance.json — resolved from the ANCHOR's root — and
+    // the new root may resolve those same names elsewhere.
+    // Repo-B anchor "dev-under" is a child of B's dev-boss; repo A also has a
+    // dev-boss. A sibling of dev-under spawned from repo A would record
+    // parentInstance: "dev-boss" — which from repo A resolves to A's boss, not
+    // the anchor's parent. Must be rejected.
+    const under = spawnInstance(b.root, findAgent(b.root, "dev"), { instance: "dev-under", relation: "child", relativeTo: "dev-boss", relativeRoot: b.root, launch: false });
+    assert.throws(
+      () => spawnInstance(a.root, findAgent(a.root, "dev"), { instance: "dev-sib-x", relation: "sibling", relativeTo: under.instance, launch: false }),
+      (e) => e.code === "E_RELATIVE_AMBIGUOUS" && /inherited lineage "dev-boss"/.test(e.message),
+      "sibling inheriting a cross-repo-shadowed parent name is rejected");
+    assert.equal(existsSync(join(a.root, "dev", "instances", "dev-sib-x")), false, "no stray home");
+    // Same inheritance path for relation=parent (new instance takes the
+    // anchor's old parent — also "dev-boss").
+    assert.throws(
+      () => spawnInstance(a.root, findAgent(a.root, "dev"), { instance: "dev-par-x", relation: "parent", relativeTo: under.instance, launch: false }),
+      (e) => e.code === "E_RELATIVE_AMBIGUOUS" && /inherited lineage "dev-boss"/.test(e.message),
+      "parent inheriting a cross-repo-shadowed lineage name is rejected");
+    assert.equal(metaOf(b.root, under.instance).parentInstance, "dev-boss", "anchor untouched by the rejected parent spawn");
+    // Sibling of the same anchor spawned from ITS OWN repo round-trips fine.
+    const sibOk = spawnInstance(b.root, findAgent(b.root, "dev"), { instance: "dev-sib-ok", relation: "sibling", relativeTo: under.instance, launch: false });
+    assert.equal(metaOf(b.root, sibOk.instance).parentInstance, "dev-boss", "same-repo sibling inherits the parent");
+  } finally { process.env.PATH = oldPath; }
+});
+
+test("anchor enumeration sees intra-root duplicates (generated-name collisions)", () => {
+  const base = temp(); const repo = join(base, "repo"); gitRepo(repo);
+  const root = join(repo, "agents");
+  // Two agents whose generated names collide: agent "dev" with purpose "foo-1"
+  // and agent "dev-foo" with purpose "1" both yield instance "dev-foo-1".
+  for (const soul of ["dev", "dev-foo"]) {
+    write(join(root, soul, "soul", "soul.yaml"), `name: ${soul}\nkind: persistent\nrepo: ${repo}\nwork: checkout\nruntime: pi\n`);
+    write(join(root, soul, "soul", "AGENTS.md"), `# ${soul}\n`);
+    mkdirSync(join(root, soul, "instances"), { recursive: true });
+  }
+  const oldPath = process.env.PATH;
+  process.env.PATH = fakeRuntimes(base);
+  try {
+    spawnInstance(root, findAgent(root, "dev"), { instance: "dev-foo-1", launch: false });
+    spawnInstance(root, findAgent(root, "dev-foo"), { instance: "dev-foo-1", launch: false });
+    // findInstanceHomes surfaces both; first-match findInstanceHome sees one.
+    assert.equal(findInstanceHomes(root, "dev-foo-1").length, 2, "both same-named homes enumerated");
+    // A relation anchored on the duplicated name is inherently ambiguous —
+    // --relative-root cannot split two matches under ONE root.
+    assert.throws(
+      () => spawnInstance(root, findAgent(root, "dev"), { instance: "dev-kid-dup", relation: "child", relativeTo: "dev-foo-1", relativeRoot: root, launch: false }),
+      (e) => e.code === "E_RELATIVE_AMBIGUOUS" && /inherently ambiguous/.test(e.message),
+      "intra-root duplicate anchor rejected even with --relative-root");
+    assert.throws(
+      () => spawnInstance(root, findAgent(root, "dev"), { instance: "dev-kid-dup", relation: "child", relativeTo: "dev-foo-1", launch: false }),
+      (e) => e.code === "E_RELATIVE_AMBIGUOUS",
+      "intra-root duplicate anchor rejected without qualifier too");
+    assert.equal(existsSync(join(root, "dev", "instances", "dev-kid-dup")), false, "no stray home");
+  } finally { process.env.PATH = oldPath; }
+});
+
+test("local-soul instances enumerate once and accept relations (no false intra-root ambiguity)", () => {
+  const base = temp(); const repo = join(base, "repo"); gitRepo(repo);
+  const root = join(repo, "agents");
+  write(join(root, "dev", "soul", "soul.yaml"), `name: dev\nkind: persistent\nrepo: ${repo}\nwork: checkout\nruntime: pi\n`);
+  write(join(root, "dev", "soul", "AGENTS.md"), "# dev\n");
+  mkdirSync(join(root, "dev", "instances"), { recursive: true });
+  // Local soul under local-agents/ — visible via BOTH listAgents and the
+  // capability fallback scan; must not double-count.
+  const la = join(repo, "local-agents");
+  write(join(la, "helper", "soul", "soul.yaml"), `name: helper\nkind: local\nrepo: ${repo}\nwork: worktree\nruntime: pi\n`);
+  write(join(la, "helper", "soul", "AGENTS.md"), "# helper\n");
+  mkdirSync(join(la, "helper", "instances"), { recursive: true });
+  const oldPath = process.env.PATH;
+  process.env.PATH = fakeRuntimes(base);
+  try {
+    const anchor = spawnInstance(root, findAgent(root, "helper"), { instance: "helper-anchor", launch: false });
+    assert.equal(findInstanceHomes(root, anchor.instance).length, 1, "local-soul instance enumerated exactly once");
+    // Relations to a local-soul anchor work — with and without --relative-root.
+    const kid = spawnInstance(root, findAgent(root, "dev"), { instance: "dev-la-kid", relation: "child", relativeTo: anchor.instance, launch: false });
+    assert.equal(kid.parentInstance, anchor.instance);
+    const kid2 = spawnInstance(root, findAgent(root, "dev"), { instance: "dev-la-kid2", relation: "child", relativeTo: anchor.instance, relativeRoot: root, launch: false });
+    assert.equal(kid2.parentInstance, anchor.instance);
+    const sib = spawnInstance(root, findAgent(root, "dev"), { instance: "dev-la-sib", relation: "sibling", relativeTo: kid.instance, launch: false });
+    assert.equal(sib.parentInstance, anchor.instance, "sibling inherits the local-soul parent");
+  } finally { process.env.PATH = oldPath; }
+});
+
 test("retire splices lineage: orphans inherit the retiree's links (parent-relation reviewer cycle)", () => {
   const base = temp(); const repo = join(base, "repo"); gitRepo(repo);
   const root = join(repo, "agents");
@@ -1116,8 +1252,8 @@ test("retire splice is identity-safe: a same-named instance in another repo keep
     const bossB = spawnInstance(b.root, findAgent(b.root, "dev"), { instance: "dev-boss", launch: false });
     assert.equal(bossA.instance, bossB.instance, "fixture: duplicate names across repos");
     // Each repo's child points at ITS OWN dev-boss (local-first resolution).
-    const kidA = spawnInstance(a.root, findAgent(a.root, "dev"), { instance: "dev-kid", relation: "child", relativeTo: "dev-boss", launch: false });
-    const kidB = spawnInstance(b.root, findAgent(b.root, "dev"), { instance: "dev-kid-b", relation: "child", relativeTo: "dev-boss", launch: false });
+    const kidA = spawnInstance(a.root, findAgent(a.root, "dev"), { instance: "dev-kid", relation: "child", relativeTo: "dev-boss", relativeRoot: a.root, launch: false });
+    const kidB = spawnInstance(b.root, findAgent(b.root, "dev"), { instance: "dev-kid-b", relation: "child", relativeTo: "dev-boss", relativeRoot: b.root, launch: false });
     const metaOf = (root2, name2) => JSON.parse(readFileSync(join(root2, "dev", "instances", name2, "instance.json"), "utf8"));
     assert.equal(metaOf(a.root, kidA.instance).parentInstance, "dev-boss");
     assert.equal(metaOf(b.root, kidB.instance).parentInstance, "dev-boss");
