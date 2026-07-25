@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: View-local shortcuts need engine-owned default metadata
-description: View-scoped shortcuts may resolve events locally, but their defaults need first-class engine metadata so the editor can show them and explicit unbinds can stop them.
+description: View-scoped shortcuts may resolve events locally, but their defaults belong in engine-owned metadata; once DEFAULT_KEYMAP owns a view default, remove local chord fallbacks so editor display and dispatch cannot drift.
 tags: [desktop, keybindings, views]
 timestamp: 2026-07-25
 ---
@@ -40,8 +40,15 @@ effective keymap alongside `DEFAULT_KEYMAP` for shell actions. With view default
 first-class, `getBinding`, editor display, rebind, and unbind flows all see the
 same default state while dispatch remains DOM-local.
 
-Do not patch the engine from a wiring branch; route this as an engine contract
-change.
+# Contract outcome
+
+When the engine/default keymap can own a view's default chord, delete the view's
+local `chord` field instead of keeping it as backup. Local fallback defaults
+recreate the same mismatch: the editor and explicit-unbind flow read the engine
+keymap, while the view handler may still fire an old hard-coded chord.
+
+If the contract is still missing, do not patch the engine from a wiring branch;
+route it as an engine contract change.
 
 Structural keys such as Enter, Escape, and arrows stay hard-coded when they are
 focus semantics rather than shortcuts.
