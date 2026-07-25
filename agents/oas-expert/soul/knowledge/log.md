@@ -1,6 +1,7 @@
 # Knowledge Log
 
 ## 2026-07-25
+* **Update**: [Repo state](/stewardship/repo-state.md) records v0.18.5 publication and deployment verification, resolution of the PR #32/#33 corrective-release thread, and this machine's tooling update; the [delivery log](/stewardship/delivery-log.md) records PR #34's manifest-bump rescue.
 * **Creation**: [xterm custom key overrides must classify the whole physical chord](/lessons/xterm-custom-key-handler-whole-chord.md) — xterm invokes a custom key event handler across keydown, keypress, and keyup, so a modifier override must suppress every relevant phase while emitting its replacement byte exactly once.
 * **Update**: skills/pr-review — added the surface-removal inventory gotcha: user-visible fallback and recovery copy must move with a removed UI surface, and tests should pin the replacement destination instead of only asserting generic failure.
 * **Creation**: [Surface removal inventories must include user-facing recovery copy](/lessons/surface-removal-inventory-user-guidance.md) — removing a UI surface requires finding user-visible fallback and recovery copy, not only imports, navigation entries, modules, and CSS.

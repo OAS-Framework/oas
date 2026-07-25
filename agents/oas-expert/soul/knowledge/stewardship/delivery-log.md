@@ -24,6 +24,18 @@ decisions/ and referenced from here.
 
 ---
 
+## PR #34 — v0.18.5 manifest bump rescue (2026-07-25)
+- verdict: MERGED as squash commit `8f5af90`. Release run `30160666617`
+  completed build/test, all three Desktop installer build+smoke legs, both npm
+  publishes, provenance, checksums, and GitHub Release v0.18.5 before the known
+  org policy blocked Actions from creating the bump PR. The workflow-created
+  branch contained exactly the five expected root/pi/Desktop manifest and
+  lockfile changes (0.18.4→0.18.5); manual PR #34 restored the protected-main
+  flow and deleted the branch.
+- owner: oas-expert-release-desktop-ux · coordinator: dev-coordinator-parallel-2
+- taught us: nothing new — the documented org-policy rescue path remains
+  necessary, while the fully qualified detached-HEAD branch push still works.
+
 ## PR #33 (round 3) — Desktop Shift+Enter send leak and terminal copy selection (2026-07-25)
 - verdict: MERGED as merge commit `595159e` at exact head `d75fa3a` after two
   RETURNs. All four gates PASS. The feature suppresses every xterm event in a
