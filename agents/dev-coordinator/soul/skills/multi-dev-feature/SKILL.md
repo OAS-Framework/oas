@@ -37,6 +37,10 @@ operator roots. Sequence dependency-heavy parts first.
   into `feature/<name>` (validate it builds); push; mail B to merge
   `origin/feature/<name>` into their branch. Never tell B to touch A's
   branch.
+- **Fast-loop aweb mail**: every coordination mail states the exact feature
+  head, what is already merged, and exactly one next action. If crossed mail
+  references stale state, reconcile against git and reply with current truth
+  instead of re-litigating.
 - Developers run their own post-commit reviewers; you don't re-review their
   in-flight commits.
 
@@ -52,9 +56,12 @@ git -C /tmp/integrate-<name> merge --no-ff origin/<dev>/<name>
 ```
 
 Resolve trivial conflicts yourself; route non-trivial ones back to the
-developer with the conflict context. After each merge, run the repo's full
-gate (for this repo: `npm test`, `npm run check`, `npm run validate`,
-`npm run pack:check`). Push the feature branch when green.
+developer with the conflict context. In a fresh integration worktree, install
+root dependencies before root gates (`npm install`) and install package-local
+dependencies for package gates (for desktop work, run `npm install` inside
+`packages/desktop`). After each merge, run the repo's full gate (for this
+repo: `npm test`, `npm run check`, `npm run validate`, `npm run pack:check`).
+Push the feature branch when green.
 
 ## 4. Merged-state review
 
@@ -93,18 +100,27 @@ to the owning developer(s), re-merge, re-gate, re-review.
   or merged-state reviewer mails its verdict and retires. Re-reviewing a
   fix means spawning a NEW reviewer on the new commit
   (`--purpose <new-short-sha>`); never wait on or mail a retired reviewer.
-- After merge: delete the feature and developer branches, remove any temp
-  worktree (`git worktree remove`), confirm developers harvested and retire
-  them, log the delivery.
+- After merge: delete the feature branch and any temp worktree (`git worktree
+  remove`). Before deleting developer branches or retiring developers, confirm
+  their post-merge harvest commits are ancestors of `origin/main`; if not,
+  preserve every not-on-main harvest commit on a knowledge-only PR first. Then
+  retire them and log the delivery.
 
 ## Gotchas
 
+- In a fast two-developer loop, crossed aweb mail can dominate coordination
+  churn. Anchor every mail on exact commit heads, what is already merged, and a
+  single next action; once PR-ready, declare a hard freeze where only
+  blocker-class defects get commits. See [Crossed aweb mail dominates
+  multi-dev integration churn — anchor every mail on exact
+  heads](../knowledge/lessons/crossed-mail-coordination.md).
 - If multiple parallel instances of the same soul harvest into separate
   branches, their soul knowledge files can conflict during integration. Union
-  append-only `knowledge/log.md` conflicts yourself, but route duplicate
-  lessons, competing concept rewrites, and section-index judgment to an owner
-  instance of that soul. See [Concurrent harvests of one soul need owner
-  reconciliation for knowledge
+  append-only `knowledge/log.md` conflicts and pure-addition index/link
+  conflicts yourself, verify cross-links exist after the union, but route
+  duplicate lessons, competing concept rewrites, and section-index judgment to
+  an owner instance of that soul. See [Concurrent harvests of one soul: union
+  pure additions, route editorial
   conflicts](../knowledge/lessons/concurrent-harvest-conflicts-one-soul.md).
 - If a reviewer appears dead, check `aw mail inbox --show-all` before acting;
   awakening events can lag behind delivered verdict mail. If the session JSONL
@@ -124,12 +140,18 @@ to the owning developer(s), re-merge, re-gate, re-review.
   complete; then retire the developer and shepherd the docs PR yourself. See
   [Retire developers without holding on docs-only follow-up
   PRs](../knowledge/lessons/retire-dev-without-docs-pr.md).
-- Fresh integration worktrees need a local `packages/desktop` install before
-  desktop gates: if desktop tests fail en masse with missing `jsdom` or other
-  package imports, run `cd packages/desktop && npm install` inside the
-  integration worktree before treating them as feature regressions. See
-  [Integration worktrees need packages/desktop npm install before the
-  gate](../knowledge/lessons/integration-worktree-desktop-npm-install.md).
+- Post-merge developer harvests can strand on the developer's instance branch.
+  Before `oas retire --delete-branch`, check whether every harvest commit is an
+  ancestor of `origin/main`; if not, cherry-pick the whole harvest chain onto a
+  knowledge-only PR and wait for any `memory-harvest-*` instance on that tree to
+  finish. See [Post-merge developer harvests land on instance branches —
+  preserve before retiring](../knowledge/lessons/post-merge-harvest-stranding.md).
+- Fresh integration worktrees need dependency installs before gates: run root
+  `npm install` before root scripts such as `npm run validate`, and run package
+  installs such as `cd packages/desktop && npm install` before package-local
+  tests, or missing imports can look like feature regressions. See [Integration
+  worktrees need root and package npm installs before
+  gates](../knowledge/lessons/integration-worktree-desktop-npm-install.md).
 - If a merged-state review fix makes a feature reachable by adding a new
   user-facing surface (tab, sidebar, menu, stage), pause before merging and
   ask the human/maintainer whether that product surface is in scope; prefer

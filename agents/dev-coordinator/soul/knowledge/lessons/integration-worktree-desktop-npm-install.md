@@ -1,19 +1,17 @@
 ---
 type: Lesson
-title: Integration worktrees need packages/desktop npm install before the gate
-description: A fresh git worktree of the oas repo shares root node_modules via the checkout but packages/desktop has its own node_modules; without `npm install` there, the desktop test suite fails en masse with ERR_MODULE_NOT_FOUND (jsdom etc.), which looks like real regressions.
+title: Integration worktrees need root and package npm installs before gates
+description: Fresh integration worktrees need dependency installs in each package that owns a gate: missing root dependencies can break `npm run validate`, and missing `packages/desktop` dependencies can make desktop tests fail en masse with ERR_MODULE_NOT_FOUND.
 tags: [integration, desktop, testing, worktree]
 ---
 
-# Integration worktrees need packages/desktop npm install before the gate
+# Integration worktrees need root and package npm installs before gates
 
-When integrating desktop work in a temp worktree (`git worktree add /tmp/...`),
-`npm test` initially failed 10 files — all `Cannot find package 'jsdom'`.
-Cause: `packages/desktop` is a private package with its own `node_modules`,
-not hoisted to root; a fresh worktree has none. Fix: `cd packages/desktop &&
-npm install` inside the worktree, then re-run the gate. Distinguish this from
-real failures before pinging developers.
+When integrating desktop work in a temporary worktree (`git worktree add /tmp/...`), missing dependencies can look like real feature regressions. Install dependencies in the worktree areas whose gates you are about to run:
 
-Also observed (2026-07-25): `test/desktop-server.test.mjs` "mutation without a
-CLI adapter degrades" (expects 503, gets 409) fails on clean origin/main —
-pre-existing, not feature work.
+- Root gates: run `npm install` at the worktree root before `npm run validate` or other root scripts. During keybindings integration, `npm run validate` needed root dependencies because the validator imports `ajv`.
+- Desktop package gates: run `cd packages/desktop && npm install` before desktop tests. A fresh worktree without `packages/desktop/node_modules` failed 10 files with `Cannot find package 'jsdom'`.
+
+Distinguish these dependency misses from real feature failures before pinging developers.
+
+Also observed (2026-07-25): `test/desktop-server.test.mjs` "mutation without a CLI adapter degrades" (expects 503, gets 409) fails on clean origin/main — pre-existing, not feature work.

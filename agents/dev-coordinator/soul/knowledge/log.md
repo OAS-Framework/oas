@@ -1,6 +1,12 @@
 # Knowledge Log
 
 ## 2026-07-25
+* **Creation**: added [Crossed aweb mail dominates multi-dev integration churn — anchor every mail on exact heads](/lessons/crossed-mail-coordination.md) from dev-coordinator-keybindings note.
+* **Creation**: added [Desktop keybindings — editable keymap architecture](/decisions/desktop-keybindings-architecture.md) from dev-coordinator-keybindings note.
+* **Creation**: added [Post-merge developer harvests land on instance branches — preserve before retiring](/lessons/post-merge-harvest-stranding.md) from dev-coordinator-keybindings note.
+* **Update**: refreshed [Concurrent harvests of one soul: union pure additions, route editorial conflicts](/lessons/concurrent-harvest-conflicts-one-soul.md) with pure-addition union and cross-link verification guidance from dev-coordinator-keybindings note.
+* **Update**: refreshed [Integration worktrees need root and package npm installs before gates](/lessons/integration-worktree-desktop-npm-install.md) with root dependency installation before validation gates from dev-coordinator-keybindings note.
+* **Update**: skills/multi-dev-feature — added exact-head aweb coordination, post-merge harvest preservation, pure-addition soul-conflict union, and root/package dependency-install guidance from dev-coordinator-keybindings notes.
 * **Creation**: added [Integration worktrees need packages/desktop npm install before the gate](/lessons/integration-worktree-desktop-npm-install.md) from dev-coordinator-parallel-2 note.
 * **Creation**: added [Merged-state review fixes can overreach scope — validate new user-facing surfaces with the human](/lessons/review-fix-scope-overreach.md) from dev-coordinator-parallel-2 note.
 * **Update**: skills/multi-dev-feature — added gotchas for desktop package installs in fresh integration worktrees and human validation before new user-facing surfaces from merged-state review fixes.
