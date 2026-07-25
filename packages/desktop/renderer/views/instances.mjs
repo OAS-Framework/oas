@@ -15,9 +15,32 @@ import { ROSTER_SORTS, groupRosterFamilies, rosterGroupKey } from "../instance-t
 let state = null;
 
 const SORT_KEY = "oas.desktop.rosterSort";
-function savedSort() {
-  try { const v = localStorage.getItem(SORT_KEY); return ROSTER_SORTS.some((s) => s.id === v) ? v : "status"; }
-  catch { return "status"; }
+/* Sort choice is WORKSPACE-SCOPED like the group collapse state (PR #29
+   maintainer finding): persisted as a { [canonicalWsId]: sortId } map so
+   workspace A's choice never leaks into B. Unknown/invalid persisted values
+   fall back to "status". Exported for the A→B→A round-trip regression. */
+export function savedSort(ws) {
+  try {
+    const map = JSON.parse(localStorage.getItem(SORT_KEY) || "{}");
+    const v = map && typeof map === "object" ? map[ws || ""] : null;
+    return ROSTER_SORTS.some((s) => s.id === v) ? v : "status";
+  } catch { return "status"; }
+}
+function persistSort(ws, sortBy) {
+  try {
+    let map;
+    try { map = JSON.parse(localStorage.getItem(SORT_KEY) || "{}"); } catch { map = {}; }
+    if (!map || typeof map !== "object" || Array.isArray(map)) map = {};
+    map[ws || ""] = sortBy;
+    localStorage.setItem(SORT_KEY, JSON.stringify(map));
+  } catch { /* storage-less env */ }
+}
+/* Re-read the persisted sort for the CURRENT workspace and sync the control.
+   Called on workspace switch and on silent server-side adoption. */
+function syncSortToWorkspace(s) {
+  s.sortBy = savedSort(currentWorkspace());
+  const sel = s.q("sortsel");
+  if (sel) sel.value = s.sortBy;
 }
 
 export function mount(el, ctx) {
@@ -27,7 +50,7 @@ export function mount(el, ctx) {
     panel: { instances: [] },
     sel: null,
     filterText: "",
-    sortBy: savedSort(),
+    sortBy: savedSort(currentWorkspace()),
     collapsedGroups: new Set(),   // rosterGroupKey(ws, repo[, family]) — ws-scoped
     pendingSends: [],
     fastPollUntil: 0,
@@ -71,7 +94,7 @@ export function mount(el, ctx) {
   sortSel.value = s.sortBy;
   sortSel.addEventListener("change", (e) => {
     s.sortBy = e.target.value;
-    try { localStorage.setItem(SORT_KEY, s.sortBy); } catch { /* storage-less env */ }
+    persistSort(currentWorkspace(), s.sortBy);
     renderRoster(s);
   });
   s.q("wssel").addEventListener("change", (e) => setWorkspace(e.target.value));
@@ -81,7 +104,7 @@ export function mount(el, ctx) {
     try { await postJson(s.ctx, instanceApiPath("interrupt", s.sel), {}); } catch { /* idle instance */ }
     setTimeout(() => refreshChat(s, true), 350);
   };
-  s.unsubWs = onWorkspaceChange(() => { clearSelection(s); refreshPanel(s); });
+  s.unsubWs = onWorkspaceChange(() => { clearSelection(s); syncSortToWorkspace(s); refreshPanel(s); });
   refreshPanel(s);
   s.timers.push(setInterval(() => refreshPanel(s), 4000));
   s.timers.push(setInterval(() => refreshChat(s, false), 1500));
@@ -113,8 +136,10 @@ async function refreshPanel(s) {
   if (!s.alive || myGen !== workspaceGeneration()) return;
   s.panel = panel;
   if (panel.workspace && panel.workspace.id !== currentWorkspace()) {
-    // server resolved our (possibly stale) ws to a real one — adopt it silently
+    // server resolved our (possibly stale) ws to a real one — adopt it
+    // silently, then re-scope the sort to the adopted workspace
     adoptWorkspace(panel.workspace.id);
+    syncSortToWorkspace(s);
   }
   renderWorkspaceSelect(s.q("wssel"), panel.workspaces, panel.workspace?.id || "");
   renderRoster(s);
