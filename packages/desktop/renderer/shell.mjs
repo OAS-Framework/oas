@@ -13,7 +13,7 @@ import {
 } from "./theme.mjs";
 import { createPalette } from "./palette.mjs";
 import {
-  registerAction, setActiveContexts, getBinding, onKeymapChange, formatChord, handleKeydown,
+  registerAction, setActiveContexts, getBinding, onKeymapChange, formatChord, handleKeydown, matchEvent,
 } from "./keybindings.mjs";
 import { createKeybindingsEditor } from "./keybindings-editor.mjs";
 import { rosterKeyAction, moveTarget } from "./roster-keys.mjs";
@@ -615,6 +615,17 @@ async function openTerminalTabInner(instance, ws, key) {
     wrap,
     isActive: () => made.paneEl.classList.contains("active"),
     fit: () => fit.fit(),
+    // Terminal-allowlisted shortcuts (engine policy: app.palette, tabs.*)
+    // must be intercepted BEFORE xterm writes to the pty — its capture-phase
+    // handler consumes e.g. Ctrl+K, so the bubble-phase window listener
+    // never sees it. matchEvent applies the allowlist (insideTerminal);
+    // the action runs once on keydown, and every phase of a matched chord
+    // is claimed so no control byte leaks to the attached program.
+    interceptKey: (ev) => {
+      if (!matchEvent(ev, { insideTerminal: true })) return false;
+      if (ev.type === "keydown") handleKeydown(ev, { insideTerminal: true });
+      return true;
+    },
   });
 
   const made = addTab({
