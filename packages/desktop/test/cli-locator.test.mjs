@@ -211,6 +211,14 @@ test("relationSupportError: related spawns fail closed on old v1 CLIs, plain spa
   assert.equal(err.code, "cli-no-relations", "stable code for the spawn form");
   assert.ok(relationSupportError(oldCli, { relativeTo: "coord-1" }), "anchor alone also gates");
   assert.equal(relationSupportError(oldCli, {}), null, "plain spawns keep working on the full v1 range");
+  // explicit "unrelated" is the DEFAULT, not a related spawn: the adapter
+  // normalizes it to absence and forwards no flags, so it must not be gated
+  // on old v1 CLIs (review 9425d6a)
+  assert.equal(relationSupportError(oldCli, { relation: "unrelated" }), null,
+    "explicit unrelated is a plain spawn on any accepted v1 CLI");
+  assert.equal(relationSupportError(oldCli, { relation: "" }), null, "empty relation is a plain spawn");
+  assert.ok(relationSupportError(oldCli, { relation: "unrelated", relativeTo: "x" }),
+    "a supplied anchor still gates even with relation=unrelated (adapter rejects the pair)");
   assert.equal(relationSupportError(newCli, { relation: "sibling", relativeTo: "x" }), null,
     "relation-capable CLI passes");
 });

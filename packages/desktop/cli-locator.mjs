@@ -42,7 +42,12 @@ export function supportsRelations(version) {
  * relation/anchor was requested but the accepted CLI predates relation
  * support, else null. */
 export function relationSupportError(cliState, { relation, relativeTo } = {}) {
-  if (!relation && !relativeTo) return null;
+  // "unrelated" (or empty) is the DEFAULT, not a related spawn — the adapter
+  // normalizes it to absence (spawnArgv) and forwards no flags, so it must
+  // keep working across the full accepted v1 range (review 9425d6a). A
+  // supplied relativeTo still gates: the adapter rejects the mismatched pair.
+  const rel = relation === "unrelated" || relation === "" ? undefined : relation;
+  if (!rel && !relativeTo) return null;
   if (cliState?.ok && supportsRelations(cliState.version)) return null;
   const err = new Error(`spawn-time relations require oas >= ${RELATIONS_MIN.join(".")} — installed ${cliState?.version || "none"} would silently spawn an unrelated instance`);
   err.code = "cli-no-relations";
