@@ -45,8 +45,9 @@ jobs:
             builder_args: --x64
     runs-on: ${{ matrix.os }}
     env:
-      # Unsigned/not notarized — disable certificate discovery (same as the
-      # release matrix). No signing secrets are referenced here.
+      # macOS artifacts are AD-HOC signed (no Developer ID, not notarized) —
+      # certificate auto-discovery stays disabled (same as the release
+      # matrix). No signing secrets are referenced here.
       CSC_IDENTITY_AUTO_DISCOVERY: "false"
     steps:
       - uses: actions/checkout@v4
@@ -57,7 +58,7 @@ jobs:
 
       # (No xvfb / display needed: the build-verify smoke runs the static
       # inventory + node-pty ABI checks, not the packaged GUI launch — that
-      # needs an interactive windowserver an unsigned app can't get on CI
+      # needs an interactive windowserver a non-notarized app can't get on CI
       # runners and is verified out of band.)
       - name: Install deps (root + packages/desktop)
         run: |
@@ -71,14 +72,30 @@ jobs:
         if: runner.os == 'macOS' && matrix.arch == 'x64'
         run: sudo softwareupdate --install-rosetta --agree-to-license
 
-      - name: Build unsigned installers
+      - name: Build installers (macOS ad-hoc signed)
         working-directory: packages/desktop
         run: npm run dist -- ${{ matrix.builder_args }}
+
+      # Contract (macos-correct-installers): BOTH packaged mac .app bundles
+      # must carry a COMPLETE ad-hoc signature (v0.18.2 arm64 shipped an
+      # incomplete linker-generated one — "code has no resources but signature
+      # indicates they must be present" — and x64 shipped unsigned). Gate the
+      # packaged app with strict deep codesign verification BEFORE smoke and
+      # artifact upload. This run-block must stay byte-identical to the one in
+      # release.yml (test/release-workflow.test.mjs enforces both).
+      - name: Verify macOS ad-hoc signature (strict deep codesign)
+        if: runner.os == 'macOS'
+        working-directory: packages/desktop
+        run: |
+          APP="$(find dist -maxdepth 2 -name '*.app' -print -quit)"
+          [ -n "$APP" ] || { echo "::error::no packaged .app found under dist/"; exit 1; }
+          echo "strict deep codesign verification: $APP"
+          codesign --verify --deep --strict --verbose=2 "$APP"
 
       # Installed-artifact smoke, BUILD-VERIFY mode: inventory (artifact names
       # + plausible sizes) + node-pty under the packaged Electron ABI. The
       # packaged GUI LAUNCH is skipped (OAS_SMOKE_BUILD_VERIFY authorizes the
-      # skip under CI) — it needs a display unsigned apps don't get on CI
+      # skip under CI) — it needs a display non-notarized apps don't get on CI
       # runners; the installer BUILD + native-module ABI are the meaningful
       # evidence here.
       - name: Installed-artifact smoke (build-verify)

@@ -65,6 +65,15 @@ jobs:
         id: v
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
+      # Fail FAST (before any build spend, long before publication) if the
+      # release notes file for this exact tag is missing — the final GitHub
+      # Release step uses --notes-file docs/release-notes/<tag>.md, and a
+      # tag/notes-filename mismatch must not be discovered post-npm-publish.
+      - name: Verify release notes exist for this tag
+        run: |
+          NOTES="docs/release-notes/${GITHUB_REF_NAME}.md"
+          [ -f "$NOTES" ] || { echo "::error::missing $NOTES — the release-notes filename must match the tag"; exit 1; }
+
       - name: Bump all three packages (root, pi, desktop)
         run: |
           npm version "${{ steps.v.outputs.version }}" --no-git-tag-version
@@ -120,7 +129,7 @@ jobs:
   # ------------------------------------------------------------ Desktop side
   # Interface seam owned by the Desktop engineer: each matrix job checks out
   # the exact tag SHA, bumps packages/desktop to the tag version, builds the
-  # unsigned installers via `npm run dist` (electron-builder internals are the
+  # installers via `npm run dist` (electron-builder internals are the
   # Desktop package's concern), and uploads a `desktop-<os>-<arch>` artifact
   # containing only the distributable files for that platform.
   #
@@ -130,7 +139,7 @@ jobs:
   #   * `npm run dist` — electron-builder packaging producing
   #     dist/oas-desktop-* artifacts for the platform (DMG+ZIP on macOS,
   #     AppImage+DEB on Linux);
-  #   * `npm run dist:smoke` (optional) — installed-artifact smoke.
+  #   * an installed-artifact smoke script (optional).
   desktop-build:
     needs: build-and-test
     strategy:
@@ -151,7 +160,8 @@ jobs:
             builder_args: --x64
     runs-on: ${{ matrix.os }}
     env:
-      # Desktop installers ship unsigned/not notarized — disable certificate discovery.
+      # macOS installers ship AD-HOC signed (no Developer ID, not notarized) —
+      # certificate auto-discovery stays disabled; no signing secrets exist here.
       CSC_IDENTITY_AUTO_DISCOVERY: "false"
     steps:
       - uses: actions/checkout@v4
@@ -180,10 +190,27 @@ jobs:
           npm test
           npm run dist -- ${{ matrix.builder_args }}
 
+      # Contract (macos-correct-installers): BOTH packaged mac .app bundles
+      # must carry a COMPLETE ad-hoc signature (v0.18.2 arm64 shipped an
+      # incomplete linker-generated one — "code has no resources but signature
+      # indicates they must be present" — and x64 shipped unsigned). Gate the
+      # packaged app with strict deep codesign verification BEFORE smoke and
+      # artifact upload. This run-block must stay byte-identical to the one in
+      # build-installers.yml (test/release-workflow.test.mjs enforces both).
+      - name: Verify macOS ad-hoc signature (strict deep codesign)
+        if: runner.os == 'macOS'
+        working-directory: packages/desktop
+        run: |
+          APP="$(find dist -maxdepth 2 -name '*.app' -print -quit)"
+          [ -n "$APP" ] || { echo "::error::no packaged .app found under dist/"; exit 1; }
+          echo "strict deep codesign verification: $APP"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+
       # Release and build-only CI run the SAME proven smoke: artifact
       # inventory + spawn-helper mode + node-pty under the packaged Electron
       # ABI. GUI launch is operator/maintainer-owned post-publish acceptance;
-      # headless CI has no reliable interactive windowserver for unsigned apps.
+      # headless CI has no reliable interactive windowserver for ad-hoc-signed,
+      # non-notarized apps.
       - name: Installed-artifact smoke (build-verify)
         working-directory: packages/desktop
         env:
