@@ -1253,13 +1253,33 @@ test("parent-relation rollback after LAUNCH kills the window, compensates hooks,
   const script = `import {appendFileSync} from 'node:fs'; appendFileSync(${JSON.stringify(hookLog)}, process.env.OAS_EVENT + ':' + process.env.OAS_INSTANCE + '\\n');`;
   capability(repo, "comp", { capability: "acme.comp", hooks: { spawn: "hook.mjs", retire: "hook.mjs" } }, { "hook.mjs": script });
   write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.comp:\n      global: true\n");
-  // Fake tmux that records argv lines; pretends the session exists, no windows.
+  // STATEFUL fake tmux: tracks window names in a file so list-windows reflects
+  // new-window/kill-window; TMUX_FAKE_STUBBORN names a window that kill-window
+  // silently fails to remove (for truth-telling assertions).
   const bin = join(base, "bin"); mkdirSync(bin, { recursive: true });
   const tmuxLog = join(base, "tmux-log");
-  write(join(bin, "tmux"), `#!/bin/sh\necho "$@" >> ${tmuxLog}\nexit 0\n`);
+  const tmuxWins = join(base, "tmux-windows");
+  write(tmuxWins, "");
+  write(join(bin, "tmux"), [
+    "#!/bin/sh",
+    `echo "$@" >> ${tmuxLog}`,
+    'cmd="$1"',
+    'case "$cmd" in',
+    "  new-window)",
+    `    while [ $# -gt 0 ]; do if [ "$1" = "-n" ]; then echo "$2" >> ${tmuxWins}; fi; shift; done ;;`,
+    "  kill-window)",
+    '    while [ $# -gt 0 ]; do if [ "$1" = "-t" ]; then t="$2"; fi; shift; done',
+    "    name=$(printf '%s' \"$t\" | sed 's/.*:=//')",
+    `    if [ "$name" != "$TMUX_FAKE_STUBBORN" ]; then grep -v -x "$name" ${tmuxWins} > ${tmuxWins}.n || true; mv ${tmuxWins}.n ${tmuxWins}; fi ;;`,
+    "  list-windows)",
+    `    cat ${tmuxWins} ;;`,
+    "esac",
+    "exit 0",
+    "",
+  ].join("\n"));
   for (const t of ["pi", "claude"]) write(join(bin, t), "#!/bin/sh\nexit 0\n");
   execFileSync("chmod", ["-R", "+x", bin]);
-  for (const t of ["git", "node", "chmod", "sh"]) symlinkSync(execFileSync("which", [t], { encoding: "utf8" }).trim(), join(bin, t));
+  for (const t of ["git", "node", "chmod", "sh", "grep", "sed", "mv", "cat", "printf"]) symlinkSync(execFileSync("which", [t], { encoding: "utf8" }).trim(), join(bin, t));
   const oldPath = process.env.PATH;
   process.env.PATH = `${bin}`;
   try {
@@ -1333,6 +1353,63 @@ test("parent-relation rollback after LAUNCH kills the window, compensates hooks,
       rmSync(tmpDir3, { recursive: true, force: true });
       if (existsSync(join(zombHome, "locked"))) execFileSync("chmod", ["755", join(zombHome, "locked")]);
       rmSync(zombHome, { recursive: true, force: true });
+    }
+
+    // Stubborn window: kill-window "succeeds" (exit 0) but the window remains
+    // — the effect check must report it (exit codes are not truth).
+    const tmpDir4 = `${anchorMetaPath}.tmp-dev-zomb4`;
+    mkdirSync(tmpDir4); write(join(tmpDir4, "blocker"), "x");
+    process.env.TMUX_FAKE_STUBBORN = "dev-zomb4";
+    try {
+      assert.throws(
+        () => spawnInstance(root, agentDef, { instance: "dev-zomb4", relation: "parent", relativeTo: anchor.instance, tmuxSession: "oas-test-fake", launch: true }),
+        /rollback INCOMPLETE.*tmux window oas-test-fake:dev-zomb4 still running/s,
+        "unkillable window reported despite kill-window exiting 0");
+    } finally {
+      delete process.env.TMUX_FAKE_STUBBORN;
+      rmSync(tmpDir4, { recursive: true, force: true });
+    }
+
+    // Failing retire hook: runLifecycleHooks catches hook errors internally,
+    // so the rollback must read the structured failures field.
+    const tmpDir5 = `${anchorMetaPath}.tmp-dev-zomb5`;
+    mkdirSync(tmpDir5); write(join(tmpDir5, "blocker"), "x");
+    write(join(repo, ".agents", "capabilities", "owned", "comp", "hook.mjs"),
+      `import {appendFileSync} from 'node:fs';\n` +
+      `appendFileSync(${JSON.stringify(hookLog)}, process.env.OAS_EVENT + ':' + process.env.OAS_INSTANCE + '\\n');\n` +
+      `if (process.env.OAS_EVENT === 'retire' && process.env.OAS_INSTANCE === 'dev-zomb5') process.exit(3);\n`);
+    try {
+      assert.throws(
+        () => spawnInstance(root, agentDef, { instance: "dev-zomb5", relation: "parent", relativeTo: anchor.instance, tmuxSession: "oas-test-fake", launch: false }),
+        /rollback INCOMPLETE.*retire hook acme\.comp/s,
+        "nonzero retire hook reported via structured failures");
+    } finally { rmSync(tmpDir5, { recursive: true, force: true }); }
+
+    // Failed worktree removal: a foreign file inside the worktree with
+    // worktree remove blocked — verify via `git worktree list` effect check.
+    write(join(root, "dev", "soul", "soul.yaml"), `name: dev\nkind: persistent\nrepo: ${repo}\nwork: worktree\nruntime: pi\n`);
+    const tmpDir6 = `${anchorMetaPath}.tmp-dev-zomb6`;
+    mkdirSync(tmpDir6); write(join(tmpDir6, "blocker"), "x");
+    write(join(repo, ".agents", "capabilities", "owned", "comp", "hook.mjs"),
+      `import {appendFileSync, mkdirSync as mk, writeFileSync as wf, chmodSync} from 'node:fs';\n` +
+      `appendFileSync(${JSON.stringify(hookLog)}, process.env.OAS_EVENT + ':' + process.env.OAS_INSTANCE + '\\n');\n` +
+      `if (process.env.OAS_EVENT === 'retire' && process.env.OAS_INSTANCE === 'dev-zomb6') {\n` +
+      `  const d = process.env.OAS_HOME + '/work/pin'; mk(d); wf(d + '/x', 'x'); chmodSync(d, 0o555); chmodSync(process.env.OAS_HOME + '/work', 0o555);\n` +
+      `}\n`);
+    const zomb6Home = join(root, "dev", "instances", "dev-zomb6");
+    try {
+      assert.throws(
+        () => spawnInstance(root, findAgent(root, "dev"), { instance: "dev-zomb6", relation: "parent", relativeTo: anchor.instance, tmuxSession: "oas-test-fake", launch: false }),
+        /rollback INCOMPLETE.*(git worktree .* still registered|instance home)/s,
+        "failed worktree cleanup reported");
+    } finally {
+      rmSync(tmpDir6, { recursive: true, force: true });
+      if (existsSync(join(zomb6Home, "work"))) {
+        execFileSync("chmod", ["-R", "755", join(zomb6Home, "work")]);
+        try { execFileSync("git", ["-C", repo, "worktree", "remove", "--force", join(zomb6Home, "work")], { stdio: "ignore" }); } catch { /* cleanup best-effort */ }
+      }
+      rmSync(zomb6Home, { recursive: true, force: true });
+      try { execFileSync("git", ["-C", repo, "worktree", "prune"], { stdio: "ignore" }); } catch { /* cleanup best-effort */ }
     }
   } finally { process.env.PATH = oldPath; }
 });
