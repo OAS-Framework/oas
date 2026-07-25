@@ -347,16 +347,16 @@ function render(s) {
   s.bounds = { w: width, h: height };
 
   const BLEED = 2000; // edge svg overdraw so dragged boxes keep their edges
-  const groupFor = (block, label, cls) => {
+  const groupFor = (block, key, ariaLabel, cls) => {
     const group = document.createElement("div");
     group.className = "hier-group" + (cls ? " " + cls : "");
-    group.dataset.ws = label;
+    group.dataset.ws = key;
     group.style.left = `${block.x}px`;
     group.style.top = `${block.y}px`;
     group.style.width = `${block.w}px`;
     group.style.height = `${block.h}px`;
     group.setAttribute("role", "group");
-    group.setAttribute("aria-label", label);
+    group.setAttribute("aria-label", ariaLabel);
     const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
     svg.classList.add("hier-edges");
     svg.setAttribute("width", block.w + BLEED * 2);
@@ -368,7 +368,7 @@ function render(s) {
     for (const n of block.nodes) {
       const off = s.nodeOffsets.get(n.inst.instance) || { x: 0, y: 0 };
       n.fx = n.x + off.x; n.fy = n.y + off.y;
-      group.append(nodeEl(s, n, label));
+      group.append(nodeEl(s, n, key));
     }
     const addEdge = (p, a, b) => {
       svg.append(p);
@@ -400,18 +400,23 @@ function render(s) {
     return group;
   };
 
+  // Cluster cards are ANONYMOUS by design (human decision): the header
+  // carries only counts/status — no derived name. c.name remains an
+  // internal, deterministic grouping/ordering key only, never shown.
+  // Cluster naming may return later tied to a task-layer integration.
   for (const pc of placed) {
     const c = pc.cluster;
-    const group = groupFor(pc, c.name, "hier-cluster");
+    const aria = `Cluster of ${c.size} agents, ${c.running} running`;
+    const group = groupFor(pc, c.name, aria, "hier-cluster");
     const head = document.createElement("div");
     head.className = "hier-chead";
-    head.innerHTML = `<span class="cnm">${escapeHtml(c.name)}</span>` +
-      `<span class="cct">${c.running}/${c.size} running</span>`;
+    head.innerHTML = `<span class="cct">${c.running}/${c.size} running</span>`;
     group.prepend(head);
     stage.append(group);
   }
   if (soloBlock) {
-    const group = groupFor({ ...soloBlock, sibs: [] }, "Independent", "hier-solo");
+    const group = groupFor({ ...soloBlock, sibs: [] }, "Independent",
+      `Independent agents: ${soloBlock.nodes.length}`, "hier-solo");
     const head = document.createElement("div");
     head.className = "hier-chead solo";
     head.innerHTML = `<span class="cnm">Independent</span>` +
