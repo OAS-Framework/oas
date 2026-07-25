@@ -37,10 +37,13 @@ read `getBinding`, dispatch, conflict checks, and display stay consistent.
 - Explicit-null persistence already round-trips through the sanitizer (`null` is
   a preserved override value), so unbind survives reload for
   registration-default actions with no extra storage work.
-- If a legacy view resolver remains during migration, gate its fallback on "the
-  engine does not know this action id," not on an effective binding of `null`;
-  `null` can be the user's explicit Backspace-unbind and must not resurrect the
-  default.
+- During live migration, if a legacy view resolver remains, gate its fallback on
+  "the engine does not know this action id," not on an effective binding of
+  `null`; `null` can be the user's explicit Backspace-unbind and must not
+  resurrect the default. Once production callers stop passing legacy chord
+  fields, delete the fallback and its registry/context policing instead of
+  preserving dormant compatibility in an exported resolver.
+  See [Dormant compatibility paths in exported resolvers are liabilities, not safety](/lessons/dormant-compat-paths-exported-resolvers.md).
 - First-class registration defaults also make a view action window-dispatchable
   in its active context, so the registered `run()` must guard that the event
   started inside the promised surface.
@@ -48,5 +51,6 @@ read `getBinding`, dispatch, conflict checks, and display stay consistent.
 # Related concepts
 
 - [First-class view defaults widen window-level dispatch](/lessons/first-class-view-defaults-window-dispatch-surface.md)
+- [Dormant compatibility paths in exported resolvers are liabilities, not safety](/lessons/dormant-compat-paths-exported-resolvers.md)
 - [View-local shortcuts resolve chords through the engine keymap](/decisions/view-local-shortcuts-engine-keymap.md)
 - [Real keybindings engine integration keeps defaults engine-owned](/lessons/real-keybindings-engine-integration.md)
