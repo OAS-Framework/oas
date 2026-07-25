@@ -12,8 +12,8 @@ Download the installer for your platform from the
 
 | Platform | Artifacts | Notes |
 | --- | --- | --- |
-| macOS arm64 (Apple Silicon) | DMG + ZIP | unsigned — see below |
-| macOS x64 (Intel) | DMG + ZIP | unsigned — see below |
+| macOS arm64 (Apple Silicon) | DMG + ZIP | ad-hoc signed — see below |
+| macOS x64 (Intel) | DMG + ZIP | ad-hoc signed — see below |
 | Linux x64 | AppImage + DEB | requires `tmux` |
 
 **Windows and Linux arm64 are not supported in 0.18.x.**
@@ -22,11 +22,14 @@ Verify downloads against the release's `SHA256SUMS.txt`. GitHub
 build-provenance attestations are published for every asset
 (`gh attestation verify <file> --repo OAS-Framework/oas`).
 
-### macOS: unsigned build
+### macOS: ad-hoc signed build
 
-The 0.18.2 installers are **unsigned and not notarized** (no signing
-credentials exist yet — nothing about this release claims otherwise).
-Gatekeeper will block the first launch:
+The macOS installers are **ad-hoc signed — not Developer ID signed and not
+notarized** (no Apple signing credentials exist yet — nothing about a
+release claims otherwise). The `.app` bundles carry complete ad-hoc
+signatures that pass `codesign --verify --deep --strict`, but ad-hoc
+signatures carry no identified-developer identity, so Gatekeeper will still
+block the first launch:
 
 - Right-click the app → **Open** → **Open** (once; subsequent launches are
   normal), or
@@ -114,7 +117,7 @@ The full breaking-change list is in the
 | "Compatible oas CLI required" card | No CLI, or version outside `>=0.18.0 <0.19.0`. Install/update, or **Choose oas…** to point at the right binary; **Retry** re-probes. Spawn is disabled until a compatible CLI is verified. |
 | Spawn disabled, no card | The probe hasn't settled yet (transient, resolves in ms). If it persists, the backend is unreachable — restart the app. |
 | Terminals fail to open ("could not attach") | tmux missing, or no live session for that instance. Install tmux (`tmux -V`); check `tmux ls`. |
-| macOS "app is damaged / can't be opened" | Unsigned build + quarantine. Right-click → Open, or clear the quarantine attribute (above). |
+| macOS "app is damaged / can't be opened" | Ad-hoc-signed (not notarized) build + quarantine. Right-click → Open, or clear the quarantine attribute (above). If it persists, verify the bundle: `codesign --verify --deep --strict --verbose=2 "/Applications/OAS Desktop.app"` — a non-zero exit means a broken artifact, report it. |
 | Roster empty | The opened directory isn't an OAS workspace (needs `agents/` or `local-agents/`, or a team scope). Use the workspace switcher → Add workspace to select the right root. |
 
 For bugs, attach the terminal output of the app (`OAS Desktop` prints
@@ -124,19 +127,23 @@ server and CLI-discovery logs to stdout) and your platform/arch.
 
 Installer CI gates what headless runners can prove reliably for every
 published platform/architecture: electron-builder completes, the expected
-DMG/ZIP/AppImage/DEB artifacts exist, node-pty's packaged `spawn-helper` is
+DMG/ZIP/AppImage/DEB artifacts exist, both packaged macOS `.app` bundles
+pass strict deep codesign verification of their complete ad-hoc signatures
+(`codesign --verify --deep --strict`), node-pty's packaged `spawn-helper` is
 executable, and node-pty loads and spawns under the packaged Electron ABI.
 The macOS x64 leg cross-builds on macos-14 and installs Rosetta 2 so that its
 x64 Electron + node-pty ABI probe really executes; a wrong-architecture
 native module fails that leg.
 
-CI does **not** gate the packaged GUI launch: unsigned Electron apps do not
+CI does **not** gate the packaged GUI launch: ad-hoc-signed, non-notarized
+Electron apps do not
 have a reliable interactive windowserver in headless CI. Post-publish launch
 acceptance is therefore owned by the operator/maintainer, using the actual
 released installers (not a source checkout):
 
 1. Verify the asset checksum/attestation, install it outside the source tree,
-   and on macOS use right-click → **Open** for the unsigned Gatekeeper step.
+   and on macOS use right-click → **Open** for the Gatekeeper step (ad-hoc
+   signatures carry no identified-developer identity).
 2. Launch OAS Desktop and open a real deployment; verify roster, brain and
    Markdown reads.
 3. Attach an existing tmux terminal, confirm input/output, and close the tab
@@ -157,7 +164,7 @@ not weaken the pre-publish build/inventory/ABI gates.
 
 Developer docs live in [`packages/desktop/README.md`](../packages/desktop/README.md)
 (run, architecture, view contract) — packaging is `npm run dist`
-(electron-builder; unsigned, certificate auto-discovery disabled) and
+(electron-builder; macOS ad-hoc signed, certificate auto-discovery disabled) and
 `npm run dist:smoke` verifies the packed artifact. Build/release CI uses the
 marked build-verify mode (inventory + node-pty ABI, no GUI launch); a local
 interactive run may also exercise the launch phase.
