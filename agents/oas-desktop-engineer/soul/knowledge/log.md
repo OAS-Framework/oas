@@ -1,5 +1,8 @@
 # Knowledge Log
 
+## 2026-07-25
+* **Creation**: promoted [keep roster family grouping helpers inside instance-tree](/lessons/roster-family-grouping-helpers.md) from the oas-desktop-engineer-roster-grouping notes.
+
 ## 2026-07-24
 * **Creation**: promoted [bounded OS resources spawned per user action need a hard cap in the owning process](/lessons/terminal-resource-cap-in-owning-process.md) from the oas-desktop-engineer-desktop-dist notes.
 * **Update**: linked [desktop terminal direct attach](/decisions/desktop-terminal-direct-attach.md) to the main-process terminal resource cap lesson.

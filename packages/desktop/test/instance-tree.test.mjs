@@ -185,3 +185,17 @@ test("rosterGroupKey is workspace-scoped and repo vs repo+family keys differ", (
   assert.notEqual(rosterGroupKey("wsA", "repo"), rosterGroupKey("wsB", "repo"));
   assert.notEqual(rosterGroupKey("ws", "repo"), rosterGroupKey("ws", "repo", "fam"));
 });
+
+test("groupRosterFamilies tolerates malformed workspace-controlled metadata (non-string agent/repoName)", () => {
+  const grouped = groupRosterFamilies([
+    { instance: "ok", agent: "fam", repoName: "r", running: true },
+    { instance: "bad-agent", agent: {}, repoName: "r", running: false },
+    { instance: "bad-repo", agent: "fam", repoName: { x: 1 }, running: false },
+    { instance: "no-agent", repoName: "r", running: false },
+  ]);
+  const all = [...grouped.values()].flatMap((f) => [...f.values()].flat()).map((i) => i.instance);
+  assert.deepEqual(all.sort(), ["bad-agent", "bad-repo", "no-agent", "ok"],
+    "every instance renders once; no localeCompare throw blanks the roster");
+  assert.ok(grouped.get("r").has("fam"), "well-formed family survives alongside malformed peers");
+  assert.ok(grouped.get("r").has("?"), "missing agent coalesces to '?'");
+});
