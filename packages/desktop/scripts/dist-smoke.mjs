@@ -6,12 +6,15 @@
 //   1. inventory: dist/ contains exactly the expected oas-desktop-*
 //      distributables for this platform (DMG+ZIP on mac, AppImage+DEB on
 //      linux) and they are non-trivially sized;
-//   2. the packaged app bundle launches headlessly and its renderer
-//      reaches the shell (CDP probe), which also proves the bundled server
-//      spawned and answered — i.e. no source-checkout dependency;
+//   2. (macOS, unconditional) the packaged .app bundle passes strict deep
+//      code-signature verification — a complete ad-hoc bundle signature;
+//      rejects the v0.18.2 partial/absent-signature class;
 //   3. node-pty (the native module) loads INSIDE the packaged app's
 //      Electron ABI (ELECTRON_RUN_AS_NODE against the packaged
-//      resources), catching ABI-mismatch and lost spawn-helper exec bits.
+//      resources), catching ABI-mismatch and lost spawn-helper exec bits;
+//   4. the packaged app bundle launches headlessly and its renderer
+//      reaches the shell (CDP probe), which also proves the bundled server
+//      spawned and answered — i.e. no source-checkout dependency.
 //
 // Runs on the bare CI runner — no display server needed on linux when
 // xvfb-run is present (the workflow provides it); on macOS Electron runs
@@ -23,6 +26,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createReaper } from "./proc-reaper.mjs";
 import { runAbiProbe } from "./smoke-probes.mjs";
+import { verifyAppSignature } from "./codesign-verify.mjs";
 import { WATCHDOG_MS, PHASE_BUDGET_MS, boundedTail, readDevToolsPort, awaitClose } from "./launch-probe.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -69,7 +73,7 @@ function unpackedAppPath() {
     for (const d of readdirSync(DIST)) {
       const app = join(DIST, d, "OAS Desktop.app");
       if (d.startsWith("mac") && existsSync(app)) {
-        return { exe: join(app, "Contents", "MacOS", "OAS Desktop"), resources: join(app, "Contents", "Resources") };
+        return { app, exe: join(app, "Contents", "MacOS", "OAS Desktop"), resources: join(app, "Contents", "Resources") };
       }
     }
   } else {
@@ -82,7 +86,21 @@ const app = unpackedAppPath();
 if (!app) fail("no unpacked app found in dist/");
 if (!existsSync(app.exe)) fail(`packaged executable missing: ${app.exe}`);
 
-// ---- 2. node-pty loads under the packaged Electron ABI ----------------------
+// ---- 2. macOS bundle signature: strict deep codesign (MANDATORY on darwin) --
+// The packaged .app must carry a COMPLETE valid ad-hoc bundle signature —
+// every nested helper/framework signed, resources sealed. v0.18.2 shipped
+// with only the linker-generated partial ad-hoc signature (arm64) / no
+// signature (x64) and Gatekeeper reported the app as damaged. This phase
+// runs UNCONDITIONALLY on darwin: no env flag (OAS_SMOKE_SKIP_LAUNCH,
+// OAS_SMOKE_BUILD_VERIFY, or anything else) can skip it — the launch-skip
+// guards below apply only to the GUI launch phase.
+if (process.platform === "darwin") {
+  const r = await verifyAppSignature(reaper, app.app, { existsSync });
+  if (!r.ok) fail(r.detail);
+  ok(r.detail);
+}
+
+// ---- 3. node-pty loads under the packaged Electron ABI ----------------------
 // Load node-pty the way the APP does: createRequire from inside app.asar.
 // Electron's fs reads the asar transparently and node-pty's own
 // app.asar → app.asar.unpacked replacement finds the native module and the
@@ -113,13 +131,13 @@ if (!existsSync(app.exe)) fail(`packaged executable missing: ${app.exe}`);
   ok(r.detail);
 }
 
-// ---- 3. packaged app launches and the renderer reaches the shell ------------
+// ---- 4. packaged app launches and the renderer reaches the shell ------------
 // (CI-oriented phase: on operator machines run only the static phases — see
 // the soul's no-GUI-launches policy; OAS_SMOKE_SKIP_LAUNCH=1 skips this.)
 if (process.env.OAS_SMOKE_SKIP_LAUNCH === "1") {
   // The guard (review ee04a44-r2) stops a RELEASE CI run from silently
   // degrading the smoke by skipping the launch. But the packaged GUI launch
-  // is unreliable in CI (no interactive windowserver for an unsigned app on
+  // is unreliable in CI (no interactive windowserver for an app without Developer ID trust on
   // mac runners → DevToolsActivePort never written), and the meaningful
   // installer evidence is BUILD + inventory + node-pty ABI. A dedicated
   // build-verify CI (build-installers.yml) opts out explicitly with

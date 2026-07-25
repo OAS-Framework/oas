@@ -2,11 +2,13 @@
 //
 // Contract (desktop-dist): macOS arm64/x64 DMG+ZIP, Linux x64 AppImage+DEB,
 // artifacts named oas-desktop-* under packages/desktop/dist/ (the release
-// workflow uploads `desktop-<os>-<arch>` from that glob). 0.18.2 ships
-// UNSIGNED and NOT notarized — no credentials exist; certificate
-// auto-discovery is disabled (CSC_IDENTITY_AUTO_DISCOVERY=false in CI and
-// identity:null here so local builds behave identically). Linux declares
-// tmux as a package dependency (DEB) and documents it for AppImage.
+// workflow uploads `desktop-<os>-<arch>` from that glob). macOS bundles are
+// AD-HOC SIGNED (identity "-"), NOT Developer ID signed and NOT notarized —
+// no Apple credentials exist; certificate auto-discovery stays disabled
+// (CSC_IDENTITY_AUTO_DISCOVERY=false in CI) so no keychain identity can
+// leak in. Ad-hoc signing is deterministic and local to the artifact: no
+// secrets, no network. Linux declares tmux as a package dependency (DEB)
+// and documents it for AppImage.
 //
 // A JS config (not JSON) so the file can carry these binding comments and
 // compute nothing — keep it static and reviewable.
@@ -50,7 +52,10 @@ module.exports = {
   // Fresh `npm ci` can deliver node-pty's prebuilt spawn-helper WITHOUT the
   // execute bit (posix_spawnp then fails in the packaged app — release
   // blocker found by the integration gate). Restore it deterministically on
-  // the PACKED output; never rely on working-tree chmod residue.
+  // the PACKED output; never rely on working-tree chmod residue. afterPack
+  // runs BEFORE electron-builder's signing step, so the chmod lands inside
+  // the sealed resources — mutating the bundle after signing would break
+  // the strict deep verification gate.
   afterPack: "scripts/after-pack.cjs",
   mac: {
     // Targets WITHOUT pinned arch: electron-builder builds the HOST arch by
@@ -60,10 +65,19 @@ module.exports = {
     //   npm run dist -- --x64   on an arm64 runner.
     target: ["dmg", "zip"],
     category: "public.app-category.developer-tools",
-    // UNSIGNED (0.18.2): no Developer ID exists. identity:null disables
-    // signing entirely — release notes and docs state the Gatekeeper
-    // implications; nothing may claim signing or notarization.
-    identity: null,
+    // AD-HOC SIGNED: identity "-" makes electron-builder/@electron/osx-sign
+    // produce a COMPLETE ad-hoc bundle signature — every nested Electron
+    // helper/framework signed and resources sealed — so
+    //   codesign --verify --deep --strict --verbose=2 "OAS Desktop.app"
+    // exits zero (verified for arm64 and the x64 cross-build; gated by
+    // dist:smoke). The former identity:null DISABLED signing entirely,
+    // which shipped the v0.18.2 defect: the arm64 executable kept only its
+    // linker-generated partial ad-hoc signature (no _CodeSignature seal →
+    // strict verify fails → Gatekeeper "damaged"), x64 was unsigned.
+    // Ad-hoc is NOT Developer ID and NOT notarization: no identity, no
+    // secrets, deterministic; Gatekeeper still requires the user's explicit
+    // first-launch approval. Nothing may claim identified-developer trust.
+    identity: "-",
   },
   linux: {
     // Filesystem-safe binary/package name. WITHOUT this, electron-builder

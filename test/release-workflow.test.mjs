@@ -61,7 +61,7 @@ test("GitHub Release is created after npm publication, from the same assets", ()
   assert.match(yml, /attest-build-provenance/, "provenance attestation");
 });
 
-test("unsigned posture: certificate auto-discovery disabled; supported matrix only", () => {
+test("signing posture: ad-hoc only — certificate auto-discovery disabled; supported matrix only", () => {
   assert.match(yml, /CSC_IDENTITY_AUTO_DISCOVERY: "false"/);
   assert.ok(!/runs-on:\s*windows|os:\s*windows/i.test(yml), "no Windows matrix/job in 0.18.x");
   assert.ok(!/os:\s*macos-13/.test(yml), "release never depends on the sunset macos-13 runner");
@@ -184,8 +184,19 @@ test("release and build-only installer smoke are consistent build-verify gates",
     assert.match(text, /OAS_SMOKE_SKIP_LAUNCH:\s*"1"/, `${name} marks GUI launch skipped`);
     assert.match(text, /OAS_SMOKE_BUILD_VERIFY:\s*"1"/, `${name} explicitly authorizes build-verify mode`);
     assert.match(text, /OAS_SMOKE_TARGET_ARCH:\s*\$\{\{ matrix\.arch \}\}/, `${name} passes the matrix arch to the ABI probe`);
-    assert.match(text, /npm run dist:smoke/, `${name} still gates inventory + node-pty ABI`);
+    assert.match(text, /npm run dist:smoke/, `${name} still gates inventory + codesign + node-pty ABI`);
+    // The smoke's codesign phase is unconditional on darwin — both CI gates
+    // rely on it; neither may set an env var that could skip it (there is
+    // none, but the CSC posture below must hold for signing to happen).
+    assert.match(text, /CSC_IDENTITY_AUTO_DISCOVERY:\s*"false"/, `${name} keeps certificate auto-discovery disabled (ad-hoc only)`);
   }
+  // build-installers runs on pull_request: electron-builder skips mac signing
+  // on PR builds (GITHUB_BASE_REF) unless CSC_FOR_PULL_REQUEST is set —
+  // without it the PR legs would build the exact unsigned defect class the
+  // codesign gate rejects. (Safe: no signing secrets exist; identity is the
+  // deterministic ad-hoc "-".) The release workflow runs on tag push (no
+  // GITHUB_BASE_REF), so it does not need the flag.
+  assert.match(bi, /CSC_FOR_PULL_REQUEST:\s*"true"/, "build-installers must force signing on PR builds (ad-hoc, secret-free)");
   // npm args must reach electron-builder, not a cleanup command: dist is the
   // builder command and postdist owns clean-dist.
   assert.equal(desktopPkg.scripts.dist, "electron-builder --config electron-builder.config.cjs");
