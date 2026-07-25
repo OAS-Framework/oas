@@ -1,5 +1,8 @@
 # Knowledge Log
 
+## 2026-07-25
+* **Creation**: [exact-tag-detached-head-refspec](/lessons/exact-tag-detached-head-refspec.md) records that exact-tag release checkout leaves detached HEAD, so version-bump pushes need fully-qualified `HEAD:refs/heads/...` destinations and static regression coverage.
+
 ## 2026-07-24
 * **Creation**: [hasownproperty-vs-truthiness](/lessons/hasownproperty-vs-truthiness.md) records that manifest command lookup must distinguish absent keys from declared-but-falsy values before assigning error codes.
 * **Update**: [test-conventions](/playbooks/test-conventions.md) records that capability fixtures under `.agents/capabilities/` need an `oas-config.yaml` discovery level or tests can accidentally assert `E_UNKNOWN_COMMAND`.
