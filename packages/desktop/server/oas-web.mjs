@@ -110,8 +110,8 @@ function panelData(wsId) {
 }
 
 /* OASWEB_PANELPROJ_BEGIN — the /api/panel per-instance contract projection.
-   Extracted by test/desktop-server.test.mjs and packages/desktop tests via
-   block markers so a dropped/typo'd field fails a real assertion (review
+   Extracted by packages/desktop/test/panel-projection.test.mjs via block
+   markers so a dropped/typo'd field fails a real assertion (review
    2092e0f): the renderer's cluster grouping and ux-designer's overview
    consume exactly these fields. */
 function projectPanelInstance(i) {
