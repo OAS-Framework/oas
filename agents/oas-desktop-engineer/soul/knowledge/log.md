@@ -1,6 +1,7 @@
 # Knowledge Log
 
 ## 2026-07-25
+* **Creation**: promoted [Keybinding engine terminal allowlist is action-id based, not chord based](/lessons/keybindings-terminal-allowlist-by-action-id.md) from the oas-desktop-engineer-keybindings-core notes.
 * **Update**: merged the xterm keypress-leak note into [Shift+Enter through xterm/tmux must be translated to pi's Ctrl+J newline alias](/lessons/shift-enter-newline-via-ctrl-j-alias.md): suppress every keydown/keypress/keyup event for the chord and write `\n` only on keydown, because xterm's keypress path can otherwise emit a submit `\r`.
 * **Creation**: promoted [tmux mouse-on viewers need modifier-forced xterm selection for copy](/lessons/tmux-mouse-on-xterm-selection-copy.md) from the oas-desktop-engineer-session-copy-newline notes.
 * **Creation**: promoted [scope rollback of a merged stage keeps the manifest tests as absence pins](/lessons/scope-rollback-absence-pins.md) from the oas-desktop-engineer-roster-scope-rollback notes.
