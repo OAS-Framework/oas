@@ -79,7 +79,13 @@ export function mount(el, ctx) {
   // CLI degradation: refresh once on mount and re-render the grid whenever
   // availability flips — spawn buttons disable consistently with the card.
   refreshCli(ctx);
-  s.unsubCli = onCliChange(() => { if (s.alive) renderGrid(s); });
+  s.unsubCli = onCliChange(() => {
+    if (!s.alive) return;
+    renderGrid(s);
+    // an open modal tracks capability live — disabled state + version note
+    // resync without touching typed fields (review 5526b70)
+    s.syncModalRelations?.();
+  });
   s.q("wssel").addEventListener("change", (e) => setWorkspace(e.target.value));
   s.unsubWs = onWorkspaceChange(() => {
     // Workspace switch owns the whole surface: invalidate any A spawn modal
@@ -232,6 +238,7 @@ function closeSpawnModal(s, { restoreFocus = false, repaint = true } = {}) {
   const agentName = s.sel;
   s.sel = null; s.selAgent = null;
   s.modalEl?.remove(); s.modalEl = null;
+  s.syncModalRelations = null;
   if (!hadModal || !repaint || s.alive === false) return;
   renderGrid(s); // clear the .open card highlight NOW
   if (!restoreFocus || !agentName) return;
@@ -263,8 +270,9 @@ function openSpawnModal(s, a) {
   // capability gate never HIDES the relation controls — on a pre-relations
   // CLI they render disabled with the required version named. The server
   // still fails closed (cli-no-relations) — render state is UX, not the
-  // guard.
-  const relations = cliRelationsAvailable();
+  // guard. Capability is NOT snapshotted: app focus re-probes the CLI, so
+  // an open modal resyncs on every CLI change (review 5526b70) via
+  // syncRelationControls below — typed fields are never touched.
   modal.innerHTML = `
     <section class="spawn-dialog" role="dialog" aria-modal="true" aria-labelledby="${titleId}">
       <div class="spawn-dialog-head">
@@ -284,7 +292,7 @@ function openSpawnModal(s, a) {
         <label>Task (optional — empty spawns an instance awaiting your instructions)
           <textarea class="field ftask" rows="4" placeholder="What should this instance do?"></textarea></label>
         <label>Relation — how this instance links into the agent hierarchy
-          <select class="field frelation" ${relations ? "" : "disabled"}>
+          <select class="field frelation" disabled>
             <option value="unrelated" selected>unrelated — no link</option>
             <option value="child">child — nests under the reference instance</option>
             <option value="sibling">sibling — peer in the reference instance's cluster</option>
@@ -295,7 +303,7 @@ function openSpawnModal(s, a) {
             <option value="">— select an instance —</option>
             ${refOptions}
           </select></label>
-        ${relations ? "" : `<div class="frelnote">Relations require oas &gt;= ${escapeHtml(relationsMinLabel())} — the installed CLI spawns unrelated instances only.</div>`}
+        <div class="frelnote" hidden></div>
         <label>Runtime (optional — defaults to the agent's definition: ${escapeHtml(a.runtime || "pi")})
           <select class="field fruntime">
             <option value="" selected>agent default (${escapeHtml(a.runtime || "pi")})</option>
@@ -314,11 +322,27 @@ function openSpawnModal(s, a) {
   const dialog = modal.querySelector(".spawn-dialog");
   const f = modal; // field lookups span the whole modal
 
+  // One source of truth for the relation controls' render state, applied at
+  // open AND on every CLI change while the modal is open (review 5526b70):
+  // capability can flip under an open dialog (app-focus re-probe after a
+  // CLI up/downgrade). Only disabled/note state changes — typed and chosen
+  // values are preserved (a selected relation re-enables after an upgrade;
+  // a downgrade disables the controls but keeps the user's choice visible).
+  const syncRelationControls = () => {
+    const relations = cliRelationsAvailable();
+    const rel = f.querySelector(".frelation"), ref = f.querySelector(".frelto");
+    const note = f.querySelector(".frelnote");
+    rel.disabled = !relations;
+    ref.disabled = !relations || rel.value === "unrelated";
+    note.hidden = relations;
+    note.textContent = relations ? "" : `Relations require oas >= ${relationsMinLabel()} — the installed CLI spawns unrelated instances only.`;
+  };
+  s.syncModalRelations = syncRelationControls;
+  syncRelationControls();
+
   // reference picker enables only when a real relation is chosen — kept
   // VISIBLE (disabled) so the hierarchy options are always in sight
-  f.querySelector(".frelation").addEventListener("change", (e) => {
-    f.querySelector(".frelto").disabled = !relations || e.target.value === "unrelated";
-  });
+  f.querySelector(".frelation").addEventListener("change", syncRelationControls);
 
   const close = () => closeSpawnModal(s, { restoreFocus: true });
   f.querySelector(".fcancel").addEventListener("click", close);
@@ -348,7 +372,7 @@ function openSpawnModal(s, a) {
       f.querySelector(".fpurpose").value = ""; f.querySelector(".ftask").value = "";
       f.querySelector(".frelation").value = "unrelated";
       f.querySelector(".frelto").value = "";
-      f.querySelector(".frelto").disabled = true;
+      syncRelationControls(); // re-disable the picker for "unrelated"
       f.querySelector(".fruntime").value = "";
       f.querySelector(".fmodel").value = "";
     },

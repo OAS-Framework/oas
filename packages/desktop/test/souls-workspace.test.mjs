@@ -551,3 +551,70 @@ test("Spawn modal close restores focus to the LIVE Spawn button and clears the c
     if (oldWindow === undefined) delete globalThis.window; else globalThis.window = oldWindow;
   }
 });
+
+test("Spawn modal tracks CLI capability LIVE: relations flip disables/enables controls without wiping typed fields (review 5526b70)", async () => {
+  const dom = new JSDOM("<!doctype html><html><head></head><body><div id=host></div></body></html>", { url: "http://localhost" });
+  const oldDocument = globalThis.document;
+  const oldWindow = globalThis.window;
+  const oldSetInterval = globalThis.setInterval;
+  globalThis.document = dom.window.document;
+  globalThis.window = dom.window;
+  globalThis.setInterval = () => ({ fake: true });
+  const common = await import("../renderer/views/common.mjs");
+  const spawn = await import("../renderer/views/spawn.mjs");
+  const cliMod = await import("../renderer/views/cli-status.mjs");
+  const status = (relations) => ({ ok: true, bin: "/seed/oas", version: relations ? "0.18.3" : "0.18.0",
+    source: "path", required: { desktopApi: 1, range: ">=0.18.0 <0.19.0" }, relations, relationsMin: "0.18.3", probedAt: 1, tried: [] });
+  const seed = (relations) => cliMod.refreshCli({ api: async () => ({ ok: true, status: 200, json: async () => status(relations) }) });
+  await seed(true);
+  const previousWs = common.currentWorkspace();
+  const agent = { name: "dev", agentsRoot: "/a", description: "", runtime: "pi", work: "workspace", repo: true, repoName: "r" };
+  const ctx = {
+    api: (pathname, opts = {}) => {
+      if (pathname === "/api/cli" || pathname === "/api/cli/reprobe") return Promise.resolve({ ok: true, status: 200, json: async () => status(true) });
+      if (opts.method === "POST") return Promise.resolve({ ok: true, status: 200, json: async () => ({ instance: "x" }) });
+      return Promise.resolve({ ok: true, status: 200, json: async () => pathname.startsWith("/api/agents")
+        ? { agents: [agent] }
+        : { instances: [{ instance: "coord-1", running: true }], workspace: { id: "w" }, workspaces: [] } });
+    },
+    openTerminal: () => {},
+  };
+  try {
+    common.setWorkspace("w");
+    spawn.mount(dom.window.document.getElementById("host"), ctx);
+    await tick(); await tick();
+    const doc = dom.window.document;
+    doc.querySelector(".spawn-act").click();
+    // relation-capable at open: enabled controls, no note; user types + picks
+    const rel = doc.querySelector(".frelation"), ref = doc.querySelector(".frelto");
+    assert.equal(rel.disabled, false);
+    assert.equal(doc.querySelector(".frelnote").hidden, true, "no note while capable");
+    doc.querySelector(".ftask").value = "typed task text";
+    rel.value = "child";
+    rel.dispatchEvent(new dom.window.Event("change"));
+    ref.value = "coord-1";
+    // DOWNGRADE lands while the modal is open (app-focus re-probe)
+    await seed(false);
+    assert.equal(rel.disabled, true, "downgrade disables the relation selector in the OPEN modal");
+    assert.equal(ref.disabled, true, "downgrade disables the reference picker");
+    const note = doc.querySelector(".frelnote");
+    assert.equal(note.hidden, false, "version note appears live");
+    assert.match(note.textContent, /oas >= 0\.18\.3/, "note names the required version");
+    assert.equal(doc.querySelector(".ftask").value, "typed task text", "typed fields survive the resync");
+    assert.equal(rel.value, "child", "chosen relation value preserved (visible, disabled)");
+    // UPGRADE flips it back: controls re-enable, note clears, values intact
+    await seed(true);
+    assert.equal(rel.disabled, false, "upgrade re-enables the selector");
+    assert.equal(ref.disabled, false, "picker re-enables (a real relation is selected)");
+    assert.equal(doc.querySelector(".frelnote").hidden, true, "note clears");
+    assert.equal(ref.value, "coord-1", "picked reference preserved");
+  } finally {
+    spawn.unmount();
+    await seedCliAvailable(); // restore shared CLI state for later suites
+    common.setWorkspace(previousWs);
+    globalThis.setInterval = oldSetInterval;
+    dom.window.close();
+    if (oldDocument === undefined) delete globalThis.document; else globalThis.document = oldDocument;
+    if (oldWindow === undefined) delete globalThis.window; else globalThis.window = oldWindow;
+  }
+});
