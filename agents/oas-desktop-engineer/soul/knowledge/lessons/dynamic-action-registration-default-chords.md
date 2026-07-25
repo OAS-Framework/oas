@@ -28,6 +28,11 @@ read `getBinding`, dispatch, conflict checks, and display stay consistent.
 
 # Gotchas
 
+- The two default mechanisms intentionally coexist: `DEFAULT_KEYMAP` is the
+  canonical table for shipped defaults, and `defaultChord` is the API for
+  dynamically registered actions. If both exist for an action, `DEFAULT_KEYMAP`
+  wins by construction; do not simplify one side away without coordinator
+  sign-off.
 - `registerAction` and unregister must fire the keymap-change notifier: a mount
   that supplies a default chord changes effective bindings, and an open
   shortcuts editor must rerender.
