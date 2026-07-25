@@ -971,6 +971,17 @@ test("spawn relations: child/sibling/parent/unrelated, sugar equivalence, valida
   // Explicit unrelated on an ATTACHED spawn suppresses the work-tree-owner
   // auto-parenting (an explicit "no link" directive), while attached WITHOUT
   // a relation still nests (behavior unchanged).
+  // CLI-level first — the original bug was bin/oas.mjs STRIPPING "unrelated"
+  // before calling the kernel, so this must go through the full CLI path.
+  r = spawn("--purpose", "cli-att-un", "--work", "attached", "--work-dir", join(anchor.home, "work"), "--relation", "unrelated");
+  assert.equal(r.status, 0, r.stderr);
+  const cliAttUn = jsonResult(r);
+  assert.equal(cliAttUn.parent, null, "CLI: explicit --relation unrelated suppresses attached auto-parenting");
+  assert.equal(cliAttUn.spawnOrigin, "operator");
+  r = spawn("--purpose", "cli-att", "--work", "attached", "--work-dir", join(anchor.home, "work"));
+  assert.equal(r.status, 0, r.stderr);
+  const cliAtt = jsonResult(r);
+  assert.equal(cliAtt.parent, anchor.instance, "CLI: attached without relation still auto-parents");
   const agentDef = findAgent(root, "dev");
   const oldPath = process.env.PATH;
   process.env.PATH = fakeRuntimes(base);
