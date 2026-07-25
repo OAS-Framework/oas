@@ -14,18 +14,23 @@ available must make that environment true. Developer machines often have
 spawn attempt that was expected to return `503` / `cli-unavailable` can proceed
 to the mutation path and fail later with `409` instead.
 
-Spawn those server tests with all locator sources pinned inert, for example:
+Spawn those server tests with all locator sources pinned inert — and the PATH
+fully hermetic, not just "minimal":
 
 ```sh
-PATH=/usr/bin:/bin
+PATH=/nonexistent
 OAS_DESKTOP_OAS_BIN=""
-SHELL=/usr/bin/false
+SHELL=/bin/false
 ```
 
-That combination strips the explicit env override, PATH lookup, npm-global lookup
-through npm-on-PATH, and login-shell fallback. Any test whose expected result
-depends on CLI absence should own this environment instead of inheriting the
-operator's machine state.
+A "minimal" `PATH=/usr/bin:/bin` is NOT enough: `/usr/bin/npm` remains
+reachable, so the locator's independent npm-global source (`npm prefix -g`)
+can still rediscover a globally installed `oas` outside PATH (e.g. under
+`/usr/local/bin`) — exactly the machine-dependence being eliminated. The
+hermetic combination strips the explicit env override, PATH lookup, the
+npm-global lookup (npm itself unreachable), and the login-shell fallback.
+Any test whose expected result depends on CLI absence should own this
+environment instead of inheriting the operator's machine state.
 
 # Fake executable fixtures under hostile PATH
 
