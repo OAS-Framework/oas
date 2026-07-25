@@ -3,7 +3,7 @@ type: Decision
 title: Spawn lineage is explicit-only and deployment-local
 description: parentInstance now comes only from an explicit --parent/o.parent inside the target deployment or the attached-mode workDir-owner fallback; env vars are never consulted, and cross-deployment spawns stay operator-origin.
 tags: [spawn, lineage, kernel, cli, cross-deployment]
-timestamp: 2026-07-24
+timestamp: 2026-07-25
 ---
 
 # Decision
@@ -14,10 +14,16 @@ reads `OAS_INSTANCE` or `PI_AGENT_INSTANCE` for lineage. Parentage sources, in
 order:
 
 1. `o.parent` (CLI `--parent <instance>`, validated to exist inside the target
-   deployment's local root or team scope before scaffolding).
-2. Attached-mode fallback: owner of the shared work tree (the `workDir`'s
+   deployment's local root or team scope before scaffolding). In attached work
+   mode this is valid only when it redundantly names the work-tree owner.
+2. Attached-mode binding: owner of the shared work tree (the `workDir`'s
    `<home>/work` parent dir name). Attached service agents genuinely nest.
 3. Otherwise: operator origin, top-level.
+
+Attached mode is a binding lineage source, not a negatable default: relation
+flags that would make the attached agent unrelated, sibling, or parent to its
+work-tree owner are rejected at both CLI and kernel boundaries. See
+[attached-spawns-child-of-work-owner](/decisions/attached-spawns-child-of-work-owner.md).
 
 Agent-driven spawn surfaces that target the same deployment pass explicit
 parentage: `oas-okf harvest` spawns pass `parent: inst`; the review injection's

@@ -1,7 +1,7 @@
 ---
 type: Lesson
 title: Relation policy changes must migrate recipes and specify retirement repair
-description: Introducing or changing spawn relation policy must update every agent-facing spawn recipe and define how retireInstance repairs any lineage metadata it mutates.
+description: Introducing or changing spawn relation policy must update every agent-facing spawn recipe and repair mutated lineage on both sides, across the full scope where references can be created.
 tags: [spawn, relations, lineage, retire, injections, migration]
 timestamp: 2026-07-25
 ---
@@ -29,10 +29,18 @@ coordinator's children.
 
 `retireInstance` must splice a retiree out of the graph: any instance whose
 `parentInstance` or `siblingInstance` names the retiree inherits the retiree's
-own links; link-less retirees leave roots; dangling sibling links drop. The
-result exposes `relinked[]` so callers can report the repaired instances. The
-current lineage shape is summarized in
+complete surviving lineage, not just the retiree's same-typed edge. Link-less
+retirees leave roots; dangling sibling links drop. Because spawn can create
+cross-repo references through team-scope anchor resolution, repair must scan the
+same scope where references can be created (`teamAgentRoots`, with guarded
+local-root realpath handling when no `agents/` directory exists). The result
+exposes `relinked[]` so callers can report the repaired instances. The current
+lineage shape is summarized in
 [spawn-relations-lineage-fields](/architecture/spawn-relations-lineage-fields.md).
+
+General rule: whoever writes cross-instance metadata owns its repair on both
+sides' lifecycle events, across the full scope where that reference can be
+created.
 
 # Related
 

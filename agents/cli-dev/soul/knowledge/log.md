@@ -1,6 +1,10 @@
 # Knowledge Log
 
 ## 2026-07-25
+* **Creation**: [attached-spawns-child-of-work-owner](/decisions/attached-spawns-child-of-work-owner.md) records the human decision that attached work mode always makes the attached agent a child of the work-tree owner and rejects contradictory relation flags.
+* **Update**: [spawn-lineage-explicit-only](/decisions/spawn-lineage-explicit-only.md) clarifies that attached-mode parentage is a binding lineage source, not a negatable fallback.
+* **Update**: [spawn-relations-lineage-fields](/architecture/spawn-relations-lineage-fields.md) records attached-mode relation rejection and complete cross-type, team-wide retirement splice rules.
+* **Update**: [relation-policy-migration-and-retire-splice](/lessons/relation-policy-migration-and-retire-splice.md) generalizes lineage repair ownership to both sides of lifecycle events across the scope where references can be created.
 * **Creation**: [relation-policy-migration-and-retire-splice](/lessons/relation-policy-migration-and-retire-splice.md) records that relation policy changes must migrate all agent-facing spawn recipes and define retire-time repair for mutated lineage.
 * **Update**: [spawn-relations-lineage-fields](/architecture/spawn-relations-lineage-fields.md) records retireInstance splice repair and its `relinked[]` reporting for links pointing at a retiree.
 * **Update**: [spawn-lineage-explicit-only](/decisions/spawn-lineage-explicit-only.md) broadens the recipe migration rule from spawn semantics to relation policy changes.
