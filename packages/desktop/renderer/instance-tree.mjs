@@ -132,6 +132,38 @@ export function clusterSeparator(doc, memberCount) {
   return el;
 }
 
+/** Find the roster instance a UI reference means. References carry the
+ * display name plus whatever identity the caller knows (home/agentsRoot —
+ * sidebar rows know both; older callers pass a bare name). Identity match
+ * wins; bare names resolve only when unambiguous in the roster — an
+ * ambiguous bare name returns null rather than the first same-named match
+ * (which could open the WRONG agents root's tmux session; review 46f3fdc).
+ * Importable so the duplicate-name regression exercises this exact layer. */
+export function findRosterInstance(instances, ref) {
+  const name = typeof ref === "string" ? ref : ref.instance;
+  const home = typeof ref === "string" ? undefined : ref.home;
+  const root = typeof ref === "string" ? undefined : ref.agentsRoot;
+  if (home) {
+    const byHome = instances.find((i) => i.home === home);
+    if (byHome) return byHome;
+  }
+  if (root) {
+    const byRoot = instances.find((i) => i.instance === name && i.agentsRoot === root);
+    if (byRoot) return byRoot;
+  }
+  const named = instances.filter((i) => i.instance === name);
+  return named.length === 1 ? named[0] : null;
+}
+
+/** Terminal-tab dedup key for an instance reference: workspace-scoped and
+ * IDENTITY-scoped, so two same-named instances from different agents roots
+ * are different terminals (review 46f3fdc). Bare-name refs key by name
+ * (legacy callers; findRosterInstance already refuses ambiguous names). */
+export function terminalKey(workspace, ref) {
+  const id = typeof ref === "string" ? ref : instanceId(ref);
+  return `term:${workspace}:${id}`;
+}
+
 export function hasInstanceChildren(instances, instance) {
   return instances.some((candidate) => candidate.parentInstance === instance);
 }
@@ -256,15 +288,28 @@ export function filterInstanceTree(instances, query) {
 /** Whether an item remains visible under VS Code-style collapsed ancestors.
  * Filtering temporarily reveals matching paths without mutating the user's
  * persisted collapse state. Parent traversal is cycle-safe. */
+/** Whether an item remains visible under VS Code-style collapsed ancestors.
+ * Filtering temporarily reveals matching paths without mutating the user's
+ * persisted collapse state. Parent traversal is cycle-safe and
+ * IDENTITY-aware: collapse keys are minted from instanceId, and parent
+ * names resolve through resolveLinkId so a collapsed duplicate name in
+ * another agents root can never hide this root's subtree (review 46f3fdc). */
 export function instanceVisibleInTree(instance, allInstances, collapsed, workspace, filtering = false) {
   if (filtering) return true;
-  const byName = new Map(allInstances.map((item) => [item.instance, item]));
-  const seen = new Set([instance.instance]);
-  let parentName = instance.parentInstance;
-  while (parentName && !seen.has(parentName)) {
-    if (collapsed.has(collapseKey(workspace, parentName))) return false;
-    seen.add(parentName);
-    parentName = byName.get(parentName)?.parentInstance;
+  const byId = new Map(allInstances.map((item) => [instanceId(item), item]));
+  const byName = new Map();
+  for (const item of allInstances) {
+    if (!byName.has(item.instance)) byName.set(item.instance, []);
+    byName.get(item.instance).push(item);
+  }
+  const seen = new Set([instanceId(instance)]);
+  let cursor = instance;
+  while (cursor?.parentInstance) {
+    const pid = resolveLinkId(cursor, cursor.parentInstance, byName);
+    if (!pid || seen.has(pid)) break;
+    if (collapsed.has(collapseKey(workspace, pid))) return false;
+    seen.add(pid);
+    cursor = byId.get(pid);
   }
   return true;
 }
@@ -299,13 +344,13 @@ export function captureTreeRenderState(listEl) {
 
 /** Filtering force-expands matching paths. Its disclosure remains truthful but
  * inert, so clicking cannot mutate persisted collapse state invisibly. */
-export function configureDisclosure(button, { instance, collapsed, filtering, onToggle }) {
+export function configureDisclosure(button, { instance, label, collapsed, filtering, onToggle }) {
   const expanded = filtering || !collapsed;
   button.dataset.treeInstance = instance;
   button.dataset.treeControl = "disclosure";
   button.textContent = expanded ? "▾" : "▸";
   button.setAttribute("aria-expanded", String(expanded));
-  button.setAttribute("aria-label", `${expanded ? "Collapse" : "Expand"} ${instance}`);
+  button.setAttribute("aria-label", `${expanded ? "Collapse" : "Expand"} ${label || instance}`);
   button.disabled = !!filtering;
   if (filtering) {
     button.setAttribute("aria-disabled", "true");

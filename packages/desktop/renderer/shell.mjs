@@ -22,6 +22,7 @@ import { NAV, stageSidebarMode, loadStageView } from "./shell-nav.mjs";
 import {
   collapseKey, hasInstanceChildren, instanceRepoLabel, treeGuideSegments, filterInstanceTree, instanceVisibleInTree,
   captureTreeRenderState, configureDisclosure, rosterResponseOwns, clusterInstances, clusterSeparator,
+  instanceId, findRosterInstance, terminalKey,
 } from "./instance-tree.mjs";
 import {
   tabVisibleInContext, canActivateTab,
@@ -225,8 +226,11 @@ function renderContextRoster(instances) {
         rowWrap.className = "ctx-tree-row";
         rowWrap.style.setProperty("--depth", String(i.depth || 0));
         const activeKey = tabs.get(activeTab)?.key;
-        const isActive = activeKey === `term:${ws}:${i.instance}`;
-        const key = collapseKey(ws, i.instance);
+        const isActive = activeKey === terminalKey(ws, i);
+        // Collapse and focus state key by IDENTITY, not bare name: two
+        // same-named instances from different agents roots collapse and
+        // focus independently (review 46f3fdc).
+        const key = collapseKey(ws, instanceId(i));
         const hasChildren = hasInstanceChildren(instances, i.instance);
         const collapsed = collapsedInstances.has(key);
 
@@ -247,7 +251,7 @@ function renderContextRoster(instances) {
         disclosure.tabIndex = hasChildren ? 0 : -1;
         if (hasChildren) {
           configureDisclosure(disclosure, {
-            instance: i.instance, collapsed, filtering,
+            instance: instanceId(i), label: i.instance, collapsed, filtering,
             onToggle: () => {
               if (collapsed) collapsedInstances.delete(key); else collapsedInstances.add(key);
               renderContextRoster(contextInstances);
@@ -260,7 +264,7 @@ function renderContextRoster(instances) {
 
         const row = document.createElement("button");
         row.type = "button";
-        row.dataset.treeInstance = i.instance;
+        row.dataset.treeInstance = instanceId(i);
         row.dataset.treeControl = "terminal";
         row.className = "ctx-inst" + (i.running ? "" : " idle") + (isActive ? " active" : "");
         row.disabled = !i.running;
@@ -278,7 +282,9 @@ function renderContextRoster(instances) {
         meta.title = `Repository: ${meta.textContent}`;
         copy.append(name, meta);
         row.append(dot, copy);
-        row.addEventListener("click", () => openTerminalTab(i.instance));
+        // pass the FULL reference: same-named instances in other agents
+        // roots must open THEIR tmux session, not the first name match
+        row.addEventListener("click", () => openTerminalTab({ instance: i.instance, home: i.home, agentsRoot: i.agentsRoot }));
         rowWrap.append(guides, disclosure, row);
         listEl.append(rowWrap);
       }
@@ -465,7 +471,9 @@ async function openViewTab(name, title, extra = {}, key = `view:${name}`,
 
 // ── integrated terminal tab (the shell's own flagship view) ──────────────
 const pendingTerms = new Set(); // keys reserved while a roster fetch is in flight
-async function openTerminalTab(instance) {
+/** ref: either a bare instance name (views, palette — resolved only when
+ * unambiguous) or { instance, home?, agentsRoot? } (sidebar rows — exact). */
+async function openTerminalTab(ref) {
   // A sidebar-tree selection opens its terminal directly — the persistent
   // roster is the quick path to sessions. The full Instances STAGE (grouped
   // roster, sorts, read-only transcript) is a separate first-class
@@ -475,21 +483,22 @@ async function openTerminalTab(instance) {
   refreshContextRoster();
   // Honor the views' workspace bus: an instance selected in a secondary
   // (server-advertised) workspace must resolve against THAT roster, and a
-  // same-named instance in another workspace is a different terminal.
+  // same-named instance in another workspace — or another agents root
+  // (review 46f3fdc) — is a different terminal.
   const ws = currentWorkspace();
-  const key = `term:${ws}:${instance}`;
+  const key = terminalKey(ws, ref);
   await whenKeyFree(key);
   for (const [tid, t] of tabs) if (t.key === key) { activateTab(tid); return; }
   if (pendingTerms.has(key)) return; // an open for this key is already in flight
   pendingTerms.add(key);
   try {
-    await openTerminalTabInner(instance, ws, key);
+    await openTerminalTabInner(ref, ws, key);
   } finally {
     pendingTerms.delete(key);
   }
 }
 
-async function openTerminalTabInner(instance, ws, key) {
+async function openTerminalTabInner(ref, ws, key) {
   // Resolve the tmux target from the roster of the selected workspace.
   const owns = () => terminalOpenOwnsWorkspace(ws, currentWorkspace());
   let panel;
@@ -502,9 +511,19 @@ async function openTerminalTabInner(instance, ws, key) {
   // Workspace changed while /api/panel was in flight: discard BEFORE addTab
   // (addTab auto-activates, so a late A open could otherwise receive B input).
   if (!owns()) return;
-  const inst = panel.instances.find((i) => i.instance === instance);
-  if (!inst) return alert(`unknown instance "${instance}"`);
-  if (!inst.running || !inst.tmux?.session) return alert(`"${instance}" has no live tmux session`);
+  // Identity-aware resolution: an exact home/agentsRoot reference finds ITS
+  // instance; a bare name resolves only when unambiguous — the first
+  // same-named match could be another agents root's tmux session
+  // (review 46f3fdc).
+  const name = typeof ref === "string" ? ref : ref.instance;
+  const inst = findRosterInstance(panel.instances, ref);
+  if (!inst) {
+    const dup = panel.instances.filter((i) => i.instance === name).length > 1;
+    return alert(dup
+      ? `several instances are named "${name}" — open it from the sidebar tree, which addresses the exact one`
+      : `unknown instance "${name}"`);
+  }
+  if (!inst.running || !inst.tmux?.session) return alert(`"${name}" has no live tmux session`);
 
   const wrap = document.createElement("div");
   wrap.className = "term-wrap";
@@ -538,7 +557,7 @@ async function openTerminalTabInner(instance, ws, key) {
   });
 
   const made = addTab({
-    title: `⌗ ${instance}`,
+    title: `⌗ ${name}`,
     key,
     kind: "terminal",
     workspace: ws,

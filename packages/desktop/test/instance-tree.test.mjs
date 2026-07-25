@@ -351,3 +351,51 @@ test("resolveLinkId (shared resolver contract): same-root first, unique cross-ro
   assert.equal(resolveLinkId(foreign, "x", byName), null, "ambiguous with no same-root candidate → null (fail safe)");
   assert.equal(resolveLinkId(from, "ghost", byName), null, "unknown name → null");
 });
+
+/* ── identity propagation past cluster construction (review 46f3fdc) ── */
+
+test("findRosterInstance: exact identity wins; bare duplicate names refuse to guess", async () => {
+  const { findRosterInstance } = await import("../renderer/instance-tree.mjs");
+  const roster = [
+    { instance: "dev-1", agentsRoot: "/ws1/agents", home: "/ws1/h", tmux: { session: "s1", window: "dev-1" } },
+    { instance: "dev-1", agentsRoot: "/ws2/agents", home: "/ws2/h", tmux: { session: "s2", window: "dev-1" } },
+    { instance: "solo", agentsRoot: "/ws1/agents", home: "/ws1/s" },
+  ];
+  // each duplicate row's reference resolves to ITS OWN instance (its own tmux target)
+  const first = findRosterInstance(roster, { instance: "dev-1", home: "/ws1/h", agentsRoot: "/ws1/agents" });
+  const second = findRosterInstance(roster, { instance: "dev-1", home: "/ws2/h", agentsRoot: "/ws2/agents" });
+  assert.equal(first.tmux.session, "s1", "first duplicate opens the first root's tmux session");
+  assert.equal(second.tmux.session, "s2", "second duplicate opens the SECOND root's tmux session, never the first name match");
+  // agentsRoot alone (no home) still disambiguates
+  assert.equal(findRosterInstance(roster, { instance: "dev-1", agentsRoot: "/ws2/agents" }).tmux.session, "s2");
+  // bare names: unique resolves, duplicate refuses (null), unknown null
+  assert.equal(findRosterInstance(roster, "solo").instance, "solo");
+  assert.equal(findRosterInstance(roster, "dev-1"), null, "ambiguous bare name never returns the first match");
+  assert.equal(findRosterInstance(roster, "ghost"), null);
+});
+
+test("terminalKey: same-named instances from different roots are DIFFERENT terminals", async () => {
+  const { terminalKey } = await import("../renderer/instance-tree.mjs");
+  const a = { instance: "dev-1", home: "/ws1/h", agentsRoot: "/ws1/agents" };
+  const b = { instance: "dev-1", home: "/ws2/h", agentsRoot: "/ws2/agents" };
+  assert.notEqual(terminalKey("w", a), terminalKey("w", b), "duplicate names dedupe separately");
+  assert.equal(terminalKey("w", a), terminalKey("w", a), "same identity dedupes together");
+  assert.notEqual(terminalKey("w1", a), terminalKey("w2", a), "still workspace-scoped");
+  assert.equal(terminalKey("w", "legacy-name"), "term:w:legacy-name", "bare-name callers keep their key shape");
+});
+
+test("collapse state keys by identity: collapsing one duplicate never hides the other's subtree", async () => {
+  const m = await import("../renderer/instance-tree.mjs");
+  const roster = [
+    { instance: "coord", agentsRoot: "/ws1/agents", home: "/ws1/c" },
+    { instance: "kid", agentsRoot: "/ws1/agents", home: "/ws1/k", parentInstance: "coord" },
+    { instance: "coord", agentsRoot: "/ws2/agents", home: "/ws2/c" },
+    { instance: "kid2", agentsRoot: "/ws2/agents", home: "/ws2/k2", parentInstance: "coord" },
+  ];
+  // collapse ONLY the /ws1 coord (by its identity)
+  const collapsed = new Set([m.collapseKey("w", m.instanceId(roster[0]))]);
+  const vis = (i) => m.instanceVisibleInTree(i, roster, collapsed, "w");
+  assert.equal(vis(roster[1]), false, "ws1 kid hidden under its collapsed parent");
+  assert.equal(vis(roster[3]), true, "ws2 kid STAYS VISIBLE — the other root's same-named parent is not collapsed");
+  assert.equal(vis(roster[2]), true, "the ws2 parent itself stays visible");
+});
