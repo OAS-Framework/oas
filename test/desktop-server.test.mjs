@@ -110,8 +110,8 @@ test("desktop server: brain: findInstance is workspace-scoped — same-named ins
   assert.equal(findInstance("only-b").running, true);
   // the brain endpoint passes its resolved workspace id to findInstance
   const serverSrc = readFileSync(SRV, "utf8");
-  assert.ok(/const live = findInstance\(name, ws\?\.id\)/.test(serverSrc),
-    "brainData scopes its running lookup to the resolved workspace");
+  assert.ok(/const live = findInstance\(name, ws\?\.id, home\)/.test(serverSrc),
+    "brainData scopes its running lookup to the resolved workspace AND pins the exact home (@7dd1e7b)");
 });
 
 test("desktop server: brain: capability skill paths expand leaf AND parent-tree forms; local + package merge", () => {

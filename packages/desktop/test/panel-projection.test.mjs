@@ -79,3 +79,44 @@ test("/api/spawn errors: E_RELATIVE_AMBIGUOUS passes through UNSLICED; others st
   // degradation code maps to 503
   assert.equal(shape(Object.assign(new Error("no cli"), { code: "cli-unavailable" })).status, 503);
 });
+
+/* ── instance-addressed route resolution (merged-state review @7dd1e7b) ── */
+
+function findInstanceFns() {
+  const src = readFileSync(SRV, "utf8");
+  const m = src.match(/\/\* OASWEB_FINDINST_BEGIN[^*]*\*\/([\s\S]*?)\/\* OASWEB_FINDINST_END \*\//);
+  assert.ok(m, "FINDINST block markers present");
+  // the block references the module-level snapshot + Date — inject stubs
+  const make = new Function("snapshot", "Date", "send",
+    m[1] + "\nreturn { findInstance, resolveInstanceOr };");
+  return (byWs) => make({ byWs }, Date, null);
+}
+
+test("instance routes: same name across TWO ROOTS in one workspace — home qualifier resolves exactly, bare name refuses 409", () => {
+  const twinA = { instance: "dev-1", home: "/ws/agents/dev/instances/dev-1", agentsRoot: "/ws/agents", running: true };
+  const twinB = { instance: "dev-1", home: "/ws/local-agents/dev/instances/dev-1", agentsRoot: "/ws/local-agents", running: false };
+  const solo = { instance: "solo", home: "/ws/agents/s/instances/solo", agentsRoot: "/ws/agents" };
+  const { findInstance, resolveInstanceOr } = findInstanceFns()(new Map([
+    ["w1", { instances: [twinA, twinB, solo] }],
+    ["w2", { instances: [{ instance: "dev-1", home: "/other/agents/dev/instances/dev-1" }] }],
+  ]));
+  // exact home qualifier → precisely that instance (privileged routes:
+  // harvest cwd, keys/interrupt tmux target must never hit the twin)
+  assert.equal(findInstance("dev-1", "w1", twinA.home), twinA);
+  assert.equal(findInstance("dev-1", "w1", twinB.home), twinB);
+  // bare name with an intra-workspace twin → AMBIGUOUS sentinel, and the
+  // route helper turns it into a 409 with a stable code (never 404, never
+  // an arbitrary first-match pick)
+  assert.equal(findInstance("dev-1", "w1"), findInstance.AMBIGUOUS);
+  const r = resolveInstanceOr("dev-1", "w1");
+  assert.equal(r.error.status, 409);
+  assert.equal(r.error.body.code, "E_INSTANCE_AMBIGUOUS");
+  // unique bare name still resolves (legacy path unbroken)
+  assert.equal(resolveInstanceOr("solo", "w1").inst, solo);
+  // ws scoping still confines resolution — w2's dev-1 is unique THERE
+  assert.equal(findInstance("dev-1", "w2").home, "/other/agents/dev/instances/dev-1");
+  // unknown → 404 payload
+  assert.equal(resolveInstanceOr("ghost", "w1").error.status, 404);
+  // home qualifier that matches nothing → 404, not a fallback to name-only
+  assert.equal(resolveInstanceOr("dev-1", "w1", "/nope").error.status, 404);
+});

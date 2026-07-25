@@ -500,14 +500,21 @@ function openSpawnModal(s, a) {
    selected workspace's panel until the instance appears (ownership- and
    generation-gated), then hand off. Exported for the stale-snapshot
    regression. delayMs is injectable so tests run without real waits. */
-export async function waitForInstanceInPanel(s, name, isCurrent, { tries = 20, delayMs = 700, sleep } = {}) {
+export async function waitForInstanceInPanel(s, ref, isCurrent, { tries = 20, delayMs = 700, sleep } = {}) {
   const wait = sleep || ((ms) => new Promise((ok) => setTimeout(ok, ms)));
+  // ref: { instance, home?, agentsRoot? }. Match the COMPOSITE identity when
+  // the spawn result provides it — with a same-named twin already in the
+  // roster, a bare-name wait would succeed early and the follow-up open then
+  // refuse the ambiguous name (merged-state review @7dd1e7b).
+  const matches = (x) => x.instance === ref.instance
+    && (!ref.home || !x.home || x.home === ref.home)
+    && (!ref.agentsRoot || !x.agentsRoot || x.agentsRoot === ref.agentsRoot);
   for (let i = 0; i < tries; i++) {
     if (!isCurrent()) return false;          // ws switched / superseded: stop
     try {
       const panel = await apiJson(s.ctx, `/api/panel${wsQuery()}`);
       if (!isCurrent()) return false;
-      if ((panel.instances || []).some((x) => x.instance === name)) return true;
+      if ((panel.instances || []).some(matches)) return true;
     } catch { /* transient — keep polling */ }
     await wait(delayMs);
   }
@@ -589,11 +596,14 @@ export async function doSpawn(s, ui) {
     // terminal before the instance is in /api/panel makes the shell resolve
     // "unknown instance". Wait for it, still gated by ownership + workspace.
     const current = () => owns() && myGen === workspaceGeneration();
-    const visible = await waitForInstanceInPanel(s, d.instance, current, s.waitOpts);
+    // Poll and open by COMPOSITE identity — the spawn result's home plus the
+    // selected agent's root disambiguate a same-named twin (review @7dd1e7b).
+    const spawnedRef = { instance: d.instance, ...(d.home ? { home: d.home } : {}), ...(a.agentsRoot ? { agentsRoot: a.agentsRoot } : {}) };
+    const visible = await waitForInstanceInPanel(s, spawnedRef, current, s.waitOpts);
     if (!current()) return;
     if (!visible) { ui.status.textContent = `Spawned ${d.instance} — roster is catching up; open it from the sidebar instance roster.`; return; }
     ui.status.textContent = `Spawned ${d.instance}${d.launched ? " — session running" : ""}. Opening terminal…`;
-    s.ctx.openTerminal(d.instance);
+    s.ctx.openTerminal(spawnedRef);
   } catch (e) {
     if (owns()) {
       ui.status.classList?.add("err");

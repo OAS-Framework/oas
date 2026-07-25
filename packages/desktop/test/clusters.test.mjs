@@ -104,3 +104,16 @@ test("ambiguous relation with no same-root candidate never merges (fail safe)", 
   ]);
   assert.equal(cs.length, 3, "ambiguous cross-root sibling resolves to nothing — three singletons");
 });
+
+test("intra-root duplicate parents: children stay single-node clusters (strict resolveLinkId)", () => {
+  // Two same-named instances in the SAME agents root — resolution is
+  // exactly-one-or-null, so the child's parent link resolves to nothing:
+  // three singletons, never a guessed edge (tightened resolver, f754745).
+  const cs = computeClusters([
+    { instance: "dev", agentsRoot: "/a", home: "/a/agents/dev/i/dev-1", running: true },
+    { instance: "dev", agentsRoot: "/a", home: "/a/agents/dev/i/dev-2", running: true },
+    { instance: "kid", agentsRoot: "/a", home: "/a/agents/kid/i/kid", parentInstance: "dev", running: true },
+  ]);
+  assert.deepEqual(cs.map((c) => c.size), [1, 1, 1],
+    "no edge to either intra-root duplicate — all singletons");
+});

@@ -456,3 +456,23 @@ test("resolveTerminalOpen: string and object refs of one identity mint ONE key; 
   assert.ok(!a.error && !b.error);
   assert.notEqual(a.key, b.key, "exact refs keep distinct terminals under shadowing");
 });
+
+test("resolveLinkId: intra-root duplicate names are inherently ambiguous — no first-candidate edge (merged-state review @7dd1e7b)", async () => {
+  const m = await import("../renderer/instance-tree.mjs");
+  const from = { instance: "child-1", agentsRoot: "/ws/agents", home: "/ws/agents/c/instances/child-1" };
+  const dupA = { instance: "coord", agentsRoot: "/ws/agents", home: "/ws/agents/coord/instances/coord" };
+  const dupB = { instance: "coord", agentsRoot: "/ws/agents", home: "/ws/agents/local~coord/instances/coord" };
+  const byName = new Map([["coord", [dupA, dupB]]]);
+  assert.equal(m.resolveLinkId(from, "coord", byName), null,
+    "two same-root candidates: kernel classifies the name inherently ambiguous — resolve to nothing, never a false edge");
+  // exactly one same-root candidate among cross-root noise still resolves
+  const other = { instance: "coord", agentsRoot: "/elsewhere/agents", home: "/elsewhere/agents/coord/instances/coord" };
+  const byName2 = new Map([["coord", [dupA, other]]]);
+  assert.equal(m.resolveLinkId(from, "coord", byName2), m.instanceId(dupA), "single same-root candidate wins over cross-root");
+  // and clustering treats the intra-root-duplicate parent edge as absent:
+  // the child is NOT merged into either duplicate's cluster
+  const child = { ...from, parentInstance: "coord" };
+  const clusters = m.clusterInstances([child, dupA, dupB]);
+  const childCluster = clusters.find((c) => c.instances.some((i) => i.instance === "child-1"));
+  assert.equal(childCluster.instances.length, 1, "ambiguous edge ignored — child stays a single-node cluster");
+});
