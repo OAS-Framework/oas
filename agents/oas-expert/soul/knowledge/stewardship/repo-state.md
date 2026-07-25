@@ -137,19 +137,21 @@ than letting the file grow stale.
 
 ## In flight
 
-- **PR #35 Desktop user-editable keyboard shortcuts** — RETURNED round 1 on
-  2026-07-25 at exact head `811cb06` for a Desktop soul knowledge-correctness
-  fix only. Code/product/security/mergeability gates passed locally and in CI;
-  at review time `main` was an ancestor and GitHub reported mergeable. Coordinator
-  `dev-coordinator-keybindings` owns the fix/handback. Required fix:
-  `agents/oas-desktop-engineer/soul/knowledge/decisions/keybindings-stub-coordinator-contract.md`
-  must stop claiming the final engine lacks the `defaultPrevented` skip/shell
-  guards it externally and must remove or qualify the non-existent
-  `matchesChord` preserved-contract claim.
+- **PR #35 Desktop user-editable keyboard shortcuts** — RETURNED round 2 on
+  2026-07-25 at exact head `b5651b6` for mergeability only. The round-1
+  knowledge finding is fixed, the additional code deltas passed maintainer
+  delta review, local full/strict gates passed, and GitHub PR CI plus all three
+  installer checks were green. The branch is stale because `origin/main` is not
+  an ancestor after the round-1 stewardship commit(s); coordinator
+  `dev-coordinator-keybindings` owns merging the latest main and handing back a
+  settled exact head.
 
 ## Recent deliveries
 
 - (record PR #, one-line scope, verdict, merge/close date)
+- PR #35 round 2 Desktop keybindings: RETURNED 2026-07-25 for mergeability
+  only after all code/knowledge/security gates passed at `b5651b6`; branch must
+  merge latest main (see delivery-log).
 - PR #35 round 1 Desktop keybindings: RETURNED 2026-07-25 for one
   knowledge-correctness fix after all code/security/mergeability gates passed
   (see delivery-log).
