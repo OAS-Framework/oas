@@ -22,7 +22,7 @@ import { NAV, stageSidebarMode, loadStageView } from "./shell-nav.mjs";
 import {
   collapseKey, hasInstanceChildren, instanceRepoLabel, treeGuideSegments, filterInstanceTree, instanceVisibleInTree,
   captureTreeRenderState, configureDisclosure, rosterResponseOwns, clusterInstances, clusterSeparator,
-  instanceId, findRosterInstance, terminalKey, resolveTerminalOpen,
+  instanceId, terminalKey, resolveTerminalOpen,
 } from "./instance-tree.mjs";
 import {
   tabVisibleInContext, canActivateTab,
@@ -470,7 +470,7 @@ async function openViewTab(name, title, extra = {}, key = `view:${name}`,
 }
 
 // ── integrated terminal tab (the shell's own flagship view) ──────────────
-const pendingTerms = new Set(); // keys reserved while a roster fetch is in flight
+const pendingTerms = new Set(); // keys with a tab CREATION in flight (post-resolution — dedup for concurrent opens of one resolved identity)
 /** ref: either a bare instance name (views, palette — resolved only when
  * unambiguous) or { instance, home?, agentsRoot? } (sidebar rows — exact).
  * ORDER MATTERS (review 7d740f9): the reference is resolved against the
