@@ -1185,6 +1185,44 @@ test("retire splices lineage: orphans inherit the retiree's links (parent-relati
     retireInstance(root, rev2.instance, { keepDir: false });
     assert.equal(metaOf(solo.instance).parentInstance, undefined, "root anchor is a root again after its reviewer retires");
     // Sibling-link splice: root sibling link to a retiring instance is dropped.
+    // parent-relation anchor rewrite is committed only AFTER a successful
+    // launch: force a launch failure (PATH without tmux) and assert the
+    // anchor's lineage is untouched — no edge to a zombie spawn.
+    const rev4 = (() => {
+      const restore = process.env.PATH;
+      // pi/claude/git available, tmux NOT: which() must fail on tmux only.
+      const noTmux = join(base, "bin-notmux"); mkdirSync(noTmux, { recursive: true });
+      for (const t of ["pi", "claude"]) write(join(noTmux, t), "#!/bin/sh\nexit 0\n");
+      execFileSync("chmod", ["-R", "+x", noTmux]);
+      const gitPath = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+      symlinkSync(gitPath, join(noTmux, "git"));
+      process.env.PATH = noTmux;
+      try {
+        assert.throws(
+          () => spawnInstance(root, agentDef, { instance: "dev-rev4", relation: "parent", relativeTo: solo.instance, launch: true }),
+          /tmux not installed/,
+          "launch failure surfaces");
+      } finally { process.env.PATH = restore; }
+    })();
+    void rev4;
+    assert.equal(metaOf(solo.instance).parentInstance, undefined, "anchor NOT re-pointed by the failed launch");
+    // Anchor-write failure AFTER successful scaffold/launch is COMPENSATED:
+    // make the anchor's instance.json unwritable, spawn a parent relation, and
+    // assert the spawn throws AND the new home is rolled back (no zombie).
+    const soloMetaPath = join(root, "dev", "instances", solo.instance, "instance.json");
+    execFileSync("chmod", ["444", soloMetaPath]);
+    execFileSync("chmod", ["555", dirname(soloMetaPath)]);
+    try {
+      assert.throws(
+        () => spawnInstance(root, agentDef, { instance: "dev-rev5", relation: "parent", relativeTo: solo.instance, launch: false }),
+        /failed to re-point anchor.*rolled back/s,
+        "anchor-write failure is compensated");
+    } finally {
+      execFileSync("chmod", ["755", dirname(soloMetaPath)]);
+      execFileSync("chmod", ["644", soloMetaPath]);
+    }
+    assert.equal(existsSync(join(root, "dev", "instances", "dev-rev5")), false, "rolled-back spawn leaves no home");
+    assert.equal(metaOf(solo.instance).parentInstance, undefined, "anchor unchanged after compensated failure");
     const peer = spawnInstance(root, agentDef, { instance: "dev-peer", relation: "sibling", relativeTo: solo.instance, launch: false });
     assert.equal(metaOf(peer.instance).siblingInstance, solo.instance);
     // Mixed edge types: reviewer R as parent over root-sibling peer absorbs
@@ -1201,6 +1239,354 @@ test("retire splices lineage: orphans inherit the retiree's links (parent-relati
     retireInstance(root, solo.instance, { keepDir: false });
     assert.equal(metaOf(peer.instance).siblingInstance, undefined, "dangling sibling link dropped on retire");
   } finally { process.env.PATH = oldPath; }
+});
+
+test("parent-relation rollback after LAUNCH kills the window, compensates hooks, and never truncates the anchor", () => {
+  const base = temp(); const repo = join(base, "repo"); gitRepo(repo);
+  const root = join(repo, "agents");
+  write(join(root, "dev", "soul", "soul.yaml"), `name: dev\nkind: persistent\nrepo: ${repo}\nwork: checkout\nruntime: pi\n`);
+  write(join(root, "dev", "soul", "AGENTS.md"), "# dev\n");
+  mkdirSync(join(root, "dev", "instances"), { recursive: true });
+  // Capability whose spawn/retire hooks record every event — compensation must
+  // fire retire for the rolled-back instance.
+  const hookLog = join(base, "hook-events");
+  const script = `import {appendFileSync} from 'node:fs'; appendFileSync(${JSON.stringify(hookLog)}, process.env.OAS_EVENT + ':' + process.env.OAS_INSTANCE + '\\n');`;
+  capability(repo, "comp", { capability: "acme.comp", hooks: { spawn: "hook.mjs", retire: "hook.mjs" } }, { "hook.mjs": script });
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.comp:\n      global: true\n");
+  // STATEFUL fake tmux: tracks window names in a file so list-windows reflects
+  // new-window/kill-window; TMUX_FAKE_STUBBORN names a window that kill-window
+  // silently fails to remove (for truth-telling assertions).
+  const bin = join(base, "bin"); mkdirSync(bin, { recursive: true });
+  const tmuxLog = join(base, "tmux-log");
+  const tmuxWins = join(base, "tmux-windows");
+  write(tmuxWins, "");
+  write(join(bin, "tmux"), [
+    "#!/bin/sh",
+    `echo "$@" >> ${tmuxLog}`,
+    'cmd="$1"',
+    'case "$cmd" in',
+    "  new-window)",
+    `    while [ $# -gt 0 ]; do if [ "$1" = "-n" ]; then echo "$2" >> ${tmuxWins}; fi; shift; done ;;`,
+    "  kill-window)",
+    '    while [ $# -gt 0 ]; do if [ "$1" = "-t" ]; then t="$2"; fi; shift; done',
+    "    name=$(printf '%s' \"$t\" | sed 's/.*:=//')",
+    `    if [ "$name" != "$TMUX_FAKE_STUBBORN" ]; then grep -v -x "$name" ${tmuxWins} > ${tmuxWins}.n || true; mv ${tmuxWins}.n ${tmuxWins}; fi ;;`,
+    "  list-windows)",
+    '    if [ -n "$TMUX_FAKE_LIST_FAIL" ]; then echo "list-windows broken" >&2; exit 1; fi',
+    `    cat ${tmuxWins} ;;`,
+    "esac",
+    "exit 0",
+    "",
+  ].join("\n"));
+  for (const t of ["pi", "claude"]) write(join(bin, t), "#!/bin/sh\nexit 0\n");
+  execFileSync("chmod", ["-R", "+x", bin]);
+  for (const t of ["git", "node", "chmod", "sh", "grep", "sed", "mv", "cat", "printf"]) symlinkSync(execFileSync("which", [t], { encoding: "utf8" }).trim(), join(bin, t));
+  const oldPath = process.env.PATH;
+  process.env.PATH = `${bin}`;
+  try {
+    const agentDef = findAgent(root, "dev");
+    const anchor = spawnInstance(root, agentDef, { instance: "dev-anchor", tmuxSession: "oas-test-fake", launch: false });
+    const anchorMetaPath = join(anchor.home, "instance.json");
+    const before = readFileSync(anchorMetaPath, "utf8");
+    // Force the ATOMIC anchor write to fail AFTER a successful launch: 555 on
+    // the anchor's home blocks the same-directory temp file creation — the
+    // target instance.json is never truncated (rename never happens).
+    execFileSync("chmod", ["555", anchor.home]);
+    try {
+      assert.throws(
+        () => spawnInstance(root, agentDef, { instance: "dev-zomb", relation: "parent", relativeTo: anchor.instance, tmuxSession: "oas-test-fake", launch: true }),
+        /failed to re-point anchor.*rolled back/s);
+    } finally { execFileSync("chmod", ["755", anchor.home]); }
+    // Anchor file NEVER truncated or altered (atomic temp+rename path).
+    assert.equal(readFileSync(anchorMetaPath, "utf8"), before, "anchor instance.json byte-identical");
+    // The launched window was killed with an exact-match target.
+    const tmuxCalls = readFileSync(tmuxLog, "utf8");
+    assert.match(tmuxCalls, /new-window .*dev-zomb/, "window was launched");
+    assert.match(tmuxCalls, /kill-window -t =oas-test-fake:=dev-zomb/, "launched window killed exact-match");
+    // Spawn hooks were compensated with retire for the rolled-back instance.
+    const events = readFileSync(hookLog, "utf8").trim().split("\n");
+    assert.ok(events.includes("spawn:dev-zomb"), "spawn hook ran");
+    assert.ok(events.includes("retire:dev-zomb"), "retire hook compensated the rolled-back spawn");
+    // Scaffold removed; no temp file remains next to the anchor meta.
+    assert.equal(existsSync(join(root, "dev", "instances", "dev-zomb")), false, "no zombie home");
+    assert.ok(!readdirSync(anchor.home).some((f) => f.includes(".tmp-")), "no leftover temp file");
+
+    // Temp-cleanup failure must not abort the rollback: pre-create a NON-EMPTY
+    // DIRECTORY at the deterministic temp path — writeFileSync fails (EISDIR,
+    // the original error) AND rmSync(tmpPath, {force:true}) throws (EISDIR/
+    // ENOTEMPTY without recursive), which previously aborted all remaining
+    // compensation (window kill, hooks, scaffold removal).
+    const tmpDir = `${anchorMetaPath}.tmp-dev-zomb2`;
+    mkdirSync(tmpDir); write(join(tmpDir, "blocker"), "x");
+    try {
+      assert.throws(
+        () => spawnInstance(root, agentDef, { instance: "dev-zomb2", relation: "parent", relativeTo: anchor.instance, tmuxSession: "oas-test-fake", launch: true }),
+        /failed to re-point anchor.*rollback INCOMPLETE.*tmp-dev-zomb2/s,
+        "original anchor-write error surfaces, and the unremovable temp is reported for manual cleanup");
+    } finally { rmSync(tmpDir, { recursive: true, force: true }); }
+    assert.equal(readFileSync(anchorMetaPath, "utf8"), before, "anchor still byte-identical");
+    const tmuxCalls2 = readFileSync(tmuxLog, "utf8");
+    assert.match(tmuxCalls2, /kill-window -t =oas-test-fake:=dev-zomb2/, "window killed despite temp-cleanup failure");
+    const events2 = readFileSync(hookLog, "utf8").trim().split("\n");
+    assert.ok(events2.includes("retire:dev-zomb2"), "hooks compensated despite temp-cleanup failure");
+    assert.equal(existsSync(join(root, "dev", "instances", "dev-zomb2")), false, "scaffold removed despite temp-cleanup failure");
+
+    // Home-removal failure must be REPORTED as incomplete with the failed
+    // path — never claimed as cleaned up. The retire hook (which compensation
+    // runs BEFORE home removal) plants a read-only subdir inside the home so
+    // rmSync(home) fails: the zombie home remains and the message says so.
+    const tmpDir3 = `${anchorMetaPath}.tmp-dev-zomb3`;
+    mkdirSync(tmpDir3); write(join(tmpDir3, "blocker"), "x"); // anchor write fails again
+    write(join(repo, ".agents", "capabilities", "owned", "comp", "hook.mjs"),
+      `import {appendFileSync, mkdirSync, writeFileSync, chmodSync} from 'node:fs';\n` +
+      `appendFileSync(${JSON.stringify(hookLog)}, process.env.OAS_EVENT + ':' + process.env.OAS_INSTANCE + '\\n');\n` +
+      `if (process.env.OAS_EVENT === 'retire' && process.env.OAS_INSTANCE === 'dev-zomb3') {\n` +
+      `  const d = process.env.OAS_HOME + '/locked'; mkdirSync(d); writeFileSync(d + '/pin', 'x'); chmodSync(d, 0o555);\n` +
+      `}\n`);
+    const zombHome = join(root, "dev", "instances", "dev-zomb3");
+    try {
+      assert.throws(
+        () => spawnInstance(root, agentDef, { instance: "dev-zomb3", relation: "parent", relativeTo: anchor.instance, tmuxSession: "oas-test-fake", launch: false }),
+        /failed to re-point anchor.*rollback INCOMPLETE.*instance home/s,
+        "unremovable home reported as incomplete with the failed path");
+      assert.ok(existsSync(zombHome), "zombie home really remains (message told the truth)");
+    } finally {
+      rmSync(tmpDir3, { recursive: true, force: true });
+      if (existsSync(join(zombHome, "locked"))) execFileSync("chmod", ["755", join(zombHome, "locked")]);
+      rmSync(zombHome, { recursive: true, force: true });
+    }
+
+    // Stubborn window: kill-window "succeeds" (exit 0) but the window remains
+    // — the effect check must report it (exit codes are not truth).
+    const tmpDir4 = `${anchorMetaPath}.tmp-dev-zomb4`;
+    mkdirSync(tmpDir4); write(join(tmpDir4, "blocker"), "x");
+    process.env.TMUX_FAKE_STUBBORN = "dev-zomb4";
+    try {
+      assert.throws(
+        () => spawnInstance(root, agentDef, { instance: "dev-zomb4", relation: "parent", relativeTo: anchor.instance, tmuxSession: "oas-test-fake", launch: true }),
+        /rollback INCOMPLETE.*tmux window oas-test-fake:dev-zomb4 still running/s,
+        "unkillable window reported despite kill-window exiting 0");
+    } finally {
+      delete process.env.TMUX_FAKE_STUBBORN;
+      rmSync(tmpDir4, { recursive: true, force: true });
+    }
+
+    // Probe failure is NOT confirmation: when list-windows itself fails, the
+    // rollback must fail CLOSED and report could-not-verify, not success.
+    const tmpDir4b = `${anchorMetaPath}.tmp-dev-zomb4b`;
+    mkdirSync(tmpDir4b); write(join(tmpDir4b, "blocker"), "x");
+    process.env.TMUX_FAKE_LIST_FAIL = "1";
+    try {
+      assert.throws(
+        () => spawnInstance(root, agentDef, { instance: "dev-zomb4b", relation: "parent", relativeTo: anchor.instance, tmuxSession: "oas-test-fake", launch: true }),
+        /rollback INCOMPLETE.*tmux window oas-test-fake:dev-zomb4b: could not verify removal/s,
+        "failed verification probe reported as could-not-verify, never as success");
+    } finally {
+      delete process.env.TMUX_FAKE_LIST_FAIL;
+      rmSync(tmpDir4b, { recursive: true, force: true });
+    }
+
+    // Failing retire hook: runLifecycleHooks catches hook errors internally,
+    // so the rollback must read the structured failures field.
+    const tmpDir5 = `${anchorMetaPath}.tmp-dev-zomb5`;
+    mkdirSync(tmpDir5); write(join(tmpDir5, "blocker"), "x");
+    write(join(repo, ".agents", "capabilities", "owned", "comp", "hook.mjs"),
+      `import {appendFileSync} from 'node:fs';\n` +
+      `appendFileSync(${JSON.stringify(hookLog)}, process.env.OAS_EVENT + ':' + process.env.OAS_INSTANCE + '\\n');\n` +
+      `if (process.env.OAS_EVENT === 'retire' && process.env.OAS_INSTANCE === 'dev-zomb5') process.exit(3);\n`);
+    try {
+      assert.throws(
+        () => spawnInstance(root, agentDef, { instance: "dev-zomb5", relation: "parent", relativeTo: anchor.instance, tmuxSession: "oas-test-fake", launch: false }),
+        /rollback INCOMPLETE.*retire hook acme\.comp/s,
+        "nonzero retire hook reported via structured failures");
+    } finally { rmSync(tmpDir5, { recursive: true, force: true }); }
+
+    // Failed worktree removal: a foreign file inside the worktree with
+    // worktree remove blocked — verify via `git worktree list` effect check.
+    write(join(root, "dev", "soul", "soul.yaml"), `name: dev\nkind: persistent\nrepo: ${repo}\nwork: worktree\nruntime: pi\n`);
+    const tmpDir6 = `${anchorMetaPath}.tmp-dev-zomb6`;
+    mkdirSync(tmpDir6); write(join(tmpDir6, "blocker"), "x");
+    write(join(repo, ".agents", "capabilities", "owned", "comp", "hook.mjs"),
+      `import {appendFileSync, mkdirSync as mk, writeFileSync as wf, chmodSync} from 'node:fs';\n` +
+      `appendFileSync(${JSON.stringify(hookLog)}, process.env.OAS_EVENT + ':' + process.env.OAS_INSTANCE + '\\n');\n` +
+      `if (process.env.OAS_EVENT === 'retire' && process.env.OAS_INSTANCE === 'dev-zomb6') {\n` +
+      `  const d = process.env.OAS_HOME + '/work/pin'; mk(d); wf(d + '/x', 'x'); chmodSync(d, 0o555); chmodSync(process.env.OAS_HOME + '/work', 0o555);\n` +
+      `}\n`);
+    const zomb6Home = join(root, "dev", "instances", "dev-zomb6");
+    try {
+      assert.throws(
+        () => spawnInstance(root, findAgent(root, "dev"), { instance: "dev-zomb6", relation: "parent", relativeTo: anchor.instance, tmuxSession: "oas-test-fake", launch: false }),
+        /rollback INCOMPLETE.*(git worktree .* still registered|instance home)/s,
+        "failed worktree cleanup reported");
+    } finally {
+      rmSync(tmpDir6, { recursive: true, force: true });
+      if (existsSync(join(zomb6Home, "work"))) {
+        execFileSync("chmod", ["-R", "755", join(zomb6Home, "work")]);
+        try { execFileSync("git", ["-C", repo, "worktree", "remove", "--force", join(zomb6Home, "work")], { stdio: "ignore" }); } catch { /* cleanup best-effort */ }
+      }
+      rmSync(zomb6Home, { recursive: true, force: true });
+      try { execFileSync("git", ["-C", repo, "worktree", "prune"], { stdio: "ignore" }); } catch { /* cleanup best-effort */ }
+    }
+
+    // SECURITY regression: branch names may contain valid-but-hostile shell
+    // metacharacters ($(…) passes check-ref-format). The rollback's branch
+    // verification must never interpolate them into a shell.
+    const marker = join(base, "pwn-marker");
+    const evilBranch = `agents/pwn$(touch\${IFS}${marker})`;
+    execFileSync("git", ["check-ref-format", `refs/heads/${evilBranch}`]); // fixture sanity: valid ref
+    const tmpDir7 = `${anchorMetaPath}.tmp-dev-zomb7`;
+    mkdirSync(tmpDir7); write(join(tmpDir7, "blocker"), "x");
+    const zomb7Home = join(root, "dev", "instances", "dev-zomb7");
+    try {
+      assert.throws(
+        () => spawnInstance(root, findAgent(root, "dev"), { instance: "dev-zomb7", relation: "parent", relativeTo: anchor.instance, branch: evilBranch, tmuxSession: "oas-test-fake", launch: false }),
+        /failed to re-point anchor/s,
+        "rollback runs with the hostile branch name");
+      assert.equal(existsSync(marker), false, "no command injection: metacharacter branch never executed");
+    } finally {
+      rmSync(tmpDir7, { recursive: true, force: true });
+      if (existsSync(join(zomb7Home, "work"))) {
+        try { execFileSync("git", ["-C", repo, "worktree", "remove", "--force", join(zomb7Home, "work")], { stdio: "ignore" }); } catch { /* best-effort */ }
+      }
+      rmSync(zomb7Home, { recursive: true, force: true });
+      try { execFileSync("git", ["-C", repo, "worktree", "prune"], { stdio: "ignore" }); } catch { /* best-effort */ }
+      try { execFileSync("git", ["-C", repo, "branch", "-D", evilBranch], { stdio: "ignore" }); } catch { /* best-effort */ }
+    }
+  } finally { process.env.PATH = oldPath; }
+});
+
+test("rollback detects a still-registered canonical worktree through a symlinked agents root", () => {
+  const base = temp(); const repo = join(base, "repo"); gitRepo(repo);
+  const realRoot = join(repo, "agents");
+  write(join(realRoot, "dev", "soul", "soul.yaml"), `name: dev\nkind: persistent\nrepo: ${repo}\nwork: checkout\nruntime: pi\n`);
+  write(join(realRoot, "dev", "soul", "AGENTS.md"), "# dev\n");
+  mkdirSync(join(realRoot, "dev", "instances"), { recursive: true });
+  // Compensation hook can remove one target's worktree directory BEFORE Git
+  // verification, reproducing the canonical-path-loss race from review.
+  const vanishHook = `import {rmSync} from 'node:fs'; if (process.env.OAS_EVENT === 'retire' && process.env.OAS_INSTANCE === 'dev-sym-missing') rmSync(process.env.OAS_HOME + '/work', {recursive:true, force:true});`;
+  capability(repo, "vanish", { capability: "acme.vanish", hooks: { retire: "hook.mjs" } }, { "hook.mjs": vanishHook });
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.vanish:\n      global: true\n");
+  const linkedRoot = join(base, "agents-link"); symlinkSync(realRoot, linkedRoot);
+
+  // Git wrapper delegates normally, but can force selected cleanup/probe operations to fail.
+  const bin = join(base, "bin"); mkdirSync(bin, { recursive: true });
+  const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+  write(join(bin, "git"), `#!/bin/sh\nif [ "$GIT_FAKE_VANISH_AFTER_ADD" = "1" ] && [ "$3" = "worktree" ] && [ "$4" = "add" ]; then ${realGit} "$@"; s=$?; if [ $s -eq 0 ]; then /bin/rm -rf "$5"; fi; exit $s; fi\nif [ "$GIT_FAKE_FAIL_REMOVE" = "1" ] && [ "$3" = "worktree" ] && [ "$4" = "remove" ]; then echo forced-remove-failure >&2; exit 7; fi\nif [ "$GIT_FAKE_FAIL_PRUNE" = "1" ] && [ "$3" = "worktree" ] && [ "$4" = "prune" ]; then echo forced-prune-failure >&2; exit 6; fi\nif [ "$GIT_FAKE_FAIL_LIST" = "1" ] && [ "$3" = "worktree" ] && [ "$4" = "list" ]; then echo forced-list-failure >&2; exit 8; fi\nif [ "$GIT_FAKE_FAIL_REVP" = "1" ] && [ "$3" = "rev-parse" ] && [ "$4" = "--verify" ]; then echo forced-rev-parse-failure >&2; exit 9; fi\nexec ${realGit} "$@"\n`);
+  for (const t of ["pi", "claude"]) write(join(bin, t), "#!/bin/sh\nexit 0\n");
+  execFileSync("chmod", ["-R", "+x", bin]);
+  const oldPath = process.env.PATH;
+  process.env.PATH = `${bin}:${oldPath}`;
+  let branch;
+  try {
+    const agentDef = findAgent(linkedRoot, "dev");
+
+    // Post-add canonicalization failure: wrapper removes the just-added tree
+    // before `realpathSync(wt)`, while remove+prune cleanup also fail. The
+    // error must retain the original canonicalization failure AND report the
+    // stranded Git state as rollback INCOMPLETE (never silently best-effort).
+    const earlyBranch = "agents/dev-early-canon";
+    process.env.GIT_FAKE_VANISH_AFTER_ADD = "1";
+    process.env.GIT_FAKE_FAIL_REMOVE = "1";
+    process.env.GIT_FAKE_FAIL_PRUNE = "1";
+    try {
+      assert.throws(
+        () => spawnInstance(linkedRoot, agentDef, { instance: "dev-early-canon", work: "worktree", branch: earlyBranch, launch: false }),
+        (err) => /git worktree add\/canonicalization failed/.test(err.message)
+          && /rollback INCOMPLETE/.test(err.message)
+          && /remove failed \(forced-remove-failure\)/.test(err.message)
+          && /prune failed \(forced-prune-failure\)/.test(err.message)
+          && /could not verify removal \(canonical path unavailable after add\)/.test(err.message),
+        "post-add canonicalization failure reports incomplete Git cleanup");
+      assert.equal(existsSync(join(linkedRoot, "dev", "instances", "dev-early-canon")), false, "failed spawn home removed");
+    } finally {
+      delete process.env.GIT_FAKE_VANISH_AFTER_ADD;
+      delete process.env.GIT_FAKE_FAIL_REMOVE;
+      delete process.env.GIT_FAKE_FAIL_PRUNE;
+      execFileSync(realGit, ["-C", repo, "worktree", "prune"]);
+      try { execFileSync(realGit, ["-C", repo, "branch", "-D", earlyBranch], { stdio: "ignore" }); } catch { /* cleanup */ }
+    }
+
+    const anchor = spawnInstance(linkedRoot, agentDef, { instance: "dev-sym-anchor", launch: false });
+    const anchorMetaPath = join(anchor.home, "instance.json");
+    const tmpBlock = `${anchorMetaPath}.tmp-dev-sym-child`;
+    mkdirSync(tmpBlock); write(join(tmpBlock, "blocker"), "x");
+    branch = "agents/dev-sym-child";
+    process.env.GIT_FAKE_FAIL_REMOVE = "1";
+    try {
+      assert.throws(
+        () => spawnInstance(linkedRoot, agentDef, { instance: "dev-sym-child", relation: "parent", relativeTo: anchor.instance, work: "worktree", branch, launch: false }),
+        (err) => /rollback INCOMPLETE/.test(err.message)
+          && /git worktree .*dev-sym-child\/work: still registered/.test(err.message)
+          && !err.message.includes(linkedRoot + "/dev/instances/dev-sym-child/work"),
+        "canonical registered path is detected and reported, not the lexical symlink path");
+    } finally {
+      delete process.env.GIT_FAKE_FAIL_REMOVE;
+      rmSync(tmpBlock, { recursive: true, force: true });
+    }
+    // Rollback removed the files but the forced Git failure left registration;
+    // prune after the path is gone clears metadata, then remove the branch.
+    execFileSync(realGit, ["-C", repo, "worktree", "prune"]);
+    try { execFileSync(realGit, ["-C", repo, "branch", "-D", branch], { stdio: "ignore" }); } catch { /* cleanup */ }
+
+    // Canonical path was captured immediately after add. The compensation hook
+    // now REMOVES the directory before rollback; remove and prune are forced to
+    // fail, while list succeeds and still returns Git's canonical registration.
+    // Re-realpath-at-rollback would fail/fall back lexical and miss this record.
+    const missingAnchor = spawnInstance(linkedRoot, agentDef, { instance: "dev-missing-anchor", launch: false });
+    const tmpMissing = `${join(missingAnchor.home, "instance.json")}.tmp-dev-sym-missing`;
+    mkdirSync(tmpMissing); write(join(tmpMissing, "blocker"), "x");
+    const missingBranch = "agents/dev-sym-missing";
+    process.env.GIT_FAKE_FAIL_REMOVE = "1";
+    process.env.GIT_FAKE_FAIL_PRUNE = "1";
+    try {
+      assert.throws(
+        () => spawnInstance(linkedRoot, agentDef, { instance: "dev-sym-missing", relation: "parent", relativeTo: missingAnchor.instance, work: "worktree", branch: missingBranch, launch: false }),
+        (err) => /rollback INCOMPLETE/.test(err.message)
+          && /git worktree .*dev-sym-missing\/work: still registered/.test(err.message)
+          && !err.message.includes(linkedRoot + "/dev/instances/dev-sym-missing/work"),
+        "captured canonical path detects stale registration after the directory vanished");
+    } finally {
+      delete process.env.GIT_FAKE_FAIL_REMOVE;
+      delete process.env.GIT_FAKE_FAIL_PRUNE;
+      rmSync(tmpMissing, { recursive: true, force: true });
+      execFileSync(realGit, ["-C", repo, "worktree", "prune"]);
+      try { execFileSync(realGit, ["-C", repo, "branch", "-D", missingBranch], { stdio: "ignore" }); } catch { /* cleanup */ }
+    }
+
+    // Probe failure is distinct from confirmed absence: let removal/deletion
+    // succeed, but force BOTH verification commands to fail. Rollback must
+    // report could-not-verify for each instead of treating failed probes as
+    // proof that worktree/ref are gone.
+    const anchor2 = spawnInstance(linkedRoot, agentDef, { instance: "dev-probe-anchor", launch: false });
+    const tmpBlock2 = `${join(anchor2.home, "instance.json")}.tmp-dev-sym-probe`;
+    mkdirSync(tmpBlock2); write(join(tmpBlock2, "blocker"), "x");
+    const probeBranch = "agents/dev-sym-probe";
+    process.env.GIT_FAKE_FAIL_LIST = "1";
+    process.env.GIT_FAKE_FAIL_REVP = "1";
+    try {
+      assert.throws(
+        () => spawnInstance(linkedRoot, agentDef, { instance: "dev-sym-probe", relation: "parent", relativeTo: anchor2.instance, work: "worktree", branch: probeBranch, launch: false }),
+        (err) => /rollback INCOMPLETE/.test(err.message)
+          && /git worktree .*could not verify removal \(forced-list-failure\)/s.test(err.message)
+          && /git branch agents\/dev-sym-probe: could not verify deletion \(forced-rev-parse-failure\)/s.test(err.message),
+        "failed Git probes report could-not-verify, never confirmed absence");
+    } finally {
+      delete process.env.GIT_FAKE_FAIL_LIST;
+      delete process.env.GIT_FAKE_FAIL_REVP;
+      rmSync(tmpBlock2, { recursive: true, force: true });
+      execFileSync(realGit, ["-C", repo, "worktree", "prune"]);
+      try { execFileSync(realGit, ["-C", repo, "branch", "-D", probeBranch], { stdio: "ignore" }); } catch { /* cleanup */ }
+    }
+  } finally {
+    delete process.env.GIT_FAKE_VANISH_AFTER_ADD;
+    delete process.env.GIT_FAKE_FAIL_REMOVE;
+    delete process.env.GIT_FAKE_FAIL_PRUNE;
+    delete process.env.GIT_FAKE_FAIL_LIST;
+    delete process.env.GIT_FAKE_FAIL_REVP;
+    process.env.PATH = oldPath;
+    try { execFileSync(realGit, ["-C", repo, "worktree", "prune"], { stdio: "ignore" }); } catch { /* cleanup */ }
+    if (branch) try { execFileSync(realGit, ["-C", repo, "branch", "-D", branch], { stdio: "ignore" }); } catch { /* cleanup */ }
+  }
 });
 
 test("retire splice crosses member repos inside a team deployment", () => {
