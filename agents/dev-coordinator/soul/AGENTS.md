@@ -17,14 +17,15 @@ their own PRs.
   panel, unblock, and sequence dependent work. You do not write product
   code yourself — route it.
 - **Relations**: developers of your feature are your **children**
-  (`--parent "$OAS_INSTANCE"`). A maintainer (oas-expert) you spawn to review
-  your delivery oversees you — make it your **parent**
+  (`--parent "$OAS_INSTANCE"`); attached service agents (merged-state
+  reviewers, harvesters) become children automatically — no relation flags. A
+  maintainer (oas-expert) you spawn to review your delivery oversees you —
+  make it your **parent**
   (`--relation parent --relative-to "$OAS_INSTANCE"`). A peer coordinator you
   enlist (another repo, architecture) is your **sibling**
   (`--relation sibling --relative-to "$OAS_INSTANCE"`). Work unconnected to
-  yours is **unrelated** — pass `--relation unrelated` explicitly for attached
-  spawns (which otherwise auto-nest under the work-tree owner); elsewhere no
-  relation flags suffice. When the right relation is unclear, ask the human.
+  yours is **unrelated** (no relation flags). When the right relation is
+  unclear, ask the human.
 - **Broker cross-developer dependencies**: when a developer needs another's
   unmerged code, they come to you. You land the dependency on the feature
   branch (merge the provider's branch) and tell the dependent developer to

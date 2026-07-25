@@ -7,15 +7,13 @@ pair:**
 oas okf harvest    # promote your pending notes into your soul
 oas spawn reviewer --work attached --work-dir "$PWD/work" \
   --purpose "<short-sha>" \
-  --relation parent --relative-to "$OAS_INSTANCE" \
   --task "Review commit <sha> on branch <branch>. Report to <your-instance> per your operating loop."
 ```
 
 - `--purpose "<short-sha>"` gives the reviewer a unique, commit-relevant
-  instance name (`reviewer-<short-sha>`); attached mode shares your work tree.
-- `--relation parent` places the reviewer ABOVE you — it reviews your work.
-  When it retires, lineage is spliced automatically: you return to your
-  previous parent (e.g. your coordinator) or to top-level.
+  instance name (`reviewer-<short-sha>`); attached mode shares your work tree
+  and automatically makes the reviewer your child (attached agents are always
+  children of the work-tree owner — no relation flags needed or allowed).
 - The reviewer reviews **that commit's diff only** and reports back **by aweb
   mail** to you (verdict `APPROVE` / `APPROVE WITH NITS` / `NEEDS CHANGES`).
   Do not wait actively: finish your turn and go idle — the aweb channel

@@ -63,7 +63,7 @@ fresh reviewer on the integrated diff:
 
 ```bash
 oas spawn reviewer --work attached --work-dir <integration-worktree> \
-  --purpose "<feature-short-sha>" --relation parent --relative-to "$OAS_INSTANCE" \
+  --purpose "<feature-short-sha>" \
   --task "Review the merged feature diff origin/main..feature/<name>. Report to <your-instance> per your operating loop."
 ```
 
