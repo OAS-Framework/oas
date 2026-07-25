@@ -399,3 +399,19 @@ test("collapse state keys by identity: collapsing one duplicate never hides the 
   assert.equal(vis(roster[3]), true, "ws2 kid STAYS VISIBLE — the other root's same-named parent is not collapsed");
   assert.equal(vis(roster[2]), true, "the ws2 parent itself stays visible");
 });
+
+test("distinguishingRootTags: colliding single-segment tags grow to a unique suffix (review cbd5bb3)", async () => {
+  const { distinguishingRootTags } = await import("../renderer/instance-tree.mjs");
+  // the naive one-segment tag would be "project" for BOTH
+  const tags = distinguishingRootTags(["/a/project/agents", "/b/project/agents"]);
+  assert.notEqual(tags.get("/a/project/agents"), tags.get("/b/project/agents"),
+    "duplicate option labels actually differ");
+  assert.match(tags.get("/a/project/agents"), /a\/project/, "suffix grows until distinguishing");
+  // non-colliding roots keep the short tag
+  const short = distinguishingRootTags(["/x/alpha/agents", "/y/beta/agents"]);
+  assert.equal(short.get("/x/alpha/agents"), "alpha");
+  assert.equal(short.get("/y/beta/agents"), "beta");
+  // identical roots (same instance listed once per name) fall back to the full root
+  const same = distinguishingRootTags(["/only/one/agents"]);
+  assert.equal(same.get("/only/one/agents"), "one");
+});

@@ -11,10 +11,11 @@ import {
   setWorkspace, onWorkspaceChange, renderWorkspaceSelect, wsQuery, workspaceGeneration,
 } from "./common.mjs";
 import { cliAvailable, cliKnownUnavailable, cliStatus, refreshCli, onCliChange, cliCard, cliRelationsAvailable } from "./cli-status.mjs";
+import { distinguishingRootTags } from "../instance-tree.mjs";
 
 /** Required-version label for the disabled relation note — from the probe
  * payload when the backend provides it, else the pinned desktop default. */
-function relationsMinLabel() { return cliStatus()?.relationsMin || "0.18.3"; }
+function relationsMinLabel() { return cliStatus()?.relationsMin || "0.18.5"; }
 
 /** True while the CLI probe has never SETTLED (no response classified yet).
  * Pending is card-less by design, so disabled buttons must explain
@@ -305,19 +306,31 @@ function openSpawnModal(s, a) {
   modal.className = "spawn-modal";
   const titleId = "spawn-dialog-title";
   // Picker options carry BOTH halves of the anchor identity: the visible
-  // value is the instance name (what the user reads), data-root is the
+  // value is the instance name (what the user reads), dataset.root is the
   // agents root it homes in — always sent as --relative-root so cross-root
   // name shadowing can never make the spawn ambiguous (kernel contract:
-  // E_RELATIVE_AMBIGUOUS). Duplicate names get a distinguishing root label.
+  // E_RELATIVE_AMBIGUOUS). Duplicate names get a SHORTEST-UNIQUE root tag
+  // (naive one-segment tags collide: /a/project/agents vs /b/project/agents;
+  // review cbd5bb3). Options are built with createElement/textContent/
+  // dataset — roots are workspace paths and must never travel through
+  // innerHTML attribute interpolation (injection surface; review cbd5bb3).
   const nameCounts = new Map();
   for (const i of s.panelInstances || []) nameCounts.set(i.instance, (nameCounts.get(i.instance) || 0) + 1);
-  const refOptions = (s.panelInstances || [])
-    .map((i) => {
+  const dupRoots = (s.panelInstances || [])
+    .filter((i) => (nameCounts.get(i.instance) || 0) > 1)
+    .map((i) => i.agentsRoot);
+  const rootTags = distinguishingRootTags(dupRoots);
+  const buildRefOptions = (select) => {
+    for (const i of s.panelInstances || []) {
+      const opt = doc.createElement("option");
+      opt.value = i.instance;
+      opt.dataset.root = i.agentsRoot || "";
       const dup = (nameCounts.get(i.instance) || 0) > 1 && i.agentsRoot;
-      const rootTag = dup ? ` [${String(i.agentsRoot).split("/").filter(Boolean).slice(-2, -1)[0] || i.agentsRoot}]` : "";
-      return `<option value="${escapeHtml(i.instance)}" data-root="${escapeHtml(i.agentsRoot || "")}">${escapeHtml(i.instance)}${rootTag}${i.running ? "" : " (idle)"}</option>`;
-    })
-    .join("");
+      const tag = dup ? ` [${rootTags.get(String(i.agentsRoot)) || i.agentsRoot}]` : "";
+      opt.textContent = `${i.instance}${tag}${i.running ? "" : " (idle)"}`;
+      select.append(opt);
+    }
+  };
   // ALL options are ALWAYS VISIBLE (human requirement): purpose, task,
   // relation + reference instance, runtime and model overrides. The CLI
   // capability gate never HIDES the relation controls — on a pre-relations
@@ -357,7 +370,6 @@ function openSpawnModal(s, a) {
             </select>
             <select class="field frelto" disabled aria-label="Which instance">
               <option value="">— which instance? —</option>
-              ${refOptions}
             </select>
           </div>
           <div class="freldesc" aria-live="polite"></div>
@@ -379,6 +391,7 @@ function openSpawnModal(s, a) {
       </div>
     </section>`;
   const dialog = modal.querySelector(".spawn-dialog");
+  buildRefOptions(modal.querySelector(".frelto")); // safe DOM construction (never innerHTML)
   const f = modal; // field lookups span the whole modal
 
   // One source of truth for the relation controls' render state, applied at
@@ -584,14 +597,16 @@ export async function doSpawn(s, ui) {
   } catch (e) {
     if (owns()) {
       ui.status.classList?.add("err");
-      // Ambiguous relation identity (kernel E_RELATIVE_AMBIGUOUS). NOT always
-      // the picked anchor: sibling/parent relations copy bare-name edges from
-      // the anchor's instance.json, and an INHERITED edge can be the
-      // ambiguous one (contract case d). The kernel message names the
-      // conflicting instance and homes — surface it verbatim, and add the
-      // picker guidance only as a hint for the direct-anchor case.
+      // Ambiguous relation identity (kernel E_RELATIVE_AMBIGUOUS). The
+      // picker ALWAYS sends the anchor's root, so this rarely means "pick
+      // better": the kernel also fires it when an already-qualified target
+      // cannot round-trip under shadowing, when a parent relation's
+      // generated name is shadowed, and on INHERITED bare-name edges copied
+      // from the anchor (case d) — names this form never sent. The kernel
+      // message names the conflicting instance and homes: surface it
+      // verbatim with the general remedy (reviews cbd5bb3 + f1e3211).
       ui.status.textContent = e.code === "E_RELATIVE_AMBIGUOUS"
-        ? `Spawn failed: ${e.message} — if the ambiguous name is the anchor you picked, choose the entry showing its workspace tag.`
+        ? `Spawn failed: ${e.message} — instance names collide across agent roots; rename or retire the shadowing instance (or pick a different purpose) and retry.`
         : `Spawn failed: ${e.message || e}`;
     }
   } finally {

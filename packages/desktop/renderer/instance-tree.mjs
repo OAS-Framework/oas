@@ -164,6 +164,33 @@ export function terminalKey(workspace, ref) {
   return `term:${workspace}:${id}`;
 }
 
+/** Shortest DISTINGUISHING path suffixes for a set of agents roots.
+ * Duplicate instance names are told apart by where they home, but naive
+ * single-segment tags collide (/a/project/agents and /b/project/agents both
+ * render "project"). Grow each root's suffix segment-by-segment until it is
+ * unique within the set; fall back to the full root. Returns Map<root, tag>.
+ * (Review cbd5bb3: duplicate option labels must actually differ.) */
+export function distinguishingRootTags(roots) {
+  const uniq = [...new Set(roots.filter(Boolean).map(String))];
+  const segs = new Map(uniq.map((r) => [r, r.split("/").filter(Boolean)]));
+  const tags = new Map();
+  for (const root of uniq) {
+    const mine = segs.get(root);
+    // skip the trailing "agents"-style leaf shared by every root: start the
+    // suffix ABOVE the leaf, then extend upward until unique
+    let take = 2; // leaf + one parent
+    let tag;
+    for (; take <= mine.length; take++) {
+      tag = mine.slice(-take, -1).join("/");
+      const clash = uniq.some((other) => other !== root
+        && segs.get(other).slice(-take, -1).join("/") === tag);
+      if (!clash) break;
+    }
+    tags.set(root, take > mine.length || !tag ? root : tag);
+  }
+  return tags;
+}
+
 export function hasInstanceChildren(instances, instance) {
   return instances.some((candidate) => candidate.parentInstance === instance);
 }
