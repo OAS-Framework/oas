@@ -15,7 +15,7 @@ import { distinguishingRootTags } from "../instance-tree.mjs";
 
 /** Required-version label for the disabled relation note — from the probe
  * payload when the backend provides it, else the pinned desktop default. */
-function relationsMinLabel() { return cliStatus()?.relationsMin || "0.18.5"; }
+function relationsMinLabel() { return cliStatus()?.relationsMin || "0.18.6"; }
 
 /** True while the CLI probe has never SETTLED (no response classified yet).
  * Pending is card-less by design, so disabled buttons must explain

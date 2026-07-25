@@ -34,9 +34,10 @@ export const PROBE_NAME = "@oas-framework/oas";
 // released CLI carries relations without the qualifier (0.18.x releases to
 // date predate both, and they merge together), so one floor covers the
 // whole related-spawn surface; if the kernel ever ships them separately
-// this must split into two probed capabilities. Release number confirmed
-// at PR time (maintainer's call — one-constant change).
-export const RELATIONS_MIN = [0, 18, 5];
+// this must split into two probed capabilities. 0.18.5 released WITHOUT
+// the feature, so the floor is the NEXT release — the first one containing
+// feature/agent-relations. Confirmed at PR time (one-constant change).
+export const RELATIONS_MIN = [0, 18, 6];
 
 /** Whether an ACCEPTED v1 CLI version also supports spawn-time relations. */
 export function supportsRelations(version) {

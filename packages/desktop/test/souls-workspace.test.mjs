@@ -450,7 +450,7 @@ test("Spawn modal: pre-relations CLI gates the RELATED options + picker disabled
   const cliStatusMod2 = await import("../renderer/views/cli-status.mjs");
   // verified CLI, but PROVEN relations-incapable (relations:false from the probe)
   const CLI_OLD = { ok: true, bin: "/seed/oas", version: "0.18.0", source: "path",
-    required: { desktopApi: 1, range: ">=0.18.0 <0.19.0" }, relations: false, relationsMin: "0.18.5", probedAt: 1, tried: [] };
+    required: { desktopApi: 1, range: ">=0.18.0 <0.19.0" }, relations: false, relationsMin: "0.18.6", probedAt: 1, tried: [] };
   await cliStatusMod2.refreshCli({ api: async () => ({ ok: true, status: 200, json: async () => CLI_OLD }) });
   const previousWs = common.currentWorkspace();
   const agent = { name: "dev", agentsRoot: "/a", description: "", runtime: "pi", work: "workspace", repo: true, repoName: "r" };
@@ -478,7 +478,7 @@ test("Spawn modal: pre-relations CLI gates the RELATED options + picker disabled
     assert.ok(doc.querySelector(".spawn-dialog .frelto"), "reference picker still rendered");
     const note = doc.querySelector(".spawn-dialog .frelnote");
     assert.ok(note, "explanatory note present");
-    assert.match(note.textContent, /oas >= 0\.18\.5/, "note names the required version");
+    assert.match(note.textContent, /oas >= 0\.18\.6/, "note names the required version");
   } finally {
     spawn.unmount();
     await seedCliAvailable(); // restore shared CLI state for later suites
@@ -565,8 +565,8 @@ test("Spawn modal tracks CLI capability LIVE: relations flip disables/enables co
   const common = await import("../renderer/views/common.mjs");
   const spawn = await import("../renderer/views/spawn.mjs");
   const cliMod = await import("../renderer/views/cli-status.mjs");
-  const status = (relations) => ({ ok: true, bin: "/seed/oas", version: relations ? "0.18.5" : "0.18.0",
-    source: "path", required: { desktopApi: 1, range: ">=0.18.0 <0.19.0" }, relations, relationsMin: "0.18.5", probedAt: 1, tried: [] });
+  const status = (relations) => ({ ok: true, bin: "/seed/oas", version: relations ? "0.18.6" : "0.18.0",
+    source: "path", required: { desktopApi: 1, range: ">=0.18.0 <0.19.0" }, relations, relationsMin: "0.18.6", probedAt: 1, tried: [] });
   const seed = (relations) => cliMod.refreshCli({ api: async () => ({ ok: true, status: 200, json: async () => status(relations) }) });
   await seed(true);
   const previousWs = common.currentWorkspace();
@@ -609,7 +609,7 @@ test("Spawn modal tracks CLI capability LIVE: relations flip disables/enables co
     assert.equal(ref.disabled, true, "downgrade disables the reference picker");
     const note = doc.querySelector(".frelnote");
     assert.equal(note.hidden, false, "version note appears live");
-    assert.match(note.textContent, /oas >= 0\.18\.5/, "note names the required version");
+    assert.match(note.textContent, /oas >= 0\.18\.6/, "note names the required version");
     assert.equal(doc.querySelector(".ftask").value, "typed task text", "typed fields survive the resync");
     assert.equal(rel.value, "child", "chosen relation value preserved (visible, disabled)");
     // the completed phrase must NOT keep promising the spawn that submit
