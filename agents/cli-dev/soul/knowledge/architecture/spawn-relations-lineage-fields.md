@@ -89,6 +89,21 @@ before lifecycle hooks if it is missing or unreadable. Re-read in the kernel eve
 when the CLI already checked, because anchor state can change between the CLI
 check and the kernel read.
 
+Anchor resolution uses the same ambiguity posture as other bare-name lineage
+edges: enumerate all candidates, require an explicit `--relative-root`/
+`o.relativeRoot` qualifier when multiple homes match, and still verify the
+stored bare name round-trips from the edge consumer's root. Enumeration must
+surface intra-root duplicate names too, because no root qualifier can split two
+same-named homes under one agents root. Parent relations must also check the
+reverse edge they write on the anchor before scaffolding.
+
+Sibling and parent relations that copy an anchor's existing `parentInstance` or
+`siblingInstance` onto the new instance must validate each copied name from both
+the anchor's root and the new instance's root. Store it only when both roots
+resolve it to the same canonical home, or when it is dangling from both roots;
+reject if the name resolves differently across those contexts. See the
+[lineage ambiguity lesson](/lessons/lineage-edge-ambiguity-posture.md).
+
 This extends the explicit-lineage rule in
 [spawn-lineage-explicit-only](/decisions/spawn-lineage-explicit-only.md): the
 caller chooses the relation, but the recorded metadata stays sparse and local to
