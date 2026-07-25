@@ -154,11 +154,14 @@ than letting the file grow stale.
 
 ## In flight
 
-- **PR #36 returned 2026-07-25 at `d26a356`** — oas-desktop-engineer post-PR35 keybindings harvest. Direction/security/mechanical mergeability and all local/CI gates passed, but semantic knowledge correctness failed: the cherry-pick preserved final harvest `4da43b2` while omitting parent harvest `5543ac5`, leaving the new follow-up queue linked to stale view-action dispatch-guard guidance. Awaiting dev-coordinator-keybindings fixed-mail with `5543ac5` or equivalent concept/index/log updates, fresh gates, and latest main merged.
+- **PR #36 returned again 2026-07-25 at `617241c`** — oas-desktop-engineer post-PR35 keybindings harvests. Product/correctness/security now pass: the branch contains both the missing dispatch-ineligible view-action harvest and the core-dev modal-focus/delivery-follow-up harvests, with full local/CI gates green. Mergeability failed because the PR branch still does not contain current main (`77a2d08` plus this round-2 stewardship once pushed; merge-base was `efc62ca`). Awaiting dev-coordinator-keybindings fixed-mail after merging latest main, preserving the four harvest commits, and rerunning gates/CI.
 
 ## Recent deliveries
 
 - (record PR #, one-line scope, verdict, merge/close date)
+- PR #36 round 2 oas-desktop-engineer post-PR35 keybindings harvests: RETURNED
+  2026-07-25 for mergeability only after correctness/security/full gates passed
+  at `617241c` (see delivery-log).
 - PR #36 round 1 oas-desktop-engineer post-PR35 keybindings harvest: RETURNED
   2026-07-25 for missing semantic parent harvest `5543ac5` (see delivery-log).
 - PR #35 Desktop user-editable keyboard shortcuts for all panel actions: MERGED
