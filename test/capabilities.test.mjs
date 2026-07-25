@@ -1455,6 +1455,81 @@ test("parent-relation rollback after LAUNCH kills the window, compensates hooks,
   } finally { process.env.PATH = oldPath; }
 });
 
+test("rollback detects a still-registered canonical worktree through a symlinked agents root", () => {
+  const base = temp(); const repo = join(base, "repo"); gitRepo(repo);
+  const realRoot = join(repo, "agents");
+  write(join(realRoot, "dev", "soul", "soul.yaml"), `name: dev\nkind: persistent\nrepo: ${repo}\nwork: checkout\nruntime: pi\n`);
+  write(join(realRoot, "dev", "soul", "AGENTS.md"), "# dev\n");
+  mkdirSync(join(realRoot, "dev", "instances"), { recursive: true });
+  const linkedRoot = join(base, "agents-link"); symlinkSync(realRoot, linkedRoot);
+
+  // Git wrapper delegates normally, but can force ONLY worktree-remove to fail.
+  const bin = join(base, "bin"); mkdirSync(bin, { recursive: true });
+  const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+  write(join(bin, "git"), `#!/bin/sh\nif [ "$GIT_FAKE_FAIL_REMOVE" = "1" ] && [ "$3" = "worktree" ] && [ "$4" = "remove" ]; then echo forced-remove-failure >&2; exit 7; fi\nif [ "$GIT_FAKE_FAIL_LIST" = "1" ] && [ "$3" = "worktree" ] && [ "$4" = "list" ]; then echo forced-list-failure >&2; exit 8; fi\nif [ "$GIT_FAKE_FAIL_REVP" = "1" ] && [ "$3" = "rev-parse" ] && [ "$4" = "--verify" ]; then echo forced-rev-parse-failure >&2; exit 9; fi\nexec ${realGit} "$@"\n`);
+  for (const t of ["pi", "claude"]) write(join(bin, t), "#!/bin/sh\nexit 0\n");
+  execFileSync("chmod", ["-R", "+x", bin]);
+  const oldPath = process.env.PATH;
+  process.env.PATH = `${bin}:${oldPath}`;
+  let branch;
+  try {
+    const agentDef = findAgent(linkedRoot, "dev");
+    const anchor = spawnInstance(linkedRoot, agentDef, { instance: "dev-sym-anchor", launch: false });
+    const anchorMetaPath = join(anchor.home, "instance.json");
+    const tmpBlock = `${anchorMetaPath}.tmp-dev-sym-child`;
+    mkdirSync(tmpBlock); write(join(tmpBlock, "blocker"), "x");
+    branch = "agents/dev-sym-child";
+    process.env.GIT_FAKE_FAIL_REMOVE = "1";
+    try {
+      assert.throws(
+        () => spawnInstance(linkedRoot, agentDef, { instance: "dev-sym-child", relation: "parent", relativeTo: anchor.instance, work: "worktree", branch, launch: false }),
+        (err) => /rollback INCOMPLETE/.test(err.message)
+          && /git worktree .*dev-sym-child\/work: still registered/.test(err.message)
+          && !err.message.includes(linkedRoot + "/dev/instances/dev-sym-child/work"),
+        "canonical registered path is detected and reported, not the lexical symlink path");
+    } finally {
+      delete process.env.GIT_FAKE_FAIL_REMOVE;
+      rmSync(tmpBlock, { recursive: true, force: true });
+    }
+    // Rollback removed the files but the forced Git failure left registration;
+    // prune after the path is gone clears metadata, then remove the branch.
+    execFileSync(realGit, ["-C", repo, "worktree", "prune"]);
+    try { execFileSync(realGit, ["-C", repo, "branch", "-D", branch], { stdio: "ignore" }); } catch { /* cleanup */ }
+
+    // Probe failure is distinct from confirmed absence: let removal/deletion
+    // succeed, but force BOTH verification commands to fail. Rollback must
+    // report could-not-verify for each instead of treating failed probes as
+    // proof that worktree/ref are gone.
+    const anchor2 = spawnInstance(linkedRoot, agentDef, { instance: "dev-probe-anchor", launch: false });
+    const tmpBlock2 = `${join(anchor2.home, "instance.json")}.tmp-dev-sym-probe`;
+    mkdirSync(tmpBlock2); write(join(tmpBlock2, "blocker"), "x");
+    const probeBranch = "agents/dev-sym-probe";
+    process.env.GIT_FAKE_FAIL_LIST = "1";
+    process.env.GIT_FAKE_FAIL_REVP = "1";
+    try {
+      assert.throws(
+        () => spawnInstance(linkedRoot, agentDef, { instance: "dev-sym-probe", relation: "parent", relativeTo: anchor2.instance, work: "worktree", branch: probeBranch, launch: false }),
+        (err) => /rollback INCOMPLETE/.test(err.message)
+          && /git worktree .*could not verify removal \(forced-list-failure\)/s.test(err.message)
+          && /git branch agents\/dev-sym-probe: could not verify deletion \(forced-rev-parse-failure\)/s.test(err.message),
+        "failed Git probes report could-not-verify, never confirmed absence");
+    } finally {
+      delete process.env.GIT_FAKE_FAIL_LIST;
+      delete process.env.GIT_FAKE_FAIL_REVP;
+      rmSync(tmpBlock2, { recursive: true, force: true });
+      execFileSync(realGit, ["-C", repo, "worktree", "prune"]);
+      try { execFileSync(realGit, ["-C", repo, "branch", "-D", probeBranch], { stdio: "ignore" }); } catch { /* cleanup */ }
+    }
+  } finally {
+    delete process.env.GIT_FAKE_FAIL_REMOVE;
+    delete process.env.GIT_FAKE_FAIL_LIST;
+    delete process.env.GIT_FAKE_FAIL_REVP;
+    process.env.PATH = oldPath;
+    try { execFileSync(realGit, ["-C", repo, "worktree", "prune"], { stdio: "ignore" }); } catch { /* cleanup */ }
+    if (branch) try { execFileSync(realGit, ["-C", repo, "branch", "-D", branch], { stdio: "ignore" }); } catch { /* cleanup */ }
+  }
+});
+
 test("retire splice crosses member repos inside a team deployment", () => {
   const base = temp();
   const ws = join(base, "ws"); mkdirSync(ws, { recursive: true });
