@@ -172,6 +172,22 @@ function agentsData(wsId) {
  * Default is NO TASK: the instance comes up awaiting instruction.
  * Validation errors THROW (→ 409); domain/CLI results RESOLVE with the
  * envelope so stable error codes reach the UI. */
+/* OASWEB_SPAWNERR_BEGIN — /api/spawn error shaping. Extracted by
+   packages/desktop/test/panel-projection.test.mjs via block markers.
+   Stable code for the degradation UI: cli-unavailable means "install or
+   choose a compatible oas CLI", not "bad request". The 300-char cap guards
+   against unbounded upstream text, but E_RELATIVE_AMBIGUOUS messages
+   legitimately carry two absolute instance homes (case-d inherited edges)
+   and the renderer surfaces them VERBATIM — a blanket cap would eat the
+   actionable tail (review f1e3211). Kernel envelope errors are bounded by
+   the CLI JSON contract; this code gets a larger, still-bounded cap. */
+function spawnErrorPayload(e) {
+  const status = e.code === "cli-unavailable" ? 503 : 409;
+  const cap = e.code === "E_RELATIVE_AMBIGUOUS" ? 2000 : 300;
+  return { status, body: { error: String(e.message || e).slice(0, cap), ...(e.code ? { code: e.code } : {}) } };
+}
+/* OASWEB_SPAWNERR_END */
+
 async function spawnAgent({ agent, agentsRoot, task, purpose, relation, relativeTo, relativeRoot, runtime, model }) {
   const name = String(agent || "");
   const root = resolve(String(agentsRoot || ""));
@@ -805,12 +821,7 @@ const server = createServer(async (req, res) => {
       if (typeof body.agent !== "string" || !body.agent || typeof body.agentsRoot !== "string" || !body.agentsRoot)
         return send(res, 400, { error: "body needs { agent, agentsRoot }" });
       try { return send(res, 200, { spawned: true, ...(await spawnAgent(body)) }); }
-      catch (e) {
-        // Stable code for the degradation UI: cli-unavailable means "install
-        // or choose a compatible oas CLI", not "bad request".
-        const status = e.code === "cli-unavailable" ? 503 : 409;
-        return send(res, status, { error: String(e.message || e).slice(0, 300), ...(e.code ? { code: e.code } : {}) });
-      }
+      catch (e) { const { status, body: b } = spawnErrorPayload(e); return send(res, status, b); }
     }
     const hm = path.match(/^\/api\/harvest\/([A-Za-z0-9._-]+)$/);
     if (hm && req.method === "POST") {

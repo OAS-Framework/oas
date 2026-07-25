@@ -806,12 +806,21 @@ test("Spawn modal: picker sends the anchor's agents root; E_RELATIVE_AMBIGUOUS s
     rel2.value = "child";
     rel2.dispatchEvent(new dom.window.Event("change"));
     form.querySelector(".frelto").value = "dev-1";
-    failNext = { error: "relation \"child\": instance name \"dev-1\" is ambiguous", code: "E_RELATIVE_AMBIGUOUS" };
+    // realistic case-(d) payload: INHERITED edge whose ambiguous name is NOT
+    // the picked anchor, two absolute homes, >300 chars — the endpoint
+    // preserves E_RELATIVE_AMBIGUOUS messages past the generic cap (review
+    // f1e3211) and the renderer must surface the tail verbatim
+    const caseD = `relation "child": inherited lineage edge "other-coord" is ambiguous — it matches `
+      + `/Users/u/very/long/workspace/path/agents/other-coord/instances/other-coord and `
+      + `/Users/u/second/equally/long/team/checkout/local-agents/other-coord/instances/other-coord; `
+      + `qualify with --relative-root or rename one instance`;
+    assert.ok(caseD.length > 300, "fixture exercises the truncation boundary");
+    failNext = { error: caseD, code: "E_RELATIVE_AMBIGUOUS" };
     form.querySelector(".fspawn").click();
     await tick(); await tick(); await tick();
     const status = form.querySelector(".fstatus").textContent;
-    assert.match(status, /instance name "dev-1" is ambiguous/,
-      "kernel message surfaces VERBATIM — case (d) inherited-edge ambiguity may name an instance the picker never sent");
+    assert.ok(status.includes(caseD),
+      "the COMPLETE kernel message surfaces — both homes and the remedy tail, ambiguous name ≠ picked anchor");
     assert.match(status, /rename or retire the shadowing instance/,
       "general remedy — never advises re-picking, which the always-sent root makes futile");
   } finally {
