@@ -152,7 +152,7 @@ test("layoutClusters: multi-member clusters get cards; singletons collect in one
   const { placed, soloBlock, width, height } = hier.layoutClusters([
     { instance: "root", running: true },
     { instance: "kid", parentInstance: "root", running: true },
-    { instance: "peer", running: true, siblingInstances: ["root"] },
+    { instance: "peer", running: true, siblingInstance: "root" },
     { instance: "solo-1", running: false },
     { instance: "solo-2", running: true },
   ]);

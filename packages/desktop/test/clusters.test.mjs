@@ -23,7 +23,7 @@ test("computeClusters: sibling links merge otherwise-separate trees", () => {
   const cs = computeClusters([
     { instance: "a", running: true },
     { instance: "a-kid", parentInstance: "a", running: true },
-    { instance: "b", running: true, siblingInstances: ["a"] },
+    { instance: "b", running: true, siblingInstance: "a" },
     { instance: "c", running: false },
   ]);
   assert.equal(cs.length, 2);
@@ -33,16 +33,18 @@ test("computeClusters: sibling links merge otherwise-separate trees", () => {
 
 test("computeClusters: malformed data never breaks — self links, unknown names, cycles", () => {
   const cs = computeClusters([
-    { instance: "x", parentInstance: "x", siblingInstances: ["x", "ghost"] },
+    { instance: "x", parentInstance: "x", siblingInstance: "x" },
+    { instance: "ghosted", siblingInstance: "ghost" },
     { instance: "loop-1", parentInstance: "loop-2" },
     { instance: "loop-2", parentInstance: "loop-1" },
     null,
     { notAnInstance: true },
   ]);
-  assert.equal(cs.length, 2);
+  assert.equal(cs.length, 3);
   const loop = cs.find((c) => c.size === 2);
   assert.ok(loop, "cycle members stay one cluster");
-  assert.equal(cs.find((c) => c.size === 1).name, "x");
+  assert.deepEqual(cs.filter((c) => c.size === 1).map((c) => c.name).sort(), ["ghosted", "x"],
+    "self links and unknown sibling names leave instances as singletons");
 });
 
 test("computeClusters: deterministic order — multi first, running-heavy first, then name", () => {
@@ -58,17 +60,19 @@ test("computeClusters: deterministic order — multi first, running-heavy first,
   assert.deepEqual(names2, names);
 });
 
-test("siblingLinksOf: adapter tolerates array, string, and absent shapes", () => {
-  assert.deepEqual(siblingLinksOf({ instance: "a", siblingInstances: ["b", "a", "", 7] }), ["b"]);
-  assert.deepEqual(siblingLinksOf({ instance: "a", siblings: "b" }), ["b"]);
+test("siblingLinksOf: kernel contract — siblingInstance string; self/absent/non-string dropped", () => {
+  assert.deepEqual(siblingLinksOf({ instance: "a", siblingInstance: "b" }), ["b"]);
+  assert.deepEqual(siblingLinksOf({ instance: "a", siblingInstance: "a" }), []);
+  assert.deepEqual(siblingLinksOf({ instance: "a", siblingInstance: 7 }), []);
   assert.deepEqual(siblingLinksOf({ instance: "a" }), []);
 });
 
 test("siblingEdges: unordered dedupe, out-of-cluster names dropped", () => {
   const cluster = {
     instances: [
-      { instance: "a", siblingInstances: ["b", "ghost"] },
-      { instance: "b", siblingInstances: ["a"] },
+      { instance: "a", siblingInstance: "b" },
+      { instance: "b", siblingInstance: "a" },
+      { instance: "d", siblingInstance: "ghost" },
       { instance: "c" },
     ],
   };

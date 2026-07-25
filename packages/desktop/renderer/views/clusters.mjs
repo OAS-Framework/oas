@@ -1,21 +1,21 @@
 /* oas desktop — agent-cluster computation for the Active overview.
    Pure functions, no DOM: clusters are the connected components of the
-   roster under parent/child (parentInstance) and sibling links. The exact
-   sibling field name from `oas status --json` is still being landed by
-   cli-dev, so ALL reading of sibling data goes through siblingLinksOf() —
-   renaming the field later is a one-line change here, nowhere else.
+   roster under parent/child (parentInstance) and sibling (siblingInstance)
+   links. ALL reading of sibling data goes through siblingLinksOf() — the
+   single seam for the kernel's field shape.
    Malformed data must never break the overview: unknown names are ignored,
    self-links are ignored, and cycles are harmless to a union-find. */
 
 /** Sibling links of a roster instance, as an array of instance names.
-    ADAPTER: the single seam for the kernel's sibling-link field name.
-    Tolerates the shapes we may receive: an array of names, a single name,
-    or absent. Update the field list when cli-dev's name is relayed. */
+    ADAPTER: kernel contract (final, relayed by dev-coordinator-parallel) is
+    `siblingInstance`: string | absent — set only when a sibling relation
+    was declared against a ROOT instance (a sibling of a non-root simply
+    shares the anchor's parentInstance). Normalized to an array so callers
+    are shape-agnostic; self-links and non-strings are dropped. */
 export function siblingLinksOf(inst) {
-  const raw = inst.siblingInstances ?? inst.siblings ?? inst.siblingInstance;
-  if (raw == null) return [];
-  const list = Array.isArray(raw) ? raw : [raw];
-  return list.filter((s) => typeof s === "string" && s && s !== inst.instance);
+  const raw = inst.siblingInstance;
+  if (typeof raw !== "string" || !raw || raw === inst.instance) return [];
+  return [raw];
 }
 
 /** Connected components of the roster under parent/child + sibling links.
