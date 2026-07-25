@@ -3,7 +3,7 @@ type: Reference
 title: Delivery log — every PR that reached (or was returned from) the main gate
 description: Append-only record kept by per-PR maintainer instances — PR number, scope, verdict per gate, merge or return, and anything the review taught about the codebase. The stewardship counterpart of git history — the WHY next to the what.
 tags: [stewardship, deliveries, append-only]
-timestamp: 2026-07-22
+timestamp: 2026-07-25
 ---
 
 # Delivery log
@@ -24,7 +24,23 @@ decisions/ and referenced from here.
 
 ---
 
-## PR #25 — release.yml: fully-qualify the bump-PR push ref (detached-HEAD safe) (2026-07-25)
+## PR #26 — cli-dev soul: promote detached-HEAD release refspec lesson (2026-07-25)
+- verdict: MERGED as merge commit `0061eb5` — knowledge-only, exact head
+  `9f43317`. Lands the harvested lesson from cli-dev-desktop-dist-2's v0.18.2 /
+  PR #25 work into the canonical cli-dev soul (its delivery branch was not
+  merged directly, so a follow-up PR carried the soul update).
+- owner: cli-dev-desktop-dist-2 (retired) · coordinator: dev-coordinator-1
+- gates: OKF-correctness gate for a knowledge-only PR — strict validator PASS
+  (19 concepts, 0 err/0 warn); one Lesson added
+  (`lessons/exact-tag-detached-head-refspec.md`), indexed with description
+  matching frontmatter, log newest-first; both referenced links resolve
+  (release-workflow-static-tests.md, playbooks/release-tag-driven-ci.md); no
+  unrelated changes (3 files, all under cli-dev soul knowledge). Approve
+  recorded as PR comment (same-account GitHub block).
+- taught us: nothing new — clean knowledge harvest; confirms the promote-lesson
+  follow-up PR flow when a completed developer's delivery branch never merged.
+
+---
 - verdict: MERGED as merge commit `8d7d2ee` — all four gates PASS at exact head
   `e52826518`. Post-release one-line automation repair: the version-bump branch
   push in the publish job runs from a DETACHED HEAD (publish checks out

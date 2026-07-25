@@ -16,6 +16,11 @@ than letting the file grow stale.
 
 ## On main
 
+- **PR #26 merged 2026-07-25 as `0061eb5`**: knowledge-only — promoted the
+  detached-HEAD release refspec lesson
+  (`agents/cli-dev/soul/knowledge/lessons/exact-tag-detached-head-refspec.md`)
+  into the canonical cli-dev soul, harvested from PR #25's fix. No code change.
+
 - **PR #25 merged 2026-07-25 as `8d7d2ee`**: release.yml bump-PR push ref
   fully-qualified to `HEAD:refs/heads/${BRANCH}` (detached-HEAD safe) + a
   regression guard in test/release-workflow.test.mjs. Fixes the recurring
