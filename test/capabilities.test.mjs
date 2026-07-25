@@ -1272,6 +1272,7 @@ test("parent-relation rollback after LAUNCH kills the window, compensates hooks,
     "    name=$(printf '%s' \"$t\" | sed 's/.*:=//')",
     `    if [ "$name" != "$TMUX_FAKE_STUBBORN" ]; then grep -v -x "$name" ${tmuxWins} > ${tmuxWins}.n || true; mv ${tmuxWins}.n ${tmuxWins}; fi ;;`,
     "  list-windows)",
+    '    if [ -n "$TMUX_FAKE_LIST_FAIL" ]; then echo "list-windows broken" >&2; exit 1; fi',
     `    cat ${tmuxWins} ;;`,
     "esac",
     "exit 0",
@@ -1370,6 +1371,21 @@ test("parent-relation rollback after LAUNCH kills the window, compensates hooks,
       rmSync(tmpDir4, { recursive: true, force: true });
     }
 
+    // Probe failure is NOT confirmation: when list-windows itself fails, the
+    // rollback must fail CLOSED and report could-not-verify, not success.
+    const tmpDir4b = `${anchorMetaPath}.tmp-dev-zomb4b`;
+    mkdirSync(tmpDir4b); write(join(tmpDir4b, "blocker"), "x");
+    process.env.TMUX_FAKE_LIST_FAIL = "1";
+    try {
+      assert.throws(
+        () => spawnInstance(root, agentDef, { instance: "dev-zomb4b", relation: "parent", relativeTo: anchor.instance, tmuxSession: "oas-test-fake", launch: true }),
+        /rollback INCOMPLETE.*tmux window oas-test-fake:dev-zomb4b: could not verify removal/s,
+        "failed verification probe reported as could-not-verify, never as success");
+    } finally {
+      delete process.env.TMUX_FAKE_LIST_FAIL;
+      rmSync(tmpDir4b, { recursive: true, force: true });
+    }
+
     // Failing retire hook: runLifecycleHooks catches hook errors internally,
     // so the rollback must read the structured failures field.
     const tmpDir5 = `${anchorMetaPath}.tmp-dev-zomb5`;
@@ -1410,6 +1426,31 @@ test("parent-relation rollback after LAUNCH kills the window, compensates hooks,
       }
       rmSync(zomb6Home, { recursive: true, force: true });
       try { execFileSync("git", ["-C", repo, "worktree", "prune"], { stdio: "ignore" }); } catch { /* cleanup best-effort */ }
+    }
+
+    // SECURITY regression: branch names may contain valid-but-hostile shell
+    // metacharacters ($(…) passes check-ref-format). The rollback's branch
+    // verification must never interpolate them into a shell.
+    const marker = join(base, "pwn-marker");
+    const evilBranch = `agents/pwn$(touch\${IFS}${marker})`;
+    execFileSync("git", ["check-ref-format", `refs/heads/${evilBranch}`]); // fixture sanity: valid ref
+    const tmpDir7 = `${anchorMetaPath}.tmp-dev-zomb7`;
+    mkdirSync(tmpDir7); write(join(tmpDir7, "blocker"), "x");
+    const zomb7Home = join(root, "dev", "instances", "dev-zomb7");
+    try {
+      assert.throws(
+        () => spawnInstance(root, findAgent(root, "dev"), { instance: "dev-zomb7", relation: "parent", relativeTo: anchor.instance, branch: evilBranch, tmuxSession: "oas-test-fake", launch: false }),
+        /failed to re-point anchor/s,
+        "rollback runs with the hostile branch name");
+      assert.equal(existsSync(marker), false, "no command injection: metacharacter branch never executed");
+    } finally {
+      rmSync(tmpDir7, { recursive: true, force: true });
+      if (existsSync(join(zomb7Home, "work"))) {
+        try { execFileSync("git", ["-C", repo, "worktree", "remove", "--force", join(zomb7Home, "work")], { stdio: "ignore" }); } catch { /* best-effort */ }
+      }
+      rmSync(zomb7Home, { recursive: true, force: true });
+      try { execFileSync("git", ["-C", repo, "worktree", "prune"], { stdio: "ignore" }); } catch { /* best-effort */ }
+      try { execFileSync("git", ["-C", repo, "branch", "-D", evilBranch], { stdio: "ignore" }); } catch { /* best-effort */ }
     }
   } finally { process.env.PATH = oldPath; }
 });
