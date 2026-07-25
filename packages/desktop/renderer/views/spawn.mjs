@@ -262,11 +262,16 @@ function onGridKey(s, e) {
     e.preventDefault();
     cur.querySelector(".spawn-act:not([disabled])")?.click();
   } else if (cur && e.target === cur) {
-    // engine-resolved view keys on the focused card (default b = brain)
-    const hit = resolveViewKey(e, [{ id: "spawn.brain", chord: "b" }]);
+    // ALL view actions resolve from a focused card — the primary
+    // non-editable surface (review 93ff03d: '/' must reach the filter
+    // from the roving card, not just 'b').
+    const hit = resolveViewKey(e, s.viewActions);
     if (hit === "spawn.brain") {
       e.preventDefault();
       cur.querySelector(".brain-act:not([disabled])")?.click();
+    } else if (hit) {
+      e.preventDefault();
+      s.viewActions.find((a) => a.id === hit)?.run();
     }
   }
 }
