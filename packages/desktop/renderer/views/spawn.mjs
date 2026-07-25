@@ -11,6 +11,11 @@ import {
 } from "./common.mjs";
 import { cliAvailable, cliKnownUnavailable, cliStatus, refreshCli, onCliChange, cliCard } from "./cli-status.mjs";
 
+/** True while the CLI probe has never SETTLED (no response classified yet).
+ * Pending is card-less by design, so disabled buttons must explain
+ * themselves — and the poll must keep retrying until a response lands. */
+const cliProbePending = () => !cliStatus() && !cliKnownUnavailable();
+
 const CSS = `
 .souls { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--bg); }
 .souls-bar { display: flex; align-items: center; gap: 10px; height: var(--bar-h, 48px); flex: none; padding: 0 14px;
@@ -77,7 +82,14 @@ export function mount(el, ctx) {
     refresh(s);
   });
   refresh(s);
-  s.timers.push(setInterval(() => refresh(s), 8000));
+  s.timers.push(setInterval(() => {
+    refresh(s);
+    // A boot-time transport failure leaves the CLI probe UNSETTLED (null
+    // state, no card) — without a retry the Spawn buttons stay dead forever
+    // with nothing on screen saying why. Keep re-fetching the cheap cached
+    // state until a response settles it either way (ok / carded).
+    if (cliProbePending()) refreshCli(ctx);
+  }, 8000));
 }
 
 export function unmount() {
@@ -207,7 +219,11 @@ function soulCard(s, a) {
     spawn.title = attached
       ? "Attached-mode agent — spawn it from an owning instance’s work tree"
       : noCli
-        ? "Spawning requires a compatible installed oas CLI — see the card above"
+        // Pending probe renders NO card (frozen contract) — the tooltip must
+        // not point at a card that is not there.
+        ? (cliProbePending()
+          ? "Checking for a compatible oas CLI — spawning enables once it is verified"
+          : "Spawning requires a compatible installed oas CLI — see the card above")
         : `Spawn ${a.name}`;
     spawn.addEventListener("click", () => {
       if (!cliAvailable()) return; // state may have flipped since render
