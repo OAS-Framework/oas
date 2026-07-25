@@ -154,9 +154,9 @@ test("layoutForest tolerates sibling-link fields — every instance placed, pare
   // drop sibling-linked nodes (they lay out as separate roots).
   const { nodes } = hier.layoutForest([
     { instance: "coord-1", running: true },
-    { instance: "dev-a", parentInstance: "coord-1", siblingInstances: ["dev-b"], running: true },
+    { instance: "dev-a", parentInstance: "coord-1", running: true },
     { instance: "dev-b", parentInstance: "coord-1", running: false },
-    { instance: "peer-1", siblingInstances: ["peer-2"], running: false },
+    { instance: "peer-1", siblingInstance: "peer-2", relation: "sibling", relativeTo: "peer-2", running: false },
     { instance: "peer-2", siblingInstance: "peer-1", running: false },
   ]);
   assert.equal(nodes.length, 5, "sibling metadata never hides an instance");

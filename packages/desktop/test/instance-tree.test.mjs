@@ -138,7 +138,7 @@ test("clusterInstances: connected components over parent + sibling links; unrela
     { instance: "dev-b", parentInstance: "coord-1", running: false },
     { instance: "reviewer-1", parentInstance: "dev-a", running: true },
     // sibling-linked pair, no shared parent — still one cluster
-    { instance: "peer-1", siblingInstances: ["peer-2"], running: false },
+    { instance: "peer-1", siblingInstance: "peer-2", relation: "sibling", relativeTo: "peer-2", running: false },
     { instance: "peer-2", running: false },
     // unrelated
     { instance: "loner", running: true },
@@ -158,7 +158,8 @@ test("clusterInstances: connected components over parent + sibling links; unrela
   assert.ok(peers.every((i) => i.depth === 0), "sibling-linked peers sit at depth 0");
   // link extractor reads defensive sibling shapes
   assert.deepEqual(instanceLinks({ instance: "x", parentInstance: "p", siblingInstance: "s" }), ["p", "s"]);
-  assert.deepEqual(instanceLinks({ instance: "x", siblings: ["a", "x", ""] }), ["a"], "self/empty links dropped");
+  assert.deepEqual(instanceLinks({ instance: "x", siblingInstance: "x" }), [], "self links dropped");
+  assert.deepEqual(instanceLinks({ instance: "x", siblingInstance: "" }), [], "empty links dropped");
 });
 
 test("clusterInstances: malformed parent cycles keep every member visible", async () => {
@@ -175,7 +176,7 @@ test("clusterInstances: malformed parent cycles keep every member visible", asyn
 test("clusterInstances: edges to instances outside the roster do not join or crash", async () => {
   const { clusterInstances } = await import("../renderer/instance-tree.mjs");
   const clusters = clusterInstances([
-    { instance: "x", parentInstance: "ghost", siblingInstances: ["phantom"], running: true },
+    { instance: "x", parentInstance: "ghost", siblingInstance: "phantom", running: true },
     { instance: "y", running: true },
   ]);
   assert.equal(clusters.length, 2, "dangling links leave both as single-node clusters");

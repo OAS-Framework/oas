@@ -112,12 +112,13 @@ function panelData(wsId) {
       home: i.home, agentsRoot: i.agentsRoot,
       workspace: dirname(i.agentsRoot), repoName: (i.repo || dirname(i.agentsRoot)).split("/").pop(),
       parentInstance: i.parentInstance || null,
-      // Sibling links (feature/agent-relations): forward whichever shape the
-      // kernel roster carries — the renderer's instanceLinks() seam reads the
-      // same defensive set until the final field name is settled.
-      ...(i.siblingInstances !== undefined ? { siblingInstances: i.siblingInstances } : {}),
-      ...(i.siblings !== undefined ? { siblings: i.siblings } : {}),
-      ...(i.siblingInstance !== undefined ? { siblingInstance: i.siblingInstance } : {}),
+      // Agent relations (kernel contract, final): siblingInstance links a
+      // declared sibling to a ROOT anchor; relation/relativeTo record what
+      // was declared at spawn. Forwarded for cluster grouping and the
+      // cluster-first overview (ux-designer reads /api/panel).
+      siblingInstance: i.siblingInstance || null,
+      relation: i.relation || null,
+      relativeTo: i.relativeTo || null,
       tmux: i.tmux, git: i.git, task: i.task, next: i.next,
       team: i.team || null,
     })),

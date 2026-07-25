@@ -3,16 +3,15 @@ export function collapseKey(workspace, instance) {
 }
 
 /** Names an instance is directly related to (undirected edge endpoints):
- * its spawn parent plus any sibling links. The sibling field name is owned
- * by the kernel contract (feature/agent-relations); until the final name is
- * relayed we read the likely shapes defensively — an array of names
- * (`siblingInstances`/`siblings`) or a single name (`siblingInstance`).
- * Unknown/absent fields simply contribute no edges. */
+ * its spawn parent plus its explicit sibling link. Kernel contract
+ * (feature/agent-relations, final): `parentInstance` and `siblingInstance`
+ * (string, only set when a sibling relation was declared against a ROOT
+ * instance — a sibling of a non-root simply shares the anchor's parent).
+ * Absent fields contribute no edges. */
 export function instanceLinks(instance) {
   const out = [];
   if (instance.parentInstance) out.push(instance.parentInstance);
-  const sib = instance.siblingInstances ?? instance.siblings ?? instance.siblingInstance;
-  for (const name of Array.isArray(sib) ? sib : sib ? [sib] : []) if (name) out.push(name);
+  if (instance.siblingInstance) out.push(instance.siblingInstance);
   return out.filter((name) => name && name !== instance.instance);
 }
 
