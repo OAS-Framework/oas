@@ -80,3 +80,27 @@ test("siblingEdges: unordered dedupe, out-of-cluster names dropped", () => {
   };
   assert.deepEqual(siblingEdges(cluster), [{ a: "a", b: "b" }]);
 });
+
+test("duplicate names across agents roots: never merged, never dropped", () => {
+  const cs = computeClusters([
+    { instance: "dev", agentsRoot: "/team/a/agents", home: "/team/a/agents/dev/i/dev", running: true },
+    { instance: "dev", agentsRoot: "/team/b/agents", home: "/team/b/agents/dev/i/dev", running: true },
+    { instance: "kid", agentsRoot: "/team/a/agents", home: "/team/a/agents/kid/i/kid", parentInstance: "dev", running: true },
+  ]);
+  // "kid" resolves its parent to the SAME-ROOT dev; the other dev stays a singleton
+  assert.equal(cs.length, 2);
+  const multi = cs.find((c) => c.size === 2);
+  assert.ok(multi.instances.some((i) => i.home === "/team/a/agents/kid/i/kid"));
+  assert.ok(multi.instances.some((i) => i.home === "/team/a/agents/dev/i/dev"), "same-root parent wins");
+  assert.equal(cs.find((c) => c.size === 1).instances[0].home, "/team/b/agents/dev/i/dev",
+    "duplicate-named instance is a distinct singleton, not hidden");
+});
+
+test("ambiguous relation with no same-root candidate never merges (fail safe)", () => {
+  const cs = computeClusters([
+    { instance: "anchor", agentsRoot: "/a", home: "/a/anchor", running: true },
+    { instance: "anchor", agentsRoot: "/b", home: "/b/anchor", running: true },
+    { instance: "joiner", agentsRoot: "/c", home: "/c/joiner", siblingInstance: "anchor", running: true },
+  ]);
+  assert.equal(cs.length, 3, "ambiguous cross-root sibling resolves to nothing — three singletons");
+});
