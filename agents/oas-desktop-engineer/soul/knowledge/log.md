@@ -1,6 +1,8 @@
 # Knowledge Log
 
 ## 2026-07-25
+* **Update**: merged the xterm keypress-leak note into [Shift+Enter through xterm/tmux must be translated to pi's Ctrl+J newline alias](/lessons/shift-enter-newline-via-ctrl-j-alias.md): suppress every keydown/keypress/keyup event for the chord and write `\n` only on keydown, because xterm's keypress path can otherwise emit a submit `\r`.
+* **Creation**: promoted [tmux mouse-on viewers need modifier-forced xterm selection for copy](/lessons/tmux-mouse-on-xterm-selection-copy.md) from the oas-desktop-engineer-session-copy-newline notes.
 * **Creation**: promoted [shell nav reachability needs an importable manifest](/lessons/shell-nav-reachability-manifest.md) from the oas-desktop-engineer-roster-grouping notes.
 * **Update**: linked [regression tests must exercise the layer that had the bug](/lessons/regression-tests-bug-layer.md) to the shell nav reachability manifest lesson.
 * **Creation**: promoted [string-coerce workspace metadata before roster grouping and sorting](/lessons/roster-grouping-string-coerce-metadata.md) from the oas-desktop-engineer-roster-grouping notes.
