@@ -48,3 +48,4 @@ binary gives a real-browser keyboard test without installing browsers.
 # Related concepts
 
 - [Raw key passthrough and the POST host/origin guard](/architecture/raw-key-passthrough-and-host-guard.md)
+- [Key dispatch engines own consumed-event and editable-field guards](/lessons/keybinding-dispatch-guards-in-engine.md)
