@@ -2,8 +2,6 @@
 type: Decision
 title: View-local shortcuts resolve chords through the engine keymap
 description: View-scoped single-key shortcuts stay DOM-local but resolve through keybinding engine registrations so editor rebinds and registration-supplied defaults share one source of truth while editable-field safety remains view-owned.
-title: View-local shortcuts need engine-owned default metadata
-description: View-scoped shortcuts may resolve events locally, but their defaults need first-class engine metadata so the editor can show them and explicit unbinds can stop them.
 tags: [desktop, keybindings, views]
 timestamp: 2026-07-25
 ---
