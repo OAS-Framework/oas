@@ -17,13 +17,16 @@ function chordsEqual(a, b, isMac) {
 
 /** Resolve a view keydown to an action id, or null.
  * `actions` = [{ id }] (registered engine actions). The chord each action
- * answers to is ENGINE-OWNED (DEFAULT_KEYMAP default, user override, or
- * explicit unbind via getBinding) — view-local dispatch merely scopes WHERE
- * the key fires (the focused canvas/grid), never WHAT it is bound to. An
- * optional legacy `chord` field is honored only for actions the engine has
- * no knowledge of at all (not registered and no default) — kept for tests.
- */
-export function resolveViewKey(e, actions, { isMac = /mac/i.test(navigator.platform || ""), binding = getBinding, registered = listActions } = {}) {
+ * answers to is ENGINE-OWNED (DEFAULT_KEYMAP default, registration
+ * defaultChord, user override, or explicit unbind via getBinding) —
+ * view-local dispatch merely scopes WHERE the key fires (the focused
+ * canvas/grid), never WHAT it is bound to. An optional legacy `chord` field
+ * is honored only for actions the engine has no knowledge of at all.
+ * `context` names the view's engine context (e.g. "stage:hierarchy"): a
+ * legacy default yields only to explicit bindings that could actually
+ * collide per the engine's context rule — same context or global — never
+ * to a binding in an inactive foreign context (review 4a3438e). */
+export function resolveViewKey(e, actions, { isMac = /mac/i.test(navigator.platform || ""), binding = getBinding, registered = listActions, context = null } = {}) {
   const evChord = chordFromEvent(e, isMac);
   if (!evChord) return null;
   const unbound = [];
@@ -36,11 +39,15 @@ export function resolveViewKey(e, actions, { isMac = /mac/i.test(navigator.platf
     }
   }
   if (!unbound.length) return null;
-  // the event chord may be explicitly bound to a NON-view action (global or
-  // another context); the local default yields to that deliberate binding
+  // the event chord may be explicitly bound to a NON-view action; the local
+  // default yields to that deliberate binding — but only when the other
+  // action can conflict here (engine context rule: same context or global).
+  // An inactive foreign context (e.g. a tabs binding while no tab is shown)
+  // must not turn the view key into a dead key.
   const viewIds = new Set(actions.map((a) => a.id));
   for (const other of registered()) {
     if (viewIds.has(other.id)) continue;
+    if (other.context !== "global" && context && other.context !== context) continue;
     const bound = parseChord(binding(other.id) || "");
     if (bound && chordsEqual(bound, evChord, isMac)) return null;
   }

@@ -37,10 +37,34 @@ test("a local default yields to an explicit binding on a NON-view action (review
   // local default for hier.brain must not shadow it
   const binding = (id) => (id === "app.doThing" ? "B" : null);
   const registered = () => [{ id: "app.doThing", context: "global" }, { id: "hier.brain", context: "stage:hierarchy" }];
-  assert.equal(resolveViewKey(ev("b"), actions, { isMac: false, binding, registered }), null,
+  assert.equal(resolveViewKey(ev("b"), actions, { isMac: false, binding, registered, context: "stage:hierarchy" }), null,
     "view default must not intercept a chord explicitly bound elsewhere");
   // but an unrelated explicit binding does not disable other defaults
-  assert.equal(resolveViewKey(ev("f"), actions, { isMac: false, binding, registered }), "hier.fit");
+  assert.equal(resolveViewKey(ev("f"), actions, { isMac: false, binding, registered, context: "stage:hierarchy" }), "hier.fit");
+});
+
+test("an inactive-context binding does not suppress a view default (review 4a3438e)", () => {
+  // tabs.next rebound to "b": it can never fire on the hierarchy canvas
+  // (context-ineligible in the engine), so suppressing hier.brain would
+  // make the key entirely dead. Same-context and global bindings still win.
+  const binding = (id) => (id === "tabs.next" ? "B" : null);
+  const registered = () => [
+    { id: "tabs.next", context: "tabs" },
+    { id: "hier.brain", context: "stage:hierarchy" },
+  ];
+  assert.equal(resolveViewKey(ev("b"), actions, { isMac: false, binding, registered, context: "stage:hierarchy" }), "hier.brain",
+    "foreign inactive context must not turn the view key dead");
+  // same-context explicit binding still suppresses the default
+  const sameCtx = (id) => (id === "hier.other" ? "B" : null);
+  const registered2 = () => [
+    { id: "hier.other", context: "stage:hierarchy" },
+    { id: "hier.brain", context: "stage:hierarchy" },
+  ];
+  assert.equal(resolveViewKey(ev("b"), actions, { isMac: false, binding: sameCtx, registered: registered2, context: "stage:hierarchy" }), null,
+    "same-context explicit binding still wins over the default");
+  // without a context hint, behave conservatively (any explicit binding wins)
+  assert.equal(resolveViewKey(ev("b"), actions, { isMac: false, binding, registered }), null,
+    "no context hint keeps the conservative rule");
 });
 
 test("modifier chords from the engine match platform Mod folding", () => {
