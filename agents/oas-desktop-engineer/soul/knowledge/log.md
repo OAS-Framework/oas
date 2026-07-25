@@ -1,6 +1,8 @@
 # Knowledge Log
 
 ## 2026-07-25
+* **Creation**: promoted [scope rollback of a merged stage keeps the manifest tests as absence pins](/lessons/scope-rollback-absence-pins.md) from the oas-desktop-engineer-roster-scope-rollback notes.
+* **Update**: linked [shell nav reachability needs an importable manifest](/lessons/shell-nav-reachability-manifest.md) and [dormant surface removals need absence inventory tests](/lessons/dormant-surface-removal-inventory.md) to the scope-rollback absence-pins lesson.
 * **Creation**: promoted [shell nav reachability needs an importable manifest](/lessons/shell-nav-reachability-manifest.md) from the oas-desktop-engineer-roster-grouping notes.
 * **Update**: linked [regression tests must exercise the layer that had the bug](/lessons/regression-tests-bug-layer.md) to the shell nav reachability manifest lesson.
 * **Creation**: promoted [string-coerce workspace metadata before roster grouping and sorting](/lessons/roster-grouping-string-coerce-metadata.md) from the oas-desktop-engineer-roster-grouping notes.
