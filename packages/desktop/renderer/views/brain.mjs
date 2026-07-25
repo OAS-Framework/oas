@@ -217,7 +217,7 @@ export async function mount(el, ctx) {
   };
 
   // Workspace-aware agent loading: /api/agents is ws-scoped, and the shared
-  // workspace bus (Instances/Spawn switchers) must refresh this view.
+  // workspace bus (the shell's switcher and other views) must refresh this view.
   async function loadAgents() {
     const myRoster = ++rosterGen;
     gen++;               // also retire in-flight brain requests of the old roster

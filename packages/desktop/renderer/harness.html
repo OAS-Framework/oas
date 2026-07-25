@@ -46,7 +46,6 @@
 <header>
   <strong style="font-size:13px"><span style="color:var(--accent)">●</span> oas desktop harness</strong>
   <button class="tab" data-view="hierarchy">Agents</button>
-  <button class="tab" data-view="instances">Instances</button>
   <button class="tab" data-view="spawn">Spawn</button>
   <button class="tab" data-view="brain">Brain</button>
   <button class="tab" data-view="markdown">Markdown</button>
@@ -97,7 +96,7 @@
   }
   for (const b of document.querySelectorAll(".tab[data-view]"))
     b.onclick = () => show(b.dataset.view);
-  show("instances");
+  show("hierarchy");
 </script>
 </body>
 </html>

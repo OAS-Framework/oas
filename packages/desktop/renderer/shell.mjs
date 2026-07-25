@@ -3,9 +3,9 @@
 // View contract (binding, from the desktop-app contract): each view is an ES
 // module in ./views/ exporting mount(el, ctx) / unmount(), where
 //   ctx = { api(pathname, opts), openFile(path), openTerminal(instance) }
-// The shell owns tabs/navigation and provides ctx. The full roster (with
-// chat transcript, spawn) lives in the ported views — the shell chrome
-// stays a thin rail so nothing is duplicated.
+// The shell owns tabs/navigation and provides ctx. The full functionality
+// (hierarchy, spawn, brain, markdown) lives in the ported views — the shell
+// chrome stays a thin rail so nothing is duplicated.
 import { currentWorkspace, setWorkspace, groupInstances, adoptWorkspace, onWorkspaceChange } from "./views/common.mjs";
 import {
   initTheme, toggleTheme, xtermTheme, onThemeChange,
@@ -461,9 +461,8 @@ async function openViewTab(name, title, extra = {}, key = `view:${name}`,
 const pendingTerms = new Set(); // keys reserved while a roster fetch is in flight
 async function openTerminalTab(instance) {
   // A sidebar-tree selection opens its terminal directly — the persistent
-  // roster is the quick path to sessions. The full Instances STAGE (grouped
-  // roster, sorts, read-only transcript) is a separate first-class
-  // destination reachable via the nav rail and the ⌘K palette (shell-nav).
+  // sidebar roster IS the instances surface (there is no Instances stage;
+  // scope correction of PR #29).
   setSidebarMode("instances");
   setNavActive(null);
   refreshContextRoster();
@@ -552,9 +551,8 @@ async function openTerminalTabInner(instance, ws, key) {
 // ── nav rail ──────────────────────────────────────────────────────────────
 // First-class stage destinations come from shell-nav.mjs (NAV) so tests can
 // prove every entry resolves to a real mount-exporting view. The permanent
-// instance tree in the sidebar stays the quick path to terminals; the
-// Instances STAGE is the full roster with grouping/sorts + read-only
-// transcript (was unreachable pre-merge — merged-state review finding).
+// instance tree in the sidebar is the instances surface itself — selecting
+// an instance opens its terminal; there is no separate Instances stage.
 const navEl = document.getElementById("nav");
 for (const v of NAV) {
   const b = document.createElement("button");
