@@ -25,6 +25,14 @@ policies inside `matchEvent`:
 This mirrors the older panel lesson: route keys logically and exclude only real
 editable controls, using the same exclusion list.
 
+# Cleanup after internalization
+
+Once `matchEvent` owns these checks, delete transitional caller-side copies such
+as `allowsEngineDispatch` and `isEditableTarget` in `renderer/view-keys.mjs`; the
+shell listener should return to bare `handleKeydown(e)`. Keeping both layers as a
+fallback invites drift in subtle semantics (Shift-only, `SELECT`,
+contenteditable) and obscures which layer enforces the invariant.
+
 # Test seam
 
 `matchEvent(e, { editableTarget })` takes an explicit override for unit tests,

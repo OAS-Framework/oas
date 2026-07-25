@@ -75,8 +75,8 @@ export function mount(el, ctx) {
   // dispatch stays view-local and editable-guarded.
   s.q("souls-grid").addEventListener("keydown", (e) => onGridKey(s, e));
   s.viewActions = [
-    { id: "spawn.filter", run: () => s.q("filter").focus() },
-    { id: "spawn.brain", run: () => brainOfFocusedCard(s) },
+    { id: "spawn.filter", defaultChord: "/", run: () => s.q("filter").focus() },
+    { id: "spawn.brain", defaultChord: "B", run: () => brainOfFocusedCard(s) },
   ];
   el.querySelector(".souls").addEventListener("keydown", (e) => {
     // Esc cancels the open spawn form from anywhere inside it (incl. the
@@ -89,8 +89,8 @@ export function mount(el, ctx) {
     if (hit) { e.preventDefault(); s.viewActions.find((a) => a.id === hit)?.run(); }
   });
   s.disposers = [
-    registerAction({ id: "spawn.filter", label: "Soul roster: focus the filter (/)", context: "stage:spawn", run: () => s.q("filter").focus() }),
-    registerAction({ id: "spawn.brain", label: "Soul roster: open Brain of focused card (b)", context: "stage:spawn", run: () => brainOfFocusedCard(s) }),
+    registerAction({ id: "spawn.filter", label: "Soul roster: focus the filter", context: "stage:spawn", defaultChord: "/", run: () => s.q("filter").focus() }),
+    registerAction({ id: "spawn.brain", label: "Soul roster: open Brain of focused card", context: "stage:spawn", defaultChord: "B", run: () => brainOfFocusedCard(s) }),
   ];
   // CLI degradation: refresh once on mount and re-render the grid whenever
   // availability flips — spawn buttons disable consistently with the card.

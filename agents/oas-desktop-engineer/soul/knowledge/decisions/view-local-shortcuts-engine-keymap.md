@@ -10,14 +10,12 @@ timestamp: 2026-07-25
 
 # Decision
 
-View-local shortcuts that are meant to be rebindable should keep DOM-local
-dispatch for focused view surfaces, but their default chords must be represented
-as engine-owned action metadata. Keeping defaults only in view-local tables
-cannot make the shortcut editor honest or let explicit unbinds disable a
-default, because `getBinding()` returns `null` for both "no default" and
-"explicitly unbound".
+View-local shortcuts that are meant to be rebindable must resolve through the
+keybinding engine instead of matching hard-coded `e.key` values in the view
+handler. Hard-coded keys keep firing after an editor rebind and can shadow
+another action's new binding.
 
-# Wiring-side pattern
+# Pattern
 
 Views declare actions in a local table such as `viewActions = [{ id,
 defaultChord, run }]`, where `defaultChord` is the view's default. At mount they

@@ -1,7 +1,7 @@
 ---
 type: Lesson
 title: Real keybindings engine integration keeps defaults engine-owned
-description: When keybindings-core replaced the wiring stub, wiring had to adopt DEFAULT_KEYMAP action ids, keep dynamic view defaults on registrations, guard defaultPrevented at the shell listener, and accept the action-id terminal allowlist where Ctrl+K opens the palette in xterm.
+description: When keybindings-core replaced the wiring stub, wiring had to adopt DEFAULT_KEYMAP action ids, keep view defaults in engine metadata, delete transitional shell guard layers once matchEvent owned them, and keep the action-id terminal allowlist.
 tags: [desktop, keybindings, merge, integration]
 timestamp: 2026-07-25
 ---
@@ -17,18 +17,20 @@ shape.
   `app.themeToggle`, `sidebar.focusFilter`, `terminal.font*`, and
   `app.shortcuts = Mod+,`.
 - Shell-level app defaults live in `DEFAULT_KEYMAP`; dynamic view-local defaults
-  belong on `registerAction({ defaultChord })`, not in the static table and not
-  in a parallel view fallback resolver.
+  belong on `registerAction({ defaultChord })`, not in a parallel view fallback
+  resolver. Once an engine-owned source can represent a default, delete the
+  view-local backup chord fields instead of keeping a second source of truth.
 - View-local actions such as `hier.*` and `spawn.*` register with their
   `defaultChord` and stay editor-visible. Keep their single-key dispatch
-  view-scoped, because the engine has no editable-field guard that would make
-  unmodified single keys safe as global defaults.
-- The real engine's `handleKeydown` does not skip `defaultPrevented` events.
-  The shell listener must guard `if (!e.defaultPrevented)` before calling it when
-  a view-local handler has already claimed a key event.
-- User-recorded bare-key bindings can still match through the shell's window
-  listener from editable targets, so call `allowsEngineDispatch(e)` at the shell
-  dispatch site as described in [the editable-target guard lesson](/lessons/window-engine-dispatch-editable-guard.md).
+  view-scoped, because DOM-local focus semantics still decide which focused view
+  surface receives the shortcut.
+- After the core addendum, `matchEvent` skips `defaultPrevented` events and
+  rejects unmodified chords from editable targets. The shell listener should call
+  bare `handleKeydown(e)`; do not keep `if (!e.defaultPrevented)` or
+  `allowsEngineDispatch(e)` as a second guard layer.
+- The earlier shell-side `allowsEngineDispatch`/`isEditableTarget` pair was only
+  temporary; keeping it as fallback is worse than one canonical engine policy
+  because Shift-only and editable-element semantics can drift.
 - Terminal safety follows the action-id allowlist, so Ctrl+K opens the palette
   inside xterm on Linux/Windows instead of passing through to the terminal.
 
@@ -37,5 +39,6 @@ shape.
 - [Keybindings wiring used a transitional stub engine with a frozen coordinator contract](/decisions/keybindings-stub-coordinator-contract.md)
 - [View-local shortcuts resolve chords through the engine keymap](/decisions/view-local-shortcuts-engine-keymap.md)
 - [Dynamic action registrations carry their own default chords](/lessons/dynamic-action-registration-default-chords.md)
-- [Window-level engine dispatch needs an editable-target guard](/lessons/window-engine-dispatch-editable-guard.md)
+- [Key dispatch engines own consumed-event and editable-field guards](/lessons/keybinding-dispatch-guards-in-engine.md)
+- [Window-level dispatch guards were transitional shell responsibilities](/lessons/window-engine-dispatch-editable-guard.md)
 - [Keybinding engine terminal allowlist is action-id based, not chord based](/lessons/keybindings-terminal-allowlist-by-action-id.md)
