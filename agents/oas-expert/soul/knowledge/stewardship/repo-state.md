@@ -15,6 +15,16 @@ than letting the file grow stale.
 
 ## On main
 
+- **PR #32 merged 2026-07-25 as `97f66c9`** — corrective rollback for the
+  out-of-scope PR #29 Instances rail destination and second roster sidebar.
+  The shell again exposes only Active overview and Soul roster as stages; the
+  permanent sidebar remains the instances context. The deleted stage/view,
+  tests, docs, and 104 lines of stage-only CSS are gone, with absence pins;
+  shared grouping helpers remain for separately owned sidebar work. Final exact
+  head `69641c9`; full local gate, human live workspace test, independent
+  reviewer, required CI, and all three installer checks passed. Source fix is
+  on main but not yet released; immutable v0.18.4 artifacts remain unchanged.
+
 - **RELEASED v0.18.4 (2026-07-25)** — Desktop UX fixes from PR #29. Tag
   `v0.18.4` on `a84443a` (PR #29 merge plus release notes). Published
   `@oas-framework/oas@0.18.4` + `@oas-framework/pi@0.18.4` and GitHub Release
@@ -26,8 +36,8 @@ than letting the file grow stale.
   (`fda7498`). The published kernel passed a clean create→spawn→inspect→retire
   deployment probe and reported Desktop API v1 at version 0.18.4. A human
   subsequently identified an out-of-scope Desktop navigation regression in
-  PR #29; v0.18.4 is immutable and a corrective patch is required (see open
-  threads).
+  PR #29. Corrective source landed in PR #32; v0.18.4 remains immutable and a
+  new patch release is required (see open threads).
 
 - **PR #29 merged 2026-07-25 as `b7203eb`** — Desktop UX fixes: spawn view
   retries an unsettled CLI probe with truthful pending UI; Shift+Enter inserts
@@ -105,12 +115,15 @@ than letting the file grow stale.
 
 ## In flight
 
-- (nothing currently recorded) — PR #29 reached terminal MERGED outcome; its
+- (nothing currently recorded) — PR #32 reached terminal MERGED outcome; its
   remote feature branch is deleted.
 
 ## Recent deliveries
 
 - (record PR #, one-line scope, verdict, merge/close date)
+- PR #32 Desktop Instances-stage scope rollback: MERGED 2026-07-25 as
+  `97f66c9` after one correctness+mergeability RETURN; corrective source is on
+  main and awaits a new patch release (see delivery-log).
 - PR #31 release: v0.18.4 manifest bump (manual bump-PR rescue after complete
   publication): MERGED 2026-07-25 (`fda7498`; see delivery-log).
 - PR #30 post-v0.18.3 cli-dev/Desktop knowledge and skill harvest: MERGED
@@ -155,12 +168,12 @@ than letting the file grow stale.
 
 ## Open threads
 
-- **v0.18.4 corrective Desktop patch required**: a coordinator HOLD arrived
-  after v0.18.4 had already published. The human identified that PR #29 added
-  an Instances navigation tab plus an extra sidebar outside the requested
-  scope; grouping belongs in the existing roster sidebar instead. Do not move,
-  delete, or republish the immutable v0.18.4 artifacts. A corrective PR is
-  forthcoming and must drive a new patch version after review.
+- **Release PR #32 corrective source in a new patch**: a coordinator HOLD
+  arrived after v0.18.4 had already published. The human identified that PR #29
+  added an Instances navigation tab plus an extra sidebar outside the requested
+  scope; grouping belongs in the existing roster sidebar instead. PR #32 now
+  removes that stage on main (`97f66c9`). Do not move, delete, or republish the
+  immutable v0.18.4 artifacts; cut a new patch version containing the fix.
 
 - aweb channel awakening drops (2 consecutive repros 2026-07-23): verdict
   mail from short-lived reviewer identities delivered and marked READ

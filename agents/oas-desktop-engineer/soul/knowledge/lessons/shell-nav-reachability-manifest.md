@@ -36,3 +36,4 @@ but not sufficient.
 - [Regression tests must exercise the layer that had the bug](/lessons/regression-tests-bug-layer.md)
 - [Desktop shell view integration lessons](/lessons/desktop-shell-view-integration-lessons.md)
 - [Contract-test the shared desktop renderer harness against shipped views](/lessons/shared-renderer-harness-enumeration-test.md)
+- [Scope rollback of a merged stage keeps the manifest tests as absence pins](/lessons/scope-rollback-absence-pins.md)
