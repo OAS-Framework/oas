@@ -24,6 +24,40 @@ decisions/ and referenced from here.
 
 ---
 
+## PR #27 — publish valid ad-hoc-signed macOS installers (2026-07-25)
+- verdict: MERGED as merge commit `921f44a` — exact head `77b7ae4`. Corrected
+  the v0.18.2 macOS installer defect (arm64 shipped an incomplete
+  linker-generated ad-hoc signature → Gatekeeper "damaged"; x64 unsigned).
+  Drove release **v0.18.3** (tag on `921f44a`).
+- owner: (feature/macos-correct-installers) · coordinator: dev-coordinator-1
+- gates: all four pass. `electron-builder.config.cjs` `identity: null → "-"`
+  (complete ad-hoc bundle signature); afterPack documented to run BEFORE signing
+  so the spawn-helper chmod lands inside the seal. Strict
+  `codesign --verify --deep --strict --verbose=2` gated fail-closed both as an
+  external workflow step AND unconditionally in `dist:smoke` on darwin
+  (platform-only guard, no OAS_SMOKE_* can skip it), before artifact upload;
+  the two workflow verifier run-blocks are enforced byte-identical by
+  `test/release-workflow.test.mjs`. `CSC_FOR_PULL_REQUEST:"true"` on
+  build-installers only (PR legs need it to actually sign; release.yml is
+  tag-push so omits it) — safe, no signing secrets, deterministic ad-hoc.
+  Release-notes existence gate added (fail fast pre-publish). New suites pass:
+  codesign-verify 15/15, release-workflow 17/17. CI evidence (runs 30156699308
+  + 30156539653, head 77b7ae4): arm64/x64 Signature=adhoc, Sealed Resources v2
+  rules=13 files=179, node-pty packaged-ABI (x64 under Rosetta). Manifests stayed
+  0.18.2 (tag-derived); no v0.18.2 asset mutation; Linux unaffected. Approve
+  recorded as PR comment (same gh account). Remote branch deleted manually (dev
+  worktree held the local branch).
+- taught us: the release bump-PR step now fails ONLY on the org-policy cause,
+  not the refspec — PR #25's `HEAD:refs/heads/<branch>` fix worked (push logged
+  `[new branch] HEAD -> release-bump/v0.18.3`), then `gh pr create` failed with
+  `GraphQL: Resource not accessible by integration (createPullRequest)` (org
+  policy blocks Actions-created PRs). Rescue: publish was already complete
+  (never retag) — created + squash-merged the bump PR manually (**PR #28**,
+  main `9a6eae8`, manifests → 0.18.3). The release run shows conclusion=failure
+  purely because of this final step; npm + GitHub Release succeeded. Until an
+  org admin relaxes the Actions-PR policy, every tag-driven release needs this
+  one manual bump-PR step.
+
 ## PR #26 — cli-dev soul: promote detached-HEAD release refspec lesson (2026-07-25)
 - verdict: MERGED as merge commit `0061eb5` — knowledge-only, exact head
   `9f43317`. Lands the harvested lesson from cli-dev-desktop-dist-2's v0.18.2 /
