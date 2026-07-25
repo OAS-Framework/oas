@@ -58,6 +58,10 @@ All kernel/CLI behavior tests live in `test/capabilities.test.mjs`
 - Team/cross-repo tests: build a workspace with a `team:` config and two
   member repos each holding `agents/` — this caught the "instance names only
   unique per agent dir" bug.
+- Name-resolution tests need a local-soul fixture too. Local souls exercise the
+  overlapping `listAgents(root)` plus `localAgentBases(root)` fallback path, so
+  all-match lookup bugs can pass cross-repo tests while double-counting local
+  homes; see [overlapping instance-home scans](/lessons/overlapping-instance-home-scans-dedupe.md).
 - Tests that reach real tmux must be idempotent against leftover session state.
   `oas okf harvest` launches a `memory-harvest-<slug>` tmux window in
   `PI_AGENTS_TMUX_SESSION`, so a fixed instance name can pass once and fail on

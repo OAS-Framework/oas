@@ -21,6 +21,12 @@ root qualifier cannot distinguish two same-named homes under one root,
 ambiguity-sensitive callers need an all-matches lookup and must reject
 intra-root duplicates with guidance to retire or rename one of them.
 
+Dedupe all-match results by canonical home before treating them as duplicates.
+The `listAgents(root)` and local-agent fallback phases overlap for local souls,
+so a scanner that skips canonical de-duplication can double-count the same home
+and falsely report an intra-root ambiguity; see
+[overlapping instance-home scans](/lessons/overlapping-instance-home-scans-dedupe.md).
+
 When multiple candidates match, fail with `E_RELATIVE_AMBIGUOUS` and list the
 candidate homes unless the caller supplies an explicit qualifier. The CLI
 qualifier is `--relative-root <agents-root>`; the kernel option is

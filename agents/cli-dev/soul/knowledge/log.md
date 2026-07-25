@@ -1,6 +1,9 @@
 # Knowledge Log
 
 ## 2026-07-25
+* **Update**: [test-conventions](/playbooks/test-conventions.md) records that name-resolution tests need local-soul fixtures because overlapping discovery phases only double-count there.
+* **Update**: [lineage-edge-ambiguity-posture](/lessons/lineage-edge-ambiguity-posture.md) records canonical-home de-duplication before treating all-match enumeration results as intra-root duplicates.
+* **Creation**: [overlapping-instance-home-scans-dedupe](/lessons/overlapping-instance-home-scans-dedupe.md) records the `findInstanceHomes` lesson that overlapping `listAgents`/`localAgentBases` scans must dedupe local souls by canonical home.
 * **Creation**: [release-bump-pr-org-policy-block](/lessons/release-bump-pr-org-policy-block.md) records the v0.18.3 org-policy block on Actions-created PRs and the publication-first manual rescue path.
 * **Update**: skills/aweb-trust-mismatch — adds the read-only diagnostic and independent-confirmation protocol for aweb `identity_mismatch` messages with green doctors.
 * **Creation**: [aweb-identity-mismatch-recipient-cache](/lessons/aweb-identity-mismatch-recipient-cache.md) records that persistent `identity_mismatch` with all-green sender and recipient doctors is a recipient-side cache or verification defect, not automatic compromise.

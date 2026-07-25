@@ -1012,6 +1012,12 @@ test("spawn relations: child/sibling/parent/unrelated, sugar equivalence, valida
     assertNoHome("dev-badrel", () => spawnInstance(root, agentDef, { instance: "dev-badrel", relation: "boss", relativeTo: anchor.instance, launch: false }), /unknown relation/);
     assertNoHome("dev-norel", () => spawnInstance(root, agentDef, { instance: "dev-norel", relation: "sibling", launch: false }), /needs a relative-to/);
     assertNoHome("dev-noanchor", () => spawnInstance(root, agentDef, { instance: "dev-noanchor", relation: "sibling", relativeTo: "no-such-instance", launch: false }), /was not found/);
+    // Kernel validates the RAW option combination (programmatic callers bypass
+    // the CLI): contradictory shapes are rejected, never silently normalized.
+    assertNoHome("dev-dangling", () => spawnInstance(root, agentDef, { instance: "dev-dangling", relativeTo: anchor.instance, launch: false }), /needs a relation/);
+    assertNoHome("dev-unrel-rt", () => spawnInstance(root, agentDef, { instance: "dev-unrel-rt", relation: "unrelated", relativeTo: anchor.instance, launch: false }), /takes no relativeTo/);
+    assertNoHome("dev-both", () => spawnInstance(root, agentDef, { instance: "dev-both", parent: anchor.instance, relation: "child", relativeTo: anchor.instance, launch: false }), /one form, not both/);
+    assertNoHome("dev-rr-only", () => spawnInstance(root, agentDef, { instance: "dev-rr-only", relativeRoot: root, launch: false }), /only qualifies/);
   } finally { process.env.PATH = oldPath; }
 });
 
