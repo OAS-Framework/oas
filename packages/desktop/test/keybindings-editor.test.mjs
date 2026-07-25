@@ -126,3 +126,75 @@ test("Escape (outside recording) and overlay backdrop close the dialog; toggle w
   editor.toggle();
   assert.equal(editor.isOpen(), false);
 });
+
+test("recording does not survive dialog close or reset-all", (t) => {
+  const { doc, editor } = setup(t);
+  editor.open();
+  const rowFor = (label) => [...doc.querySelectorAll(".kb-row")]
+    .find((r) => r.querySelector(".kb-label").textContent === label);
+
+  // close during recording: the capture listener must be torn down
+  rowFor("Command palette").querySelector(".kb-chord").click();
+  editor.close();
+  const e = key(doc, "x", { metaKey: true });
+  doc.dispatchEvent(e);
+  assert.equal(e.defaultPrevented, false, "closed editor must not swallow keys");
+  assert.equal(getBinding("app.palette"), DEFAULT_KEYMAP["app.palette"],
+    "closed editor must not persist a binding");
+
+  // reset-all during recording: capture ends, nothing recorded afterwards
+  editor.open();
+  rowFor("Command palette").querySelector(".kb-chord").click();
+  doc.querySelector(".kb-reset-all").click();
+  doc.dispatchEvent(key(doc, "y", { metaKey: true }));
+  assert.equal(getBinding("app.palette"), DEFAULT_KEYMAP["app.palette"]);
+
+  // rerender (keymap change from elsewhere) also invalidates a capture
+  rowFor("Command palette").querySelector(".kb-chord").click();
+  setBinding("tabs.close", "Mod+X"); // triggers render
+  doc.dispatchEvent(key(doc, "z", { metaKey: true }));
+  assert.equal(getBinding("app.palette"), DEFAULT_KEYMAP["app.palette"]);
+  editor.close();
+});
+
+test("malformed persisted overrides are sanitized and cannot break the editor", async (t) => {
+  // corrupt payload BEFORE the module (re)reads storage
+  localStorage.setItem("oas-desktop-keymap",
+    JSON.stringify({ "app.palette": 42, "tabs.close": { evil: true }, "stage.hierarchy.focus": "NotAChord+", "x.legacy": "Mod+Shift+L", "x.unbound": null }));
+  const fresh = await import("../renderer/keybindings.mjs?fresh=" + Math.random());
+  assert.equal(fresh.getBinding("app.palette"), "Mod+K", "non-string value discarded → default");
+  assert.equal(fresh.getBinding("tabs.close"), "Mod+W", "object value discarded → default");
+  assert.equal(fresh.getBinding("x.legacy"), "Mod+Shift+L", "valid chord survives");
+  assert.equal(fresh.getBinding("x.unbound"), null, "explicit null unbind survives");
+  localStorage.removeItem("oas-desktop-keymap");
+
+  // and the editor renders instead of throwing on a poisoned live map too
+  const { doc, editor } = setup(t);
+  assert.doesNotThrow(() => { editor.open(); editor.close(); });
+});
+
+test("Tab wraps focus inside the modal dialog", (t) => {
+  const { doc, editor } = setup(t);
+  const outside = doc.createElement("button");
+  outside.textContent = "outside";
+  doc.body.append(outside);
+  editor.open();
+  const overlay = doc.querySelector(".kb-overlay");
+  const dialog = overlay.querySelector(".kb-editor");
+  const focusable = [...dialog.querySelectorAll("button:not([disabled])")]
+    .filter((el) => !el.hidden && el.tabIndex >= 0);
+  const first = focusable[0], last = focusable.at(-1);
+
+  last.focus();
+  const tab = key(doc, "Tab");
+  overlay.dispatchEvent(tab);
+  assert.equal(tab.defaultPrevented, true, "Tab on the last control is wrapped");
+  assert.equal(doc.activeElement, first);
+
+  first.focus();
+  const shiftTab = key(doc, "Tab", { shiftKey: true });
+  overlay.dispatchEvent(shiftTab);
+  assert.equal(shiftTab.defaultPrevented, true, "Shift+Tab on the first control is wrapped");
+  assert.equal(doc.activeElement, last);
+  editor.close();
+});

@@ -189,7 +189,19 @@ function readOverrides() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     const obj = raw ? JSON.parse(raw) : null;
-    return obj && typeof obj === "object" && !Array.isArray(obj) ? obj : {};
+    if (!obj || typeof obj !== "object" || Array.isArray(obj)) return {};
+    // Sanitize: only `null` (explicit unbind) or a parseable chord string
+    // survives — anything else (numbers, objects, junk strings) is discarded
+    // so a corrupted/legacy payload can never reach formatChord/matchEvent.
+    const clean = {};
+    for (const [id, value] of Object.entries(obj)) {
+      if (value === null) clean[id] = null;
+      else if (typeof value === "string") {
+        const canonical = chordToString(parseChord(value));
+        if (canonical) clean[id] = canonical;
+      }
+    }
+    return clean;
   } catch { return {}; }
 }
 

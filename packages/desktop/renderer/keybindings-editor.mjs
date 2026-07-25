@@ -42,9 +42,15 @@ export function createKeybindingsEditor({ doc = document, isMac } = {}) {
   let overlay = null;
   let offKeymap = null;
   let restoreFocus = null;
+  let stopRecording = null; // teardown for an in-flight chord capture
+
+  function endRecording() {
+    if (stopRecording) { const stop = stopRecording; stopRecording = null; stop(); }
+  }
 
   function close() {
     if (!overlay) return;
+    endRecording(); // the capture listener must not outlive the dialog
     offKeymap?.(); offKeymap = null;
     overlay.remove(); overlay = null;
     try { restoreFocus?.focus?.(); } catch { /* focus target may be gone */ }
@@ -68,18 +74,29 @@ export function createKeybindingsEditor({ doc = document, isMac } = {}) {
       </div>`;
     overlay.addEventListener("mousedown", (e) => { if (e.target === overlay) close(); });
     overlay.addEventListener("keydown", (e) => {
-      if (e.key === "Escape" && !recording) { e.preventDefault(); close(); }
+      if (e.key === "Escape" && !stopRecording) { e.preventDefault(); close(); return; }
+      if (e.key !== "Tab" || stopRecording) return;
+      // aria-modal promises focus containment — wrap Tab/Shift+Tab inside the
+      // dialog (same handling as the workspace-switcher modal).
+      const dialog = overlay.querySelector(".kb-editor");
+      const focusable = [...dialog.querySelectorAll("button:not([disabled])")]
+        .filter((el) => !el.hidden && el.tabIndex >= 0);
+      if (!focusable.length) return;
+      const first = focusable[0], last = focusable.at(-1);
+      if (e.shiftKey && (doc.activeElement === first || !dialog.contains(doc.activeElement))) {
+        e.preventDefault(); last.focus();
+      } else if (!e.shiftKey && (doc.activeElement === last || !dialog.contains(doc.activeElement))) {
+        e.preventDefault(); first.focus();
+      }
     });
     doc.body.append(overlay);
     overlay.querySelector(".kb-close").addEventListener("click", close);
-    overlay.querySelector(".kb-reset-all").addEventListener("click", () => resetAllBindings());
-
-    let recording = null; // { actionId, btn } while capturing a chord
+    overlay.querySelector(".kb-reset-all").addEventListener("click", () => { endRecording(); resetAllBindings(); });
 
     const body = overlay.querySelector(".kb-body");
 
     const render = () => {
-      recording = null;
+      endRecording(); // a rerender invalidates any in-flight capture
       body.innerHTML = "";
       const groups = groupActions();
       if (!groups.length) {
@@ -127,28 +144,26 @@ export function createKeybindingsEditor({ doc = document, isMac } = {}) {
     };
 
     const startRecording = (action, btn, conflictEl) => {
-      if (recording) return;
-      recording = { actionId: action.id, btn };
+      if (stopRecording) return;
       btn.classList.add("kb-recording");
       btn.textContent = "Press keys…";
       const onKey = (e) => {
         e.preventDefault();
         e.stopPropagation();
-        if (e.key === "Escape") { stop(); render(); return; }
+        if (e.key === "Escape") { endRecording(); render(); return; }
         if (e.key === "Backspace" && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
-          stop(); setBinding(action.id, null); return;
+          endRecording(); setBinding(action.id, null); return;
         }
         const chord = chordFromEvent(e, isMac);
         if (!chord) return; // bare modifier — keep recording
         const conflict = findConflict(chord, action.context, action.id, isMac);
         if (conflict) conflictEl.textContent = `Also bound to “${conflict.label}”`;
-        stop();
+        endRecording();
         setBinding(action.id, chordToString(chord));
       };
-      const stop = () => {
+      stopRecording = () => {
         doc.removeEventListener("keydown", onKey, true);
         btn.classList.remove("kb-recording");
-        recording = null;
       };
       doc.addEventListener("keydown", onKey, true);
     };
