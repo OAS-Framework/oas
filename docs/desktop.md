@@ -126,9 +126,10 @@ Installer CI gates what headless runners can prove reliably for every
 published platform/architecture: electron-builder completes, the expected
 DMG/ZIP/AppImage/DEB artifacts exist, node-pty's packaged `spawn-helper` is
 executable, and node-pty loads and spawns under the packaged Electron ABI.
-The macOS x64 leg cross-builds on macos-14 and installs Rosetta 2 so that its
-x64 Electron + node-pty ABI probe really executes; a wrong-architecture
-native module fails that leg.
+The macOS x64 leg cross-builds on macos-14, installs Rosetta 2, warms the
+exact packaged x64 Electron binary once (Rosetta caches per Mach-O), then
+runs the normal-budget x64 Electron + node-pty ABI probe; a warm hang or
+wrong-architecture native module fails that leg.
 
 CI does **not** gate the packaged GUI launch: unsigned Electron apps do not
 have a reliable interactive windowserver in headless CI. Post-publish launch

@@ -171,6 +171,7 @@ test("release and build-only installer smoke are consistent build-verify gates",
     assert.match(text, /OAS_SMOKE_SKIP_LAUNCH:\s*"1"/, `${name} marks GUI launch skipped`);
     assert.match(text, /OAS_SMOKE_BUILD_VERIFY:\s*"1"/, `${name} explicitly authorizes build-verify mode`);
     assert.match(text, /OAS_SMOKE_TARGET_ARCH:\s*\$\{\{ matrix\.arch \}\}/, `${name} passes the matrix arch to the ABI probe`);
+    assert.match(text, /Warm exact packaged x64 Electron under Rosetta[\s\S]*matrix\.arch == 'x64'[\s\S]*warm-rosetta\.mjs/, `${name} warms the exact packaged x64 binary before the normal-budget probe`);
     assert.match(text, /npm run dist:smoke/, `${name} still gates inventory + node-pty ABI`);
   }
   // npm args must reach electron-builder, not a cleanup command: dist is the

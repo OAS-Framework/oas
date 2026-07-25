@@ -75,6 +75,15 @@ jobs:
         working-directory: packages/desktop
         run: npm run dist -- ${{ matrix.builder_args }}
 
+      # Installing Rosetta does NOT warm a binary's AOT cache. Execute the
+      # exact packaged x64 Electron once (bounded, no GUI) so the subsequent
+      # normal-budget ABI probe distinguishes cold translation from a genuine
+      # x64 node-pty hang/wrong-arch native.
+      - name: Warm exact packaged x64 Electron under Rosetta
+        if: runner.os == 'macOS' && matrix.arch == 'x64'
+        working-directory: packages/desktop
+        run: node scripts/warm-rosetta.mjs
+
       # Installed-artifact smoke, BUILD-VERIFY mode: inventory (artifact names
       # + plausible sizes) + node-pty under the packaged Electron ABI. The
       # packaged GUI LAUNCH is skipped (OAS_SMOKE_BUILD_VERIFY authorizes the

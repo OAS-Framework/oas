@@ -187,7 +187,7 @@ test("smoke probe contract: runAbiProbe refuses to run without a reaper runTrack
   // inventory alone would let a wrong-arch binary sail through.
   callsSeen.length = 0;
   const x64R = await runAbiProbe(reaper, "/pkg/x64/App", "/pkg/x64/app.asar/main.mjs", {
-    timeout: 90000, env: {}, targetArch: "x64", platform: "darwin", hostArch: "arm64",
+    timeout: 30000, env: {}, targetArch: "x64", platform: "darwin", hostArch: "arm64",
   });
   assert.equal(x64R.ok, true);
   assert.equal(callsSeen[0].exe, "/usr/bin/arch", "Rosetta launcher used explicitly");

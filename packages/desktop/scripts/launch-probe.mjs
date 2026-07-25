@@ -11,9 +11,10 @@
 // finding 1); a test asserts WATCHDOG_MS > sum(phase budgets).
 export const PHASE_BUDGET_MS = {
   inventory: 10_000,
-  // Rosetta's first x64 translation/start on a fresh arm64 CI runner can
-  // exceed 30s. Keep one bounded phase budget that covers native + Rosetta.
-  abiProbe: 90_000,
+  // Normal ABI-probe budget. The mac x64 CI leg warms the EXACT packaged
+  // Electron binary under Rosetta first; the timed probe then measures warm
+  // native/ABI behavior. A warm hang still fails at 30s (never papered over).
+  abiProbe: 30_000,
   launchReady: 90_000,
   cdpEvaluate: 20_000,
 };
