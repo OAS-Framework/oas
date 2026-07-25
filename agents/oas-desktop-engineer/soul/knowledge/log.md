@@ -1,6 +1,7 @@
 # Knowledge Log
 
 ## 2026-07-25
+* **Creation**: promoted [graph code over roster instances must key by composite identity](/lessons/cluster-composite-identity.md) from the oas-desktop-engineer-agent-relations notes.
 * **Creation**: promoted [new CLI mutation flags need a capability gate](/lessons/new-mutation-flags-capability-gate.md) from the oas-desktop-engineer-agent-relations notes.
 * **Creation**: promoted [final kernel contract for spawn-time agent relations](/references/agent-relations-kernel-contract.md) from the oas-desktop-engineer-agent-relations notes.
 * **Update**: updated [desktop cluster grouping sibling-link extractor seam](/decisions/desktop-cluster-grouping-sibling-seam.md) to consume the final `siblingInstance`, `relation`, and `relativeTo` kernel contract.
