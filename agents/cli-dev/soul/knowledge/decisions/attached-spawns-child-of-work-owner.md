@@ -12,6 +12,11 @@ Attached work mode binds lineage: an attached spawn shares another instance's
 work tree, so its `parentInstance` is the work-tree owner. This is not an
 optional fallback callers may negate.
 
+The owner must be canonical, not guessed from a `<name>/work` path shape. A
+candidate instance name must resolve to a known instance and
+`realpath(instanceHome/work)` must equal the attached `workDir`; legitimate
+non-instance integration work trees need an explicit `--parent`/parent option.
+
 Because soul defaults and capability hooks can request attached work without a
 CLI `--work attached` flag, enforce this in both surfaces: contradictory
 relation options on an attached spawn fail before scaffolding (`E_BAD_ARGS` at

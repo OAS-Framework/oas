@@ -37,8 +37,13 @@ Attached work mode owns the lineage decision: an attached spawn records the
 shared work-tree owner as `parentInstance`. Relation flags that contradict that
 child-of-owner shape are invalid (`E_BAD_ARGS` at the CLI and a kernel throw for
 programmatic callers). Only an explicit redundant child-of-owner request is
-accepted, because capability hooks may pass the parent explicitly. The binding
-policy is recorded in
+accepted, because capability hooks may pass the parent explicitly.
+
+The work-tree owner is identity-sensitive. Infer it only when a candidate owner
+resolves to a known instance and `realpath(instanceHome/work)` equals
+`realpath(workDir)`. Path shape alone is not proof; legitimate non-instance
+integration work trees need explicit ownership (`--parent`). The binding policy
+is recorded in
 [attached-spawns-child-of-work-owner](/decisions/attached-spawns-child-of-work-owner.md).
 
 # Retirement repair
@@ -57,9 +62,14 @@ This repair is required for parent relation: an ephemeral parent retiring should
 hand anchored instances back to the displaced parent instead of leaving
 `parentInstance` pointing at a missing instance. Because spawn can resolve
 anchors across member repositories, retirement repair must scan every
-`teamAgentRoots` root, not only the retiree's local repo; local-only scopes may
-lack an `agents/` directory, so guard realpath checks. See the broader
-[relation-policy lesson](/lessons/relation-policy-migration-and-retire-splice.md).
+`teamAgentRoots` root, not only the retiree's local repo. A bare lineage value is
+not enough to identify the retiree: resolve it from the referrer's agents root
+using the same local-first, then team-scope precedence spawn uses, and splice
+only when that resolved home realpath-matches the retiree's home. Run the splice
+before deleting the retiree home, or this proof is impossible. Local-only scopes
+may lack an `agents/` directory, so guard realpath checks. See the broader
+[relation-policy lesson](/lessons/relation-policy-migration-and-retire-splice.md)
+and [identity lesson](/lessons/names-are-not-identity.md).
 
 # Validation boundary
 

@@ -1,6 +1,10 @@
 # Knowledge Log
 
 ## 2026-07-25
+* **Creation**: [names-are-not-identity](/lessons/names-are-not-identity.md) records that bare instance names and path-shaped work owners must resolve to canonical homes before relation repair or attached-owner inference acts.
+* **Update**: [spawn-relations-lineage-fields](/architecture/spawn-relations-lineage-fields.md) clarifies retire splice proof: resolve lineage names from each referrer's context and realpath-match before relinking.
+* **Update**: [spawn-lineage-explicit-only](/decisions/spawn-lineage-explicit-only.md) records that attached work owner fallback is canonical only when an instance's work realpath matches the workDir; non-instance trees need explicit parent.
+* **Update**: [attached-spawns-child-of-work-owner](/decisions/attached-spawns-child-of-work-owner.md) clarifies that attached ownership is verified, not inferred lexically from `<name>/work`.
 * **Creation**: [attached-spawns-child-of-work-owner](/decisions/attached-spawns-child-of-work-owner.md) records the human decision that attached work mode always makes the attached agent a child of the work-tree owner and rejects contradictory relation flags.
 * **Update**: [spawn-lineage-explicit-only](/decisions/spawn-lineage-explicit-only.md) clarifies that attached-mode parentage is a binding lineage source, not a negatable fallback.
 * **Update**: [spawn-relations-lineage-fields](/architecture/spawn-relations-lineage-fields.md) records attached-mode relation rejection and complete cross-type, team-wide retirement splice rules.

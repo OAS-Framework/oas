@@ -16,8 +16,11 @@ order:
 1. `o.parent` (CLI `--parent <instance>`, validated to exist inside the target
    deployment's local root or team scope before scaffolding). In attached work
    mode this is valid only when it redundantly names the work-tree owner.
-2. Attached-mode binding: owner of the shared work tree (the `workDir`'s
-   `<home>/work` parent dir name). Attached service agents genuinely nest.
+2. Attached-mode binding: a verified owner of the shared work tree. Infer this
+   only when a candidate instance resolves and `realpath(instanceHome/work) ===
+   realpath(workDir)`; path shape alone is not identity. Legitimate non-instance
+   work trees must pass an explicit parent. Attached service agents genuinely
+   nest.
 3. Otherwise: operator origin, top-level.
 
 Attached mode is a binding lineage source, not a negatable default: relation
