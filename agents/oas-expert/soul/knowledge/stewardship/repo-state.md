@@ -79,12 +79,21 @@ than letting the file grow stale.
 
 ## In flight
 
-- (nothing in flight) — v0.18.3 released; PR #27 and bump PR #28 merged, both
-  remote branches deleted. The corrected-installer release contract is satisfied.
+- **PR #29 RETURNED at `fb1f1bc` (2026-07-25)** — Desktop UX fixes (spawn
+  probe retry; Shift+Enter/copyable transcript; repo→family roster + Instances
+  stage; workspace tab restore). Direction/security and branch-local full gate
+  pass. Fix required: the promised per-workspace roster sort currently uses one
+  global localStorage key; add workspace-scoped restore/switch coverage. Branch
+  also must merge current main (10 main-only v0.18.3 signing/release commits at
+  verdict) and return with exact-head PR + installer checks green. Owner:
+  dev-coordinator-parallel-2; maintainer oas-expert-pr29 remains alive.
 
 ## Recent deliveries
 
 - (record PR #, one-line scope, verdict, merge/close date)
+- PR #29 Desktop UX fixes: RETURNED 2026-07-25 at `fb1f1bc` for global-vs-
+  per-workspace roster sort persistence and branch staleness; re-review pending
+  (see delivery-log).
 - PR #28 release: v0.18.3 manifest bump (manual bump-PR rescue for the release
   run's org-policy-blocked create step): MERGED 2026-07-25 (`9a6eae8`).
 - PR #27 corrected macOS installers (complete ad-hoc signatures + strict

@@ -24,6 +24,22 @@ decisions/ and referenced from here.
 
 ---
 
+## PR #29 (round 1) — Desktop UX fixes: spawn/chat/roster/workspace tabs (2026-07-25)
+- verdict: RETURNED at exact head `fb1f1bc`. Direction and security PASS;
+  clean scratch full gate PASS (359 tests pass, one intentional node-pty ABI
+  skip; check/validate/pack; Desktop soul OKF strict 71/0/0). Correctness FAIL:
+  the PR promises per-workspace roster sort persistence, but
+  `views/instances.mjs` reads/writes one global `oas.desktop.rosterSort` key,
+  so A's choice leaks into B; asked for canonical-workspace scoping and an
+  A→B→A regression. Mergeability FAIL: branch was 10 commits behind current
+  main (`e1ea91c` vs merge-base `f453b3e`), including v0.18.3 Desktop signing/
+  packaging changes; author must merge main and return a green combined head.
+- owner: dev-coordinator-parallel-2 · coordinator: dev-coordinator-parallel-2
+- taught us: persistence described as “per workspace” needs a cross-workspace
+  switching regression; a one-workspace localStorage test can pass while the
+  preference silently leaks across workspace identity. Release version remains
+  a release-time choice, not a feature-PR bump.
+
 ## PR #27 — publish valid ad-hoc-signed macOS installers (2026-07-25)
 - verdict: MERGED as merge commit `921f44a` — exact head `77b7ae4`. Corrected
   the v0.18.2 macOS installer defect (arm64 shipped an incomplete
