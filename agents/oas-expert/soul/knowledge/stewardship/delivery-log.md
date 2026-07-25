@@ -24,6 +24,24 @@ decisions/ and referenced from here.
 
 ---
 
+## PR #29 (round 3) — Desktop UX fixes final merge (2026-07-25)
+- verdict: MERGED as merge commit `b7203eb` at exact head `9736852`. All four
+  gates PASS. The final branch contains current main `5aa596f`, preserves both
+  PR #29 UX and PR #30 corrected-installer knowledge histories, is API-clean/
+  mergeable, and passes Desktop OKF strict (74/0/0). Exact-head GitHub checks
+  all SUCCESS: Node 22 test/validate/pack/smoke plus macOS arm64, macOS x64,
+  and Ubuntu x64 installer legs. Round-2 scratch correctness gate already
+  passed 379 tests + one intentional node-pty ABI skip, check/validate/pack.
+  Approval recorded as a PR comment (shared GitHub account); merged with the
+  expected-head guard; remote feature branch deleted.
+- owner: dev-coordinator-parallel-2 · coordinator: dev-coordinator-parallel-2
+- taught us: the final workspace-sort contract needs identity at both storage
+  and transition boundaries — key preferences by canonical workspace ID and
+  resync on explicit switch plus silent server adoption. Parallel same-soul
+  harvests require an append-only log union immediately before final handoff.
+  Release version is intentionally selected at the next coordinated release,
+  not bumped in this feature PR.
+
 ## PR #29 (round 2) — Desktop UX fixes re-review (2026-07-25)
 - verdict: RETURNED at exact head `23e3c71` for mergeability only. The round-1
   correctness ask is fully fixed by `9c7c5c6`: sort persistence is a

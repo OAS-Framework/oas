@@ -15,6 +15,15 @@ than letting the file grow stale.
 
 ## On main
 
+- **PR #29 merged 2026-07-25 as `b7203eb`** — Desktop UX fixes: spawn view
+  retries an unsettled CLI probe with truthful pending UI; Shift+Enter inserts
+  a newline and transcripts are copyable without Linux/Windows Ctrl-chord
+  regressions; Instances is a first-class nav/palette stage with repo→family
+  grouping, collapsible headers, and workspace-scoped sorting; active terminal
+  tabs restore per workspace. Final exact head `9736852`; all PR and three-leg
+  installer checks green. Release version intentionally deferred to the next
+  coordinated release cut.
+
 - **PR #30 merged 2026-07-25 as `935d142`**: post-v0.18.3 knowledge-only
   harvest from cli-dev and oas-desktop-engineer. Promotes the corrected macOS
   installer signing/release lessons, strict codesign gate structure, release
@@ -85,24 +94,17 @@ than letting the file grow stale.
 
 ## In flight
 
-- **PR #29 ROUND-2 RETURN at `23e3c71` (2026-07-25)** — Desktop UX fixes
-  (spawn probe retry; Shift+Enter/copyable transcript; repo→family roster +
-  Instances stage; workspace tab restore). The workspace-scoped sort finding is
-  resolved and fresh full gate passes (379 pass, one ABI skip; check/validate/
-  pack; Desktop OKF strict). Mergeability alone fails: PR #30 advanced main and
-  GitHub reports CONFLICTING in the Desktop soul's append-only knowledge log.
-  Owner must merge latest main, union both log histories, and return an exact
-  head with PR + installer checks green. Owner: dev-coordinator-parallel-2;
-  maintainer oas-expert-pr29 remains alive.
+- (nothing currently recorded) — PR #29 reached terminal MERGED outcome; its
+  remote feature branch is deleted.
 
 ## Recent deliveries
 
 - (record PR #, one-line scope, verdict, merge/close date)
 - PR #30 post-v0.18.3 cli-dev/Desktop knowledge and skill harvest: MERGED
   2026-07-25 (`935d142`); strict OKF passed all 8 bundles (see delivery-log).
-- PR #29 Desktop UX fixes: ROUND-2 RETURNED 2026-07-25 at `23e3c71`;
-  correctness is fixed/full gate green, but PR #30 made the branch conflicting
-  in Desktop knowledge/log; re-review pending (see delivery-log).
+- PR #29 Desktop UX fixes: MERGED 2026-07-25 as `b7203eb` after one
+  correctness+staleness RETURN and one mergeability-only RETURN; release cut
+  remains coordinated/deferred (see delivery-log).
 - PR #28 release: v0.18.3 manifest bump (manual bump-PR rescue for the release
   run's org-policy-blocked create step): MERGED 2026-07-25 (`9a6eae8`).
 - PR #27 corrected macOS installers (complete ad-hoc signatures + strict
