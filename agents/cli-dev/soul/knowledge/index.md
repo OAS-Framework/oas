@@ -40,7 +40,7 @@ read what the current task needs, not everything.
 ## Playbooks
 
 * [playbooks/release-tag-driven-ci.md](playbooks/release-tag-driven-ci.md) - Releases are cut by pushing a vX.Y.Z tag on main which makes CI bump and publish packages; local version bumps break the workflow, retries must skip already-published artifacts, and verification means installing the published artifact.
-* [playbooks/test-conventions.md](playbooks/test-conventions.md) - test/capabilities.test.mjs house style: temp dirs, fixtureSoul, fakeRuntimes, spawnSync of the CLI.
+* [playbooks/test-conventions.md](playbooks/test-conventions.md) - Kernel and CLI tests run node:test against temp directories with fixture souls, fake runtime binaries on PATH, spawnSync of bin/oas.mjs for CLI behavior, and regression coverage at the layer where bugs occurred.
 
 ## References
 
