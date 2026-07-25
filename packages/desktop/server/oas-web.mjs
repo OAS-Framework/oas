@@ -105,25 +105,35 @@ function panelData(wsId) {
     team: ws?.team || null,
     generatedAt: new Date().toISOString(),
     running: instances.filter((i) => i.running).length,
-    instances: instances.map((i) => ({
-      instance: i.instance, agent: i.agent, description: i.description,
-      repo: i.repo, work: i.work, branch: i.branch || null, runtime: i.runtime || "pi",
-      model: i.model || null, running: i.running, createdAt: i.createdAt,
-      home: i.home, agentsRoot: i.agentsRoot,
-      workspace: dirname(i.agentsRoot), repoName: (i.repo || dirname(i.agentsRoot)).split("/").pop(),
-      parentInstance: i.parentInstance || null,
-      // Agent relations (kernel contract, final): siblingInstance links a
-      // declared sibling to a ROOT anchor; relation/relativeTo record what
-      // was declared at spawn. Forwarded for cluster grouping and the
-      // cluster-first overview (ux-designer reads /api/panel).
-      siblingInstance: i.siblingInstance || null,
-      relation: i.relation || null,
-      relativeTo: i.relativeTo || null,
-      tmux: i.tmux, git: i.git, task: i.task, next: i.next,
-      team: i.team || null,
-    })),
+    instances: instances.map(projectPanelInstance),
   };
 }
+
+/* OASWEB_PANELPROJ_BEGIN — the /api/panel per-instance contract projection.
+   Extracted by test/desktop-server.test.mjs and packages/desktop tests via
+   block markers so a dropped/typo'd field fails a real assertion (review
+   2092e0f): the renderer's cluster grouping and ux-designer's overview
+   consume exactly these fields. */
+function projectPanelInstance(i) {
+  return {
+    instance: i.instance, agent: i.agent, description: i.description,
+    repo: i.repo, work: i.work, branch: i.branch || null, runtime: i.runtime || "pi",
+    model: i.model || null, running: i.running, createdAt: i.createdAt,
+    home: i.home, agentsRoot: i.agentsRoot,
+    workspace: dirname(i.agentsRoot), repoName: (i.repo || dirname(i.agentsRoot)).split("/").pop(),
+    parentInstance: i.parentInstance || null,
+    // Agent relations (kernel contract, final): siblingInstance links a
+    // declared sibling to a ROOT anchor; relation/relativeTo record what
+    // was declared at spawn. Forwarded for cluster grouping and the
+    // cluster-first overview (ux-designer reads /api/panel).
+    siblingInstance: i.siblingInstance || null,
+    relation: i.relation || null,
+    relativeTo: i.relativeTo || null,
+    tmux: i.tmux, git: i.git, task: i.task, next: i.next,
+    team: i.team || null,
+  };
+}
+/* OASWEB_PANELPROJ_END */
 
 /** Available agents (souls) of a workspace — what `oas spawn <agent>` could
  * start. Same read-only seams as the reader: listAgents per agents root, plus

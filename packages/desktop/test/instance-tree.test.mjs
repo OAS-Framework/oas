@@ -156,7 +156,7 @@ test("clusterInstances: connected components over parent + sibling links; unrela
   assert.deepEqual(coord.map((i) => i.depth), [0, 1, 2, 1]);
   const peers = clusters.find((c) => byKey.get(c.key).includes("peer-2")).instances;
   assert.ok(peers.every((i) => i.depth === 0), "sibling-linked peers sit at depth 0");
-  // link extractor reads defensive sibling shapes
+  // link extractor reads the canonical contract: parentInstance + siblingInstance
   assert.deepEqual(instanceLinks({ instance: "x", parentInstance: "p", siblingInstance: "s" }), ["p", "s"]);
   assert.deepEqual(instanceLinks({ instance: "x", siblingInstance: "x" }), [], "self links dropped");
   assert.deepEqual(instanceLinks({ instance: "x", siblingInstance: "" }), [], "empty links dropped");
