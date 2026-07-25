@@ -16,13 +16,22 @@ than letting the file grow stale.
 
 ## On main
 
-- PR #19 merged 2026-07-24 as `9b39ee7`: OAS Desktop 0.1.0 private
-  package now owns the panel backend; oas.web, `oas pane`, and the public
-  control-pane export are retired with deterministic migration diagnostics.
-  Explicit spawn lineage/task delivery landed with traversal-safe shared
-  instance lookup (name syntax + realpath immediate-child containment).
-  Desktop release is still blocked on installer distribution and replacing
-  adjacent-core mutations with compatible installed-CLI JSON calls.
+- **RELEASED v0.18.2 (2026-07-25)** — first public OAS Desktop release.
+  Tag `v0.18.2` on merge commit `7cc3b5b`. Published: `@oas-framework/oas@0.18.2`
+  + `@oas-framework/pi@0.18.2` (npm latest), and GitHub Release v0.18.2 with all
+  Desktop installers (mac arm64/x64 DMG+ZIP, linux x64 AppImage+DEB), SHA256SUMS
+  + build provenance (UNSIGNED/not notarized — no signing secrets). desktopApi:1
+  contract verified on the PUBLISHED artifact. Source manifests bumped to 0.18.2
+  (root/pi/desktop) via manually-rescued bump PR #24. Delivered by PR #21 (the
+  Electron app + legacy-panel succession, merged `0961175`) + PR #22 (Linux
+  executableName release-blocker fix, merged `7cc3b5b`). Superseded the failed
+  `v0.18.1` cut (Linux desktop-build failed, nothing published; tag deleted).
+
+- PR #19 merged 2026-07-24 as `9b39ee7`: OAS Desktop private package took over
+  the panel backend; oas.web, `oas pane`, and the public control-pane export
+  retired with migration diagnostics; explicit spawn lineage/task delivery +
+  traversal-safe shared instance lookup. (Its "release still blocked on installer
+  distribution" caveat is now RESOLVED by v0.18.2.)
 
 - 2026-07-23 reviewer-deaths incident fixes (direct commits, incident
   response): b3eeed0 — retireInstance tmux kill-window targets `=`-anchored
@@ -35,23 +44,26 @@ than letting the file grow stale.
 - Earlier oas.web and Control Pane deliveries remain in the delivery log and
   donor-soul knowledge as migration history; their product surfaces are no
   longer present on main.
-- Framework source remains 0.17.6 pending a breaking successor release;
-  private Desktop is 0.1.0. Capabilities at: oas.review 1.1.6, oas.okf 1.3.1,
-  oas.aweb 1.5.1, oas.jira 1.0.0. Published artifacts remain on the prior
-  release until the desktop distribution gate is satisfied.
+- Framework source is now **0.18.2** on npm (root/pi) with the first public
+  Desktop installers on GitHub Release v0.18.2. Capabilities at: oas.review
+  1.1.6, oas.okf **1.4.0**, oas.aweb 1.5.1, oas.jira 1.0.0. (Superseded the
+  earlier "source remains 0.17.6 / published artifacts predate the desktop
+  gate" state.)
 
 ## In flight
 
-- `feature/desktop-dist` was cut at a154f0e on 2026-07-24. cli-dev-desktop-dist-2
-  owns the CLI/version/npm slice on `cli-dev/desktop-dist`;
-  oas-desktop-engineer-desktop-dist owns installers, app integration, pruning,
-  and parity on `oas-desktop-engineer/desktop-dist`. The frozen target is one
-  public `v0.18.0` tag publishing root/pi npm plus macOS arm64+x64 and Linux x64
-  Desktop assets. Binding gates are in the [public release contract](/decisions/desktop-public-release-contract.md).
+- (nothing in flight) — `feature/desktop-dist` merged (PR #21) and the
+  `oas-desktop-engineer/linux-executablename` fix branch merged (PR #22); both
+  remote branches deleted. The v0.18.2 release contract is satisfied.
 
 ## Recent deliveries
 
 - (record PR #, one-line scope, verdict, merge/close date)
+- PR #22 Linux executableName release-blocker fix + re-cut v0.18.2: MERGED
+  2026-07-25 (`7cc3b5b`); drove the successful v0.18.2 publish (see delivery-log).
+- PR #21 OAS Desktop standalone Electron app + legacy-panel succession: MERGED
+  2026-07-24 (`0961175`); its `v0.18.1` release cut failed on the Linux build
+  (nothing published), re-cut as v0.18.2 via PR #22 (see delivery-log).
 - PR #19 Desktop ownership cut + legacy panel retirement + explicit spawn
   lineage/traversal hardening: MERGED 2026-07-24 after two RETURNs (see
   delivery-log).
@@ -94,11 +106,18 @@ than letting the file grow stale.
   merge main, `npm test` run from THOSE roots can still prefix-kill live
   reviewer-* windows (owners notified via tui-dev thread).
 
-- Org-level GitHub Actions policy blocks CI bump-PRs — manual rescue each
-  release until an org admin relaxes it.
-- Published artifacts still predate PR #19. Do not tag the breaking successor
-  merely to close capability-version drift: desktop installers and the
-  installed-CLI/no-CLI boundary are mandatory release prerequisites.
+- CI bump-PR step fails every release and needs manual rescue. Two distinct
+  causes seen: (a) the known org-level GitHub Actions policy blocking
+  Actions-created PRs; (b) at v0.18.2, the step failed even earlier on an
+  ambiguous `git push origin HEAD:release-bump/vX.Y.Z` refspec — once the tag
+  `vX.Y.Z` exists, the partial destination can't resolve to a branch. Proposed
+  fix to the human: qualify the push as `HEAD:refs/heads/release-bump/vX.Y.Z`
+  in release.yml. Rescue procedure (bump root/pi/desktop manifests+locks, push
+  a proper branch ref, open + squash-merge the `release: vX.Y.Z` PR) is in the
+  git-tag-release skill; publish is already done by this step, so never retag.
+- Published artifacts are now v0.18.2 (RESOLVED — was "predate PR #19"). The
+  desktop installers + installed-CLI/no-CLI boundary that were mandatory
+  release prerequisites are shipped.
 - webpanel-dev instance worktrees still hold deleted branches locally
   (webpanel-dev-1: feature/panel-refinements, fix/panel-key-routing,
   perf/fast-attach, debug/typing-live; webpanel-dev-spawn-from-panel:

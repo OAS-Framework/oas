@@ -24,6 +24,62 @@ decisions/ and referenced from here.
 
 ---
 
+## PR #22 — Linux executableName release-blocker fix + re-cut v0.18.2 (2026-07-25)
+- verdict: MERGED as merge commit `7cc3b5b` — all four gates PASS at head
+  `1a95e7e`. Fix VERIFIED on REAL green installer builds (build-installers
+  run 30153115337, all 3 legs): ubuntu x64 AppImage(124MB)+DEB(96MB)
+  built+smoke-verified, macos-14 arm64 DMG+ZIP, macos-14 x64 DMG+ZIP under
+  Rosetta. `executableName: "oas-desktop"` (linux-scoped) + DEB
+  `maintainer`/`homepage`. Complete 0.18.1→0.18.2 sweep; compat band
+  unchanged. release.yml: fail-fast:false, macos-13 sunset runner dropped
+  (x64 cross-builds on macos-14 under Rosetta).
+- owner: oas-desktop-engineer-desktop-dist · handoff: oas-maintainer (verified);
+  coordinator: dev-coordinator-1
+- release: tag `v0.18.2` on `7cc3b5b` → run 30153347086 PUBLISHED
+  `@oas-framework/oas@0.18.2` + `@oas-framework/pi@0.18.2` (latest) + GitHub
+  Release v0.18.2 with all 7 assets (mac arm64/x64 DMG+ZIP, linux
+  AppImage+DEB, SHA256SUMS + provenance). desktopApi contract verified on the
+  PUBLISHED artifact: `oas version --json` == `{schemaVersion:1,...,version:"0.18.2",desktopApi:1}`.
+  Manifest bump-PR (#24) manually rescued (CI step failed on an ambiguous
+  `git push HEAD:release-bump/v0.18.2` refspec — tag v0.18.2 exists so the
+  partial ref couldn't resolve; publish was already done). Orphan `v0.18.1`
+  tag deleted post-green (operator OK).
+- taught us: the tag-driven release's Linux/mac installer build can't be
+  rehearsed pre-merge (tag must be on main), so a packaging-config defect
+  (scoped-name AppImage executableName) survives the full local gate and
+  fails only in a real release with nothing published — see
+  [lesson](/lessons/release-ci-linux-build-unrehearsable-pre-merge.md). This
+  PR also SHIPPED the structural gap-closer: a verify-only `build-installers.yml`
+  (PR + workflow_dispatch, contents:read, fail-fast:false, own concurrency)
+  that builds every installer leg on PRs without any publish surface. Also:
+  the CI bump-PR push uses a partial refname (`HEAD:${BRANCH}`) that becomes
+  ambiguous once the same-name tag exists — a real release.yml bug worth
+  fixing to `HEAD:refs/heads/${BRANCH}` (proposed to human).
+
+## PR #21 — OAS Desktop v0.18.x standalone Electron app + legacy-panel succession (2026-07-24/25)
+- verdict: MERGED as merge commit `0961175` — all four gates PASS at head
+  `975a44a`. Direction: matches decisions/desktop-public-release-contract in
+  substance (installer matrix, Desktop CLI API v1, no-CLI observation mode,
+  split ownership, dormant Diff/Jira removal, RETIRED_CAPABILITIES doctor
+  diagnostics). Correctness: 333 pass/1 env-skip; check/validate/okf/pack/
+  tarball-smoke green. Security: loopback+DNS-rebind+CSRF, terminal cap 20 in
+  the owning main process, wx 0o600 task files, argv allowlist (execFile, no
+  shell), realpath TOCTOU-hardened file-root guard, no kernel imports —
+  strengthened, not weakened. Mergeability: CLEAN, 5 conflicts author-resolved,
+  okf lock sha256-45c0… == oas.okf 1.4.0.
+- owner: oas-desktop-engineer + cli-dev (multi-dev) · coordinator: dev-coordinator-1
+- release fallout: the initial `v0.18.1` cut (0.18.0 already npm-published via
+  #20 with no Desktop/desktopApi; idempotent skip-guard would skip a re-tag)
+  FAILED at the Linux desktop-build — nothing published. Superseded by the
+  operator-chosen `v0.18.2` re-cut (PR #22).
+- taught us: independently verify the version-cut rationale against npm +
+  GitHub Releases state, not just the coordinator's narrative — 0.18.0 was
+  npm-only (no Release/installers), which is exactly why a fresh version was
+  needed. A green PR gate + sound-looking release.yml is NOT proof the release
+  publishes (see PR #22).
+
+---
+
 ## PR #19 (round 3) — desktop succession + explicit spawn lineage (2026-07-24)
 - verdict: MERGED as `9b39ee7` — all four gates PASS at exact final head
   `daa0b98`. Direction: desktop owns its backend and immediately retires

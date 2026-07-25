@@ -27,6 +27,19 @@ boundary from the [standalone CLI decision](/decisions/standalone-cli.md).
 
 # Release identity and ordering
 
+> **Amendment (2026-07-25):** the version identity in this contract (`v0.18.0`)
+> was overtaken by events. `v0.18.0` was published to npm as a version-only bump
+> (PR #20) WITHOUT the Desktop installers or the desktopApi CLI, and its release
+> runs failed before any GitHub Release. Because the release workflow's npm
+> publish is idempotent (skips an already-live version), re-tagging `0.18.0`
+> could never ship the desktopApi CLI. The first FULL public release therefore
+> shipped as **`v0.18.2`** (2026-07-25): `v0.18.1` was cut first but its Linux
+> desktop-build failed (nothing published), and the operator chose a fresh
+> `v0.18.2` re-cut rather than a retag. Everything below stands with `0.18.0`
+> read as `0.18.2`; the compat band `>=0.18.0 <0.19.0` is unchanged and admits
+> it. See delivery-log PR #21/#22 and
+> [lesson](/lessons/release-ci-linux-build-unrehearsable-pre-merge.md).
+
 The first public release is **`v0.18.0`**. One tag on one exact main commit
 produces three version-identical products:
 
