@@ -337,3 +337,17 @@ test("instanceId: home wins, agentsRoot+name fallback, bare name last", async ()
   assert.equal(instanceId({ instance: "a", agentsRoot: "/r" }), "/r\u0000a");
   assert.equal(instanceId({ instance: "a" }), "a");
 });
+
+test("resolveLinkId (shared resolver contract): same-root first, unique cross-root, ambiguous → null", async () => {
+  const { resolveLinkId, instanceId } = await import("../renderer/instance-tree.mjs");
+  const a1 = { instance: "x", agentsRoot: "/a/agents", home: "/a/x" };
+  const b1 = { instance: "x", agentsRoot: "/b/agents", home: "/b/x" };
+  const u = { instance: "uniq", agentsRoot: "/b/agents", home: "/b/u" };
+  const byName = new Map([["x", [a1, b1]], ["uniq", [u]]]);
+  const from = { instance: "child", agentsRoot: "/a/agents", home: "/a/c" };
+  assert.equal(resolveLinkId(from, "x", byName), instanceId(a1), "same-root candidate wins over the foreign twin");
+  assert.equal(resolveLinkId(from, "uniq", byName), instanceId(u), "globally-unique name resolves cross-root");
+  const foreign = { instance: "far", agentsRoot: "/c/agents", home: "/c/f" };
+  assert.equal(resolveLinkId(foreign, "x", byName), null, "ambiguous with no same-root candidate → null (fail safe)");
+  assert.equal(resolveLinkId(from, "ghost", byName), null, "unknown name → null");
+});

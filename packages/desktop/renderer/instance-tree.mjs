@@ -32,8 +32,11 @@ export function instanceId(instance) {
  * one deployment scope — so a name resolves to the same-agentsRoot instance
  * first; a name that is globally unique resolves cross-root; an AMBIGUOUS
  * name with no same-root candidate resolves to nothing (fail safe: two
- * separate clusters, never a wrong merge or a hidden node). */
-function resolveLinkId(fromInstance, name, byName) {
+ * separate clusters, never a wrong merge or a hidden node).
+ * EXPORTED as the one shared resolver — ux-designer's hierarchy/cluster
+ * maps must use the same semantics rather than re-implementing them.
+ * byName: Map<name, instance[]> over the same roster. */
+export function resolveLinkId(fromInstance, name, byName) {
   const candidates = byName.get(name);
   if (!candidates || !candidates.length) return null;
   if (candidates.length === 1) return instanceId(candidates[0]);
