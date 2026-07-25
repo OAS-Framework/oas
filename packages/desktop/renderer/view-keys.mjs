@@ -9,6 +9,27 @@
    action's explicit binding on the same key. */
 import { getBinding, parseChord, chordFromEvent } from "./keybindings.mjs";
 
+/** True when a keydown target is an editable control (typing surface). */
+export function isEditableTarget(target) {
+  if (!target) return false;
+  const tag = target.tagName;
+  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target.isContentEditable === true;
+}
+
+/** Guard for the shell's window-level engine dispatch: unmodified chords
+ * (bare keys, or shift-only — both produce text) must never fire from
+ * editable controls; a user-recorded bare-key binding would otherwise steal
+ * typed characters (e.g. rebinding a stage switch to "a" discarding an open
+ * spawn form). Modifier-based shortcuts still pass. The engine itself will
+ * gain this guard via the approved contract addendum; the shell guard keeps
+ * the invariant regardless. */
+export function allowsEngineDispatch(e, { isMac = /mac/i.test(navigator.platform || "") } = {}) {
+  if (!isEditableTarget(e.target)) return true;
+  const c = chordFromEvent(e, isMac);
+  if (!c) return true; // pure-modifier keydown — nothing to dispatch anyway
+  return !!(c.mod || c.ctrl || c.alt);
+}
+
 function chordsEqual(a, b, isMac) {
   if (!a || !b || a.key !== b.key || a.alt !== b.alt || a.shift !== b.shift) return false;
   if (isMac) return a.mod === b.mod && a.ctrl === b.ctrl;

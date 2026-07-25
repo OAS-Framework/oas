@@ -17,6 +17,7 @@ import {
 } from "./keybindings.mjs";
 import { createKeybindingsEditor } from "./keybindings-editor.mjs";
 import { rosterKeyAction, moveTarget } from "./roster-keys.mjs";
+import { allowsEngineDispatch } from "./view-keys.mjs";
 import { createViewLifecycle } from "./view-lifecycle.mjs";
 import { reserveKey, whenKeyFree } from "./tab-keys.mjs";
 import { createTerminalTab, terminalOptions } from "./terminal-tab.mjs";
@@ -745,8 +746,12 @@ registerAction({ id: "tabs.close", label: "Close the active tab", context: "tabs
 // opens the palette inside xterm there, superseding the legacy
 // isPaletteShortcut pass-through). View-local handlers (hierarchy canvas,
 // roster rows, palette input) preventDefault the keys they consume; the
-// engine must not double-dispatch them.
-window.addEventListener("keydown", (e) => { if (!e.defaultPrevented) handleKeydown(e); });
+// engine must not double-dispatch them. Unmodified bindings never fire from
+// editable controls (allowsEngineDispatch) — a user-recorded bare-key chord
+// must not steal typed characters.
+window.addEventListener("keydown", (e) => {
+  if (!e.defaultPrevented && allowsEngineDispatch(e)) handleKeydown(e);
+});
 
 // rail-footer: Shortcuts button next to Theme
 {

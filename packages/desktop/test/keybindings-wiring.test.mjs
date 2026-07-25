@@ -15,7 +15,8 @@ test("shell installs exactly one window keydown listener: the engine's handleKey
   const src = read("renderer/shell.mjs");
   const listeners = [...src.matchAll(/window\.addEventListener\("keydown"/g)];
   assert.equal(listeners.length, 1, "ONE window keydown listener (contract)");
-  assert.match(src, /window\.addEventListener\("keydown", \(e\) => \{ if \(!e\.defaultPrevented\) handleKeydown\(e\); \}\)/);
+  assert.match(src, /window\.addEventListener\("keydown", \(e\) => \{\n  if \(!e\.defaultPrevented && allowsEngineDispatch\(e\)\) handleKeydown\(e\);\n\}\)/,
+    "engine dispatch is guarded by defaultPrevented + the editable-target policy");
   assert.ok(!/isPaletteShortcut\(/.test(src), "ad-hoc palette shortcut check replaced by the engine");
 });
 
