@@ -27,8 +27,10 @@ single physical press. Returning `false` only for `keydown` still leaves xterm's
 through `coreService.triggerDataEvent`. The result is `\n` immediately followed
 by `\r`: the newline appears and the message submits anyway.
 
-The classifier lives as `shiftEnterByte(ev)` in
-`packages/desktop/renderer/terminal-tab.mjs`, and the handler is installed inside
+The classifier lives as `shiftEnterAction(ev)` in
+`packages/desktop/renderer/terminal-tab.mjs`, returning `{ suppress, byte }` —
+`suppress` is true for every event of the chord and `byte` is `"\n"` only on
+`keydown` — and the handler is installed inside
 `onReady` per the terminal lifecycle contract. Tests should cover both the pure classifier and the wired handler: suppression
 for all event types, pty write only on keydown, and no write after the terminal
 closes. JSDOM-only tests cannot prove this leak because the extra submit comes

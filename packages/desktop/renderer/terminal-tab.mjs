@@ -62,8 +62,9 @@ export function shiftEnterAction(ev) {
    running with `mouse on` (wheel scrollback — tmux-target.mjs), so tmux
    grabs the mouse and a plain drag never creates an xterm selection — copy
    looked broken (v0.18.4 field report). xterm's escape hatch is a modifier-
-   forced LOCAL selection: Shift+drag everywhere, plus Option+drag on macOS,
-   which is OFF by default and must be opted into. */
+   forced LOCAL selection, and it is platform-split (shouldForceSelection):
+   Option+drag on macOS — only when this option is on (default off) — and
+   Shift+drag on non-mac platforms. */
 export function terminalOptions({ fontSize, fontFamily, theme }) {
   return {
     fontSize,
