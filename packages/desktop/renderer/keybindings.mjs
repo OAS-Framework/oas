@@ -127,6 +127,15 @@ function defaultIsMac() {
   } catch { return false; }
 }
 
+/** True when the event target is a real editable control — plain-key chords
+ * must not steal typing (mirrors the panel's logical key-routing lesson). */
+function isEditableTarget(target) {
+  if (!target) return false;
+  const tag = String(target.tagName || "").toUpperCase();
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
+  return !!target.isContentEditable;
+}
+
 // ---------------------------------------------------------------- defaults
 
 export const DEFAULT_KEYMAP = Object.freeze({
@@ -288,10 +297,19 @@ function resolveForCompare(chord, isMac) {
 /** Match a keydown to an eligible action id, or null. Honors context scoping
  * and the terminal policy. `opts` is for tests: { isMac, insideTerminal }. */
 export function matchEvent(e, opts = {}) {
+  // A consumed event stays consumed: view-local handlers (hierarchy canvas,
+  // roster rows, palette input) preventDefault what they own — the engine
+  // must never double-dispatch it (contract addendum a).
+  if (e.defaultPrevented) return null;
   const isMac = opts.isMac ?? defaultIsMac();
   const insideTerminal = opts.insideTerminal ?? !!e.target?.closest?.(".xterm");
   const evChord = chordFromEvent(e, isMac);
   if (!evChord) return null;
+  // Unmodified (or shift-only) chords belong to editable fields when one has
+  // focus — a plain "b" binding must not fire while typing (addendum b).
+  const editable = opts.editableTarget ?? isEditableTarget(e.target);
+  const plainKey = !evChord.mod && !evChord.ctrl && !evChord.alt;
+  if (plainKey && editable) return null;
 
   let globalHit = null;
   let contextHit = null;

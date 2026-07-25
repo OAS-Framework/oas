@@ -232,6 +232,42 @@ test("unbound actions never match; rebinding is honored by dispatch", (t) => {
   assert.equal(matchEvent(ev("p", { metaKey: true, shiftKey: true }), { isMac: true, insideTerminal: false }), "app.palette");
 });
 
+test("matchEvent ignores events already consumed via preventDefault", (t) => {
+  withActions(t, [{ id: "app.palette", label: "Palette", context: "global", run: () => {} }]);
+  const e = ev("k", { metaKey: true });
+  e.preventDefault();
+  assert.equal(matchEvent(e, { isMac: true, insideTerminal: false }), null,
+    "a defaultPrevented event must never dispatch");
+  assert.equal(handleKeydown(ev("k", { metaKey: true, defaultPrevented: true }), { isMac: true, insideTerminal: false }), false);
+  // and the unconsumed event still works
+  assert.equal(matchEvent(ev("k", { metaKey: true }), { isMac: true, insideTerminal: false }), "app.palette");
+});
+
+test("unmodified chords do not fire from editable fields; modified chords do", (t) => {
+  withActions(t, [
+    { id: "hier.filter", label: "Filter", context: "stage:hierarchy", run: () => {} },
+    { id: "app.palette", label: "Palette", context: "global", run: () => {} },
+  ]);
+  setActiveContexts(new Set(["stage:hierarchy"]));
+  setBinding("hier.filter", "F");
+  const opts = (editableTarget) => ({ isMac: true, insideTerminal: false, editableTarget });
+  // plain key: fires outside editables, not inside
+  assert.equal(matchEvent(ev("f"), opts(false)), "hier.filter");
+  assert.equal(matchEvent(ev("f"), opts(true)), null, "plain chord must not steal typing");
+  // shift-only counts as unmodified (typing produces shifted chars)
+  setBinding("hier.filter", "Shift+F");
+  assert.equal(matchEvent(ev("f", { shiftKey: true }), opts(true)), null);
+  assert.equal(matchEvent(ev("f", { shiftKey: true }), opts(false)), "hier.filter");
+  // modified chords still fire from editable fields
+  assert.equal(matchEvent(ev("k", { metaKey: true }), opts(true)), "app.palette");
+  // default editable detection from e.target (tagName / contentEditable)
+  setBinding("hier.filter", "F");
+  assert.equal(matchEvent({ ...ev("f"), target: { tagName: "INPUT" } }, { isMac: true, insideTerminal: false }), null);
+  assert.equal(matchEvent({ ...ev("f"), target: { tagName: "TEXTAREA" } }, { isMac: true, insideTerminal: false }), null);
+  assert.equal(matchEvent({ ...ev("f"), target: { tagName: "DIV", isContentEditable: true } }, { isMac: true, insideTerminal: false }), null);
+  assert.equal(matchEvent({ ...ev("f"), target: { tagName: "DIV" } }, { isMac: true, insideTerminal: false }), "hier.filter");
+});
+
 // ---------------------------------------------------------------- conflicts
 
 test("findConflict: same context and global<->context collisions, exclusion", (t) => {

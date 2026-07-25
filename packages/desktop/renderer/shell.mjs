@@ -731,7 +731,8 @@ registerAction({ id: "tabs.close", label: "Close the active tab", context: "tabs
 // isPaletteShortcut pass-through). View-local handlers (hierarchy canvas,
 // roster rows, palette input) preventDefault the keys they consume; the
 // engine must not double-dispatch them.
-window.addEventListener("keydown", (e) => { if (!e.defaultPrevented) handleKeydown(e); });
+// The engine skips already-consumed (defaultPrevented) events itself.
+window.addEventListener("keydown", (e) => handleKeydown(e));
 
 // rail-footer: Shortcuts button next to Theme
 {
