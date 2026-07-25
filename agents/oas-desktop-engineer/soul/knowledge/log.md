@@ -1,6 +1,8 @@
 # Knowledge Log
 
 ## 2026-07-25
+* **Creation**: promoted [Dormant compatibility paths in exported resolvers are liabilities, not safety](/lessons/dormant-compat-paths-exported-resolvers.md) from the oas-desktop-engineer-keybindings-wiring notes.
+* **Update**: linked [Dynamic action registrations carry their own default chords](/lessons/dynamic-action-registration-default-chords.md) to the dormant resolver compatibility lesson: legacy fallback gates are temporary migration scaffolding; once production callers no longer pass chord fields, delete the fallback plus registry/context policing instead of preserving a dormant exported path.
 * **Creation**: promoted [First-class view defaults widen window-level dispatch](/lessons/first-class-view-defaults-window-dispatch-surface.md) from the oas-desktop-engineer-keybindings-wiring notes.
 * **Update**: linked [Dynamic action registrations carry their own default chords](/lessons/dynamic-action-registration-default-chords.md) and [View-local shortcuts resolve chords through the engine keymap](/decisions/view-local-shortcuts-engine-keymap.md) to the window-dispatch surface lesson: first-class view defaults require registered `run()` surface guards, and legacy fallbacks must not resurrect explicit-null unbinds.
 * **Creation**: promoted [View-default suppression must use context-aware conflict checks](/lessons/view-default-suppression-context-collision.md) from the oas-desktop-engineer-keybindings-wiring notes.
