@@ -20,7 +20,7 @@ import { createIntentGate, prepareOwnedOpen } from "./open-intent.mjs";
 import { createWorkspaceSwitcher } from "./workspace-switcher.mjs";
 import {
   collapseKey, hasInstanceChildren, instanceRepoLabel, treeGuideSegments, filterInstanceTree, instanceVisibleInTree,
-  captureTreeRenderState, configureDisclosure, rosterResponseOwns, clusterInstances,
+  captureTreeRenderState, configureDisclosure, rosterResponseOwns, clusterInstances, clusterSeparator,
 } from "./instance-tree.mjs";
 import {
   terminalTabsForWorkspace, tabVisibleInContext, canActivateTab,
@@ -210,20 +210,15 @@ function renderContextRoster(instances) {
     return;
   }
   // Sidebar groups by agent CLUSTER (connected relations), not per repo:
-  // the repo is the small label under each instance. Clusters render
-  // ANONYMOUSLY (human requirement — naming may return with a task-layer
-  // integration): multi-member clusters get an unlabelled separator only;
-  // single-node clusters get nothing.
+  // the repo is the small label under each instance. Clusters read purely
+  // from SPACING/STRUCTURE (human re-test: no visible glyph) — multi-member
+  // clusters get an invisible separator that still exposes the group
+  // boundary to AT (role=separator + aria-label); single-node clusters get
+  // nothing.
   for (const cluster of clusterInstances(visible)) {
     const items = cluster.instances;
     if (items.length > 1) {
-      const rh = document.createElement("div");
-      rh.className = "ctx-repo ctx-cluster";
-      rh.textContent = "◎";
-      rh.setAttribute("role", "separator");
-      rh.title = `Agent cluster of ${items.length} related instances`;
-      rh.setAttribute("aria-label", `Agent cluster of ${items.length} related instances`);
-      listEl.append(rh);
+      listEl.append(clusterSeparator(document, items.length));
     }
     {
       for (const i of items) {

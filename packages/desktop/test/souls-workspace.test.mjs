@@ -596,6 +596,9 @@ test("Spawn modal tracks CLI capability LIVE: relations flip disables/enables co
     rel.value = "child";
     rel.dispatchEvent(new dom.window.Event("change"));
     ref.value = "coord-1";
+    ref.dispatchEvent(new dom.window.Event("change"));
+    assert.match(doc.querySelector(".freldesc").textContent, /will spawn as a child of coord-1/,
+      "completed phrase announces the outcome while capable");
     // DOWNGRADE lands while the modal is open (app-focus re-probe)
     await seed(false);
     assert.equal(rel.disabled, false, "select stays usable after downgrade — recovery via 'unrelated'");
@@ -609,6 +612,14 @@ test("Spawn modal tracks CLI capability LIVE: relations flip disables/enables co
     assert.match(note.textContent, /oas >= 0\.18\.3/, "note names the required version");
     assert.equal(doc.querySelector(".ftask").value, "typed task text", "typed fields survive the resync");
     assert.equal(rel.value, "child", "chosen relation value preserved (visible, disabled)");
+    // the completed phrase must NOT keep promising the spawn that submit
+    // will reject (review e9a9281): it flips to an unavailable-state message
+    const desc = doc.querySelector(".freldesc");
+    assert.ok(!/will spawn as/.test(desc.textContent),
+      "outcome promise gone after the downgrade");
+    assert.match(desc.textContent, /unavailable on the installed CLI/,
+      "phrase states unavailability, consistent with the version note");
+    assert.match(desc.textContent, /child of coord-1/, "the preserved choice is still described");
     // submitting the RETAINED related spawn on the downgraded CLI must fail
     // IN THE FORM — no POST, fields preserved (review f35c1dc)
     doc.querySelector(".fspawn").click();
@@ -655,6 +666,69 @@ test("Spawn modal tracks CLI capability LIVE: relations flip disables/enables co
   } finally {
     spawn.unmount();
     await seedCliAvailable(); // restore shared CLI state for later suites
+    common.setWorkspace(previousWs);
+    globalThis.setInterval = oldSetInterval;
+    dom.window.close();
+    if (oldDocument === undefined) delete globalThis.document; else globalThis.document = oldDocument;
+    if (oldWindow === undefined) delete globalThis.window; else globalThis.window = oldWindow;
+  }
+});
+
+test("Spawn modal: relation + instance form ONE grouped fieldset with plain-language phrasing (human round 3)", async () => {
+  const dom = new JSDOM("<!doctype html><html><head></head><body><div id=host></div></body></html>", { url: "http://localhost" });
+  const oldDocument = globalThis.document;
+  const oldWindow = globalThis.window;
+  const oldSetInterval = globalThis.setInterval;
+  globalThis.document = dom.window.document;
+  globalThis.window = dom.window;
+  globalThis.setInterval = () => ({ fake: true });
+  const common = await import("../renderer/views/common.mjs");
+  const spawn = await import("../renderer/views/spawn.mjs");
+  await seedCliAvailable();
+  const previousWs = common.currentWorkspace();
+  const agent = { name: "dev", agentsRoot: "/a", description: "", runtime: "pi", work: "workspace", repo: true, repoName: "r" };
+  const ctx = {
+    api: (pathname, opts = {}) => {
+      if (pathname === "/api/cli" || pathname === "/api/cli/reprobe") return Promise.resolve(CLI_OK);
+      if (opts.method === "POST") return Promise.resolve({ ok: true, status: 200, json: async () => ({ instance: "x" }) });
+      return Promise.resolve({ ok: true, status: 200, json: async () => pathname.startsWith("/api/agents")
+        ? { agents: [agent] }
+        : { instances: [{ instance: "coord-1", running: true }], workspace: { id: "w" }, workspaces: [] } });
+    },
+    openTerminal: () => {},
+  };
+  try {
+    common.setWorkspace("w");
+    spawn.mount(dom.window.document.getElementById("host"), ctx);
+    await tick(); await tick();
+    const doc = dom.window.document;
+    doc.querySelector(".spawn-act").click();
+    // ONE grouped section: fieldset+legend contains BOTH selects
+    const group = doc.querySelector(".spawn-dialog fieldset.frelgroup");
+    assert.ok(group, "relation section is a fieldset");
+    assert.match(group.querySelector("legend").textContent, /Relation to other agents/);
+    assert.ok(group.querySelector(".frelation") && group.querySelector(".frelto"),
+      "relation choice and instance picker live INSIDE the group");
+    const rel = group.querySelector(".frelation"), ref = group.querySelector(".frelto");
+    // plain wording: phrase-style options, no 'reference instance' jargon
+    const labels = [...rel.querySelectorAll("option")].map((o) => o.textContent);
+    assert.ok(labels.some((l) => /Child of/.test(l)), "child option reads as a phrase");
+    assert.ok(!group.textContent.includes("Reference instance"), "jargon label gone");
+    // unrelated: picker naturally disabled within the group, no phrase
+    assert.equal(ref.disabled, true);
+    assert.equal(group.querySelector(".freldesc").textContent, "");
+    // choosing a relation re-labels the picker and prompts; picking completes the phrase
+    rel.value = "child";
+    rel.dispatchEvent(new dom.window.Event("change"));
+    assert.equal(ref.disabled, false);
+    assert.match(ref.getAttribute("aria-label"), /Child of which instance/, "picker accessible name follows the relation");
+    assert.match(group.querySelector(".freldesc").textContent, /Pick the instance this one is a child of/);
+    ref.value = "coord-1";
+    ref.dispatchEvent(new dom.window.Event("change"));
+    assert.match(group.querySelector(".freldesc").textContent, /spawn as a child of coord-1/,
+      "completed choice reads as one plain-language sentence");
+  } finally {
+    spawn.unmount();
     common.setWorkspace(previousWs);
     globalThis.setInterval = oldSetInterval;
     dom.window.close();
