@@ -27,10 +27,12 @@ succeeded.
   with empty stderr means confirmed absent; other failures mean unverifiable.
   For tmux and worktree lists, command failure is unverifiable, never an empty
   list.
-- For `git worktree list --porcelain -z`, capture `realpath(work)` before
-  removal and parse exact NUL-delimited `worktree ` records. Symlinked parent
-  paths may be registered under their canonical path, so substring matching the
-  lexical work path can falsely report absence; see
+- For `git worktree list --porcelain -z`, use the canonical worktree path
+  retained immediately after `git worktree add` and parse exact NUL-delimited
+  `worktree ` records. Symlinked parent paths may be registered under their
+  canonical path, and rollback hooks can remove or make `work/` inaccessible
+  before verification; re-canonicalizing during rollback or substring matching
+  the lexical work path can falsely report absence. See
   [canonical worktree verification](/lessons/canonical-worktree-verification.md).
 
 This sharpens the rollback truthfulness rule in

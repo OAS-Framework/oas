@@ -1,6 +1,9 @@
 # Knowledge Log
 
 ## 2026-07-25
+* **Update**: [canonical-worktree-verification](/lessons/canonical-worktree-verification.md) merges capture-canonical-path-before-hooks: capture the canonical worktree path immediately after `git worktree add`, retain it through hooks and compensation, and fail closed when no retained identity exists.
+* **Update**: [rollback-probes-argv-and-fail-closed](/lessons/rollback-probes-argv-and-fail-closed.md) points worktree rollback probes at the retained canonical identity instead of rollback-time re-canonicalization or lexical fallback.
+* **Update**: [test-conventions](/playbooks/test-conventions.md) records the symlinked-root, retire-hook-removes-work, stale canonical worktree-list fixture for retained-path rollback coverage.
 * **Creation**: [canonical-worktree-verification](/lessons/canonical-worktree-verification.md) records the symlink canonicalization rollback gotcha: capture `realpath(work)` before removal and compare exact NUL-delimited `git worktree list --porcelain -z` records.
 * **Update**: [rollback-probes-argv-and-fail-closed](/lessons/rollback-probes-argv-and-fail-closed.md) links the general argv-safe, fail-closed rule to exact canonical worktree record parsing.
 * **Update**: [test-conventions](/playbooks/test-conventions.md) records the symlinked-agents-root regression fixture for canonical Git worktree rollback diagnostics.

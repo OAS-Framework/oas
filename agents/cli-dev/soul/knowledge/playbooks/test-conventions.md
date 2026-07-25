@@ -66,9 +66,13 @@ All kernel/CLI behavior tests live in `test/capabilities.test.mjs`
   `git check-ref-format` that contains `$(touch${IFS}<marker>)`, assert the
   marker never appears, and exercise probe failures separately from absence;
   see [rollback probes](/lessons/rollback-probes-argv-and-fail-closed.md). To
-  cover worktree canonicalization, create the worktree through a symlinked
-  agents root, force `git worktree remove` to fail through a delegating fake Git
-  wrapper, and assert rollback reports the canonical registered path; see
+  cover worktree canonicalization through rollback hooks, create the worktree
+  through a symlinked agents root, have a compensated retire hook remove or make
+  `work/` inaccessible before verification, use a delegating fake Git wrapper
+  to make `git worktree remove` and prune cleanup fail while
+  `worktree list --porcelain -z` still returns the stale canonical record, and
+  assert rollback reports the retained canonical path rather than lexical
+  fallback; see
   [canonical worktree verification](/lessons/canonical-worktree-verification.md).
   Restore modes in cleanup before deleting the temp tree. If the test replaces
   PATH wholesale, include symlinks for tools the kernel/hooks and shims still
