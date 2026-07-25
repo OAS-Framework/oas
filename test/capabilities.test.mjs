@@ -1124,6 +1124,33 @@ test("anchor enumeration sees intra-root duplicates (generated-name collisions)"
   } finally { process.env.PATH = oldPath; }
 });
 
+test("local-soul instances enumerate once and accept relations (no false intra-root ambiguity)", () => {
+  const base = temp(); const repo = join(base, "repo"); gitRepo(repo);
+  const root = join(repo, "agents");
+  write(join(root, "dev", "soul", "soul.yaml"), `name: dev\nkind: persistent\nrepo: ${repo}\nwork: checkout\nruntime: pi\n`);
+  write(join(root, "dev", "soul", "AGENTS.md"), "# dev\n");
+  mkdirSync(join(root, "dev", "instances"), { recursive: true });
+  // Local soul under local-agents/ — visible via BOTH listAgents and the
+  // capability fallback scan; must not double-count.
+  const la = join(repo, "local-agents");
+  write(join(la, "helper", "soul", "soul.yaml"), `name: helper\nkind: local\nrepo: ${repo}\nwork: worktree\nruntime: pi\n`);
+  write(join(la, "helper", "soul", "AGENTS.md"), "# helper\n");
+  mkdirSync(join(la, "helper", "instances"), { recursive: true });
+  const oldPath = process.env.PATH;
+  process.env.PATH = fakeRuntimes(base);
+  try {
+    const anchor = spawnInstance(root, findAgent(root, "helper"), { instance: "helper-anchor", launch: false });
+    assert.equal(findInstanceHomes(root, anchor.instance).length, 1, "local-soul instance enumerated exactly once");
+    // Relations to a local-soul anchor work — with and without --relative-root.
+    const kid = spawnInstance(root, findAgent(root, "dev"), { instance: "dev-la-kid", relation: "child", relativeTo: anchor.instance, launch: false });
+    assert.equal(kid.parentInstance, anchor.instance);
+    const kid2 = spawnInstance(root, findAgent(root, "dev"), { instance: "dev-la-kid2", relation: "child", relativeTo: anchor.instance, relativeRoot: root, launch: false });
+    assert.equal(kid2.parentInstance, anchor.instance);
+    const sib = spawnInstance(root, findAgent(root, "dev"), { instance: "dev-la-sib", relation: "sibling", relativeTo: kid.instance, launch: false });
+    assert.equal(sib.parentInstance, anchor.instance, "sibling inherits the local-soul parent");
+  } finally { process.env.PATH = oldPath; }
+});
+
 test("retire splices lineage: orphans inherit the retiree's links (parent-relation reviewer cycle)", () => {
   const base = temp(); const repo = join(base, "repo"); gitRepo(repo);
   const root = join(repo, "agents");
