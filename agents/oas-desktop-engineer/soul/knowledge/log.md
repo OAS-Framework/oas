@@ -1,6 +1,8 @@
 # Knowledge Log
 
 ## 2026-07-25
+* **Creation**: promoted [Dynamic action registrations carry their own default chords](/lessons/dynamic-action-registration-default-chords.md) from the oas-desktop-engineer-keybindings-core notes.
+* **Update**: updated [View-local shortcuts resolve chords through the engine keymap](/decisions/view-local-shortcuts-engine-keymap.md) and [Real keybindings engine integration keeps defaults engine-owned](/lessons/real-keybindings-engine-integration.md) so dynamic view defaults route through `registerAction({ defaultChord })` and `getBinding` instead of unbound registrations or parallel fallback defaults.
 * **Creation**: promoted [Key dispatch engines own consumed-event and editable-field guards](/lessons/keybinding-dispatch-guards-in-engine.md) from the oas-desktop-engineer-keybindings-core notes.
 * **Update**: merged the xterm capture note into [Keybinding engine terminal allowlist is action-id based, not chord based](/lessons/keybindings-terminal-allowlist-by-action-id.md): xterm consumes claimed terminal chords before bubble-phase shell listeners, so allowlisted engine actions must be intercepted with `attachCustomKeyEventHandler` before the pty write.
 * **Update**: linked [Real keybindings engine integration keeps defaults engine-owned](/lessons/real-keybindings-engine-integration.md) to [Window-level engine dispatch needs an editable-target guard](/lessons/window-engine-dispatch-editable-guard.md), noting that shell dispatch must call `allowsEngineDispatch(e)` for editable targets even when defaults contain no bare keys.

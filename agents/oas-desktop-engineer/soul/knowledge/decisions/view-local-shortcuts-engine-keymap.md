@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: View-local shortcuts resolve chords through the engine keymap
-description: View-scoped single-key shortcuts stay DOM-local but resolve through the keybinding engine so editor rebinds override defaults while editable-field safety remains view-owned.
+description: View-scoped single-key shortcuts stay DOM-local but resolve through keybinding engine registrations so editor rebinds and registration-supplied defaults share one source of truth while editable-field safety remains view-owned.
 tags: [desktop, keybindings, views]
 timestamp: 2026-07-25
 ---
@@ -15,21 +15,27 @@ another action's new binding.
 
 # Pattern
 
-Views declare actions in a local table such as `viewActions = [{ id, chord, run
-}]`, where `chord` is the view's default. They register those actions unbound in
-the engine so the shortcut editor can see them, then the view keydown handler
-calls `resolveViewKey(e, viewActions)` from `renderer/view-keys.mjs`.
+Views declare actions in a local table such as `viewActions = [{ id,
+defaultChord, run }]`, where `defaultChord` is the view's default. At mount they
+register those actions with `registerAction({ defaultChord })` so the shortcut
+editor can see them and the engine owns default resolution.
 
-`resolveViewKey` checks engine bindings first (`getBinding`), so explicit user
-bindings win. Defaults apply only to actions that the engine reports unbound.
-Dispatch remains DOM-local to the focused canvas, grid, or other view surface,
-which preserves the editable-field guard that the global engine cannot provide
-for unmodified single keys.
+View keydown handlers still dispatch DOM-locally to the focused canvas, grid, or
+other view surface, preserving the editable-field guard that the global engine
+cannot provide for unmodified single keys. But they resolve the active chord
+through `getBinding`: explicit user bindings win, explicit persisted `null`
+means unbound, static `DEFAULT_KEYMAP` entries cover app-lifetime actions, and
+registration defaults cover mount-time view-local actions.
+
+Do not keep a parallel view fallback resolver that treats `null` as both
+"no default" and "explicit unbind". Registration defaults are part of the action
+registration contract, as captured in [the dynamic registration default lesson](/lessons/dynamic-action-registration-default-chords.md).
 
 Structural keys such as Enter, Escape, and arrows stay hard-coded when they are
 focus semantics rather than shortcuts.
 
 # Related concepts
 
+- [Dynamic action registrations carry their own default chords](/lessons/dynamic-action-registration-default-chords.md)
 - [Real keybindings engine integration keeps defaults engine-owned](/lessons/real-keybindings-engine-integration.md)
 - [Keybindings wiring used a transitional stub engine with a frozen coordinator contract](/decisions/keybindings-stub-coordinator-contract.md)
