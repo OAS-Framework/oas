@@ -1,6 +1,6 @@
 {
   "name": "@oas-framework/desktop",
-  "version": "0.18.3",
+  "version": "0.18.4",
   "private": true,
   "description": "OAS desktop app — Electron shell, integrated tmux terminal, and view host for the agent control panel.",
   "type": "module",
