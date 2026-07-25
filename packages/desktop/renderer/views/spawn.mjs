@@ -9,6 +9,7 @@ import {
   escapeHtml, apiJson, postJson, ensureTheme,
   setWorkspace, onWorkspaceChange, renderWorkspaceSelect, wsQuery, workspaceGeneration,
 } from "./common.mjs";
+import { registerAction } from "../keybindings.mjs";
 import { cliAvailable, cliKnownUnavailable, cliStatus, refreshCli, onCliChange, cliCard } from "./cli-status.mjs";
 
 /** True while the CLI probe has never SETTLED (no response classified yet).
@@ -65,6 +66,25 @@ export function mount(el, ctx) {
     </div>`;
   s.q = (cls) => el.querySelector("." + cls);
   s.q("filter").addEventListener("input", (e) => { s.filterText = e.target.value; renderGrid(s); });
+  // Keyboard operability (task: keybindings wiring): `/` focuses the filter,
+  // arrows rove the card grid, Enter opens the focused card's spawn form,
+  // b opens its brain, Esc cancels an open form. Registered as rebindable
+  // stage:spawn actions; dispatch is view-local on the grid (roving focus).
+  s.q("souls-grid").addEventListener("keydown", (e) => onGridKey(s, e));
+  el.querySelector(".souls").addEventListener("keydown", (e) => {
+    // Esc cancels the open spawn form from anywhere inside it (incl. the
+    // task textarea — cancel is safe; submit stays click/button-only there).
+    if (e.key === "Escape" && s.sel) { e.preventDefault(); s.sel = null; s.selAgent = null; renderGrid(s); return; }
+    // view-local single keys (never stolen from editable fields)
+    const editable = e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.isContentEditable;
+    if (editable) return;
+    if (e.key === "/") { e.preventDefault(); s.q("filter").focus(); }
+    else if (e.key === "b" && !e.target.closest?.(".soul-card")) { e.preventDefault(); brainOfFocusedCard(s); }
+  });
+  s.disposers = [
+    registerAction({ id: "spawn.filter", label: "Soul roster: focus the filter (/)", context: "stage:spawn", run: () => s.q("filter").focus() }),
+    registerAction({ id: "spawn.brain", label: "Soul roster: open Brain of focused card (b)", context: "stage:spawn", run: () => brainOfFocusedCard(s) }),
+  ];
   // CLI degradation: refresh once on mount and re-render the grid whenever
   // availability flips — spawn buttons disable consistently with the card.
   refreshCli(ctx);
@@ -96,6 +116,7 @@ export function unmount() {
   if (!state) return;
   state.alive = false;
   state.timers.forEach(clearInterval);
+  (state.disposers || []).forEach((off) => { try { off(); } catch {} });
   if (state.unsubWs) state.unsubWs();
   if (state.unsubCli) state.unsubCli();
   if (state.cliCardHandle) { state.cliCardHandle.dispose(); state.cliCardHandle = null; }
@@ -192,6 +213,42 @@ function renderGrid(s) {
   }
 }
 
+/* ── grid keyboard: roving focus over cards ──────────────────────── */
+function gridCards(s) { return [...s.q("souls-grid").querySelectorAll(".soul-card")]; }
+
+function focusedCard(s) {
+  const active = s.el.ownerDocument.activeElement;
+  return active?.closest?.(".soul-card") || null;
+}
+
+function brainOfFocusedCard(s) {
+  const card = focusedCard(s) || gridCards(s)[0];
+  const a = card && s.souls.agents.find((x) => x.name === card.dataset.agent);
+  if (a) s.ctx.openBrain?.(a.name);
+}
+
+function onGridKey(s, e) {
+  // Keys inside the open form belong to the form (Esc handled above).
+  if (e.target.closest?.(".soul-form")) return;
+  const cards = gridCards(s);
+  if (!cards.length) return;
+  const cur = focusedCard(s);
+  const at = cur ? cards.indexOf(cur) : -1;
+  if (["ArrowRight", "ArrowDown"].includes(e.key)) {
+    e.preventDefault();
+    cards[Math.min(cards.length - 1, at + 1)]?.focus();
+  } else if (["ArrowLeft", "ArrowUp"].includes(e.key)) {
+    e.preventDefault();
+    cards[Math.max(0, at - 1)]?.focus();
+  } else if (e.key === "Enter" && cur && e.target === cur) {
+    e.preventDefault();
+    cur.querySelector(".spawn-act:not([disabled])")?.click();
+  } else if (e.key === "b" && cur && e.target === cur) {
+    e.preventDefault();
+    cur.querySelector(".brain-act:not([disabled])")?.click();
+  }
+}
+
 function soulCard(s, a) {
   const attached = a.work === "attached"; // needs an owning instance's work tree
   const noCli = !cliAvailable();          // unknown OR unavailable — mutations need a verified CLI
@@ -199,6 +256,9 @@ function soulCard(s, a) {
   const card = document.createElement("div");
   card.className = "soul-card" + (attached ? " attached" : "") + (open ? " open" : "");
   card.dataset.agent = a.name;
+  card.tabIndex = 0; // roving entry; arrows move between cards
+  card.setAttribute("role", "group");
+  card.setAttribute("aria-label", a.name);
   card.innerHTML = `
     <div class="sname"><span class="glyph" aria-hidden="true">✦</span>${escapeHtml(a.name)}</div>
     ${a.description ? `<div class="sdesc">${escapeHtml(a.description)}</div>` : '<div class="sdesc"></div>'}

@@ -27,6 +27,14 @@ Shell-level regression coverage should prove all three reachability facts:
   routes `openView(name)` through the stage loader instead of per-view focus
   special cases.
 
+`test/shell-nav.test.mjs` also pins the palette command source shape: the
+"palette view commands derive from NAV" assertion matches the `NAV.map(...)`
+expression in `shell.mjs` and asserts there are no hard-coded
+`label: "View: ..."` strings. When palette command rows change, such as adding
+chord `detail` fields, update that regex in the same commit while preserving the
+NAV-derivation invariant. Stage-switch action registrations should be derived
+from `NAV.forEach(...)` too, not from per-stage hard-coded labels.
+
 Lesson: a feature is not delivered until a shell-level test proves a user can
 reach it. "The view exists" and "the view mounts in module tests" are necessary
 but not sufficient.
