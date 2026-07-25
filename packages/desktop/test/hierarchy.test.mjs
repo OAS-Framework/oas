@@ -322,3 +322,23 @@ test("layout determinism with duplicate names: identity tie-break keeps coordina
   assert.equal(posOf(l1, "/a/dev"), posOf(l2, "/a/dev"), "same-named children never swap slots");
   assert.equal(posOf(l1, "/b/dev"), posOf(l2, "/b/dev"));
 });
+
+test("full-roster scope covers SIBLING edges too: globally-ambiguous sibling name never becomes a false edge", () => {
+  // /c/kid declares siblingInstance="dev" — globally AMBIGUOUS (/a/dev vs
+  // /b/dev), so clustering drops it. But /a/dev is validly in kid's cluster
+  // (child of the same root), so a cluster-scoped index would see exactly
+  // one "dev" and resurrect the pair as a false sibling arc.
+  const roster = [
+    { instance: "root", home: "/c/root", running: true },
+    { instance: "kid", agentsRoot: "/c", home: "/c/kid", parentInstance: "root",
+      siblingInstance: "dev", running: true },
+    { instance: "dev", agentsRoot: "/a", home: "/a/dev", parentInstance: "root", running: true },
+    { instance: "dev", agentsRoot: "/b", home: "/b/dev", running: true },
+  ];
+  const { placed } = hier.layoutClusters(roster);
+  const cl = placed.find((pc) => pc.nodes.some((n) => n.inst.home === "/c/kid"));
+  assert.ok(cl.nodes.some((n) => n.inst.home === "/a/dev"),
+    "fixture: /a/dev must share kid's cluster for the narrowed-scope bug to bite");
+  assert.deepEqual(cl.sibs, [],
+    "ambiguous sibling name stays dropped — no false arc from cluster-local uniqueness");
+});
