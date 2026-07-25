@@ -35,7 +35,7 @@ test("shell registers global + tabs actions covered by the engine's DEFAULT_KEYM
 test("hierarchy and spawn views register rebindable view-local actions and dispose them", () => {
   const hier = read("renderer/views/hierarchy.mjs");
   for (const id of ["hier.fit", "hier.terminal", "hier.brain", "hier.spawn", "hier.popover", "hier.zoomIn", "hier.zoomOut"]) {
-    assert.match(hier, new RegExp(`id: "${id.replace(".", "\\.")}", label:`), `hierarchy action ${id} declared`);
+    assert.match(hier, new RegExp(`id: "${id.replace(".", "\\.")}", defaultChord:`), `hierarchy action ${id} declared`);
   }
   assert.match(hier, /context: "stage:hierarchy"/, "hierarchy actions registered in their stage context");
   assert.match(hier, /s\.disposers = s\.viewActions\.map/, "hierarchy keeps action disposers");
@@ -58,14 +58,22 @@ test("palette rows and data-action tooltips carry live chord labels", () => {
   assert.match(palette, /typeof c\.detail === "function" \? c\.detail\(\)/, "palette re-evaluates chord details per render");
 });
 
-test("view-local defaults are first-class engine bindings (DEFAULT_KEYMAP)", async () => {
-  const { DEFAULT_KEYMAP } = await import("../renderer/keybindings.mjs");
+test("view-local defaults are first-class engine bindings (registerAction defaultChord)", () => {
+  // engine addendum 3: dynamic view actions carry their default in the
+  // registration; getBinding folds override ?? DEFAULT_KEYMAP ?? defaultChord,
+  // so the editor shows real defaults and Backspace-unbind kills the key.
+  const hier = read("renderer/views/hierarchy.mjs");
   const expected = {
     "hier.fit": "F", "hier.terminal": "T", "hier.brain": "B", "hier.spawn": "S",
     "hier.popover": "O", "hier.zoomIn": "=", "hier.zoomOut": "-",
-    "spawn.filter": "/", "spawn.brain": "B",
   };
   for (const [id, chord] of Object.entries(expected)) {
-    assert.equal(DEFAULT_KEYMAP[id], chord, `${id} default is engine-owned (editor-honest, Backspace-unbindable)`);
+    assert.match(hier, new RegExp(`id: "${id.replace(".", "\\.")}", defaultChord: "${chord === "=" ? "=" : chord}"`),
+      `${id} registers defaultChord ${chord}`);
   }
+  assert.match(hier, /registerAction\(\{\n?\s*id: a\.id,.*defaultChord: a\.defaultChord,?\n?\s*\}\)/s,
+    "hierarchy passes defaultChord through registerAction");
+  const spawn = read("renderer/views/spawn.mjs");
+  assert.match(spawn, /id: "spawn\.filter", label:.*defaultChord: "\/"/, "spawn.filter default '/'");
+  assert.match(spawn, /id: "spawn\.brain", label:.*defaultChord: "B"/, "spawn.brain default B");
 });

@@ -151,18 +151,6 @@ export const DEFAULT_KEYMAP = Object.freeze({
   "terminal.fontBigger": "Mod+=",
   "terminal.fontSmaller": "Mod+-",
   "terminal.fontReset": "Mod+0",
-  // view-local stage actions (registered by their views on mount; dispatch
-  // is view-scoped — see renderer/view-keys.mjs — but the DEFAULTS live here
-  // so the editor shows them honestly and Backspace/reset behave):
-  "hier.fit": "F",
-  "hier.terminal": "T",
-  "hier.brain": "B",
-  "hier.spawn": "S",
-  "hier.popover": "O",
-  "hier.zoomIn": "=",
-  "hier.zoomOut": "-",
-  "spawn.filter": "/",
-  "spawn.brain": "B",
 });
 
 // Action ids allowed to fire inside .xterm on Linux/Windows, where their
@@ -183,12 +171,20 @@ let activeContexts = new Set();
 const keymapListeners = new Set();
 
 /** Register an action; returns an unregister function. Re-registering an id
- * replaces it (views re-mount). */
-export function registerAction({ id, label, context = "global", run }) {
+ * replaces it (views re-mount). Optional `defaultChord` folds into the
+ * effective keymap exactly like a DEFAULT_KEYMAP entry: user override wins,
+ * an explicit editor unbind (persisted null) kills it, and getBinding /
+ * findConflict / the editor all see it — view-local actions registered at
+ * mount carry their defaults with the registration (contract addendum 3). */
+export function registerAction({ id, label, context = "global", run, defaultChord = null }) {
   if (!id || typeof run !== "function") throw new Error("registerAction: id and run required");
-  const action = { id, label: label || id, context, run };
+  const canonical = defaultChord == null ? null : chordToString(parseChord(defaultChord));
+  const action = { id, label: label || id, context, run, defaultChord: canonical };
   actions.set(id, action);
-  return () => { if (actions.get(id) === action) actions.delete(id); };
+  notifyKeymapChange(); // a new default can change effective bindings
+  return () => {
+    if (actions.get(id) === action) { actions.delete(id); notifyKeymapChange(); }
+  };
 }
 
 /** Registered actions (editor rendering). */
@@ -239,13 +235,15 @@ function notifyKeymapChange() {
   for (const fn of [...keymapListeners]) { try { fn(); } catch { /* isolate listener */ } }
 }
 
-/** Effective chord string for an action (override ?? default), or null. */
+/** Effective chord string for an action (override ?? static default ??
+ * registration default), or null. An explicit persisted null (editor
+ * Backspace-unbind) wins over BOTH default sources. */
 export function getBinding(actionId) {
   if (Object.prototype.hasOwnProperty.call(overrides, actionId)) {
     const v = overrides[actionId];
     return v == null ? null : v; // explicit null = unbound
   }
-  return DEFAULT_KEYMAP[actionId] ?? null;
+  return DEFAULT_KEYMAP[actionId] ?? actions.get(actionId)?.defaultChord ?? null;
 }
 
 /** Persist an override: chord (string or object) or null to unbind. */

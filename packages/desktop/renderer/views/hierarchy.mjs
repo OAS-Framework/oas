@@ -216,21 +216,21 @@ export function mount(el, ctx) {
   s.canvas.addEventListener("keydown", (e) => onKey(s, e));
 
   // Register the canvas keys as actions (context stage:hierarchy). Their
-  // DEFAULT chords live in the engine's DEFAULT_KEYMAP (hier.*) so the
-  // shortcuts editor shows them honestly and Backspace/reset behave;
+  // DEFAULT chords ride the registration (engine addendum 3: defaultChord)
+  // so the shortcuts editor shows them honestly and Backspace/reset behave;
   // dispatch stays canvas-local via resolveViewKey (engine binding wins,
   // explicit unbind kills the key). Disposed on unmount.
   s.viewActions = [
-    { id: "hier.fit", label: "Hierarchy: fit to screen", run: () => fit(s) },
-    { id: "hier.terminal", label: "Hierarchy: open terminal of selection", run: () => { if (s.sel) s.ctx.openTerminal(s.sel); } },
-    { id: "hier.brain", label: "Hierarchy: open Brain of selection", run: () => openSelBrain(s) },
-    { id: "hier.spawn", label: "Hierarchy: open the Spawn view", run: () => s.ctx.openView?.("spawn") },
-    { id: "hier.popover", label: "Hierarchy: open the action popover", run: () => { if (s.sel) openPop(s, s.sel); } },
-    { id: "hier.zoomIn", label: "Hierarchy: zoom in", run: () => zoomBy(s, 1.2) },
-    { id: "hier.zoomOut", label: "Hierarchy: zoom out", run: () => zoomBy(s, 1 / 1.2) },
+    { id: "hier.fit", defaultChord: "F", label: "Hierarchy: fit to screen", run: () => fit(s) },
+    { id: "hier.terminal", defaultChord: "T", label: "Hierarchy: open terminal of selection", run: () => { if (s.sel) s.ctx.openTerminal(s.sel); } },
+    { id: "hier.brain", defaultChord: "B", label: "Hierarchy: open Brain of selection", run: () => openSelBrain(s) },
+    { id: "hier.spawn", defaultChord: "S", label: "Hierarchy: open the Spawn view", run: () => s.ctx.openView?.("spawn") },
+    { id: "hier.popover", defaultChord: "O", label: "Hierarchy: open the action popover", run: () => { if (s.sel) openPop(s, s.sel); } },
+    { id: "hier.zoomIn", defaultChord: "=", label: "Hierarchy: zoom in", run: () => zoomBy(s, 1.2) },
+    { id: "hier.zoomOut", defaultChord: "-", label: "Hierarchy: zoom out", run: () => zoomBy(s, 1 / 1.2) },
   ];
   s.disposers = s.viewActions.map((a) => registerAction({
-    id: a.id, label: a.label, context: "stage:hierarchy", run: a.run,
+    id: a.id, label: a.label, context: "stage:hierarchy", run: a.run, defaultChord: a.defaultChord,
   }));
 
   s.unsubWs = onWorkspaceChange(() => { s.sel = null; s.fitted = false; s.nodeOffsets.clear(); refresh(s); });

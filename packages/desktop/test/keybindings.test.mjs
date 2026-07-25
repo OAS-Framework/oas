@@ -268,6 +268,64 @@ test("unmodified chords do not fire from editable fields; modified chords do", (
   assert.equal(matchEvent({ ...ev("f"), target: { tagName: "DIV" } }, { isMac: true, insideTerminal: false }), "hier.filter");
 });
 
+test("registerAction defaultChord: folds into the effective keymap (addendum 3)", (t) => {
+  installStorage(); resetAllBindings();
+  const off = registerAction({ id: "hier.fit", label: "Fit", context: "stage:hierarchy", run: () => {}, defaultChord: "F" });
+  t.after(() => { off(); resetAllBindings(); setActiveContexts(new Set()); });
+
+  // registration-supplied default visible via getBinding (canonicalized)
+  assert.equal(getBinding("hier.fit"), "F");
+
+  // dispatches like any binding (context active, outside editables)
+  setActiveContexts(new Set(["stage:hierarchy"]));
+  assert.equal(matchEvent(ev("f"), { isMac: true, insideTerminal: false, editableTarget: false }), "hier.fit");
+
+  // user override wins
+  setBinding("hier.fit", "Mod+F");
+  assert.equal(getBinding("hier.fit"), "Mod+F");
+  assert.equal(matchEvent(ev("f"), { isMac: true, insideTerminal: false, editableTarget: false }), null);
+  assert.equal(matchEvent(ev("f", { metaKey: true }), { isMac: true, insideTerminal: false }), "hier.fit");
+
+  // reset returns to the registration default
+  resetBinding("hier.fit");
+  assert.equal(getBinding("hier.fit"), "F");
+
+  // explicit null unbind kills the default and stops dispatch
+  setBinding("hier.fit", null);
+  assert.equal(getBinding("hier.fit"), null);
+  assert.equal(matchEvent(ev("f"), { isMac: true, insideTerminal: false, editableTarget: false }), null);
+
+  // …and the unbind survives a storage reload (persisted null round-trips)
+  const raw = localStorage.getItem("oas-desktop-keymap");
+  assert.match(raw, /"hier\.fit":null/);
+
+  // static DEFAULT_KEYMAP wins over a registration default for the same id
+  const off2 = registerAction({ id: "app.palette", label: "P", context: "global", run: () => {}, defaultChord: "Mod+9" });
+  assert.equal(getBinding("app.palette"), "Mod+K");
+  off2();
+
+  // invalid defaultChord is discarded, not thrown
+  const off3 = registerAction({ id: "x.bad", label: "Bad", context: "global", run: () => {}, defaultChord: "A+B" });
+  assert.equal(getBinding("x.bad"), null);
+  off3();
+});
+
+test("registerAction defaultChord: unbind persisted across module reload; conflicts seen", async (t) => {
+  installStorage(); resetAllBindings();
+  localStorage.setItem("oas-desktop-keymap", JSON.stringify({ "hier.fit": null }));
+  const fresh = await import("../renderer/keybindings.mjs?fresh=" + Math.random());
+  const off = fresh.registerAction({ id: "hier.fit", label: "Fit", context: "stage:hierarchy", run: () => {}, defaultChord: "F" });
+  t.after(() => { off(); fresh.resetAllBindings(); });
+  assert.equal(fresh.getBinding("hier.fit"), null,
+    "explicit unbind loaded from storage suppresses the registration default");
+
+  // findConflict treats a registration default like any binding
+  fresh.resetAllBindings();
+  assert.equal(fresh.getBinding("hier.fit"), "F");
+  assert.equal(fresh.findConflict("F", "stage:hierarchy", null, true)?.id, "hier.fit");
+  assert.equal(fresh.findConflict("F", "tabs", null, true), null, "other non-global context: no conflict");
+});
+
 // ---------------------------------------------------------------- conflicts
 
 test("findConflict: same context and global<->context collisions, exclusion", (t) => {

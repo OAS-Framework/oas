@@ -119,7 +119,8 @@ export function createKeybindingsEditor({ doc = document, isMac } = {}) {
       const el = doc.createElement("div");
       el.className = "kb-row";
       const chordStr = getBinding(action.id);
-      const isDefault = chordStr === (DEFAULT_KEYMAP[action.id] ?? null);
+      // the effective default: static table or registration-supplied
+      const isDefault = chordStr === (DEFAULT_KEYMAP[action.id] ?? action.defaultChord ?? null);
       el.innerHTML = `
         <span class="kb-label"></span>
         <span class="kb-conflict" role="status"></span>
