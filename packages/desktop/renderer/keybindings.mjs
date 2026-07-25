@@ -303,7 +303,8 @@ export function isPlainChord(chord) {
 // ---------------------------------------------------------------- dispatch
 
 /** Match a keydown to an eligible action id, or null. Honors context scoping
- * and the terminal policy. `opts` is for tests: { isMac, insideTerminal }. */
+ * and the terminal policy. `opts` is for tests: { isMac, insideTerminal,
+ * editableTarget } — each defaults from the environment/event. */
 export function matchEvent(e, opts = {}) {
   // A consumed event stays consumed: view-local handlers (hierarchy canvas,
   // roster rows, palette input) preventDefault what they own — the engine
