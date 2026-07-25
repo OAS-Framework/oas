@@ -238,3 +238,33 @@ test("brain: roster failure re-enables the selector; a stale failure cannot unlo
     g.document = saved.document; g.window = saved.window; g.localStorage = saved.localStorage;
   }
 });
+
+test("instances: live transcript selection blocks the background repaint (copyable chat)", async () => {
+  // The transcript re-renders by innerHTML replacement on a poll; without
+  // this guard any repaint destroys the user's in-progress selection and the
+  // chat is uncopyable. Drives the exported predicate with jsdom selections.
+  const { JSDOM } = await import("jsdom");
+  const dom = new JSDOM('<!doctype html><body><div id="chat"><p id="a">hello world</p></div><p id="out">outside</p>');
+  const doc = dom.window.document;
+  const { selectionBlocksRepaint } = await import("../renderer/views/instances.mjs");
+  const box = doc.getElementById("chat");
+  const sel = dom.window.getSelection();
+
+  assert.equal(selectionBlocksRepaint(box, doc), false, "no selection → repaint allowed");
+
+  const range = doc.createRange();
+  range.selectNodeContents(doc.getElementById("a").firstChild);
+  sel.removeAllRanges(); sel.addRange(range);
+  assert.equal(selectionBlocksRepaint(box, doc), true, "selection inside the chat → repaint deferred");
+
+  const collapsed = doc.createRange();
+  collapsed.setStart(doc.getElementById("a").firstChild, 1);
+  collapsed.collapse(true);
+  sel.removeAllRanges(); sel.addRange(collapsed);
+  assert.equal(selectionBlocksRepaint(box, doc), false, "a caret (collapsed) never blocks");
+
+  const outside = doc.createRange();
+  outside.selectNodeContents(doc.getElementById("out").firstChild);
+  sel.removeAllRanges(); sel.addRange(outside);
+  assert.equal(selectionBlocksRepaint(box, doc), false, "selection elsewhere in the page → repaint allowed");
+});
