@@ -1172,6 +1172,50 @@ test("attached ownership is path-first: a same-named local instance cannot shado
   } finally { process.env.PATH = oldPath; }
 });
 
+test("attached owner discovery reaches all-local sibling scopes (no agents/ dir)", () => {
+  const base = temp();
+  const ws = join(base, "ws"); mkdirSync(ws, { recursive: true });
+  write(join(ws, "oas-config.yaml"), "team:\n  name: t\n");
+  // Repo A: ALL-LOCAL — no agents/ dir, its soul lives under local-agents/.
+  const repoA = join(ws, "repo-a"); gitRepo(repoA);
+  write(join(repoA, "oas-config.yaml"), "capabilities:\n  additive: {}\n");
+  const laDir = join(repoA, "local-agents");
+  write(join(laDir, "helper", "soul", "soul.yaml"), `name: helper\nkind: local\nrepo: ${repoA}\nwork: worktree\nruntime: pi\n`);
+  write(join(laDir, "helper", "soul", "AGENTS.md"), "# helper\n");
+  mkdirSync(join(laDir, "helper", "instances"), { recursive: true });
+  // Repo B: regular agents/ root; spawns attach onto A's local instance tree.
+  const repoB = join(ws, "repo-b"); gitRepo(repoB);
+  write(join(repoB, "oas-config.yaml"), "capabilities:\n  additive: {}\n");
+  const rootB = join(repoB, "agents");
+  write(join(rootB, "dev", "soul", "soul.yaml"), `name: dev\nkind: persistent\nrepo: ${repoB}\nwork: checkout\nruntime: pi\n`);
+  write(join(rootB, "dev", "soul", "AGENTS.md"), "# dev\n");
+  mkdirSync(join(rootB, "dev", "instances"), { recursive: true });
+  const oldPath = process.env.PATH;
+  process.env.PATH = fakeRuntimes(base);
+  try {
+    const rootA = join(repoA, "agents"); // nonexistent — the all-local case
+    const helperAgent = findAgent(rootA, "helper");
+    assert.ok(helperAgent, "fixture: local soul resolves through the nonexistent agents/ root");
+    const owner = spawnInstance(rootA, helperAgent, { instance: "helper-owner", launch: false });
+    // Owner discovery from repo B must reach A's local-agents instance even
+    // though teamAgentRoots yields A's NONEXISTENT agents/ root for it.
+    const kid = spawnInstance(rootB, findAgent(rootB, "dev"), { instance: "dev-att-la", work: "attached", workDir: join(owner.home, "work"), launch: false });
+    assert.equal(kid.parentInstance, owner.instance, "all-local sibling owner discovered by path");
+    // Shadow + explicit parent must still be rejected: same-named instance in
+    // B's OWN local-agents (names are only unique per agent dir).
+    const laB = join(repoB, "local-agents");
+    write(join(laB, "helper", "soul", "soul.yaml"), `name: helper\nkind: local\nrepo: ${repoB}\nwork: worktree\nruntime: pi\n`);
+    write(join(laB, "helper", "soul", "AGENTS.md"), "# helper\n");
+    mkdirSync(join(laB, "helper", "instances"), { recursive: true });
+    spawnInstance(rootB, findAgent(rootB, "helper"), { instance: owner.instance, launch: false });
+    assert.throws(
+      () => spawnInstance(rootB, findAgent(rootB, "dev"), { instance: "dev-att-sh", work: "attached", workDir: join(owner.home, "work"), parent: owner.instance, launch: false }),
+      /ambiguous/,
+      "shadowed all-local owner rejected even with explicit --parent");
+    assert.equal(existsSync(join(rootB, "dev", "instances", "dev-att-sh")), false, "no stray home scaffolded");
+  } finally { process.env.PATH = oldPath; }
+});
+
 test("lineage is deployment-local: --parent from an unrelated deployment is rejected", () => {
   const base = temp();
   // Deployment A: the caller's instance lives here.
