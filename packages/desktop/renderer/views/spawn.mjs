@@ -91,7 +91,7 @@ export function mount(el, ctx) {
     // view-local keys (never stolen from editable fields), engine-resolved
     const editable = e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.isContentEditable;
     if (editable || e.target.closest?.(".soul-card")) return; // card keys are onGridKey's
-    const hit = resolveViewKey(e, s.viewActions, { context: "stage:spawn" });
+    const hit = resolveViewKey(e, s.viewActions);
     if (hit) { e.preventDefault(); s.viewActions.find((a) => a.id === hit)?.run(); }
   });
   s.disposers = [
@@ -271,7 +271,7 @@ function onGridKey(s, e) {
     // ALL view actions resolve from a focused card — the primary
     // non-editable surface (review 93ff03d: '/' must reach the filter
     // from the roving card, not just 'b').
-    const hit = resolveViewKey(e, s.viewActions, { context: "stage:spawn" });
+    const hit = resolveViewKey(e, s.viewActions);
     if (hit === "spawn.brain") {
       e.preventDefault();
       cur.querySelector(".brain-act:not([disabled])")?.click();
