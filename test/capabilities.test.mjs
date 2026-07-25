@@ -1241,6 +1241,57 @@ test("retire splices lineage: orphans inherit the retiree's links (parent-relati
   } finally { process.env.PATH = oldPath; }
 });
 
+test("parent-relation rollback after LAUNCH kills the window, compensates hooks, and never truncates the anchor", () => {
+  const base = temp(); const repo = join(base, "repo"); gitRepo(repo);
+  const root = join(repo, "agents");
+  write(join(root, "dev", "soul", "soul.yaml"), `name: dev\nkind: persistent\nrepo: ${repo}\nwork: checkout\nruntime: pi\n`);
+  write(join(root, "dev", "soul", "AGENTS.md"), "# dev\n");
+  mkdirSync(join(root, "dev", "instances"), { recursive: true });
+  // Capability whose spawn/retire hooks record every event — compensation must
+  // fire retire for the rolled-back instance.
+  const hookLog = join(base, "hook-events");
+  const script = `import {appendFileSync} from 'node:fs'; appendFileSync(${JSON.stringify(hookLog)}, process.env.OAS_EVENT + ':' + process.env.OAS_INSTANCE + '\\n');`;
+  capability(repo, "comp", { capability: "acme.comp", hooks: { spawn: "hook.mjs", retire: "hook.mjs" } }, { "hook.mjs": script });
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.comp:\n      global: true\n");
+  // Fake tmux that records argv lines; pretends the session exists, no windows.
+  const bin = join(base, "bin"); mkdirSync(bin, { recursive: true });
+  const tmuxLog = join(base, "tmux-log");
+  write(join(bin, "tmux"), `#!/bin/sh\necho "$@" >> ${tmuxLog}\nexit 0\n`);
+  for (const t of ["pi", "claude"]) write(join(bin, t), "#!/bin/sh\nexit 0\n");
+  execFileSync("chmod", ["-R", "+x", bin]);
+  for (const t of ["git", "node", "chmod", "sh"]) symlinkSync(execFileSync("which", [t], { encoding: "utf8" }).trim(), join(bin, t));
+  const oldPath = process.env.PATH;
+  process.env.PATH = `${bin}`;
+  try {
+    const agentDef = findAgent(root, "dev");
+    const anchor = spawnInstance(root, agentDef, { instance: "dev-anchor", tmuxSession: "oas-test-fake", launch: false });
+    const anchorMetaPath = join(anchor.home, "instance.json");
+    const before = readFileSync(anchorMetaPath, "utf8");
+    // Force the ATOMIC anchor write to fail AFTER a successful launch: 555 on
+    // the anchor's home blocks the same-directory temp file creation — the
+    // target instance.json is never truncated (rename never happens).
+    execFileSync("chmod", ["555", anchor.home]);
+    try {
+      assert.throws(
+        () => spawnInstance(root, agentDef, { instance: "dev-zomb", relation: "parent", relativeTo: anchor.instance, tmuxSession: "oas-test-fake", launch: true }),
+        /failed to re-point anchor.*rolled back/s);
+    } finally { execFileSync("chmod", ["755", anchor.home]); }
+    // Anchor file NEVER truncated or altered (atomic temp+rename path).
+    assert.equal(readFileSync(anchorMetaPath, "utf8"), before, "anchor instance.json byte-identical");
+    // The launched window was killed with an exact-match target.
+    const tmuxCalls = readFileSync(tmuxLog, "utf8");
+    assert.match(tmuxCalls, /new-window .*dev-zomb/, "window was launched");
+    assert.match(tmuxCalls, /kill-window -t =oas-test-fake:=dev-zomb/, "launched window killed exact-match");
+    // Spawn hooks were compensated with retire for the rolled-back instance.
+    const events = readFileSync(hookLog, "utf8").trim().split("\n");
+    assert.ok(events.includes("spawn:dev-zomb"), "spawn hook ran");
+    assert.ok(events.includes("retire:dev-zomb"), "retire hook compensated the rolled-back spawn");
+    // Scaffold removed; no temp file remains next to the anchor meta.
+    assert.equal(existsSync(join(root, "dev", "instances", "dev-zomb")), false, "no zombie home");
+    assert.ok(!readdirSync(anchor.home).some((f) => f.includes(".tmp-")), "no leftover temp file");
+  } finally { process.env.PATH = oldPath; }
+});
+
 test("retire splice crosses member repos inside a team deployment", () => {
   const base = temp();
   const ws = join(base, "ws"); mkdirSync(ws, { recursive: true });
