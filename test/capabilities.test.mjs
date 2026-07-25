@@ -1471,7 +1471,7 @@ test("rollback detects a still-registered canonical worktree through a symlinked
   // Git wrapper delegates normally, but can force selected cleanup/probe operations to fail.
   const bin = join(base, "bin"); mkdirSync(bin, { recursive: true });
   const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
-  write(join(bin, "git"), `#!/bin/sh\nif [ "$GIT_FAKE_FAIL_REMOVE" = "1" ] && [ "$3" = "worktree" ] && [ "$4" = "remove" ]; then echo forced-remove-failure >&2; exit 7; fi\nif [ "$GIT_FAKE_FAIL_PRUNE" = "1" ] && [ "$3" = "worktree" ] && [ "$4" = "prune" ]; then echo forced-prune-failure >&2; exit 6; fi\nif [ "$GIT_FAKE_FAIL_LIST" = "1" ] && [ "$3" = "worktree" ] && [ "$4" = "list" ]; then echo forced-list-failure >&2; exit 8; fi\nif [ "$GIT_FAKE_FAIL_REVP" = "1" ] && [ "$3" = "rev-parse" ] && [ "$4" = "--verify" ]; then echo forced-rev-parse-failure >&2; exit 9; fi\nexec ${realGit} "$@"\n`);
+  write(join(bin, "git"), `#!/bin/sh\nif [ "$GIT_FAKE_VANISH_AFTER_ADD" = "1" ] && [ "$3" = "worktree" ] && [ "$4" = "add" ]; then ${realGit} "$@"; s=$?; if [ $s -eq 0 ]; then /bin/rm -rf "$5"; fi; exit $s; fi\nif [ "$GIT_FAKE_FAIL_REMOVE" = "1" ] && [ "$3" = "worktree" ] && [ "$4" = "remove" ]; then echo forced-remove-failure >&2; exit 7; fi\nif [ "$GIT_FAKE_FAIL_PRUNE" = "1" ] && [ "$3" = "worktree" ] && [ "$4" = "prune" ]; then echo forced-prune-failure >&2; exit 6; fi\nif [ "$GIT_FAKE_FAIL_LIST" = "1" ] && [ "$3" = "worktree" ] && [ "$4" = "list" ]; then echo forced-list-failure >&2; exit 8; fi\nif [ "$GIT_FAKE_FAIL_REVP" = "1" ] && [ "$3" = "rev-parse" ] && [ "$4" = "--verify" ]; then echo forced-rev-parse-failure >&2; exit 9; fi\nexec ${realGit} "$@"\n`);
   for (const t of ["pi", "claude"]) write(join(bin, t), "#!/bin/sh\nexit 0\n");
   execFileSync("chmod", ["-R", "+x", bin]);
   const oldPath = process.env.PATH;
@@ -1479,6 +1479,33 @@ test("rollback detects a still-registered canonical worktree through a symlinked
   let branch;
   try {
     const agentDef = findAgent(linkedRoot, "dev");
+
+    // Post-add canonicalization failure: wrapper removes the just-added tree
+    // before `realpathSync(wt)`, while remove+prune cleanup also fail. The
+    // error must retain the original canonicalization failure AND report the
+    // stranded Git state as rollback INCOMPLETE (never silently best-effort).
+    const earlyBranch = "agents/dev-early-canon";
+    process.env.GIT_FAKE_VANISH_AFTER_ADD = "1";
+    process.env.GIT_FAKE_FAIL_REMOVE = "1";
+    process.env.GIT_FAKE_FAIL_PRUNE = "1";
+    try {
+      assert.throws(
+        () => spawnInstance(linkedRoot, agentDef, { instance: "dev-early-canon", work: "worktree", branch: earlyBranch, launch: false }),
+        (err) => /git worktree add\/canonicalization failed/.test(err.message)
+          && /rollback INCOMPLETE/.test(err.message)
+          && /remove failed \(forced-remove-failure\)/.test(err.message)
+          && /prune failed \(forced-prune-failure\)/.test(err.message)
+          && /could not verify removal \(canonical path unavailable after add\)/.test(err.message),
+        "post-add canonicalization failure reports incomplete Git cleanup");
+      assert.equal(existsSync(join(linkedRoot, "dev", "instances", "dev-early-canon")), false, "failed spawn home removed");
+    } finally {
+      delete process.env.GIT_FAKE_VANISH_AFTER_ADD;
+      delete process.env.GIT_FAKE_FAIL_REMOVE;
+      delete process.env.GIT_FAKE_FAIL_PRUNE;
+      execFileSync(realGit, ["-C", repo, "worktree", "prune"]);
+      try { execFileSync(realGit, ["-C", repo, "branch", "-D", earlyBranch], { stdio: "ignore" }); } catch { /* cleanup */ }
+    }
+
     const anchor = spawnInstance(linkedRoot, agentDef, { instance: "dev-sym-anchor", launch: false });
     const anchorMetaPath = join(anchor.home, "instance.json");
     const tmpBlock = `${anchorMetaPath}.tmp-dev-sym-child`;
@@ -1551,6 +1578,7 @@ test("rollback detects a still-registered canonical worktree through a symlinked
       try { execFileSync(realGit, ["-C", repo, "branch", "-D", probeBranch], { stdio: "ignore" }); } catch { /* cleanup */ }
     }
   } finally {
+    delete process.env.GIT_FAKE_VANISH_AFTER_ADD;
     delete process.env.GIT_FAKE_FAIL_REMOVE;
     delete process.env.GIT_FAKE_FAIL_PRUNE;
     delete process.env.GIT_FAKE_FAIL_LIST;
