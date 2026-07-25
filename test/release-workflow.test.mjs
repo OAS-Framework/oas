@@ -61,7 +61,64 @@ test("GitHub Release is created after npm publication, from the same assets", ()
   assert.match(yml, /attest-build-provenance/, "provenance attestation");
 });
 
-test("unsigned posture: certificate auto-discovery disabled; supported matrix only", () => {
+test("macOS legs gate a strict deep codesign verification of the packaged app (both workflows, identical, before upload)", () => {
+  // Contract (macos-correct-installers): v0.18.2 arm64 shipped an INCOMPLETE
+  // linker-generated ad-hoc signature (failed `codesign --verify --deep
+  // --strict` with "code has no resources but signature indicates they must
+  // be present") and x64 shipped unsigned. Both the release matrix and the
+  // build-only matrix must verify the packaged .app with the SAME strict
+  // command before smoke/artifact upload — and the two verifier run-blocks
+  // must not diverge.
+  const bi = readFileSync(new URL("../.github/workflows/build-installers.yml", import.meta.url), "utf8");
+  const extract = (text, name) => {
+    const at = text.indexOf("Verify macOS ad-hoc signature");
+    assert.ok(at > 0, `${name}: mac signature verification step present`);
+    const runAt = text.indexOf("run: |", at);
+    const end = text.indexOf("\n\n", runAt); // run-block ends at the first blank line
+    return { at, block: text.slice(runAt, end > 0 ? end : undefined) };
+  };
+  const rel = extract(yml, "release.yml");
+  const build = extract(bi, "build-installers.yml");
+  for (const [name, { at, block }, text] of [["release.yml", rel, yml], ["build-installers.yml", build, bi]]) {
+    assert.match(block, /codesign --verify --deep --strict --verbose=2/, `${name}: strict deep codesign command`);
+    assert.match(block, /no packaged \.app found/, `${name}: fails hard when no .app is found`);
+    // gated on macOS legs only, and BEFORE both the smoke and artifact upload
+    const guard = text.slice(at - 400, at);
+    assert.match(guard + text.slice(at, at + 200), /if: runner\.os == 'macOS'/, `${name}: verifier runs on the mac legs`);
+    assert.ok(text.indexOf("dist:smoke", at) > 0, `${name}: verification precedes the installed-artifact smoke`);
+    assert.ok(text.lastIndexOf("npm run dist:smoke") > at, `${name}: the smoke run-step follows verification`);
+    assert.ok(at < text.indexOf("upload-artifact", at), `${name}: verification precedes artifact upload`);
+    // and AFTER the build
+    assert.ok(text.indexOf("npm run dist --") < at, `${name}: verification follows the installer build`);
+  }
+  // identical verifier: the run-blocks must match byte-for-byte
+  assert.equal(rel.block, build.block, "release and build-only workflows must gate the IDENTICAL codesign verifier");
+});
+
+test("ad-hoc posture wording: workflows never claim 'unsigned' mac artifacts and reference no Apple signing secrets", () => {
+  const bi = readFileSync(new URL("../.github/workflows/build-installers.yml", import.meta.url), "utf8");
+  for (const [name, text] of [["release.yml", yml], ["build-installers.yml", bi]]) {
+    // historical mention of the v0.18.2 defect ("x64 shipped unsigned") is
+    // allowed; any other 'unsigned' claim about current artifacts is not.
+    assert.ok(!/unsigned/i.test(text.replace(/x64 shipped unsigned/g, "")), `${name}: mac artifacts are ad-hoc signed — 'unsigned' wording must not reappear`);
+    assert.match(text, /ad-hoc signed/i, `${name}: states the ad-hoc signing posture`);
+    assert.ok(!/notarytool|APPLE_ID|APPLE_APP_SPECIFIC_PASSWORD|APPLE_TEAM_ID|CSC_LINK|CSC_KEY_PASSWORD/.test(text), `${name}: no Apple credentials/notarization surface`);
+    assert.match(text, /CSC_IDENTITY_AUTO_DISCOVERY: "false"/, `${name}: certificate auto-discovery stays disabled`);
+  }
+});
+
+test("release fails fast when the tag has no matching release-notes file", () => {
+  // `gh release create` ends the run with --notes-file
+  // docs/release-notes/<tag>.md; a tag/filename mismatch must be caught in
+  // build-and-test, before any build spend or publication.
+  const guard = yml.indexOf("Verify release notes exist for this tag");
+  assert.ok(guard > 0, "release-notes existence gate present");
+  assert.ok(guard < yml.indexOf("publish:\n"), "gate runs pre-publication");
+  assert.match(yml, /docs\/release-notes\/\$\{GITHUB_REF_NAME\}\.md/, "gate checks the tag-named notes file");
+  assert.match(yml, /--notes-file docs\/release-notes\/\$\{GITHUB_REF_NAME\}\.md/, "gh release create uses the same tag-named file");
+});
+
+test("ad-hoc signing posture: certificate auto-discovery disabled; supported matrix only", () => {
   assert.match(yml, /CSC_IDENTITY_AUTO_DISCOVERY: "false"/);
   assert.ok(!/runs-on:\s*windows|os:\s*windows/i.test(yml), "no Windows matrix/job in 0.18.x");
   assert.ok(!/os:\s*macos-13/.test(yml), "release never depends on the sunset macos-13 runner");
@@ -184,8 +241,19 @@ test("release and build-only installer smoke are consistent build-verify gates",
     assert.match(text, /OAS_SMOKE_SKIP_LAUNCH:\s*"1"/, `${name} marks GUI launch skipped`);
     assert.match(text, /OAS_SMOKE_BUILD_VERIFY:\s*"1"/, `${name} explicitly authorizes build-verify mode`);
     assert.match(text, /OAS_SMOKE_TARGET_ARCH:\s*\$\{\{ matrix\.arch \}\}/, `${name} passes the matrix arch to the ABI probe`);
-    assert.match(text, /npm run dist:smoke/, `${name} still gates inventory + node-pty ABI`);
+    assert.match(text, /npm run dist:smoke/, `${name} still gates inventory + codesign + node-pty ABI`);
+    // The smoke's codesign phase is unconditional on darwin — both CI gates
+    // rely on it; neither may set an env var that could skip it (there is
+    // none, but the CSC posture below must hold for signing to happen).
+    assert.match(text, /CSC_IDENTITY_AUTO_DISCOVERY:\s*"false"/, `${name} keeps certificate auto-discovery disabled (ad-hoc only)`);
   }
+  // build-installers runs on pull_request: electron-builder skips mac signing
+  // on PR builds (GITHUB_BASE_REF) unless CSC_FOR_PULL_REQUEST is set —
+  // without it the PR legs would build the exact unsigned defect class the
+  // codesign gate rejects. (Safe: no signing secrets exist; identity is the
+  // deterministic ad-hoc "-".) The release workflow runs on tag push (no
+  // GITHUB_BASE_REF), so it does not need the flag.
+  assert.match(bi, /CSC_FOR_PULL_REQUEST:\s*"true"/, "build-installers must force signing on PR builds (ad-hoc, secret-free)");
   // npm args must reach electron-builder, not a cleanup command: dist is the
   // builder command and postdist owns clean-dist.
   assert.equal(desktopPkg.scripts.dist, "electron-builder --config electron-builder.config.cjs");

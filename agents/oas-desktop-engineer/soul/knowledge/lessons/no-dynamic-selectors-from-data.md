@@ -51,4 +51,5 @@ form is open, and spawn with the task and exact agent name in the POST body.
 
 # Related
 
+- [Build option lists from data with createElement, never innerHTML attributes](/lessons/dom-construction-not-innerhtml-attributes.md) applies the same no-data-interpolation rule to attribute-bearing DOM construction.
 - [Periodic repaints must not rebuild DOM under open forms](/lessons/poll-repaint-wipes-form-input.md) is the open-form repaint lesson whose original selector guard was superseded by this safer pattern.

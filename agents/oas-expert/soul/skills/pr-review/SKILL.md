@@ -73,6 +73,12 @@ BEFORE retiring — it is the last gate of the review.
 
 ## Operational gotchas
 
+- **Surface removals need user-guidance inventory**: when a PR removes a UI
+  surface, stage, view, or destination, do not stop at imports, navigation
+  entries, modules, and CSS. Search user-visible fallback/recovery copy, error
+  paths, and tests for old destination labels; require assertions that pin the
+  replacement destination instead of only proving a generic failure. See
+  `knowledge/lessons/surface-removal-inventory-user-guidance.md`.
 - **Window gone + no verdict does not always mean killed**: if a spawned
   reviewer/subagent's tmux window disappears and no verdict awakening arrives,
   run one targeted `aw mail inbox --show-all` and inspect the session log tail

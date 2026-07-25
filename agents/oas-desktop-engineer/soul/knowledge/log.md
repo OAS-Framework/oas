@@ -1,11 +1,33 @@
 # Knowledge Log
 
 ## 2026-07-25
+* **Creation**: promoted [verify the committed tree matches the commit message before pushing](/lessons/verify-committed-tree-before-push.md) from the oas-desktop-engineer-agent-relations notes.
+* **Creation**: promoted [build option lists from data with createElement, never innerHTML attributes](/lessons/dom-construction-not-innerhtml-attributes.md) from the oas-desktop-engineer-agent-relations notes.
+* **Update**: linked [no dynamic selectors from data](/lessons/no-dynamic-selectors-from-data.md) and [sanitize markdown before innerHTML](/lessons/sanitize-marked-markdown-before-innerhtml.md) to the DOM construction lesson.
+* **Creation**: promoted [graph code over roster instances must key by composite identity](/lessons/cluster-composite-identity.md) from the oas-desktop-engineer-agent-relations notes.
 * **Creation**: promoted [new CLI mutation flags need a capability gate](/lessons/new-mutation-flags-capability-gate.md) from the oas-desktop-engineer-agent-relations notes.
 * **Creation**: promoted [final kernel contract for spawn-time agent relations](/references/agent-relations-kernel-contract.md) from the oas-desktop-engineer-agent-relations notes.
 * **Update**: updated [desktop cluster grouping sibling-link extractor seam](/decisions/desktop-cluster-grouping-sibling-seam.md) to consume the final `siblingInstance`, `relation`, and `relativeTo` kernel contract.
 * **Creation**: promoted [desktop cluster grouping sibling-link extractor seam](/decisions/desktop-cluster-grouping-sibling-seam.md) from the oas-desktop-engineer-agent-relations notes.
 * **Creation**: promoted [no-CLI desktop server tests must hide the real oas CLI](/lessons/no-cli-desktop-server-tests-real-oas-cli.md) from the oas-desktop-engineer-agent-relations notes.
+* **Update**: merged the xterm keypress-leak note into [Shift+Enter through xterm/tmux must be translated to pi's Ctrl+J newline alias](/lessons/shift-enter-newline-via-ctrl-j-alias.md): suppress every keydown/keypress/keyup event for the chord and write `\n` only on keydown, because xterm's keypress path can otherwise emit a submit `\r`.
+* **Creation**: promoted [tmux mouse-on viewers need modifier-forced xterm selection for copy](/lessons/tmux-mouse-on-xterm-selection-copy.md) from the oas-desktop-engineer-session-copy-newline notes.
+* **Creation**: promoted [scope rollback of a merged stage keeps the manifest tests as absence pins](/lessons/scope-rollback-absence-pins.md) from the oas-desktop-engineer-roster-scope-rollback notes.
+* **Update**: linked [shell nav reachability needs an importable manifest](/lessons/shell-nav-reachability-manifest.md) and [dormant surface removals need absence inventory tests](/lessons/dormant-surface-removal-inventory.md) to the scope-rollback absence-pins lesson.
+* **Creation**: promoted [shell nav reachability needs an importable manifest](/lessons/shell-nav-reachability-manifest.md) from the oas-desktop-engineer-roster-grouping notes.
+* **Update**: linked [regression tests must exercise the layer that had the bug](/lessons/regression-tests-bug-layer.md) to the shell nav reachability manifest lesson.
+* **Creation**: promoted [string-coerce workspace metadata before roster grouping and sorting](/lessons/roster-grouping-string-coerce-metadata.md) from the oas-desktop-engineer-roster-grouping notes.
+* **Update**: linked [keep roster family grouping helpers inside instance-tree](/lessons/roster-family-grouping-helpers.md) to the string-coercion lesson for workspace-controlled instance metadata.
+* **Update**: merged the spawn-button pending probe note into [CLI degradation state must distinguish pending, compatible, and unavailable](/lessons/degradation-state-unknown-capable.md): pending CLI probes stay card-less and disabled but retry from the roster poll until settled, with a checking tooltip instead of a missing-card hint.
+* **Update**: merged the desktop-server test CLI-on-PATH note into [CLI locator tests need hermetic PATH and absolute fixtures](/lessons/fake-cli-fixtures-hostile-path.md): no-CLI degradation tests must strip env, PATH, npm-on-PATH, and login-shell locator sources.
+* **Creation**: promoted [keep roster family grouping helpers inside instance-tree](/lessons/roster-family-grouping-helpers.md) from the oas-desktop-engineer-roster-grouping notes.
+* **Creation**: promoted [Polling innerHTML repaints destroy text selection](/lessons/polling-innerhtml-repaints-destroy-selection.md) from the oas-desktop-engineer-chat-input-copy notes.
+* **Update**: linked [Periodic repaints must not rebuild DOM under open forms](/lessons/poll-repaint-wipes-form-input.md) to the transcript-selection repaint barrier.
+* **Creation**: promoted [Shift+Enter through xterm/tmux must be translated to pi's Ctrl+J newline alias](/lessons/shift-enter-newline-via-ctrl-j-alias.md) from the oas-desktop-engineer-chat-input-copy notes.
+* **Update**: linked [Desktop terminal is a direct tmux attach via node-pty](/decisions/desktop-terminal-direct-attach.md) to the Shift+Enter xterm translation lesson.
+* **Creation**: promoted [electron-builder identity "-" produces complete ad-hoc mac bundle signatures](/lessons/electron-builder-adhoc-identity.md) from the oas-desktop-engineer-macos-correct-installers notes.
+* **Creation**: promoted [Strict deep codesign gates need structural bundle-seal pre-checks](/lessons/macos-strict-codesign-gate-structure.md) from the oas-desktop-engineer-macos-correct-installers notes.
+* **Creation**: promoted [v0.18.2 malformed installer defect and the v0.18.3 terminal release facts](/references/macos-installer-v0182-v0183-release-record.md) from the oas-desktop-engineer-macos-correct-installers notes.
 
 ## 2026-07-24
 * **Creation**: promoted [bounded OS resources spawned per user action need a hard cap in the owning process](/lessons/terminal-resource-cap-in-owning-process.md) from the oas-desktop-engineer-desktop-dist notes.

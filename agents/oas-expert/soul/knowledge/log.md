@@ -1,5 +1,13 @@
 # Knowledge Log
 
+## 2026-07-25
+* **Update**: [Repo state](/stewardship/repo-state.md) records v0.18.5 publication and deployment verification, resolution of the PR #32/#33 corrective-release thread, and this machine's tooling update; the [delivery log](/stewardship/delivery-log.md) records PR #34's manifest-bump rescue.
+* **Creation**: [xterm custom key overrides must classify the whole physical chord](/lessons/xterm-custom-key-handler-whole-chord.md) — xterm invokes a custom key event handler across keydown, keypress, and keyup, so a modifier override must suppress every relevant phase while emitting its replacement byte exactly once.
+* **Update**: skills/pr-review — added the surface-removal inventory gotcha: user-visible fallback and recovery copy must move with a removed UI surface, and tests should pin the replacement destination instead of only asserting generic failure.
+* **Creation**: [Surface removal inventories must include user-facing recovery copy](/lessons/surface-removal-inventory-user-guidance.md) — removing a UI surface requires finding user-visible fallback and recovery copy, not only imports, navigation entries, modules, and CSS.
+* **Update**: [Repo state](/stewardship/repo-state.md) records the post-publication human finding that PR #29's added Instances navigation/sidebar was out of scope and v0.18.4 now requires an immutable-version corrective patch.
+* **Update**: [Repo state](/stewardship/repo-state.md) records the v0.18.4 Desktop UX release, published package/installer verification, clean deployment probe, and PR #31 manifest-bump rescue; the [delivery log](/stewardship/delivery-log.md) records PR #31's terminal outcome.
+
 ## 2026-07-24
 * **Harvest**: merged pending note `desktop-publication-release-contract.md` into the existing [First public OAS Desktop release contract](/decisions/desktop-public-release-contract.md); no concept change was needed because the accepted decision already carries the durable release contract.
 * **Creation**: [First public OAS Desktop release contract](/decisions/desktop-public-release-contract.md) — synchronized v0.18.0 root/pi npm and Desktop GitHub publication, explicit unsigned macOS/Linux matrix under current credentials, Desktop API v1 JSON mutations, observation-only no-CLI behavior, installed-artifact parity, one-tag sequencing, dormant-surface pruning, and cli-dev/Desktop ownership.

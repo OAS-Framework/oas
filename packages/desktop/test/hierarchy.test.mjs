@@ -245,3 +245,100 @@ test("cluster cards are anonymous: header carries counts only, never the derived
     g.window = prev.window; g.document = prev.document; g.localStorage = prev.localStorage;
   }
 });
+
+test("duplicate names across agents roots render as DISTINCT nodes; terminal opens carry identity", async () => {
+  const { JSDOM } = await import("jsdom");
+  const dom = new JSDOM(`<div id="root"></div>`, { pretendToBeVisual: true });
+  const g = globalThis;
+  const prev = { window: g.window, document: g.document, localStorage: g.localStorage };
+  g.window = dom.window; g.document = dom.window.document;
+  g.localStorage = { getItem: () => null, setItem: () => {} };
+  try {
+    const panel = { instances: [
+      { instance: "dev", agentsRoot: "/a/agents", home: "/a/agents/dev/i/dev", running: true },
+      { instance: "dev", agentsRoot: "/b/agents", home: "/b/agents/dev/i/dev", running: true },
+      { instance: "kid", agentsRoot: "/a/agents", home: "/a/agents/kid/i/kid", parentInstance: "dev", running: true },
+    ], workspaces: [], workspace: null };
+    const opened = [];
+    const ctx = { api: async () => ({ ok: true, status: 200, json: async () => panel }),
+                  openTerminal: (ref) => opened.push(ref) };
+    const el = dom.window.document.getElementById("root");
+    const un = hier.mount(el, ctx);
+    await new Promise((r) => setTimeout(r, 30));
+    const nodes = [...el.querySelectorAll(".hnode")];
+    assert.equal(nodes.length, 3, "duplicate-named instances are distinct nodes — none dropped");
+    assert.equal(new Set(nodes.map((n) => n.dataset.id)).size, 3, "node identity keys are unique");
+    // the OTHER-root dev is a singleton in the Independent strip, not merged
+    assert.equal(el.querySelectorAll(".hier-cluster .hnode").length, 2);
+    assert.equal(el.querySelectorAll(".hier-solo .hnode").length, 1);
+    // double-click opens with full identity (home/agentsRoot), not a bare name
+    const soloNode = el.querySelector(".hier-solo .hnode");
+    soloNode.dispatchEvent(new dom.window.Event("dblclick", { bubbles: true }));
+    assert.equal(opened.length, 1);
+    assert.equal(opened[0].home, "/b/agents/dev/i/dev", "terminal open addresses the exact instance");
+    assert.equal(opened[0].agentsRoot, "/b/agents");
+    un();
+  } finally {
+    g.window = prev.window; g.document = prev.document; g.localStorage = prev.localStorage;
+  }
+});
+
+test("relation resolution keeps FULL-roster scope after clustering: globally-ambiguous edge never reintroduced", () => {
+  // /c/kid joins /a/dev's component via an unambiguous sibling link, but
+  // kid.parentInstance="dev" is globally AMBIGUOUS (/a/dev vs /b/dev):
+  // clustering drops it — the per-cluster forest must NOT resurrect it.
+  const roster = [
+    { instance: "dev", agentsRoot: "/a", home: "/a/dev", running: true },
+    { instance: "dev", agentsRoot: "/b", home: "/b/dev", running: true },
+    { instance: "kid", agentsRoot: "/c", home: "/c/kid", parentInstance: "dev",
+      siblingInstance: "uniq", running: true },
+    // uniq shares /a with its parent "dev" — same-root resolution validly
+    // pulls /a/dev into kid's component, making "dev" unique WITHIN the
+    // cluster while staying ambiguous in the full roster.
+    { instance: "uniq", agentsRoot: "/a", home: "/a/uniq", parentInstance: "dev", running: true },
+  ];
+  const { placed } = hier.layoutClusters(roster);
+  const cl = placed.find((pc) => pc.nodes.some((n) => n.inst.home === "/c/kid"));
+  assert.ok(cl.nodes.some((n) => n.inst.home === "/a/dev"),
+    "fixture: /a/dev must share kid's cluster for the test to bite");
+  const kid = cl.nodes.find((n) => n.inst.home === "/c/kid");
+  const parentOfKid = cl.nodes.find((n) => n.children.includes(kid));
+  assert.equal(parentOfKid, undefined,
+    "ambiguous parent stays dropped inside the cluster forest — kid renders as a root");
+});
+
+test("layout determinism with duplicate names: identity tie-break keeps coordinates stable across roster order", () => {
+  const roster = [
+    { instance: "root", home: "/r/root", running: true },
+    { instance: "dev", agentsRoot: "/a", home: "/a/dev", parentInstance: "root", running: true },
+    { instance: "dev", agentsRoot: "/b", home: "/b/dev", parentInstance: "root", running: true },
+  ];
+  const posOf = (lay, home) => {
+    const n = lay.nodes.find((x) => x.inst.home === home);
+    return `${n.x}:${n.y}`;
+  };
+  const l1 = hier.layoutForest(roster);
+  const l2 = hier.layoutForest([...roster].reverse());
+  assert.equal(posOf(l1, "/a/dev"), posOf(l2, "/a/dev"), "same-named children never swap slots");
+  assert.equal(posOf(l1, "/b/dev"), posOf(l2, "/b/dev"));
+});
+
+test("full-roster scope covers SIBLING edges too: globally-ambiguous sibling name never becomes a false edge", () => {
+  // /c/kid declares siblingInstance="dev" — globally AMBIGUOUS (/a/dev vs
+  // /b/dev), so clustering drops it. But /a/dev is validly in kid's cluster
+  // (child of the same root), so a cluster-scoped index would see exactly
+  // one "dev" and resurrect the pair as a false sibling arc.
+  const roster = [
+    { instance: "root", home: "/c/root", running: true },
+    { instance: "kid", agentsRoot: "/c", home: "/c/kid", parentInstance: "root",
+      siblingInstance: "dev", running: true },
+    { instance: "dev", agentsRoot: "/a", home: "/a/dev", parentInstance: "root", running: true },
+    { instance: "dev", agentsRoot: "/b", home: "/b/dev", running: true },
+  ];
+  const { placed } = hier.layoutClusters(roster);
+  const cl = placed.find((pc) => pc.nodes.some((n) => n.inst.home === "/c/kid"));
+  assert.ok(cl.nodes.some((n) => n.inst.home === "/a/dev"),
+    "fixture: /a/dev must share kid's cluster for the narrowed-scope bug to bite");
+  assert.deepEqual(cl.sibs, [],
+    "ambiguous sibling name stays dropped — no false arc from cluster-local uniqueness");
+});

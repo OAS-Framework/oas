@@ -172,7 +172,32 @@ function agentsData(wsId) {
  * Default is NO TASK: the instance comes up awaiting instruction.
  * Validation errors THROW (→ 409); domain/CLI results RESOLVE with the
  * envelope so stable error codes reach the UI. */
-async function spawnAgent({ agent, agentsRoot, task, purpose, relation, relativeTo, runtime, model }) {
+/* OASWEB_SPAWNERR_BEGIN — /api/spawn error shaping. Extracted by
+   packages/desktop/test/panel-projection.test.mjs via block markers; the
+   HTTP boundary itself is covered by test/desktop-cli-integration.test.mjs.
+   Stable code for the degradation UI: cli-unavailable means "install or
+   choose a compatible oas CLI", not "bad request". The 300-char cap guards
+   against unbounded upstream text, but E_RELATIVE_AMBIGUOUS messages
+   legitimately carry multiple absolute instance homes (case-d inherited
+   edges) and the renderer surfaces them VERBATIM — any fixed cap can eat
+   the actionable tail for deeply nested paths (reviews f1e3211, 835a05f).
+   This code's message passes through UNSLICED: it originates from the CLI
+   JSON envelope, which the adapter already bounds (maxBuffer 4 MiB — the
+   real upstream bound), and the renderer assigns it via textContent. */
+function spawnErrorPayload(e) {
+  const status = e.code === "cli-unavailable" ? 503 : 409;
+  const message = String(e.message || e);
+  return {
+    status,
+    body: {
+      error: e.code === "E_RELATIVE_AMBIGUOUS" ? message : message.slice(0, 300),
+      ...(e.code ? { code: e.code } : {}),
+    },
+  };
+}
+/* OASWEB_SPAWNERR_END */
+
+async function spawnAgent({ agent, agentsRoot, task, purpose, relation, relativeTo, relativeRoot, runtime, model }) {
   const name = String(agent || "");
   const root = resolve(String(agentsRoot || ""));
   // agentsRoot must be one of the workspace roots this server was started for —
@@ -204,6 +229,10 @@ async function spawnAgent({ agent, agentsRoot, task, purpose, relation, relative
     purpose: purpose ? String(purpose) : undefined,
     relation: relation ? String(relation) : undefined,
     relativeTo: relativeTo ? String(relativeTo) : undefined,
+    // Anchor disambiguation: the renderer picker knows each instance's
+    // agentsRoot; sending the pair makes related spawns unambiguous under
+    // cross-root name shadowing (kernel E_RELATIVE_AMBIGUOUS otherwise).
+    relativeRoot: relativeRoot ? String(relativeRoot) : undefined,
     // Runtime/model overrides (spawn-modal options): adapter-allowlisted and
     // shape-validated there; empty means "agent definition default".
     runtime: runtime ? String(runtime) : undefined,
@@ -801,12 +830,7 @@ const server = createServer(async (req, res) => {
       if (typeof body.agent !== "string" || !body.agent || typeof body.agentsRoot !== "string" || !body.agentsRoot)
         return send(res, 400, { error: "body needs { agent, agentsRoot }" });
       try { return send(res, 200, { spawned: true, ...(await spawnAgent(body)) }); }
-      catch (e) {
-        // Stable code for the degradation UI: cli-unavailable means "install
-        // or choose a compatible oas CLI", not "bad request".
-        const status = e.code === "cli-unavailable" ? 503 : 409;
-        return send(res, status, { error: String(e.message || e).slice(0, 300), ...(e.code ? { code: e.code } : {}) });
-      }
+      catch (e) { const { status, body: b } = spawnErrorPayload(e); return send(res, status, b); }
     }
     const hm = path.match(/^\/api\/harvest\/([A-Za-z0-9._-]+)$/);
     if (hm && req.method === "POST") {

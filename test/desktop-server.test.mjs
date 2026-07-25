@@ -142,7 +142,7 @@ test("desktop harness: every shipped view has a tab in the shared harness", () =
   const views = readdirSync(viewsDir).filter((f) => f.endsWith(".mjs"))
     .filter((f) => /export (async )?function mount\(/.test(readFileSync(join(viewsDir, f), "utf8")))
     .map((f) => f.replace(/\.mjs$/, ""));
-  assert.ok(views.length >= 5, `shipped views found (got: ${views.join(", ")})`);
+  assert.ok(views.length >= 4, `shipped views found (got: ${views.join(", ")})`);
   const harness = readFileSync(join(rendererDir, "harness.html"), "utf8");
   for (const v of views)
     assert.ok(harness.includes(`data-view="${v}"`), `harness.html has a tab for the "${v}" view`);
@@ -289,7 +289,16 @@ test("desktop server: /api/agents lists persistent AND capability-defined agents
   // capability-defined agents (oas.review's reviewer) can resolve.
   execFileSync(process.execPath, [CLI, "install", "--dir", ROOT], { stdio: "ignore" });
   const port = 4000 + Math.floor(Math.random() * 2000);
-  const proc = spawn(process.execPath, [SRV, "start", "--port", String(port), "--dir", ROOT], { stdio: "ignore" });
+  // The 503 assertion below requires the server to find NO compatible CLI.
+  // On dev machines a real `oas` is often on PATH (the probe settles ok and
+  // the spawn attempt answers 409 instead) — strip every locator source so
+  // the test is deterministic in CI and locally alike. PATH must be empty of
+  // ANY toolchain: even /usr/bin/npm lets the npm-global source rediscover a
+  // real oas (review b2a1564).
+  const proc = spawn(process.execPath, [SRV, "start", "--port", String(port), "--dir", ROOT], {
+    stdio: "ignore",
+    env: { ...process.env, PATH: "/nonexistent", OAS_DESKTOP_OAS_BIN: "", SHELL: "/bin/false" },
+  });
   try {
     let up = false;
     for (let i = 0; i < 40 && !up; i++) {

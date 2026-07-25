@@ -9,7 +9,7 @@
 //   * integrated terminal: node-pty running `tmux attach-session` per
 //     terminal tab, bytes streamed to xterm.js over IPC. Closing a tab kills
 //     the pty ONLY — the tmux session is the durable host and must survive.
-import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from "electron";
 import { spawn, execFileSync } from "node:child_process";
 import { existsSync, readFileSync, realpathSync, writeFileSync, lstatSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -22,6 +22,7 @@ import { ensureServerOnPort, serverCompatible } from "./server-compat.mjs";
 import { createServerHost, createServerAdapter } from "./server-host.mjs";
 import { validateWorkspace, workspaceSuggestions, parseRecents, pushRecent, decideAdd, createGenerations, createAddExecutor } from "./workspace-registry.mjs";
 import { resolveDeployment, teamAgentRoots } from "./server/deployment.mjs";
+import { appMenuTemplate } from "./app-menu.mjs";
 
 const require = createRequire(import.meta.url);
 const pty = require("node-pty");
@@ -426,6 +427,16 @@ ipcMain.on("term:close", (e, id) => {
 });
 
 // ---- window -------------------------------------------------------------
+// Application menu policy lives in app-menu.mjs (pure, unit-tested):
+// role menu on macOS only (Cmd accelerators cannot collide with terminal
+// Ctrl chords); NO menu elsewhere — role menus on Linux/Windows register
+// Ctrl accelerators that steal xterm's terminal control keys (review
+// befe75b important 1), and Chromium handles clipboard shortcuts natively.
+function installAppMenu() {
+  const template = appMenuTemplate(process.platform);
+  Menu.setApplicationMenu(template ? Menu.buildFromTemplate(template) : null);
+}
+
 async function createWindow() {
   const win = new BrowserWindow({
     width: 1400,
@@ -452,9 +463,25 @@ async function createWindow() {
     if (/^https?:/.test(url)) shell.openExternal(url);
   });
   await win.loadFile(join(HERE, "renderer", "index.html"));
+  // Right-click copy for selected transcript/view text (and standard edit
+  // actions in editable fields). Menu items come from Electron's editFlags —
+  // nothing shows when nothing is applicable.
+  win.webContents.on("context-menu", (_event, params) => {
+    const items = [];
+    if (params.isEditable) {
+      items.push({ role: "cut", enabled: params.editFlags.canCut });
+      items.push({ role: "copy", enabled: params.editFlags.canCopy });
+      items.push({ role: "paste", enabled: params.editFlags.canPaste });
+      items.push({ role: "selectAll", enabled: params.editFlags.canSelectAll });
+    } else if (params.selectionText.trim()) {
+      items.push({ role: "copy", enabled: params.editFlags.canCopy });
+    }
+    if (items.length) Menu.buildFromTemplate(items).popup({ window: win });
+  });
 }
 
 app.whenReady().then(async () => {
+  installAppMenu();
   sweepOrphanViewers(); // a previously crashed desktop must not leak viewer sessions
   try { await ensureServer(); }
   catch (e) { console.error(`oas-desktop: ${e.message}`); }

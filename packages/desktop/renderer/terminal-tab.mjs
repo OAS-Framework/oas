@@ -26,6 +26,55 @@ import { createTermLifecycle } from "./term-lifecycle.mjs";
  * @param {(e: unknown) => void} [deps.onError]
  * @returns {{ start: () => Promise<void>, close: () => Promise<void> }}
  */
+/* Shift+Enter must insert a newline in the agent's input line, not send the
+   message. xterm.js emits a plain \r for Enter regardless of Shift, so the
+   modifier is lost before tmux or the agent runtime ever sees it. pi binds
+   Ctrl+J (a raw \n linefeed) as its default newline alias precisely for
+   terminals that cannot deliver a real shift+enter through tmux (see pi
+   docs/terminal-setup.md), so translating Shift+Enter → \n here composes a
+   newline in every runtime that follows that convention while plain Enter
+   keeps sending.
+
+   xterm invokes the custom handler for keydown, keypress AND keyup of the
+   same physical press. Suppressing only the keydown is NOT enough: the
+   browser still fires keypress (charCode 13), xterm's _keyPress path is
+   reached because the handler returned true for it, and a \r goes to the
+   pty right after our \n — newline immediately followed by SEND (the
+   v0.18.4 field failure: Shift+Enter looked like it "did nothing" because
+   the message submitted anyway). Every event of a Shift+Enter press must
+   be suppressed; the \n is written once, on the keydown.
+
+   Returns { suppress, byte } — byte is the payload to write (only on
+   keydown), suppress covers keypress/keyup of the same chord. Pure —
+   exported for tests. */
+export function shiftEnterAction(ev) {
+  if (ev.key !== "Enter" || !ev.shiftKey || ev.ctrlKey || ev.altKey || ev.metaKey) {
+    return { suppress: false, byte: null };
+  }
+  return { suppress: true, byte: ev.type === "keydown" ? "\n" : null };
+}
+
+/* xterm Terminal construction options for a shell terminal tab — exported
+   (rather than inlined in shell.mjs) so the invariant-bearing lines are
+   testable (lesson: regression tests must exercise the bug layer).
+
+   macOptionClickForcesSelection: the tab attaches to a tmux viewer session
+   running with `mouse on` (wheel scrollback — tmux-target.mjs), so tmux
+   grabs the mouse and a plain drag never creates an xterm selection — copy
+   looked broken (v0.18.4 field report). xterm's escape hatch is a modifier-
+   forced LOCAL selection, and it is platform-split (shouldForceSelection):
+   Option+drag on macOS — only when this option is on (default off) — and
+   Shift+drag on non-mac platforms. */
+export function terminalOptions({ fontSize, fontFamily, theme }) {
+  return {
+    fontSize,
+    fontFamily,
+    theme,
+    scrollback: 5000,
+    macOptionClickForcesSelection: true,
+  };
+}
+
 export function createTerminalTab({ desk, term, tmux, wrap, isActive, fit, observe, onError = (e) => console.error(e) }) {
   let offData = null, offExit = null;
   let unobserve = null;
@@ -83,6 +132,15 @@ export function createTerminalTab({ desk, term, tmux, wrap, isActive, fit, obser
           banner("session ended — close this tab");
         });
         term.onData((data) => { if (life.ptyId() !== null) desk.termWrite(life.ptyId(), data); });
+        // Shift+Enter → newline (Ctrl+J alias); returning false suppresses
+        // xterm's handling for EVERY event of the chord — keydown (would
+        // send \r) and keypress (would ALSO send \r; see shiftEnterAction).
+        term.attachCustomKeyEventHandler?.((ev) => {
+          const { suppress, byte } = shiftEnterAction(ev);
+          if (!suppress) return true;
+          if (byte !== null && life.ptyId() !== null) desk.termWrite(life.ptyId(), byte);
+          return false;
+        });
         term.onResize(({ cols, rows }) => { if (life.ptyId() !== null) desk.termResize(life.ptyId(), cols, rows); });
         unobserve = (observe || defaultObserve)(wrap);
         term.focus();

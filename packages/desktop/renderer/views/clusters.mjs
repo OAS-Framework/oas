@@ -3,8 +3,15 @@
    roster under parent/child (parentInstance) and sibling (siblingInstance)
    links. ALL reading of sibling data goes through siblingLinksOf() — the
    single seam for the kernel's field shape.
+   IDENTITY: nodes are keyed by instanceId (composite identity from
+   instance-tree.mjs), never bare name — duplicate instance names across
+   agent dirs/team repos are legal, and a bare-name key would silently drop
+   or falsely merge live instances (merged-state review f7c5769). Relation
+   names resolve through the shared resolveLinkId semantics: same-agentsRoot
+   first, unique cross-root allowed, ambiguous → no edge (fail safe).
    Malformed data must never break the overview: unknown names are ignored,
    self-links are ignored, and cycles are harmless to a union-find. */
+import { instanceId, resolveLinkId } from "../instance-tree.mjs";
 
 /** Sibling links of a roster instance, as an array of instance names.
     ADAPTER: kernel contract (final, relayed by dev-coordinator-parallel) is
@@ -20,28 +27,36 @@ export function siblingLinksOf(inst) {
 
 /** Connected components of the roster under parent/child + sibling links.
     Returns clusters sorted for stable rendering: multi-member clusters
-    first (running-heavy first, then by cluster name), then singletons.
+    first (running-heavy first, then by cluster key), then singletons.
     Each cluster: { name, instances, running, size }.
-    - name: deterministic label — the root-most member's name (the member
-      with no in-cluster parent that sorts first), so the same roster
-      always produces the same cluster identity across refreshes.
+    - name: INTERNAL deterministic grouping/ordering key (root-most member's
+      id), never rendered (clusters are anonymous by human decision).
     - instances: members in roster order (layout decides visual order). */
 export function computeClusters(instances) {
   const list = (instances || []).filter((i) => i && i.instance);
-  const index = new Map(list.map((i, at) => [i.instance, at]));
+  const ids = list.map((i) => instanceId(i));
+  const index = new Map(ids.map((id, at) => [id, at])); // id -> roster position
+  const byName = new Map();
+  for (const i of list) {
+    if (!byName.has(i.instance)) byName.set(i.instance, []);
+    byName.get(i.instance).push(i);
+  }
 
-  // union-find over roster positions
+  // union-find over roster positions; edges resolve through the SHARED
+  // resolver (same-root first, unique cross-root, ambiguous → dropped)
   const up = list.map((_, at) => at);
   const find = (a) => { while (up[a] !== a) { up[a] = up[up[a]]; a = up[a]; } return a; };
   const union = (a, b) => { const ra = find(a), rb = find(b); if (ra !== rb) up[rb] = ra; };
-
+  const linkTo = (i, at, name) => {
+    const oid = resolveLinkId(i, name, byName);
+    if (oid && oid !== ids[at] && index.has(oid)) union(index.get(oid), at);
+  };
   list.forEach((i, at) => {
-    const p = i.parentInstance;
-    if (p && p !== i.instance && index.has(p)) union(index.get(p), at);
-    for (const s of siblingLinksOf(i)) if (index.has(s)) union(index.get(s), at);
+    if (i.parentInstance) linkTo(i, at, i.parentInstance);
+    for (const s of siblingLinksOf(i)) linkTo(i, at, s);
   });
 
-  const groups = new Map(); // root position -> members
+  const groups = new Map(); // component root position -> members
   list.forEach((i, at) => {
     const r = find(at);
     if (!groups.has(r)) groups.set(r, []);
@@ -49,13 +64,16 @@ export function computeClusters(instances) {
   });
 
   const clusters = [...groups.values()].map((members) => {
-    const names = new Set(members.map((m) => m.instance));
-    // root-most: no parent inside the cluster; deterministic tiebreak by name
-    const roots = members.filter((m) => !(m.parentInstance && m.parentInstance !== m.instance && names.has(m.parentInstance)));
-    const label = (roots.length ? roots : members)
-      .map((m) => m.instance).sort()[0];
+    const memberIds = new Set(members.map((m) => instanceId(m)));
+    // root-most: no RESOLVED parent inside the cluster; deterministic tiebreak
+    const roots = members.filter((m) => {
+      const pid = m.parentInstance ? resolveLinkId(m, m.parentInstance, byName) : null;
+      return !(pid && pid !== instanceId(m) && memberIds.has(pid));
+    });
+    const key = (roots.length ? roots : members)
+      .map((m) => instanceId(m)).sort()[0];
     return {
-      name: label,
+      name: key,
       instances: members,
       running: members.filter((m) => m.running).length,
       size: members.length,
@@ -72,16 +90,29 @@ export function computeClusters(instances) {
 }
 
 /** Sibling edge list within one cluster: unique unordered pairs of member
-    names, both present in the cluster, deduped regardless of declaration
-    direction. Returns [{ a, b }] with a < b. */
-export function siblingEdges(cluster) {
-  const names = new Set(cluster.instances.map((i) => i.instance));
+    instanceIds, both resolved into the cluster, deduped regardless of
+    declaration direction. rosterByName (name -> instance[]) SHOULD be the
+    FULL roster's index — resolving against only the cluster's members can
+    make a globally-ambiguous name falsely unique and reintroduce a dropped
+    edge (review 3ab2a40); defaults to cluster scope only for callers with
+    no wider roster. Returns [{ a, b }] with a < b (ids). */
+export function siblingEdges(cluster, rosterByName) {
+  const memberIds = new Set(cluster.instances.map((i) => instanceId(i)));
+  let byName = rosterByName;
+  if (!byName) {
+    byName = new Map();
+    for (const i of cluster.instances) {
+      if (!byName.has(i.instance)) byName.set(i.instance, []);
+      byName.get(i.instance).push(i);
+    }
+  }
   const seen = new Set();
   const edges = [];
   for (const i of cluster.instances) {
     for (const s of siblingLinksOf(i)) {
-      if (!names.has(s)) continue;
-      const [a, b] = [i.instance, s].sort();
+      const oid = resolveLinkId(i, s, byName);
+      if (!oid || !memberIds.has(oid)) continue;
+      const [a, b] = [instanceId(i), oid].sort();
       const key = `${a}\u0000${b}`;
       if (seen.has(key)) continue;
       seen.add(key);

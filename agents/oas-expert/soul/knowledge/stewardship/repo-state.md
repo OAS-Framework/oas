@@ -5,7 +5,6 @@ description: Always-current snapshot of what is on main, what is in flight (PRs,
 tags: [stewardship, repo-state, living]
 timestamp: 2026-07-25
 ---
-
 # Repo state — the living picture
 
 Maintenance contract: **whoever changes this reality updates this concept in
@@ -15,6 +14,84 @@ entries first inside each section; prune entries that stop being true rather
 than letting the file grow stale.
 
 ## On main
+
+- **RELEASED v0.18.5 (2026-07-25)** — corrective Desktop patch containing
+  PR #32 and PR #33. Tag `v0.18.5` on `a0052bd` (both corrective merges plus
+  release notes). Published `@oas-framework/oas@0.18.5` +
+  `@oas-framework/pi@0.18.5` and GitHub Release v0.18.5 with all six Desktop
+  installers, SHA256SUMS.txt, and build provenance. Release run `30160666617`
+  passed build/test and macOS arm64/x64 plus Linux x64 installer build+smoke;
+  its only failure was the known org-policy block on Actions-created PRs after
+  publication. Manifests were bumped through manual rescue PR #34 (`8f5af90`).
+  The published kernel passed a clean create→spawn→inspect→retire deployment
+  probe; this machine's global kernel and Pi bridge were updated to 0.18.5 with
+  clean OAS and LFX doctors. Per coordinator instruction, running Desktop app
+  processes were not touched.
+
+- **PR #33 merged 2026-07-25 as `595159e`** — fixes both remaining v0.18.4
+  terminal field failures: Shift+Enter suppresses xterm keydown/keypress/keyup
+  while writing one newline, and modifier-forced local xterm selection enables
+  terminal copy with tmux mouse mode (Option on macOS, Shift on non-macOS).
+  Final exact head `d75fa3a`; human live verification, local full/affected
+  gates, strict OKF, required CI, and all three installer checks passed after
+  two maintainer RETURNs. Released with PR #32 in v0.18.5; v0.18.4 remains
+  immutable.
+
+- **PR #32 merged 2026-07-25 as `97f66c9`** — corrective rollback for the
+  out-of-scope PR #29 Instances rail destination and second roster sidebar.
+  The shell again exposes only Active overview and Soul roster as stages; the
+  permanent sidebar remains the instances context. The deleted stage/view,
+  tests, docs, and 104 lines of stage-only CSS are gone, with absence pins;
+  shared grouping helpers remain for separately owned sidebar work. Final exact
+  head `69641c9`; full local gate, human live workspace test, independent
+  reviewer, required CI, and all three installer checks passed. Released in
+  v0.18.5; immutable v0.18.4 artifacts remain unchanged.
+
+- **RELEASED v0.18.4 (2026-07-25)** — Desktop UX fixes from PR #29. Tag
+  `v0.18.4` on `a84443a` (PR #29 merge plus release notes). Published
+  `@oas-framework/oas@0.18.4` + `@oas-framework/pi@0.18.4` and GitHub Release
+  v0.18.4 with all six Desktop installers (mac arm64/x64 DMG+ZIP, Linux x64
+  AppImage+DEB), SHA256SUMS.txt, and build provenance. Build/test and all three
+  installer build+smoke legs passed in release run `30158015741`; the run's
+  only failure was the known org-policy block on Actions-created PRs after
+  publication. Manifests were bumped to 0.18.4 through manual rescue PR #31
+  (`fda7498`). The published kernel passed a clean create→spawn→inspect→retire
+  deployment probe and reported Desktop API v1 at version 0.18.4. A human
+  subsequently identified an out-of-scope Desktop navigation regression in
+  PR #29. Corrective source landed in PR #32; v0.18.4 remains immutable and a
+  new patch release is required (see open threads).
+
+- **PR #29 merged 2026-07-25 as `b7203eb`** — Desktop UX fixes: spawn view
+  retries an unsettled CLI probe with truthful pending UI; Shift+Enter inserts
+  a newline and transcripts are copyable without Linux/Windows Ctrl-chord
+  regressions; Instances is a first-class nav/palette stage with repo→family
+  grouping, collapsible headers, and workspace-scoped sorting; active terminal
+  tabs restore per workspace. Final exact head `9736852`; all PR and three-leg
+  installer checks green. Released in v0.18.4.
+
+- **PR #30 merged 2026-07-25 as `935d142`**: post-v0.18.3 knowledge-only
+  harvest from cli-dev and oas-desktop-engineer. Promotes the corrected macOS
+  installer signing/release lessons, strict codesign gate structure, release
+  workflow/static-test gotchas, and a read-only aweb trust-mismatch diagnostic
+  skill. No product, release, manifest, or framework behavior changes.
+
+- **RELEASED v0.18.3 (2026-07-25)** — corrected macOS installers. Tag `v0.18.3`
+  on PR #27 merge commit `921f44a`. Published `@oas-framework/oas@0.18.3` +
+  `@oas-framework/pi@0.18.3` (npm latest) and GitHub Release v0.18.3 with all
+  six Desktop installers (mac arm64/x64 DMG+ZIP, linux x64 AppImage+DEB) +
+  SHA256SUMS.txt + build provenance. Fixes the v0.18.2 defect: both mac `.app`
+  bundles now carry COMPLETE ad-hoc signatures (identity `"-"`, NOT Developer ID,
+  NOT notarized) and pass strict deep codesign, gated fail-closed in CI on both
+  arches (external step + unconditional packaged smoke, byte-identical
+  run-blocks). Manifests on main bumped to 0.18.3 via manual bump PR #28
+  (`9a6eae8`) — the release run's own bump-PR create step is blocked by org
+  policy (see open threads). v0.18.2 assets untouched. Operator to manually
+  launch-test the released arm64 artifact.
+
+- **PR #27 merged 2026-07-25 as `921f44a`**: publish valid ad-hoc-signed macOS
+  installers (electron-builder `identity: "-"`; strict deep codesign gate as
+  external workflow step + unconditional darwin smoke; release-notes existence
+  gate; `CSC_FOR_PULL_REQUEST=true` on build-installers only). Drove v0.18.3.
 
 - **PR #26 merged 2026-07-25 as `0061eb5`**: knowledge-only — promoted the
   detached-HEAD release refspec lesson
@@ -54,21 +131,38 @@ than letting the file grow stale.
 - Earlier oas.web and Control Pane deliveries remain in the delivery log and
   donor-soul knowledge as migration history; their product surfaces are no
   longer present on main.
-- Framework source is now **0.18.2** on npm (root/pi) with the first public
-  Desktop installers on GitHub Release v0.18.2. Capabilities at: oas.review
-  1.1.6, oas.okf **1.4.0**, oas.aweb 1.5.1, oas.jira 1.0.0. (Superseded the
-  earlier "source remains 0.17.6 / published artifacts predate the desktop
-  gate" state.)
+- Framework source and Desktop artifacts are now **0.18.5** (root/pi npm plus
+  GitHub Release installers). Capabilities at: oas.review 1.1.6, oas.okf
+  **1.4.0**, oas.aweb 1.5.1, oas.jira 1.0.0.
 
 ## In flight
 
-- (nothing in flight) — `feature/desktop-dist` merged (PR #21) and the
-  `oas-desktop-engineer/linux-executablename` fix branch merged (PR #22); both
-  remote branches deleted. The v0.18.2 release contract is satisfied.
+- (nothing currently recorded) — PR #33 reached terminal MERGED outcome; its
+  remote feature branch is deleted.
 
 ## Recent deliveries
 
 - (record PR #, one-line scope, verdict, merge/close date)
+- PR #34 release: v0.18.5 manifest bump (manual rescue after complete
+  publication): MERGED 2026-07-25 (`8f5af90`; see delivery-log).
+- PR #33 Desktop Shift+Enter whole-chord suppression + modifier-forced terminal
+  copy selection: MERGED 2026-07-25 as `595159e` after two RETURNs; released
+  with PR #32 in v0.18.5 (see delivery-log).
+- PR #32 Desktop Instances-stage scope rollback: MERGED 2026-07-25 as
+  `97f66c9` after one correctness+mergeability RETURN; released with PR #33 in
+  v0.18.5 (see delivery-log).
+- PR #31 release: v0.18.4 manifest bump (manual bump-PR rescue after complete
+  publication): MERGED 2026-07-25 (`fda7498`; see delivery-log).
+- PR #30 post-v0.18.3 cli-dev/Desktop knowledge and skill harvest: MERGED
+  2026-07-25 (`935d142`); strict OKF passed all 8 bundles (see delivery-log).
+- PR #29 Desktop UX fixes: MERGED 2026-07-25 as `b7203eb` after one
+  correctness+staleness RETURN and one mergeability-only RETURN; released in
+  v0.18.4 (see delivery-log).
+- PR #28 release: v0.18.3 manifest bump (manual bump-PR rescue for the release
+  run's org-policy-blocked create step): MERGED 2026-07-25 (`9a6eae8`).
+- PR #27 corrected macOS installers (complete ad-hoc signatures + strict
+  codesign gate): MERGED 2026-07-25 (`921f44a`); drove the v0.18.3 publish
+  (see delivery-log).
 - PR #25 release.yml fully-qualify bump-PR push ref (detached-HEAD safe) +
   regression guard: MERGED 2026-07-25 (`8d7d2ee`); resolves the recurring
   bump-PR push failure (see delivery-log).
@@ -119,16 +213,21 @@ than letting the file grow stale.
   merge main, `npm test` run from THOSE roots can still prefix-kill live
   reviewer-* windows (owners notified via tui-dev thread).
 
-- CI bump-PR step: the ambiguous-refspec failure is now **RESOLVED on main**
-  by PR #25 (`8d7d2ee`) — release.yml pushes `HEAD:refs/heads/release-bump/vX.Y.Z`,
-  which works from the publish job's detached HEAD. The OTHER cause may still
-  bite: (a) org-level GitHub Actions policy blocking Actions-created PRs can
-  still require manual `gh pr create`/merge of the `release: vX.Y.Z` bump PR.
-  Publish is already done by this step, so never retag. Rescue procedure is in
-  the git-tag-release skill.
-- Published artifacts are now v0.18.2 (RESOLVED — was "predate PR #19"). The
-  desktop installers + installed-CLI/no-CLI boundary that were mandatory
-  release prerequisites are shipped.
+- CI bump-PR step: the ambiguous-refspec failure is **RESOLVED on main** by
+  PR #25 (`8d7d2ee`) and **confirmed on the v0.18.3 run** (push logged
+  `[new branch] HEAD -> release-bump/v0.18.3`). The REMAINING cause is
+  org-level: `gh pr create` fails `GraphQL: Resource not accessible by
+  integration (createPullRequest)` because the OAS-Framework org policy blocks
+  Actions-created PRs. Every tag-driven release therefore ends with a
+  conclusion=failure run whose ONLY failed step is the bump-PR create; npm +
+  GitHub Release already succeeded (never retag). Rescue each time: create +
+  squash-merge the `release-bump/vX.Y.Z` branch manually (done for v0.18.3 as
+  PR #28, v0.18.4 as PR #31, and v0.18.5 as PR #34). Needs an org admin to
+  relax the Actions-PR policy to fully automate.
+  Rescue procedure is in the git-tag-release skill.
+- Published artifacts are now v0.18.5. The macOS installers retain complete
+  ad-hoc signatures passing strict deep codesign; earlier release assets remain
+  untouched.
 - webpanel-dev instance worktrees still hold deleted branches locally
   (webpanel-dev-1: feature/panel-refinements, fix/panel-key-routing,
   perf/fast-attach, debug/typing-live; webpanel-dev-spawn-from-panel:

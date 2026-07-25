@@ -24,6 +24,217 @@ decisions/ and referenced from here.
 
 ---
 
+## PR #34 — v0.18.5 manifest bump rescue (2026-07-25)
+- verdict: MERGED as squash commit `8f5af90`. Release run `30160666617`
+  completed build/test, all three Desktop installer build+smoke legs, both npm
+  publishes, provenance, checksums, and GitHub Release v0.18.5 before the known
+  org policy blocked Actions from creating the bump PR. The workflow-created
+  branch contained exactly the five expected root/pi/Desktop manifest and
+  lockfile changes (0.18.4→0.18.5); manual PR #34 restored the protected-main
+  flow and deleted the branch.
+- owner: oas-expert-release-desktop-ux · coordinator: dev-coordinator-parallel-2
+- taught us: nothing new — the documented org-policy rescue path remains
+  necessary, while the fully qualified detached-HEAD branch push still works.
+
+## PR #33 (round 3) — Desktop Shift+Enter send leak and terminal copy selection (2026-07-25)
+- verdict: MERGED as merge commit `595159e` at exact head `d75fa3a` after two
+  RETURNs. All four gates PASS. The feature suppresses every xterm event in a
+  Shift+Enter chord while writing one `\n` on keydown, and enables xterm's
+  modifier-forced local selection for terminal copy (Option on macOS, Shift on
+  non-macOS). It preserves PR #32's Instances-stage removal and carries accurate
+  Desktop knowledge. Fresh final affected gate passed 30/30 merged-head tests,
+  check/check:pi, strict OKF for all 8 bundles, and diff-check; the earlier full
+  scratch gate passed 382 tests plus validate/pack/smoke; human live verification
+  and all four exact-head CI/installer checks passed. Approval was recorded as a
+  PR comment (shared account), expected-head merge succeeded, and the remote
+  branch was deleted.
+- owner: oas-desktop-engineer-session-copy-newline · coordinator:
+  dev-coordinator-parallel-2
+- taught us: xterm custom key handlers span keydown, keypress, and keyup, so a
+  replacement chord must suppress all phases and emit once. Also, a handback can
+  be truthfully fresh yet immediately superseded by the maintainer's own
+  previously launched harvest; settle reviewer-driven commits before the final
+  handoff. The next patch release must combine PR #32 and PR #33 without
+  modifying immutable v0.18.4 artifacts.
+
+## PR #33 (round 2) — Desktop Shift+Enter send leak and terminal copy selection (2026-07-25)
+- verdict: RETURNED at exact head `0a9c6df` for one knowledge-correctness fix
+  plus mergeability. The branch correctly merged main twice, preserved PR #32's
+  Instances-stage removal and this PR's `terminalOptions(...)` construction,
+  unioned the append-only soul log, and passed 30/30 targeted merged-head tests,
+  Desktop strict OKF (76 concepts, 0 errors/warnings), diff-check, the owner's
+  repeated full gates, and all four exact-head CI/installer checks. Correctness
+  FAIL: the updated Shift+Enter lesson still names removed classifier
+  `shiftEnterByte(ev)` instead of `shiftEnterAction(ev)`, and the product comment
+  says Shift+drag works “everywhere” although shipped xterm uses Option on macOS
+  and Shift only on non-macOS. Mergeability FAIL: reviewer-driven harvest
+  `71b4aa1` completed after handback and advanced main, so current main is no
+  longer an ancestor. Author must fix both claims, merge final current main,
+  rerun the affected/full gate, and return a settled exact SHA.
+- owner: oas-desktop-engineer-session-copy-newline · coordinator:
+  dev-coordinator-parallel-2
+- taught us: nothing new beyond the existing settled-handback lesson — the
+  owner rechecked correctly, but the maintainer's own previously launched
+  harvest landed during the handoff window. Round 2 deliberately launches no
+  further harvest before the next handback.
+
+## PR #33 (round 1) — Desktop Shift+Enter send leak and terminal copy selection (2026-07-25)
+- verdict: RETURNED at exact head `605607a` for mergeability only. Product
+  direction, correctness, and security PASS. Fresh scratch gate passed 382
+  tests (381 pass, one intentional node-pty ABI skip), check/check:pi,
+  validate/strict OKF/pack/smoke; human live verification passed; all four
+  exact-head PR/installer checks are green. Mergeability FAIL: the branch is
+  based on `d3b0e69` and does not contain current main `41272b6`, missing seven
+  PR #32/main commits. Both sides changed `packages/desktop/renderer/shell.mjs`;
+  GitHub currently auto-merges it cleanly, but the author must merge current
+  main, preserve both changes, rerun the full gate, and return a settled green
+  exact head.
+- owner: oas-desktop-engineer-session-copy-newline · coordinator:
+  dev-coordinator-parallel-2
+- taught us: xterm's custom key callback spans keydown, keypress, and keyup; a
+  modifier override that suppresses only keydown can still leak a default
+  keypress byte. Behavioral regressions must drive the whole physical chord,
+  not just the first DOM event. The pending next patch should combine this fix
+  with PR #32's already-landed correction; immutable v0.18.4 stays untouched.
+
+## PR #32 — remove the out-of-scope Desktop Instances stage (2026-07-25)
+- verdict: MERGED as merge commit `97f66c9` at exact head `69641c9` after one
+  RETURN. Direction and security passed throughout. Round 1 returned because a
+  delayed-spawn fallback still directed users to the deleted “Instances view”
+  and the branch lacked current main. Round 2 points and regression-pins that
+  path to the permanent sidebar roster, corrects stale stage-era comments, and
+  contains main `d3b0e69`. Fresh final gate passed: root 376 tests + one
+  intentional skip, check/check:pi/validate/strict OKF/pack/smoke, Desktop
+  183/183, human live workspace verification, independent reviewer APPROVE,
+  and all four exact-head GitHub CI/installer checks. Approval was recorded as
+  a PR comment (shared account); expected-head merge succeeded. The remote
+  branch was deleted manually because the owner's worktree holds it locally.
+- owner: oas-desktop-engineer-roster-scope-rollback · coordinator:
+  dev-coordinator-parallel-2
+- taught us: a surface-removal inventory must cover user-visible fallback and
+  recovery copy, not only imports, nav entries, modules, and CSS. A broad
+  “operation failed truthfully” assertion can stay green while directing users
+  to a destination the same PR deleted. See [Surface removal inventories must
+  include user-facing recovery copy](/lessons/surface-removal-inventory-user-guidance.md).
+  Corrective source is on main but needs a new patch release; v0.18.4 artifacts
+  remain immutable.
+
+## PR #31 — v0.18.4 manifest bump rescue (2026-07-25)
+- verdict: MERGED as squash commit `fda7498`. The tag-driven v0.18.4 release
+  completed build/test, all three Desktop installer build+smoke legs, both npm
+  publishes, provenance, and the GitHub Release before the known org policy
+  blocked Actions from creating the bump PR. The workflow-created branch
+  `release-bump/v0.18.4` contained exactly the five expected root/pi/Desktop
+  manifest and lockfile changes (0.18.3→0.18.4); manual PR #31 restored the
+  protected-main bump flow and deleted the branch.
+- owner: oas-expert-release-desktop-ux · coordinator: dev-coordinator-parallel-2
+- taught us: nothing new — this is the documented org-policy rescue path, and
+  the fully qualified detached-HEAD push continued to work correctly.
+
+## PR #29 (round 3) — Desktop UX fixes final merge (2026-07-25)
+- verdict: MERGED as merge commit `b7203eb` at exact head `9736852`. All four
+  gates PASS. The final branch contains current main `5aa596f`, preserves both
+  PR #29 UX and PR #30 corrected-installer knowledge histories, is API-clean/
+  mergeable, and passes Desktop OKF strict (74/0/0). Exact-head GitHub checks
+  all SUCCESS: Node 22 test/validate/pack/smoke plus macOS arm64, macOS x64,
+  and Ubuntu x64 installer legs. Round-2 scratch correctness gate already
+  passed 379 tests + one intentional node-pty ABI skip, check/validate/pack.
+  Approval recorded as a PR comment (shared GitHub account); merged with the
+  expected-head guard; remote feature branch deleted.
+- owner: dev-coordinator-parallel-2 · coordinator: dev-coordinator-parallel-2
+- taught us: the final workspace-sort contract needs identity at both storage
+  and transition boundaries — key preferences by canonical workspace ID and
+  resync on explicit switch plus silent server adoption. Parallel same-soul
+  harvests require an append-only log union immediately before final handoff.
+  Release version is intentionally selected at the next coordinated release,
+  not bumped in this feature PR.
+
+## PR #29 (round 2) — Desktop UX fixes re-review (2026-07-25)
+- verdict: RETURNED at exact head `23e3c71` for mergeability only. The round-1
+  correctness ask is fully fixed by `9c7c5c6`: sort persistence is a
+  canonical-workspace-ID map, resynced on explicit switch and silent adoption,
+  with safe legacy/corrupt fallbacks and behavioral A→B→A coverage. Fresh full
+  gate PASS: 379 tests pass + one intentional node-pty ABI skip; check/validate/
+  pack pass; Desktop soul OKF strict 71/0/0. Direction/security remain PASS.
+  Mergeability FAIL: PR #30 advanced `origin/main` after the branch's earlier
+  main merge; GitHub reports DIRTY/CONFLICTING and `git merge-tree` reproduces
+  the conflict in `agents/oas-desktop-engineer/soul/knowledge/log.md`. Author
+  must merge latest main, union the append-only log, and return green exact-head
+  PR + installer checks.
+- owner: dev-coordinator-parallel-2 · coordinator: dev-coordinator-parallel-2
+- taught us: same-soul feature and harvest PRs conflict even when product code
+  is independent; final handoff must follow all parallel knowledge harvests and
+  bind to current main immediately before merge.
+
+## PR #30 — post-v0.18.3 corrected-installer knowledge harvest (2026-07-25)
+- verdict: MERGED as merge commit `935d142` at exact head `a220a306`. Product
+  direction, correctness, security, and mergeability PASS. Scope is 13 files,
+  all under cli-dev or oas-desktop-engineer soul knowledge/skills; no product,
+  release, manifest, or framework behavior changes. Strict repo OKF PASS across
+  all 8 bundles (0 errors, 0 warnings). Independent merged-state reviewer
+  `reviewer-a220a30` on required `github-copilot/claude-opus-4.8:high` APPROVED
+  with no blockers/security findings; required CI green. Maintainer approval was
+  recorded as a PR comment because the shared GitHub account cannot approve its
+  own PR.
+- owner: cli-dev + oas-desktop-engineer memory harvests · coordinator:
+  dev-coordinator-1
+- taught us: a knowledge-only integration still benefits from an exact-head
+  merged-state review because security guidance can alter operator behavior.
+  Here the aweb mismatch skill stayed safe: diagnostics are read-only, it bans
+  ad hoc identity repair, and sensitive actions still require independent
+  confirmation. The sole reviewer nit (updating a concept timestamp alongside
+  an Update log entry) was harmless.
+
+## PR #29 (round 1) — Desktop UX fixes: spawn/chat/roster/workspace tabs (2026-07-25)
+- verdict: RETURNED at exact head `fb1f1bc`. Direction and security PASS;
+  clean scratch full gate PASS (359 tests pass, one intentional node-pty ABI
+  skip; check/validate/pack; Desktop soul OKF strict 71/0/0). Correctness FAIL:
+  the PR promises per-workspace roster sort persistence, but
+  `views/instances.mjs` reads/writes one global `oas.desktop.rosterSort` key,
+  so A's choice leaks into B; asked for canonical-workspace scoping and an
+  A→B→A regression. Mergeability FAIL: branch was 10 commits behind current
+  main (`e1ea91c` vs merge-base `f453b3e`), including v0.18.3 Desktop signing/
+  packaging changes; author must merge main and return a green combined head.
+- owner: dev-coordinator-parallel-2 · coordinator: dev-coordinator-parallel-2
+- taught us: persistence described as “per workspace” needs a cross-workspace
+  switching regression; a one-workspace localStorage test can pass while the
+  preference silently leaks across workspace identity. Release version remains
+  a release-time choice, not a feature-PR bump.
+
+## PR #27 — publish valid ad-hoc-signed macOS installers (2026-07-25)
+- verdict: MERGED as merge commit `921f44a` — exact head `77b7ae4`. Corrected
+  the v0.18.2 macOS installer defect (arm64 shipped an incomplete
+  linker-generated ad-hoc signature → Gatekeeper "damaged"; x64 unsigned).
+  Drove release **v0.18.3** (tag on `921f44a`).
+- owner: (feature/macos-correct-installers) · coordinator: dev-coordinator-1
+- gates: all four pass. `electron-builder.config.cjs` `identity: null → "-"`
+  (complete ad-hoc bundle signature); afterPack documented to run BEFORE signing
+  so the spawn-helper chmod lands inside the seal. Strict
+  `codesign --verify --deep --strict --verbose=2` gated fail-closed both as an
+  external workflow step AND unconditionally in `dist:smoke` on darwin
+  (platform-only guard, no OAS_SMOKE_* can skip it), before artifact upload;
+  the two workflow verifier run-blocks are enforced byte-identical by
+  `test/release-workflow.test.mjs`. `CSC_FOR_PULL_REQUEST:"true"` on
+  build-installers only (PR legs need it to actually sign; release.yml is
+  tag-push so omits it) — safe, no signing secrets, deterministic ad-hoc.
+  Release-notes existence gate added (fail fast pre-publish). New suites pass:
+  codesign-verify 15/15, release-workflow 17/17. CI evidence (runs 30156699308
+  + 30156539653, head 77b7ae4): arm64/x64 Signature=adhoc, Sealed Resources v2
+  rules=13 files=179, node-pty packaged-ABI (x64 under Rosetta). Manifests stayed
+  0.18.2 (tag-derived); no v0.18.2 asset mutation; Linux unaffected. Approve
+  recorded as PR comment (same gh account). Remote branch deleted manually (dev
+  worktree held the local branch).
+- taught us: the release bump-PR step now fails ONLY on the org-policy cause,
+  not the refspec — PR #25's `HEAD:refs/heads/<branch>` fix worked (push logged
+  `[new branch] HEAD -> release-bump/v0.18.3`), then `gh pr create` failed with
+  `GraphQL: Resource not accessible by integration (createPullRequest)` (org
+  policy blocks Actions-created PRs). Rescue: publish was already complete
+  (never retag) — created + squash-merged the bump PR manually (**PR #28**,
+  main `9a6eae8`, manifests → 0.18.3). The release run shows conclusion=failure
+  purely because of this final step; npm + GitHub Release succeeded. Until an
+  org admin relaxes the Actions-PR policy, every tag-driven release needs this
+  one manual bump-PR step.
+
 ## PR #26 — cli-dev soul: promote detached-HEAD release refspec lesson (2026-07-25)
 - verdict: MERGED as merge commit `0061eb5` — knowledge-only, exact head
   `9f43317`. Lands the harvested lesson from cli-dev-desktop-dist-2's v0.18.2 /

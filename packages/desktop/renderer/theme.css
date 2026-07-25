@@ -85,9 +85,6 @@
                   padding: 1px 8px; font-weight: 550; }
 .oas-view .chip.dirty { color: var(--warn); }
 .oas-view .chip.rt { color: var(--accent); }
-.oas-view .badge { font-size: 10px; padding: 1px 7px; border-radius: 999px; font-weight: 600; flex: none; }
-.oas-view .badge.on { background: var(--surface-2); color: var(--ok); }
-.oas-view .badge.off { background: var(--chip-bg); color: var(--muted); }
 .oas-view .empty { color: var(--muted); text-align: center; padding: 60px 30px; font-size: 13.5px; white-space: normal; }
 .oas-view .empty .big { font-size: 32px; display: block; margin-bottom: 12px; color: var(--faint); }
 .oas-view .empty code { background: var(--chip-bg); border-radius: 6px; padding: 1px 7px; font-size: 12px; }
@@ -103,103 +100,11 @@
 .oas-view input.field::placeholder, .oas-view textarea.field::placeholder { color: var(--faint); }
 
 @keyframes oas-spin { to { transform: rotate(360deg); } }
-@keyframes oas-pulse { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-1px); } }
-@keyframes oas-blink { 0%,100% { transform: scale(.75); } 50% { transform: scale(1); } }
 .oas-view .spinner { width: 14px; height: 14px; border: 2px solid color-mix(in srgb, var(--fg) 25%, transparent);
                      border-top-color: var(--accent); border-radius: 50%; animation: oas-spin .7s linear infinite;
                      display: inline-block; vertical-align: -2px; }
 .oas-view .loading-block { display: flex; align-items: center; gap: 10px; justify-content: center;
                            padding: 48px 0; color: var(--muted); font-size: 13px; }
-
-/* ── roster sidebar (instances + spawn views) ── */
-.oas-view .side { width: 320px; min-width: 260px; max-width: 420px; border-right: 1px solid var(--border);
-                  background: var(--surface); display: flex; flex-direction: column; flex: none; }
-.oas-view .filterbar { padding: 12px 12px 8px; display: flex; gap: 8px; }
-.oas-view .filterbar.bar { height: var(--bar-h); flex: none; align-items: center; padding: 0 12px;
-                           border-bottom: 1px solid var(--border); }
-.oas-view .filterbar input { flex: 1; min-width: 0; }
-.oas-view .groups { flex: 1; overflow-y: auto; padding: 0 8px 12px; }
-.oas-view .ghead { display: flex; align-items: center; gap: 8px; padding: 8px 8px 4px; user-select: none;
-                   color: var(--muted); font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacing: .06em; }
-.oas-view .ghead .count { margin-left: auto; font-weight: 500; color: var(--faint); text-transform: none; letter-spacing: 0; }
-.oas-view .rhead { color: var(--faint); font-size: 11.5px; padding: 5px 8px 2px; font-weight: 600; }
-.oas-view .inst { padding: 8px 10px 8px 12px; border-radius: 8px; cursor: pointer; margin: 1px 0;
-                  border: 1px solid transparent; position: relative; }
-.oas-view .inst:hover { background: var(--surface-2); }
-.oas-view .inst.sel { background: var(--sel); border-color: var(--accent); }
-.oas-view .inst.idle { border-style: dashed; color: var(--muted); }
-.oas-view .inst.child { margin-left: 18px; }
-.oas-view .inst.child::before { content: ""; position: absolute; left: -10px; top: 0; bottom: 50%; width: 9px;
-                                border-left: 1px solid var(--border); border-bottom: 1px solid var(--border);
-                                border-bottom-left-radius: 6px; }
-.oas-view .iname { font-weight: 600; font-size: 13px; display: flex; align-items: center; gap: 7px; }
-.oas-view .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); flex: none; }
-.oas-view .dot.on { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 22%, transparent); }
-.oas-view .itask { color: var(--muted); font-size: 12px; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.oas-view .imeta { display: flex; gap: 5px; margin-top: 5px; flex-wrap: wrap; align-items: center; }
-
-/* ── detail surface (instances view) ── */
-.oas-view .detail { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-.oas-view .vhead { min-height: var(--bar-h); display: flex; flex-direction: column; justify-content: center;
-                   padding: 6px 18px; border-bottom: 1px solid var(--border); background: var(--surface); flex: none; }
-.oas-view .vhead .row1 { display: flex; align-items: center; gap: 10px; }
-.oas-view .vhead .title { font-weight: 650; font-size: 14.5px; }
-.oas-view .vhead .actions { margin-left: auto; display: flex; gap: 8px; }
-.oas-view .vhead .row2 { color: var(--muted); font-size: 12.5px; margin-top: 4px; display: flex; gap: 16px; flex-wrap: wrap; }
-.oas-view .vhead .row2 b { color: var(--fg); font-weight: 550; }
-
-/* ── pi-style transcript ── */
-.oas-view .chat { flex: 1; overflow-y: auto; padding: 22px 0 30px;
-                  background: var(--term-bg); color: var(--term-fg);
-                  font: 13px/1.55 "SF Mono", ui-monospace, SFMono-Regular, Menlo, monospace; }
-.oas-view .chat ::selection { background: var(--term-sel); color: var(--term-sel-fg); }
-.oas-view .turn { max-width: 900px; margin: 0 auto; padding: 0 26px; }
-.oas-view .turn + .turn { margin-top: 16px; }
-.oas-view .turn.user .utext { border-left: 3px solid var(--accent);
-        background: var(--surface-2);
-        border-radius: 6px; padding: 10px 14px; white-space: pre-wrap; word-break: break-word;
-        color: var(--accent); font-weight: 500; }
-.oas-view .turn.ai .atext { white-space: pre-wrap; word-break: break-word; margin: 8px 0; }
-.oas-view .turn.ai .atext code { background: var(--surface-2); border-radius: 4px; padding: 0 4px; }
-.oas-view .turn.ai .atext code.block { display: block; padding: 10px 12px; margin: 8px 0; overflow-x: auto;
-        background: var(--surface-2); border-radius: 6px; border: none; }
-.oas-view .turn.ai .atext b { color: var(--fg); }
-.oas-view .tool { margin: 8px 0; }
-.oas-view .toolhead { display: flex; align-items: baseline; gap: 8px; cursor: pointer; user-select: none; }
-.oas-view .toolhead:hover .tcmd { text-decoration: underline; }
-.oas-view .toolhead .tverb { color: var(--ok); font-weight: 700; flex: none; }
-.oas-view .toolhead.running .tverb { color: var(--warn); animation: oas-pulse 1.2s ease-in-out infinite; }
-.oas-view .toolhead .tcmd { color: var(--term-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.oas-view .toolout { color: var(--muted); white-space: pre-wrap;
-                     word-break: break-all; font-size: 12px; padding: 3px 0 0 18px; }
-.oas-view .toolout.full { max-height: 360px; overflow-y: auto; color: var(--term-fg); }
-.oas-view .tool .more { color: var(--muted); padding-left: 18px; font-size: 11px; cursor: pointer; }
-.oas-view .tool .more:hover { color: var(--term-fg); }
-.oas-view .tool.wf { border: 1px solid color-mix(in srgb, var(--term-fg) 18%, transparent);
-                     border-radius: 8px; padding: 10px 14px; margin: 10px 0;
-                     background: var(--surface-2); }
-.oas-view .wfhead { display: flex; align-items: baseline; gap: 8px; cursor: pointer; user-select: none; }
-.oas-view .wfmark { color: var(--violet); }
-.oas-view .tool.wf .wfname { font-weight: 700; color: var(--term-fg); }
-.oas-view .tool.wf.running .wfmark { animation: oas-pulse 1.2s ease-in-out infinite; }
-.oas-view .wfstate { margin-left: auto; font-size: 11.5px; color: var(--muted);
-                     display: inline-flex; align-items: center; gap: 6px; }
-.oas-view .tool.wf.done .wfstate { color: var(--ok); }
-.oas-view .tool.wf.failed .wfstate { color: var(--danger); }
-.oas-view .tool.wf.running .wfstate { color: var(--warn); }
-.oas-view .wfdesc { color: var(--muted); font-size: 12px; margin-top: 4px; }
-.oas-view .thinking { color: var(--muted); font-size: 12px; margin: 6px 0; }
-.oas-view .thinking summary { cursor: pointer; list-style: none; user-select: none; }
-.oas-view .thinking summary::before { content: "▸ "; }
-.oas-view details[open].thinking summary::before { content: "▾ "; }
-.oas-view .thinking .tbody { font-style: italic; white-space: pre-wrap;
-                             border-left: 2px solid color-mix(in srgb, var(--term-fg) 25%, transparent);
-                             padding-left: 12px; margin-top: 4px; }
-.oas-view .working { display: flex; align-items: center; gap: 8px; padding: 10px 0 0;
-                     color: var(--muted); font-size: 12px; }
-.oas-view .working .dots span { animation: oas-blink 1.4s infinite; }
-.oas-view .working .dots span:nth-child(2) { animation-delay: .2s; }
-.oas-view .working .dots span:nth-child(3) { animation-delay: .4s; }
 
 /* ── cli degradation card (Spawn/Harvest without a compatible oas CLI) ── */
 .oas-view .cli-card, .cli-card { background: var(--surface); border: 1px solid var(--warn); border-radius: 12px;

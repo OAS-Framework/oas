@@ -24,12 +24,20 @@ import { delimiter, isAbsolute, join } from "node:path";
 export const DESKTOP_API = 1;
 export const ACCEPT_RANGE = { min: [0, 18, 0], maxExclusive: [0, 19, 0] };
 export const PROBE_NAME = "@oas-framework/oas";
-// Spawn-time agent relations (--relation/--relative-to) shipped mid-v1.
-// Older v1 CLIs IGNORE unknown spawn options and still succeed, so sending
-// relation flags to them would silently spawn an UNRELATED instance while
-// the desktop reports success. Related spawns therefore require the first
-// release containing relation support; plain spawns keep the full v1 range.
-export const RELATIONS_MIN = [0, 18, 3];
+// Spawn-time agent relations (--relation/--relative-to) AND the anchor
+// qualifier (--relative-root, a later contract addition in the same
+// unreleased feature) gate on ONE floor: the first release carrying BOTH.
+// Older v1 CLIs IGNORE unknown spawn options and still succeed, so a
+// pre-relations CLI would silently spawn an UNRELATED instance — and a
+// hypothetical relations-only CLI would silently DISCARD --relative-root
+// and link the wrong same-named anchor (review cbd5bb3 blocker). No
+// released CLI carries relations without the qualifier (0.18.x releases to
+// date predate both, and they merge together), so one floor covers the
+// whole related-spawn surface; if the kernel ever ships them separately
+// this must split into two probed capabilities. 0.18.5 released WITHOUT
+// the feature, so the floor is the NEXT release — the first one containing
+// feature/agent-relations. Confirmed at PR time (one-constant change).
+export const RELATIONS_MIN = [0, 18, 6];
 
 /** Whether an ACCEPTED v1 CLI version also supports spawn-time relations. */
 export function supportsRelations(version) {
