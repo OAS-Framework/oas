@@ -1,9 +1,10 @@
 /* oas desktop — Spawn view: the souls browser.
    Browse available agents (souls) per workspace as a card grid — description
-   and capability chips up front — and spawn from the card: selecting one
-   flips it into an inline spawn form (purpose + task). Panel defaults hold:
-   task "" spawns an instance awaiting instructions; attached-mode agents are
-   not spawnable standalone. GET /api/agents, POST /api/spawn.
+   and capability chips up front — and spawn from the card: "Spawn" opens a
+   MODAL dialog with every spawn option (purpose, task, relation + reference
+   instance) directly visible. Panel defaults hold: task "" spawns an
+   instance awaiting instructions; attached-mode agents are not spawnable
+   standalone. GET /api/agents, POST /api/spawn.
    Contract: mount(el, ctx) / unmount(). Plain ES module + DOM. */
 import {
   escapeHtml, apiJson, postJson, ensureTheme,
@@ -37,6 +38,19 @@ const CSS = `
 .soul-form .frow { display: flex; gap: 8px; align-items: center; }
 .soul-form .fstatus { font-size: 12.5px; color: var(--muted); }
 .soul-form .fstatus.err { color: var(--danger); }
+.spawn-modal { position: fixed; z-index: 100; inset: 0; display: grid; place-items: center; padding: 24px;
+               background: color-mix(in srgb, var(--bg) 60%, transparent); }
+.spawn-dialog { width: min(520px, 100%); max-height: min(680px, calc(100vh - 48px)); display: flex;
+                flex-direction: column; gap: 10px; overflow-y: auto; background: var(--surface);
+                border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow);
+                padding: 16px 18px; }
+.spawn-dialog-head { display: flex; align-items: flex-start; gap: 8px; }
+.spawn-dialog-head h2 { margin: 0; font-size: 16px; line-height: 1.3; flex: 1; }
+.spawn-dialog-head .sdesc { color: var(--muted); font-size: 12.5px; }
+.spawn-dialog .close-act { margin-left: auto; width: 28px; height: 28px; border: 0; border-radius: 6px;
+                           background: none; color: var(--muted); font-size: 16px; cursor: pointer; }
+.spawn-dialog .close-act:hover { background: var(--surface-2); color: var(--fg); }
+.spawn-dialog .frelnote { font-size: 12px; color: var(--muted); }
 `;
 
 let state = null;
@@ -64,13 +78,12 @@ export function mount(el, ctx) {
   s.unsubCli = onCliChange(() => { if (s.alive) renderGrid(s); });
   s.q("wssel").addEventListener("change", (e) => setWorkspace(e.target.value));
   s.unsubWs = onWorkspaceChange(() => {
-    // Workspace switch owns the whole surface: invalidate any A spawn form
+    // Workspace switch owns the whole surface: invalidate any A spawn modal
     // immediately, remove its DOM before B loads, and clear A's agentsRoot.
     s.spawnOp++;
-    s.sel = null;
-    s.selAgent = null;
+    closeSpawnModal(s);
     s.q("souls-grid").innerHTML = '<div class="loading-block"><span class="spinner"></span> Loading agents…</div>';
-    // No force flag: if a newer B poll paints a B spawn form before this
+    // No force flag: if a newer B poll paints a B spawn modal before this
     // request resolves, the late switch refresh must respect that owner.
     refresh(s);
   });
@@ -85,6 +98,7 @@ export function unmount() {
   if (state.unsubWs) state.unsubWs();
   if (state.unsubCli) state.unsubCli();
   if (state.cliCardHandle) { state.cliCardHandle.dispose(); state.cliCardHandle = null; }
+  closeSpawnModal(state);
   state.el.innerHTML = "";
   state = null;
 }
@@ -116,27 +130,17 @@ function matches(s, a) {
 
 function renderGrid(s) {
   const grid = s.q("souls-grid");
-  // Polling (including a delayed switch-triggered refresh) must never replace
-  // an OPEN spawn form: rebuilding swaps in a fresh empty form, silently
-  // wiping typed-but-unsubmitted task/purpose text — the user then submits
-  // the replacement and the instance spawns with NO TASK. Any open form
-  // (not just a disabled in-flight one) owns the grid; the roster repaints
-  // on the next poll after the form closes. Workspace switching still resets
-  // synchronously before dispatching its refresh (s.sel cleared + innerHTML).
-  // Explicit re-renders (cancel/select) clear or change s.sel first, so they
-  // rebuild; only a form still owned by the CURRENT selection blocks repaint.
-  // No dynamic selector: agent names are roster data and may contain selector
-  // metacharacters (and this module's CSS constant shadows the global, so
-  // CSS.escape is not available here). Compare dataset identity instead.
-  // EXCEPTION (review d7becaf): a CLI-not-available transition BYPASSES form
-  // preservation — the launch race (form opened while CLI state was
-  // unknown, probe lands ok:false) must not leave a live submit behind a
-  // missing degradation card. The selection is invalidated so the rebuild
-  // shows the card and disabled buttons; doSpawn independently re-checks.
+  // The spawn form lives in a MODAL outside the grid (human change request on
+  // the integrated feature branch), so periodic polls may rebuild the roster
+  // freely without wiping typed-but-unsubmitted task/purpose text — the
+  // modal DOM is untouched by grid repaints. The one transition that must
+  // still reach INTO the modal is CLI degradation (review d7becaf): a modal
+  // opened while the CLI state was unknown must not leave a live submit
+  // behind a missing degradation card when the probe lands ok:false. Close
+  // it; the rebuild shows the card and disabled buttons; doSpawn
+  // independently re-checks at submit time.
   const noCli = !cliAvailable(); // frozen contract: unknown does NOT render capable
-  if (noCli && s.sel) s.sel = null, s.selAgent = null;
-  if (s.sel && [...(grid.querySelectorAll?.(".soul-card") || [])]
-        .some((card) => card.dataset?.agent === s.sel && card.querySelector(".soul-form"))) return;
+  if (noCli && s.sel) closeSpawnModal(s);
   grid.innerHTML = "";
   const list = s.souls.agents.filter((a) => matches(s, a));
   const spawnable = s.souls.agents.filter((a) => a.work !== "attached").length;
@@ -166,9 +170,8 @@ function renderGrid(s) {
 function soulCard(s, a) {
   const attached = a.work === "attached"; // needs an owning instance's work tree
   const noCli = !cliAvailable();          // unknown OR unavailable — mutations need a verified CLI
-  const open = s.sel === a.name && !attached && !noCli;
   const card = document.createElement("div");
-  card.className = "soul-card" + (attached ? " attached" : "") + (open ? " open" : "");
+  card.className = "soul-card" + (attached ? " attached" : "") + (s.sel === a.name ? " open" : "");
   card.dataset.agent = a.name;
   card.innerHTML = `
     <div class="sname"><span class="glyph" aria-hidden="true">✦</span>${escapeHtml(a.name)}</div>
@@ -182,7 +185,7 @@ function soulCard(s, a) {
     </div>`;
   const actions = document.createElement("div");
   actions.className = "sactions";
-  if (!open) {
+  {
     const spawn = document.createElement("button");
     spawn.className = "act spawn-act";
     spawn.textContent = attached ? "Attached only" : "Spawn";
@@ -194,8 +197,7 @@ function soulCard(s, a) {
         : `Spawn ${a.name}`;
     spawn.addEventListener("click", () => {
       if (!cliAvailable()) return; // state may have flipped since render
-      s.sel = a.name; s.selAgent = a; renderGrid(s);
-      s.q("souls-grid").querySelector(".soul-form .fpurpose")?.focus();
+      openSpawnModal(s, a, spawn);
     });
     actions.append(spawn);
   }
@@ -206,65 +208,120 @@ function soulCard(s, a) {
   brain.addEventListener("click", () => s.ctx.openBrain?.(a.name));
   actions.append(brain);
   card.append(actions);
-  if (open) card.append(spawnForm(s, a));
   return card;
 }
 
-function spawnForm(s, a) {
-  const f = document.createElement("div");
-  f.className = "soul-form";
+/** Close (if open) the spawn modal and clear the selection. Safe to call
+ * when no modal exists. Does NOT bump spawnOp — callers that must invalidate
+ * an in-flight spawn (workspace switch) bump it themselves; a plain close
+ * leaves the operation's status handling to the ownership tokens. */
+function closeSpawnModal(s, { restoreFocus = false } = {}) {
+  const opener = s.modalOpener;
+  s.sel = null; s.selAgent = null; s.modalOpener = null;
+  s.modalEl?.remove(); s.modalEl = null;
+  if (restoreFocus && opener?.isConnected) opener.focus();
+}
+
+/** Spawn modal (human change request on the integrated feature branch):
+ * ALL spawn options in one dialog — purpose, task, and the agent-relation
+ * options (relation + reference instance) directly visible, following the
+ * app's ws-dialog pattern: role=dialog + aria-modal, labelled controls,
+ * Tab focus trap, Esc/backdrop/× close, focus restored to the opener. */
+function openSpawnModal(s, a, opener) {
+  closeSpawnModal(s); // one modal at a time; a new open supersedes the old
+  s.sel = a.name; s.selAgent = a; s.modalOpener = opener || null;
+  renderGrid(s); // highlight the selected card under the backdrop
+
+  const doc = s.el.ownerDocument;
+  const modal = doc.createElement("div");
+  modal.className = "spawn-modal";
+  const titleId = "spawn-dialog-title";
   const refOptions = (s.panelInstances || [])
     .map((i) => `<option value="${escapeHtml(i.instance)}">${escapeHtml(i.instance)}${i.running ? "" : " (idle)"}</option>`)
     .join("");
-  // Relation UI only when the verified CLI supports spawn-time relations
-  // (older v1 CLIs would silently spawn an unrelated instance); unknown
-  // probes render capable — the server fails closed (cli-no-relations).
+  // Relation controls render whenever the verified CLI supports spawn-time
+  // relations; on an older v1 CLI they are VISIBLE but disabled with an
+  // explanatory note (the change request wants the options in sight, and
+  // silent absence hides why). The server still fails closed
+  // (cli-no-relations) — render state is UX, not the guard.
   const relations = cliRelationsAvailable();
-  f.innerHTML = `
-    <label>Purpose (optional — becomes part of the instance name)
-      <input class="field fpurpose" placeholder="e.g. pr42" autocomplete="off"></label>
-    <label>Task (optional — empty spawns an instance awaiting your instructions)
-      <textarea class="field ftask" rows="4" placeholder="What should this instance do?"></textarea></label>
-    ${relations ? `<label>Relation (optional — link the new instance to an existing one)
-      <select class="field frelation">
-        <option value="unrelated" selected>unrelated — no link</option>
-        <option value="child">child — nests under the reference instance</option>
-        <option value="sibling">sibling — peer in the reference instance's cluster</option>
-        <option value="parent">parent — becomes the reference instance's parent</option>
-      </select></label>
-    <label class="frelto-label" style="display:none">Reference instance
-      <select class="field frelto">
-        <option value="">— select an instance —</option>
-        ${refOptions}
-      </select></label>` : ""}
-    <div class="frow">
-      <button class="act fspawn">Spawn</button>
-      <button class="act fcancel">Cancel</button>
-      <span class="fstatus"></span>
-    </div>`;
-  // the picker only appears when a relation is chosen — unrelated needs none
-  f.querySelector(".frelation")?.addEventListener("change", (e) => {
-    f.querySelector(".frelto-label").style.display = e.target.value === "unrelated" ? "none" : "";
+  modal.innerHTML = `
+    <section class="spawn-dialog" role="dialog" aria-modal="true" aria-labelledby="${titleId}">
+      <div class="spawn-dialog-head">
+        <div>
+          <h2 id="${titleId}">Spawn ${escapeHtml(a.name)}</h2>
+          ${a.description ? `<div class="sdesc">${escapeHtml(a.description)}</div>` : ""}
+        </div>
+        <button class="close-act fcancel-x" type="button" aria-label="Close spawn dialog">×</button>
+      </div>
+      <div class="soul-form">
+        <label>Purpose (optional — becomes part of the instance name)
+          <input class="field fpurpose" placeholder="e.g. pr42" autocomplete="off"></label>
+        <label>Task (optional — empty spawns an instance awaiting your instructions)
+          <textarea class="field ftask" rows="4" placeholder="What should this instance do?"></textarea></label>
+        <label>Relation — how this instance links into the agent hierarchy
+          <select class="field frelation" ${relations ? "" : "disabled"}>
+            <option value="unrelated" selected>unrelated — no link</option>
+            <option value="child">child — nests under the reference instance</option>
+            <option value="sibling">sibling — peer in the reference instance's cluster</option>
+            <option value="parent">parent — becomes the reference instance's parent</option>
+          </select></label>
+        <label class="frelto-label">Reference instance
+          <select class="field frelto" disabled>
+            <option value="">— select an instance —</option>
+            ${refOptions}
+          </select></label>
+        ${relations ? "" : `<div class="frelnote">Relations need a newer oas CLI — the installed version spawns unrelated instances only.</div>`}
+        <div class="frow">
+          <button class="act fspawn">Spawn</button>
+          <button class="act fcancel">Cancel</button>
+          <span class="fstatus" aria-live="polite"></span>
+        </div>
+      </div>
+    </section>`;
+  const dialog = modal.querySelector(".spawn-dialog");
+  const f = modal; // field lookups span the whole modal
+
+  // reference picker enables only when a real relation is chosen — kept
+  // VISIBLE (disabled) so the hierarchy options are always in sight
+  f.querySelector(".frelation").addEventListener("change", (e) => {
+    f.querySelector(".frelto").disabled = !relations || e.target.value === "unrelated";
   });
-  f.addEventListener("click", (e) => e.stopPropagation()); // clicks in the form never re-select the card
-  f.querySelector(".fcancel").addEventListener("click", () => { s.sel = null; renderGrid(s); });
+
+  const close = () => closeSpawnModal(s, { restoreFocus: true });
+  f.querySelector(".fcancel").addEventListener("click", close);
+  f.querySelector(".fcancel-x").addEventListener("click", close);
+  modal.addEventListener("mousedown", (e) => { if (e.target === modal) close(); }); // backdrop
+  dialog.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") { e.preventDefault(); close(); return; }
+    if (e.key !== "Tab") return; // focus trap (ws-dialog pattern)
+    const focusable = [...dialog.querySelectorAll("button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled])")]
+      .filter((el) => !el.hidden && el.tabIndex >= 0);
+    if (!focusable.length) return;
+    const first = focusable[0], last = focusable.at(-1);
+    if (e.shiftKey && doc.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && doc.activeElement === last) { e.preventDefault(); first.focus(); }
+  });
+
   f.querySelector(".fspawn").addEventListener("click", () => doSpawn(s, {
     btn: f.querySelector(".fspawn"),
     status: f.querySelector(".fstatus"),
     purpose: () => f.querySelector(".fpurpose").value,
     task: () => f.querySelector(".ftask").value,
-    relation: () => f.querySelector(".frelation")?.value ?? "unrelated",
-    relativeTo: () => f.querySelector(".frelto")?.value ?? "",
+    relation: () => f.querySelector(".frelation").value,
+    relativeTo: () => f.querySelector(".frelto").value,
     clear: () => {
       f.querySelector(".fpurpose").value = ""; f.querySelector(".ftask").value = "";
-      const rel = f.querySelector(".frelation");
-      if (rel) {
-        rel.value = "unrelated"; f.querySelector(".frelto").value = "";
-        f.querySelector(".frelto-label").style.display = "none";
-      }
+      f.querySelector(".frelation").value = "unrelated";
+      f.querySelector(".frelto").value = "";
+      f.querySelector(".frelto").disabled = true;
     },
   }));
-  return f;
+
+  s.modalEl = modal;
+  s.el.querySelector(".souls").append(modal);
+  f.querySelector(".fpurpose").focus?.();
+  return modal;
 }
 
 /* Exported for the in-flight-spawn regressions.
@@ -303,11 +360,11 @@ export async function waitForInstanceInPanel(s, name, isCurrent, { tries = 20, d
 export async function doSpawn(s, ui) {
   const a = s.selAgent;
   if (!a) return;
-  // CLI gate at SUBMIT time (review d7becaf): a form opened before a state
+  // CLI gate at SUBMIT time (review d7becaf): a modal opened before a state
   // flip must not dispatch — the render-time disable alone cannot cover a
-  // form that was already open. Mutations require a VERIFIED compatible CLI.
+  // dialog that was already open. Mutations require a VERIFIED compatible CLI.
   if (!cliAvailable()) {
-    s.sel = null; s.selAgent = null;
+    closeSpawnModal(s);
     renderGrid(s); // repaints the degradation card + disabled buttons
     return;
   }

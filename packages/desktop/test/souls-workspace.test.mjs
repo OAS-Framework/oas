@@ -313,12 +313,19 @@ test("Soul roster: relation + reference instance pass through POST /api/spawn; u
     await tick(); await tick();
     dom.window.document.querySelector(".spawn-act").click();
     const doc = dom.window.document;
-    // picker hidden while unrelated (the default)
+    // spawn opens a MODAL dialog (human change request): a11y contract
+    const dialog = doc.querySelector(".spawn-dialog");
+    assert.ok(dialog, "spawn opens a modal dialog");
+    assert.equal(dialog.getAttribute("role"), "dialog");
+    assert.equal(dialog.getAttribute("aria-modal"), "true");
+    assert.ok(dialog.getAttribute("aria-labelledby"), "dialog is labelled");
+    // relation options DIRECTLY VISIBLE; picker disabled until a relation is chosen
     const relSel = doc.querySelector(".frelation");
     assert.equal(relSel.value, "unrelated", "relation defaults to unrelated");
-    assert.equal(doc.querySelector(".frelto-label").style.display, "none", "reference picker hidden for unrelated");
-    // picker lists live workspace instances
+    assert.equal(relSel.disabled, false, "relation select enabled on a relation-capable CLI");
     const refSel = doc.querySelector(".frelto");
+    assert.ok(refSel, "reference picker is visible in the modal");
+    assert.equal(refSel.disabled, true, "reference picker disabled while unrelated");
     assert.ok([...refSel.options].some((o) => o.value === "coord-1"), "reference picker lists roster instances");
 
     // 1) unrelated spawn: no relation fields on the wire
@@ -328,13 +335,13 @@ test("Soul roster: relation + reference instance pass through POST /api/spawn; u
     assert.equal(posts[0].relation, undefined, "unrelated sends no relation");
     assert.equal(posts[0].relativeTo, undefined, "unrelated sends no relativeTo");
 
-    // 2) choosing a relation reveals the picker; missing reference fails BEFORE dispatch
-    doc.querySelector(".spawn-act")?.click(); // reopen if the grid rebuilt
-    const form = doc.querySelector(".soul-form");
+    // 2) choosing a relation ENABLES the picker; missing reference fails BEFORE dispatch
+    if (!doc.querySelector(".spawn-dialog")) doc.querySelector(".spawn-act").click(); // reopen if closed
+    const form = doc.querySelector(".spawn-dialog");
     const rel2 = form.querySelector(".frelation");
     rel2.value = "child";
     rel2.dispatchEvent(new dom.window.Event("change"));
-    assert.equal(form.querySelector(".frelto-label").style.display, "", "picker appears for a real relation");
+    assert.equal(form.querySelector(".frelto").disabled, false, "picker enables for a real relation");
     form.querySelector(".fspawn").click();
     await tick();
     assert.equal(posts.length, 1, "relation without a reference never dispatches");
@@ -347,6 +354,16 @@ test("Soul roster: relation + reference instance pass through POST /api/spawn; u
     assert.equal(posts.length, 2);
     assert.equal(posts[1].relation, "child");
     assert.equal(posts[1].relativeTo, "coord-1");
+
+    // 4) modal close paths: Escape closes and clears the selection
+    if (!doc.querySelector(".spawn-dialog")) doc.querySelector(".spawn-act").click();
+    const dlg2 = doc.querySelector(".spawn-dialog");
+    dlg2.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    assert.equal(doc.querySelector(".spawn-dialog"), null, "Escape closes the spawn modal");
+    // Cancel button closes too
+    doc.querySelector(".spawn-act").click();
+    doc.querySelector(".spawn-dialog .fcancel").click();
+    assert.equal(doc.querySelector(".spawn-dialog"), null, "Cancel closes the spawn modal");
   } finally {
     spawn.unmount();
     common.setWorkspace(previousWs);
