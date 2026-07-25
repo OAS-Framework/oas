@@ -39,12 +39,18 @@ child-of-owner shape are invalid (`E_BAD_ARGS` at the CLI and a kernel throw for
 programmatic callers). Only an explicit redundant child-of-owner request is
 accepted, because capability hooks may pass the parent explicitly.
 
-The work-tree owner is identity-sensitive. Infer it only when a candidate owner
-resolves to a known instance and `realpath(instanceHome/work)` equals
-`realpath(workDir)`. Path shape alone is not proof; legitimate non-instance
-integration work trees need explicit ownership (`--parent`). The binding policy
-is recorded in
-[attached-spawns-child-of-work-owner](/decisions/attached-spawns-child-of-work-owner.md).
+The work-tree owner is identity-sensitive. Resolve it path-first over known
+candidate homes in the local root and team scope. Symlinked checkout-mode
+`work` directories all realpath to the same shared repository, so match those
+by lexical parent relation; match real work directories by realpath equality.
+Only record a candidate name after resolving that name from the attached
+instance's context lands back on the same home. Path shape alone is not proof,
+and a same-named local instance that breaks the round trip is ambiguous.
+Legitimate non-instance integration work trees need explicit ownership
+(`--parent`) only when the path matches no known instance work. The binding
+policy is recorded in
+[attached-spawns-child-of-work-owner](/decisions/attached-spawns-child-of-work-owner.md)
+and [path-first resolution](/lessons/path-first-resolution-round-trip.md).
 
 # Retirement repair
 

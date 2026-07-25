@@ -1,6 +1,11 @@
 # Knowledge Log
 
 ## 2026-07-25
+* **Creation**: [path-first-resolution-round-trip](/lessons/path-first-resolution-round-trip.md) records the path-first, name round-trip rule for path-identified instances whose metadata stores names.
+* **Update**: [names-are-not-identity](/lessons/names-are-not-identity.md) distinguishes path-first owner matching from name-based identity and adds the symlinked checkout matching gotcha.
+* **Update**: [attached-spawns-child-of-work-owner](/decisions/attached-spawns-child-of-work-owner.md) records that explicit parent fallback cannot bypass a failed known-instance owner round trip.
+* **Update**: [spawn-lineage-explicit-only](/decisions/spawn-lineage-explicit-only.md) updates attached-mode owner verification to scan paths before accepting the recordable parent name.
+* **Update**: [spawn-relations-lineage-fields](/architecture/spawn-relations-lineage-fields.md) replaces realpath-only attached owner inference with path-first matching and name round-trip verification.
 * **Creation**: [names-are-not-identity](/lessons/names-are-not-identity.md) records that bare instance names and path-shaped work owners must resolve to canonical homes before relation repair or attached-owner inference acts.
 * **Update**: [spawn-relations-lineage-fields](/architecture/spawn-relations-lineage-fields.md) clarifies retire splice proof: resolve lineage names from each referrer's context and realpath-match before relinking.
 * **Update**: [spawn-lineage-explicit-only](/decisions/spawn-lineage-explicit-only.md) records that attached work owner fallback is canonical only when an instance's work realpath matches the workDir; non-instance trees need explicit parent.

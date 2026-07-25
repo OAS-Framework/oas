@@ -15,18 +15,22 @@ order:
 
 1. `o.parent` (CLI `--parent <instance>`, validated to exist inside the target
    deployment's local root or team scope before scaffolding). In attached work
-   mode this is valid only when it redundantly names the work-tree owner.
-2. Attached-mode binding: a verified owner of the shared work tree. Infer this
-   only when a candidate instance resolves and `realpath(instanceHome/work) ===
-   realpath(workDir)`; path shape alone is not identity. Legitimate non-instance
-   work trees must pass an explicit parent. Attached service agents genuinely
-   nest.
+   mode this is valid only when it redundantly names the path-verified
+   work-tree owner; it cannot bypass an ambiguous known-instance owner.
+2. Attached-mode binding: a verified owner of the shared work tree. Verify by
+   scanning candidate homes path-first across local and team scope, matching
+   symlinked checkout `work` paths by lexical parent relation and real work
+   directories by realpath equality, then accepting the recordable name only if
+   it resolves back to the matched home from the attached instance's context.
+   Legitimate non-instance work trees must pass an explicit parent only when the
+   path matches no known instance work. Attached service agents genuinely nest.
 3. Otherwise: operator origin, top-level.
 
 Attached mode is a binding lineage source, not a negatable default: relation
 flags that would make the attached agent unrelated, sibling, or parent to its
 work-tree owner are rejected at both CLI and kernel boundaries. See
-[attached-spawns-child-of-work-owner](/decisions/attached-spawns-child-of-work-owner.md).
+[attached-spawns-child-of-work-owner](/decisions/attached-spawns-child-of-work-owner.md)
+and [path-first resolution](/lessons/path-first-resolution-round-trip.md).
 
 Agent-driven spawn surfaces that target the same deployment pass explicit
 parentage: `oas-okf harvest` spawns pass `parent: inst`; the review injection's
