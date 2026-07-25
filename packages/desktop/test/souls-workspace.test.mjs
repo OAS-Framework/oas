@@ -850,7 +850,12 @@ test("Spawn modal picker: hostile paths stay inert; colliding root tags render d
   const spawn = await import("../renderer/views/spawn.mjs");
   await seedCliAvailable();
   const previousWs = common.currentWorkspace();
-  const agent = { name: "dev", agentsRoot: "/a", description: "", runtime: "pi", work: "workspace", repo: true, repoName: "r" };
+  const agent = { name: "dev", agentsRoot: "/a", description: "", runtime: "pi", work: "workspace", repo: true, repoName: "r",
+    // SECURITY fixture (merged-state review @3e76616): workspace-controlled
+    // model with an attribute breakout — escapeHtml does not escape quotes,
+    // so attribute interpolation would mint an onpointerenter handler with
+    // access to the privileged bridge
+    model: `x" onpointerenter="window.__pwned=1` };
   // hostile path: HTML-significant characters in a valid workspace path;
   // plus two roots whose naive one-segment tag collides ("project")
   const evilRoot = `/tmp/x"><img src=x onerror=alert(1)>/agents`;
@@ -877,6 +882,13 @@ test("Spawn modal picker: hostile paths stay inert; colliding root tags render d
     const doc = dom.window.document;
     doc.querySelector(".spawn-act").click();
     const ref = doc.querySelector(".frelto");
+    // hostile MODEL never escapes the attribute context: the placeholder is
+    // assigned as a DOM property, so no event handler attribute can exist
+    const fmodel = doc.querySelector(".fmodel");
+    assert.equal(fmodel.placeholder, `x" onpointerenter="window.__pwned=1`, "model preserved byte-for-byte as placeholder TEXT");
+    assert.equal(fmodel.getAttribute("onpointerenter"), null, "no event-handler attribute minted from a hostile model");
+    assert.ok(![...doc.querySelectorAll("*")].some((el) => [...el.attributes].some((at) => at.name.startsWith("on"))),
+      "no on* attribute anywhere in the modal from workspace-controlled data");
     // hostile path never becomes markup: no injected node, dataset intact
     assert.equal(doc.querySelector("img"), null, "no element injected from a hostile workspace path");
     const evilOpt = [...ref.options].find((o) => o.dataset.root === evilRoot);
@@ -935,4 +947,27 @@ test("common: instanceApiPath carries the home qualifier for object refs (merged
     // legacy string ref unchanged
     assert.equal(common.instanceApiPath("chat", "solo"), "/api/chat/solo?ws=w1");
   } finally { common.setWorkspace(prev); }
+});
+
+test("shell api errors: httpError carries the server's stable domain code (merged-state review @3e76616)", async () => {
+  const common = await import("../renderer/views/common.mjs");
+  // Electron-bridge shape: parsed body, no .json() — the shell's ctx.api
+  // throws via httpError. Dropping body.code made doSpawn's
+  // E_RELATIVE_AMBIGUOUS branch unreachable in PRODUCTION while
+  // fetch-shaped tests stayed green.
+  const e = common.httpError({ ok: false, status: 409,
+    body: { error: 'relation "child": ambiguous', code: "E_RELATIVE_AMBIGUOUS" } }, "/api/spawn");
+  assert.equal(e.message, 'relation "child": ambiguous');
+  assert.equal(e.status, 409);
+  assert.equal(e.code, "E_RELATIVE_AMBIGUOUS", "domain code survives the shell-parsed path");
+  // code-less errors stay code-less; message falls back to status text
+  const e2 = common.httpError({ ok: false, status: 500, body: {} }, "/api/x");
+  assert.equal(e2.message, "HTTP 500 for /api/x");
+  assert.ok(!("code" in e2));
+  // the SHELL actually routes through httpError (composition root is not
+  // importable — pin the wiring textually like the nav-manifest tests do)
+  const { readFileSync } = await import("node:fs");
+  const src = readFileSync(new URL("../renderer/shell.mjs", import.meta.url), "utf8");
+  assert.ok(/if \(!r\.ok\) throw httpError\(r, pathname\);/.test(src), "shell ctx.api throws via the shared httpError");
+  assert.ok(/httpError\s*\}?\s*from ".\/views\/common.mjs"|,\s*httpError\s*\}/.test(src), "shell imports httpError from common");
 });

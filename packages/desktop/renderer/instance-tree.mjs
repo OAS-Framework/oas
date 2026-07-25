@@ -325,11 +325,20 @@ export function treeGuideSegments(items, item) {
   });
 }
 
-/** Include matching instances plus their ancestor paths, in source order. */
+/** Include matching instances plus their ancestor paths, in source order.
+ * IDENTITY-aware (merged-state review @3e76616): inclusion keys by
+ * instanceId and ancestors resolve through resolveLinkId over the FULL
+ * roster — a same-named instance in another root never leaks into this
+ * one's filter results, and an ambiguous parent edge includes nothing. */
 export function filterInstanceTree(instances, query) {
   const needle = String(query || "").trim().toLowerCase();
   if (!needle) return instances;
-  const byName = new Map(instances.map((item) => [item.instance, item]));
+  const byId = new Map(instances.map((item) => [instanceId(item), item]));
+  const byName = new Map();
+  for (const item of instances) {
+    if (!byName.has(item.instance)) byName.set(item.instance, []);
+    byName.get(item.instance).push(item);
+  }
   const included = new Set();
   for (const item of instances) {
     const matches = [item.instance, item.agent, item.repoName, item.task]
@@ -337,13 +346,29 @@ export function filterInstanceTree(instances, query) {
     if (!matches) continue;
     let cursor = item;
     const seen = new Set();
-    while (cursor && !seen.has(cursor.instance)) {
-      included.add(cursor.instance);
-      seen.add(cursor.instance);
-      cursor = byName.get(cursor.parentInstance);
+    while (cursor) {
+      const id = instanceId(cursor);
+      if (seen.has(id)) break;
+      included.add(id);
+      seen.add(id);
+      const pid = cursor.parentInstance ? resolveLinkId(cursor, cursor.parentInstance, byName) : null;
+      cursor = pid ? byId.get(pid) : null;
     }
   }
-  return instances.filter((item) => included.has(item.instance));
+  return instances.filter((item) => included.has(instanceId(item)));
+}
+
+/** Cluster the FULL roster, then project each cluster to its visible
+ * members — never cluster a filtered subset: dropping roster rows can turn
+ * a globally AMBIGUOUS relation edge into a false unique edge, silently
+ * re-linking nodes while the user types (merged-state review @3e76616).
+ * Cluster order and member depths come from the full-roster computation;
+ * clusters with no visible member disappear. */
+export function visibleClusters(allInstances, visibleInstances, { links = instanceLinks } = {}) {
+  const visibleIds = new Set(visibleInstances.map((i) => instanceId(i)));
+  return clusterInstances(allInstances, { links })
+    .map((c) => ({ ...c, instances: c.instances.filter((i) => visibleIds.has(instanceId(i))) }))
+    .filter((c) => c.instances.length);
 }
 
 /** Whether an item remains visible under VS Code-style collapsed ancestors.

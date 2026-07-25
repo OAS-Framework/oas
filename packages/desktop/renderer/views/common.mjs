@@ -33,6 +33,20 @@ export async function apiJson(ctx, pathname, opts) {
   }
   return d;
 }
+
+/* Error for a RECEIVED non-2xx {ok,status,body} response (the Electron
+   bridge shape) — used by the SHELL's ctx.api so consumers can distinguish
+   HTTP errors (status present) from transport failures. Must carry the
+   server's stable domain CODE: dropping it made doSpawn's
+   E_RELATIVE_AMBIGUOUS branch unreachable in production while fetch-shaped
+   tests stayed green (merged-state review @3e76616). Exported from here —
+   not defined in shell.mjs — so the parsed-path shaping is testable. */
+export function httpError(r, pathname) {
+  const err = new Error(r.body?.error || `HTTP ${r.status} for ${pathname}`);
+  err.status = r.status;
+  if (r.body?.code) err.code = r.body.code;
+  return err;
+}
 export function postJson(ctx, pathname, body) {
   return apiJson(ctx, pathname, {
     method: "POST",
