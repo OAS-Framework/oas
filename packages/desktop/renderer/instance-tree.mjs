@@ -191,8 +191,40 @@ export function distinguishingRootTags(roots) {
   return tags;
 }
 
+/** Resolve a terminal-open reference and mint its canonical dedup key — in
+ * that ORDER (review 7d740f9): the key must derive from the RESOLVED roster
+ * instance, never the caller's ref shape, so a bare-name open and a sidebar
+ * object open of the same identity share one tab, and a stale bare-name
+ * tab can never be activated once the name has become ambiguous (resolution
+ * refuses first). Returns { inst, key } or { error: "ambiguous"|"unknown" }.
+ * Importable so the ordering regression exercises this exact layer. */
+export function resolveTerminalOpen(instances, ref, workspace) {
+  const name = typeof ref === "string" ? ref : ref.instance;
+  const inst = findRosterInstance(instances, ref);
+  if (!inst) {
+    const dup = instances.filter((i) => i.instance === name).length > 1;
+    return { error: dup ? "ambiguous" : "unknown", name };
+  }
+  return { inst, key: terminalKey(workspace, inst), name };
+}
+
+/** Whether an instance has children IN ITS OWN identity — parent edges
+ * resolve through resolveLinkId, so a childless parent whose NAME is shared
+ * by a parent in another agents root gets no disclosure control (review
+ * 7d740f9). Accepts the full instance object; the legacy bare-name call
+ * shape (string) keeps name matching for rosters without identity fields. */
 export function hasInstanceChildren(instances, instance) {
-  return instances.some((candidate) => candidate.parentInstance === instance);
+  if (typeof instance === "string") {
+    return instances.some((candidate) => candidate.parentInstance === instance);
+  }
+  const byName = new Map();
+  for (const i of instances) {
+    if (!byName.has(i.instance)) byName.set(i.instance, []);
+    byName.get(i.instance).push(i);
+  }
+  const id = instanceId(instance);
+  return instances.some((candidate) => candidate.parentInstance
+    && resolveLinkId(candidate, candidate.parentInstance, byName) === id);
 }
 
 export function instanceRepoLabel(instance) {

@@ -22,7 +22,7 @@ import { NAV, stageSidebarMode, loadStageView } from "./shell-nav.mjs";
 import {
   collapseKey, hasInstanceChildren, instanceRepoLabel, treeGuideSegments, filterInstanceTree, instanceVisibleInTree,
   captureTreeRenderState, configureDisclosure, rosterResponseOwns, clusterInstances, clusterSeparator,
-  instanceId, findRosterInstance, terminalKey,
+  instanceId, findRosterInstance, terminalKey, resolveTerminalOpen,
 } from "./instance-tree.mjs";
 import {
   tabVisibleInContext, canActivateTab,
@@ -231,7 +231,7 @@ function renderContextRoster(instances) {
         // same-named instances from different agents roots collapse and
         // focus independently (review 46f3fdc).
         const key = collapseKey(ws, instanceId(i));
-        const hasChildren = hasInstanceChildren(instances, i.instance);
+        const hasChildren = hasInstanceChildren(instances, i);
         const collapsed = collapsedInstances.has(key);
 
         // VS Code-style ancestry guides: exhausted ancestor branches vanish;
@@ -472,7 +472,12 @@ async function openViewTab(name, title, extra = {}, key = `view:${name}`,
 // ── integrated terminal tab (the shell's own flagship view) ──────────────
 const pendingTerms = new Set(); // keys reserved while a roster fetch is in flight
 /** ref: either a bare instance name (views, palette — resolved only when
- * unambiguous) or { instance, home?, agentsRoot? } (sidebar rows — exact). */
+ * unambiguous) or { instance, home?, agentsRoot? } (sidebar rows — exact).
+ * ORDER MATTERS (review 7d740f9): the reference is resolved against the
+ * roster FIRST and the dedup key derives from the RESOLVED instance, so a
+ * bare-name open and a sidebar open of the same identity share one tab —
+ * and an existing tab can never be activated for a name that has since
+ * become ambiguous (resolution refuses before dedup can activate). */
 async function openTerminalTab(ref) {
   // A sidebar-tree selection opens its terminal directly — the persistent
   // roster is the quick path to sessions. The full Instances STAGE (grouped
@@ -486,20 +491,6 @@ async function openTerminalTab(ref) {
   // same-named instance in another workspace — or another agents root
   // (review 46f3fdc) — is a different terminal.
   const ws = currentWorkspace();
-  const key = terminalKey(ws, ref);
-  await whenKeyFree(key);
-  for (const [tid, t] of tabs) if (t.key === key) { activateTab(tid); return; }
-  if (pendingTerms.has(key)) return; // an open for this key is already in flight
-  pendingTerms.add(key);
-  try {
-    await openTerminalTabInner(ref, ws, key);
-  } finally {
-    pendingTerms.delete(key);
-  }
-}
-
-async function openTerminalTabInner(ref, ws, key) {
-  // Resolve the tmux target from the roster of the selected workspace.
   const owns = () => terminalOpenOwnsWorkspace(ws, currentWorkspace());
   let panel;
   try {
@@ -508,21 +499,35 @@ async function openTerminalTabInner(ref, ws, key) {
     if (!owns()) return; // stale rejection belongs to the old workspace
     throw e;
   }
-  // Workspace changed while /api/panel was in flight: discard BEFORE addTab
-  // (addTab auto-activates, so a late A open could otherwise receive B input).
   if (!owns()) return;
-  // Identity-aware resolution: an exact home/agentsRoot reference finds ITS
-  // instance; a bare name resolves only when unambiguous — the first
-  // same-named match could be another agents root's tmux session
-  // (review 46f3fdc).
-  const name = typeof ref === "string" ? ref : ref.instance;
-  const inst = findRosterInstance(panel.instances, ref);
-  if (!inst) {
-    const dup = panel.instances.filter((i) => i.instance === name).length > 1;
-    return alert(dup
-      ? `several instances are named "${name}" — open it from the sidebar tree, which addresses the exact one`
-      : `unknown instance "${name}"`);
+  // Identity-aware resolution BEFORE any key/tab decision (resolveTerminalOpen
+  // encodes the ordering; review 7d740f9): an exact home/agentsRoot reference
+  // finds ITS instance; a bare name resolves only when unambiguous — the
+  // first same-named match could be another agents root's tmux session.
+  const r = resolveTerminalOpen(panel.instances, ref, ws);
+  if (r.error) {
+    return alert(r.error === "ambiguous"
+      ? `several instances are named "${r.name}" — open it from the sidebar tree, which addresses the exact one`
+      : `unknown instance "${r.name}"`);
   }
+  const { inst, key } = r;
+  await whenKeyFree(key);
+  for (const [tid, t] of tabs) if (t.key === key) { activateTab(tid); return; }
+  if (pendingTerms.has(key)) return; // an open for this key is already in flight
+  pendingTerms.add(key);
+  try {
+    await openTerminalTabInner(inst, ws, key, owns);
+  } finally {
+    pendingTerms.delete(key);
+  }
+}
+
+async function openTerminalTabInner(inst, ws, key, owns) {
+  // inst is the RESOLVED roster instance (openTerminalTab resolves + keys
+  // before dedup; review 7d740f9). Re-check ownership here — whenKeyFree
+  // may have waited across a workspace switch.
+  if (!owns()) return;
+  const name = inst.instance;
   if (!inst.running || !inst.tmux?.session) return alert(`"${name}" has no live tmux session`);
 
   const wrap = document.createElement("div");

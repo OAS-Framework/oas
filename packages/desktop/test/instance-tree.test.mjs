@@ -415,3 +415,44 @@ test("distinguishingRootTags: colliding single-segment tags grow to a unique suf
   const same = distinguishingRootTags(["/only/one/agents"]);
   assert.equal(same.get("/only/one/agents"), "one");
 });
+
+test("hasInstanceChildren by identity: a childless duplicate-name parent gets NO disclosure (review 7d740f9)", async () => {
+  const m = await import("../renderer/instance-tree.mjs");
+  const roster = [
+    { instance: "coord", agentsRoot: "/ws1/agents", home: "/ws1/c" },                       // has a child
+    { instance: "kid", agentsRoot: "/ws1/agents", home: "/ws1/k", parentInstance: "coord" },
+    { instance: "coord", agentsRoot: "/ws2/agents", home: "/ws2/c" },                       // childless twin
+  ];
+  assert.equal(m.hasInstanceChildren(roster, roster[0]), true, "the real parent discloses");
+  assert.equal(m.hasInstanceChildren(roster, roster[2]), false,
+    "the childless same-named twin gets no disclosure control");
+  // legacy bare-name shape still works for identity-less rosters
+  assert.equal(m.hasInstanceChildren([{ instance: "a", parentInstance: "p" }], "p"), true);
+  assert.equal(m.hasInstanceChildren([{ instance: "a", parentInstance: "p" }], "a"), false);
+});
+
+test("resolveTerminalOpen: string and object refs of one identity mint ONE key; ambiguity refuses before any key exists (review 7d740f9)", async () => {
+  const m = await import("../renderer/instance-tree.mjs");
+  const uniqueRoster = [
+    { instance: "dev-1", agentsRoot: "/ws1/agents", home: "/ws1/h", running: true, tmux: { session: "s1" } },
+    { instance: "solo", agentsRoot: "/ws1/agents", home: "/ws1/s", running: true },
+  ];
+  // string-vs-object opens of the SAME identity dedupe to one tab key
+  const byName = m.resolveTerminalOpen(uniqueRoster, "dev-1", "w");
+  const byObject = m.resolveTerminalOpen(uniqueRoster, { instance: "dev-1", home: "/ws1/h", agentsRoot: "/ws1/agents" }, "w");
+  assert.ok(!byName.error && !byObject.error);
+  assert.equal(byName.key, byObject.key, "palette (bare name) and sidebar (object) share ONE tab for one identity");
+  assert.equal(byName.inst.home, "/ws1/h", "both resolve to the canonical roster instance");
+  // the name later becomes AMBIGUOUS: resolution refuses BEFORE any key can
+  // match a stale bare-name tab — no wrong-session activation path
+  const shadowedRoster = [...uniqueRoster,
+    { instance: "dev-1", agentsRoot: "/ws2/agents", home: "/ws2/h", running: true, tmux: { session: "s2" } }];
+  const nowAmbiguous = m.resolveTerminalOpen(shadowedRoster, "dev-1", "w");
+  assert.equal(nowAmbiguous.error, "ambiguous", "previously unique bare name refuses once shadowed");
+  assert.equal(nowAmbiguous.key, undefined, "no key minted — stale-tab dedup can never activate on ambiguity");
+  // exact refs still resolve under shadowing, each to its own key
+  const a = m.resolveTerminalOpen(shadowedRoster, { instance: "dev-1", home: "/ws1/h", agentsRoot: "/ws1/agents" }, "w");
+  const b = m.resolveTerminalOpen(shadowedRoster, { instance: "dev-1", home: "/ws2/h", agentsRoot: "/ws2/agents" }, "w");
+  assert.ok(!a.error && !b.error);
+  assert.notEqual(a.key, b.key, "exact refs keep distinct terminals under shadowing");
+});
