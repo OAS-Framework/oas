@@ -1,6 +1,8 @@
 # Knowledge Log
 
 ## 2026-07-25
+* **Update**: [cross-instance-writes-commit-last](/lessons/cross-instance-writes-commit-last.md) records that final cross-instance metadata writes are themselves fallible and need compensation for prior launch/scaffold side effects.
+* **Update**: [test-conventions](/playbooks/test-conventions.md) records the chmod recipe for forcing metadata-write failures and asserting full rollback.
 * **Update**: [kernel-validation-before-side-effects](/lessons/kernel-validation-before-side-effects.md) links to the cross-instance write ordering lesson as the transactionality counterpart to pre-side-effect validation.
 * **Creation**: [cross-instance-writes-commit-last](/lessons/cross-instance-writes-commit-last.md) records that writes to another instance's metadata must wait until every remaining fallible step has succeeded, or be compensated on failure.
 * **Update**: [test-conventions](/playbooks/test-conventions.md) records direct-kernel coverage for raw spawn relation option combinations, matching CLI `E_BAD_ARGS` cases and no-home side-effect assertions.

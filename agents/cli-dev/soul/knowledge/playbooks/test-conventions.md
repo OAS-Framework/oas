@@ -36,6 +36,11 @@ All kernel/CLI behavior tests live in `test/capabilities.test.mjs`
   after `spawnInstance` or the CLI rejects relation/anchor options, assert that
   no instance directory remains. See
   [kernel-validation-before-side-effects](/lessons/kernel-validation-before-side-effects.md).
+- Cross-instance metadata-write failure tests need both failure forcing and
+  rollback assertions: chmod the anchor `instance.json` to `444` and its
+  directory to `555`, assert the throw plus no scaffolded home and unchanged
+  anchor, then restore modes in `finally`. See
+  [cross-instance writes](/lessons/cross-instance-writes-commit-last.md).
 - Every CLI-level `E_BAD_ARGS` relation-matrix case needs a direct
   `spawnInstance(..., { launch: false })` equivalent that passes the raw
   programmatic shape (for example dangling `relativeTo`, `unrelated` plus
