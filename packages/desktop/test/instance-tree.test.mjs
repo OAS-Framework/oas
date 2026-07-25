@@ -127,3 +127,76 @@ test("first-launch deferred roster owns both completion orders but rejects a tru
   assert.equal(owns("wsB"), false);
   assert.equal(owns("wsA", 1, 2), false);
 });
+
+/* ── agent clusters (feature/agent-relations) ── */
+
+test("clusterInstances: connected components over parent + sibling links; unrelated are single-node clusters", async () => {
+  const { clusterInstances, instanceLinks } = await import("../renderer/instance-tree.mjs");
+  const roster = [
+    { instance: "coord-1", running: true },
+    { instance: "dev-a", parentInstance: "coord-1", running: true },
+    { instance: "dev-b", parentInstance: "coord-1", running: false },
+    { instance: "reviewer-1", parentInstance: "dev-a", running: true },
+    // sibling-linked pair, no shared parent — still one cluster
+    { instance: "peer-1", siblingInstance: "peer-2", relation: "sibling", relativeTo: "peer-2", running: false },
+    { instance: "peer-2", running: false },
+    // unrelated
+    { instance: "loner", running: true },
+  ];
+  const clusters = clusterInstances(roster);
+  const byKey = new Map(clusters.map((c) => [c.key, c.instances.map((i) => i.instance)]));
+  assert.equal(clusters.length, 3);
+  assert.deepEqual(byKey.get("coord-1"), ["coord-1", "dev-a", "reviewer-1", "dev-b"],
+    "cluster keeps parent-first tree order (running-first among siblings)");
+  assert.deepEqual(new Set(byKey.get("peer-1")), new Set(["peer-1", "peer-2"]),
+    "sibling link alone joins a cluster");
+  assert.deepEqual(byKey.get("loner"), ["loner"], "unrelated instance is its own cluster");
+  // depths: tree depth inside the cluster; sibling-only members at depth 0
+  const coord = clusters.find((c) => c.key === "coord-1").instances;
+  assert.deepEqual(coord.map((i) => i.depth), [0, 1, 2, 1]);
+  const peers = clusters.find((c) => byKey.get(c.key).includes("peer-2")).instances;
+  assert.ok(peers.every((i) => i.depth === 0), "sibling-linked peers sit at depth 0");
+  // link extractor reads the canonical contract: parentInstance + siblingInstance
+  assert.deepEqual(instanceLinks({ instance: "x", parentInstance: "p", siblingInstance: "s" }), ["p", "s"]);
+  assert.deepEqual(instanceLinks({ instance: "x", siblingInstance: "x" }), [], "self links dropped");
+  assert.deepEqual(instanceLinks({ instance: "x", siblingInstance: "" }), [], "empty links dropped");
+});
+
+test("clusterInstances: malformed parent cycles keep every member visible", async () => {
+  const { clusterInstances } = await import("../renderer/instance-tree.mjs");
+  const roster = [
+    { instance: "a", parentInstance: "b", running: false },
+    { instance: "b", parentInstance: "a", running: false },
+  ];
+  const clusters = clusterInstances(roster);
+  assert.equal(clusters.length, 1);
+  assert.deepEqual(new Set(clusters[0].instances.map((i) => i.instance)), new Set(["a", "b"]));
+});
+
+test("clusterInstances: edges to instances outside the roster do not join or crash", async () => {
+  const { clusterInstances } = await import("../renderer/instance-tree.mjs");
+  const clusters = clusterInstances([
+    { instance: "x", parentInstance: "ghost", siblingInstance: "phantom", running: true },
+    { instance: "y", running: true },
+  ]);
+  assert.equal(clusters.length, 2, "dangling links leave both as single-node clusters");
+});
+
+test("clusterInstances: cluster key is deterministic under liveness changes (review f921f7d nit)", async () => {
+  const { clusterInstances } = await import("../renderer/instance-tree.mjs");
+  const pair = (aRunning, bRunning) => [
+    { instance: "b-peer", siblingInstance: "a-peer", running: bRunning },
+    { instance: "a-peer", running: aRunning },
+  ];
+  const keyOf = (list) => clusterInstances(list)[0].key;
+  assert.equal(keyOf(pair(true, false)), "a-peer");
+  assert.equal(keyOf(pair(false, true)), "a-peer",
+    "which member is running must not change the visible cluster name");
+  // parented cluster: the label is the root, regardless of who is running
+  const tree = (rootRunning) => [
+    { instance: "z-root", running: rootRunning },
+    { instance: "a-child", parentInstance: "z-root", running: !rootRunning },
+  ];
+  assert.equal(keyOf(tree(true)), "z-root");
+  assert.equal(keyOf(tree(false)), "z-root", "root name labels the cluster even when idle");
+});

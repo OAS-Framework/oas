@@ -109,7 +109,7 @@ test("ws generation: a deferred roster from workspace A never paints after switc
   const fakeEl = () => ({
     style: {}, dataset: {}, classList: { toggle() {}, add() {}, remove() {} },
     innerHTML: "", textContent: "", title: "",
-    append() {}, appendChild() {}, remove() {},
+    append() {}, appendChild() {}, prepend() {}, remove() {},
     querySelector: () => null, querySelectorAll: () => [],
     addEventListener() {}, setAttribute() {},
   });
@@ -146,4 +146,66 @@ test("refresh after teardown (alive=false) never mutates state", async () => {
   gate[0]({ ok: true, status: 200, json: async () => ({ instances: [{ instance: "late", running: true }] }) });
   await inFlight;
   assert.equal(s.panel.instances.length, 0, "post-unmount response must not paint");
+});
+
+test("layoutForest tolerates sibling-link fields — every instance placed, parent edges intact", () => {
+  // feature/agent-relations: rosters may carry sibling-link metadata; the
+  // hierarchy layout is parentInstance-driven and must neither crash nor
+  // drop sibling-linked nodes (they lay out as separate roots).
+  const { nodes } = hier.layoutForest([
+    { instance: "coord-1", running: true },
+    { instance: "dev-a", parentInstance: "coord-1", running: true },
+    { instance: "dev-b", parentInstance: "coord-1", running: false },
+    { instance: "peer-1", siblingInstance: "peer-2", relation: "sibling", relativeTo: "peer-2", running: false },
+    { instance: "peer-2", siblingInstance: "peer-1", running: false },
+  ]);
+  assert.equal(nodes.length, 5, "sibling metadata never hides an instance");
+  const byName = new Map(nodes.map((n) => [n.inst.instance, n]));
+  assert.ok(byName.get("coord-1").children.some((c) => c.inst.instance === "dev-a"), "parent edges survive");
+  assert.equal(byName.get("peer-1").y, 0, "sibling-only nodes are roots");
+  assert.equal(byName.get("peer-2").y, 0);
+});
+
+test("layoutClusters: multi-member clusters get cards; singletons collect in one Independent block", () => {
+  const { placed, soloBlock, width, height } = hier.layoutClusters([
+    { instance: "root", running: true },
+    { instance: "kid", parentInstance: "root", running: true },
+    { instance: "peer", running: true, siblingInstance: "root" },
+    { instance: "solo-1", running: false },
+    { instance: "solo-2", running: true },
+  ]);
+  assert.equal(placed.length, 1, "one multi-member cluster");
+  assert.equal(placed[0].cluster.size, 3);
+  assert.deepEqual(placed[0].sibs, [{ a: "peer", b: "root" }], "sibling edge surfaces for rendering");
+  assert.equal(soloBlock.nodes.length, 2, "singletons share the Independent block");
+  assert.ok(soloBlock.y >= placed[0].y + placed[0].h, "Independent block sits below cluster cards");
+  // node coordinates are group-local and inside the card's padded area
+  for (const n of placed[0].nodes) assert.ok(n.x >= 0 && n.y > 0);
+  assert.ok(width > 0 && height > 0);
+});
+
+test("layoutClusters: deterministic across roster order; no instance lost", () => {
+  const roster = [
+    { instance: "b-root", running: false },
+    { instance: "b-kid", parentInstance: "b-root", running: true },
+    { instance: "a-root", running: true },
+    { instance: "a-kid", parentInstance: "a-root", running: true },
+    { instance: "lone", running: false },
+  ];
+  const l1 = hier.layoutClusters(roster);
+  const l2 = hier.layoutClusters([...roster].reverse());
+  const namesOf = (l) => l.placed.map((p) => p.cluster.name);
+  assert.deepEqual(namesOf(l1), ["a-root", "b-root"], "running-heavy cluster first");
+  assert.deepEqual(namesOf(l2), namesOf(l1), "stable across shuffles");
+  const all = (l) => [...l.placed.flatMap((p) => p.nodes), ...(l.soloBlock?.nodes || [])].map((n) => n.inst.instance).sort();
+  assert.deepEqual(all(l1), ["a-kid", "a-root", "b-kid", "b-root", "lone"]);
+});
+
+test("layoutClusters: all-singleton roster yields only the Independent block", () => {
+  const { placed, soloBlock } = hier.layoutClusters([
+    { instance: "x", running: true }, { instance: "y", running: false },
+  ]);
+  assert.equal(placed.length, 0);
+  assert.equal(soloBlock.nodes.length, 2);
+  assert.equal(soloBlock.y, 0, "no cluster cards above — block starts at the top");
 });

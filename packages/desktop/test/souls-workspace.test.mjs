@@ -279,3 +279,80 @@ test("Soul roster: selector-metacharacter agent names spawn cleanly and still bl
     if (oldWindow === undefined) delete globalThis.window; else globalThis.window = oldWindow;
   }
 });
+
+test("Soul roster: relation + reference instance pass through POST /api/spawn; unrelated sends neither", async () => {
+  const dom = new JSDOM("<!doctype html><html><head></head><body><div id=host></div></body></html>", { url: "http://localhost" });
+  const oldDocument = globalThis.document;
+  const oldWindow = globalThis.window;
+  const oldSetInterval = globalThis.setInterval;
+  globalThis.document = dom.window.document;
+  globalThis.window = dom.window;
+  globalThis.setInterval = () => ({ fake: true });
+  const common = await import("../renderer/views/common.mjs");
+  const spawn = await import("../renderer/views/spawn.mjs");
+  await seedCliAvailable();
+  const previousWs = common.currentWorkspace();
+  const agent = { name: "dev", agentsRoot: "/a", description: "", runtime: "pi", work: "workspace", repo: true, repoName: "r" };
+  const posts = [];
+  const ctx = {
+    api: (pathname, opts = {}) => {
+      if (pathname === "/api/cli" || pathname === "/api/cli/reprobe") return Promise.resolve(CLI_OK);
+      if (opts.method === "POST") {
+        posts.push(JSON.parse(opts.body));
+        return Promise.resolve({ ok: true, status: 200, json: async () => ({ instance: "dev-1", launched: false }) });
+      }
+      return Promise.resolve({ ok: true, status: 200, json: async () => pathname.startsWith("/api/agents")
+        ? { agents: [agent] }
+        : { instances: [{ instance: "coord-1", running: true }, { instance: "dev-1" }], workspace: { id: "w" }, workspaces: [] } });
+    },
+    openTerminal: () => {},
+  };
+  try {
+    common.setWorkspace("w");
+    spawn.mount(dom.window.document.getElementById("host"), ctx);
+    await tick(); await tick();
+    dom.window.document.querySelector(".spawn-act").click();
+    const doc = dom.window.document;
+    // picker hidden while unrelated (the default)
+    const relSel = doc.querySelector(".frelation");
+    assert.equal(relSel.value, "unrelated", "relation defaults to unrelated");
+    assert.equal(doc.querySelector(".frelto-label").style.display, "none", "reference picker hidden for unrelated");
+    // picker lists live workspace instances
+    const refSel = doc.querySelector(".frelto");
+    assert.ok([...refSel.options].some((o) => o.value === "coord-1"), "reference picker lists roster instances");
+
+    // 1) unrelated spawn: no relation fields on the wire
+    doc.querySelector(".fspawn").click();
+    await tick(); await tick(); await tick();
+    assert.equal(posts.length, 1);
+    assert.equal(posts[0].relation, undefined, "unrelated sends no relation");
+    assert.equal(posts[0].relativeTo, undefined, "unrelated sends no relativeTo");
+
+    // 2) choosing a relation reveals the picker; missing reference fails BEFORE dispatch
+    doc.querySelector(".spawn-act")?.click(); // reopen if the grid rebuilt
+    const form = doc.querySelector(".soul-form");
+    const rel2 = form.querySelector(".frelation");
+    rel2.value = "child";
+    rel2.dispatchEvent(new dom.window.Event("change"));
+    assert.equal(form.querySelector(".frelto-label").style.display, "", "picker appears for a real relation");
+    form.querySelector(".fspawn").click();
+    await tick();
+    assert.equal(posts.length, 1, "relation without a reference never dispatches");
+    assert.match(form.querySelector(".fstatus").textContent, /needs a reference instance/);
+
+    // 3) full pair passes through
+    form.querySelector(".frelto").value = "coord-1";
+    form.querySelector(".fspawn").click();
+    await tick(); await tick(); await tick();
+    assert.equal(posts.length, 2);
+    assert.equal(posts[1].relation, "child");
+    assert.equal(posts[1].relativeTo, "coord-1");
+  } finally {
+    spawn.unmount();
+    common.setWorkspace(previousWs);
+    globalThis.setInterval = oldSetInterval;
+    dom.window.close();
+    if (oldDocument === undefined) delete globalThis.document; else globalThis.document = oldDocument;
+    if (oldWindow === undefined) delete globalThis.window; else globalThis.window = oldWindow;
+  }
+});

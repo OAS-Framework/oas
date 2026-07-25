@@ -6,7 +6,7 @@
 // The shell owns tabs/navigation and provides ctx. The full roster (with
 // chat transcript, spawn) lives in the ported views — the shell chrome
 // stays a thin rail so nothing is duplicated.
-import { currentWorkspace, setWorkspace, groupInstances, adoptWorkspace, onWorkspaceChange } from "./views/common.mjs";
+import { currentWorkspace, setWorkspace, adoptWorkspace, onWorkspaceChange } from "./views/common.mjs";
 import {
   initTheme, toggleTheme, xtermTheme, onThemeChange,
   terminalTypography, setTerminalFontSize, setTerminalFontFamily, onTerminalTypographyChange,
@@ -20,7 +20,7 @@ import { createIntentGate, prepareOwnedOpen } from "./open-intent.mjs";
 import { createWorkspaceSwitcher } from "./workspace-switcher.mjs";
 import {
   collapseKey, hasInstanceChildren, instanceRepoLabel, treeGuideSegments, filterInstanceTree, instanceVisibleInTree,
-  captureTreeRenderState, configureDisclosure, rosterResponseOwns,
+  captureTreeRenderState, configureDisclosure, rosterResponseOwns, clusterInstances,
 } from "./instance-tree.mjs";
 import {
   terminalTabsForWorkspace, tabVisibleInContext, canActivateTab,
@@ -209,12 +209,20 @@ function renderContextRoster(instances) {
     restoreTreeState();
     return;
   }
-  for (const [, repos] of groupInstances(visible)) {
-    for (const [repo, items] of repos) {
+  // Sidebar groups by agent CLUSTER (connected relations), not per repo:
+  // the repo is the small label under each instance. Single-node clusters
+  // (unrelated instances) get no header row — headers only where a real
+  // group exists.
+  for (const cluster of clusterInstances(visible)) {
+    const items = cluster.instances;
+    if (items.length > 1) {
       const rh = document.createElement("div");
-      rh.className = "ctx-repo";
-      rh.textContent = repo;
+      rh.className = "ctx-repo ctx-cluster";
+      rh.textContent = `◎ ${cluster.key}`;
+      rh.title = `Agent cluster of ${items.length} related instances`;
       listEl.append(rh);
+    }
+    {
       for (const i of items) {
         const rowWrap = document.createElement("div");
         rowWrap.className = "ctx-tree-row";
@@ -544,7 +552,7 @@ async function openTerminalTabInner(instance, ws, key) {
 // Two first-class navigation surfaces: hierarchy and soul roster. Instances
 // live permanently below them; selecting one opens its terminal artifact.
 const NAV = [
-  { name: "hierarchy", label: "Active overview", icon: "⌘", title: "Active overview" },
+  { name: "hierarchy", label: "Active", icon: "⌘", title: "Active — live cluster overview" },
   { name: "spawn", label: "Soul roster", icon: "✦", title: "Soul roster" },
 ];
 const navEl = document.getElementById("nav");
@@ -580,7 +588,7 @@ const palette = createPalette({
   },
   openTerminal: (name) => openTerminalTab(name),
   commands: [
-    { label: "View: Active overview", run: () => showStage("hierarchy") },
+    { label: "View: Active", run: () => showStage("hierarchy") },
     { label: "View: Soul roster", run: () => showStage("spawn") },
     { label: "Theme: toggle light/dark", run: () => toggleTheme() },
     { label: "Terminal: increase font size", run: () => setTerminalFontSize(terminalTypography().fontSize + 1) },
