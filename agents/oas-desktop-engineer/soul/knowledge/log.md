@@ -1,6 +1,8 @@
 # Knowledge Log
 
 ## 2026-07-25
+* **Creation**: promoted [build option lists from data with createElement, never innerHTML attributes](/lessons/dom-construction-not-innerhtml-attributes.md) from the oas-desktop-engineer-agent-relations notes.
+* **Update**: linked [no dynamic selectors from data](/lessons/no-dynamic-selectors-from-data.md) and [sanitize markdown before innerHTML](/lessons/sanitize-marked-markdown-before-innerhtml.md) to the DOM construction lesson.
 * **Creation**: promoted [graph code over roster instances must key by composite identity](/lessons/cluster-composite-identity.md) from the oas-desktop-engineer-agent-relations notes.
 * **Creation**: promoted [new CLI mutation flags need a capability gate](/lessons/new-mutation-flags-capability-gate.md) from the oas-desktop-engineer-agent-relations notes.
 * **Creation**: promoted [final kernel contract for spawn-time agent relations](/references/agent-relations-kernel-contract.md) from the oas-desktop-engineer-agent-relations notes.

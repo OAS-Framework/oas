@@ -26,4 +26,5 @@ Cover the behavior with a DOM-backed test, such as jsdom, that inspects the norm
 
 # Related concepts
 
+- [Build option lists from data with createElement, never innerHTML attributes](/lessons/dom-construction-not-innerhtml-attributes.md)
 - [desktop backend architecture](/architecture/desktop-backend-architecture.md)
