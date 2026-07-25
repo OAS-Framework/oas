@@ -268,8 +268,10 @@ function openSpawnModal(s, a) {
   // ALL options are ALWAYS VISIBLE (human requirement): purpose, task,
   // relation + reference instance, runtime and model overrides. The CLI
   // capability gate never HIDES the relation controls — on a pre-relations
-  // CLI they render disabled with the required version named. The server
-  // still fails closed (cli-no-relations) — render state is UX, not the
+  // CLI the related choices (child/sibling/parent) and the reference picker
+  // gate disabled with the required version named, while the select itself
+  // and "unrelated" stay usable. The server still fails closed
+  // (cli-no-relations) — render state is UX, not the
   // guard. Capability is NOT snapshotted: app focus re-probes the CLI, so
   // an open modal resyncs on every CLI change (review 5526b70) via
   // syncRelationControls below — typed fields are never touched.

@@ -437,7 +437,7 @@ test("Spawn modal: every option always visible; runtime/model pass through; defa
   }
 });
 
-test("Spawn modal: pre-relations CLI shows relation controls DISABLED with the required version named — never hidden", async () => {
+test("Spawn modal: pre-relations CLI gates the RELATED options + picker disabled with the required version named — 'unrelated' stays selectable, nothing hidden", async () => {
   const dom = new JSDOM("<!doctype html><html><head></head><body><div id=host></div></body></html>", { url: "http://localhost" });
   const oldDocument = globalThis.document;
   const oldWindow = globalThis.window;
