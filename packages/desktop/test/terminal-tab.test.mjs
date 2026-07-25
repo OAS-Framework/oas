@@ -154,3 +154,43 @@ test("term:open result translation: {error} → surfaces the message, no attach"
   assert.ok(!d.log.includes("focus"), "no attach on error");
   await tab.close();
 });
+
+// ── Shift+Enter → newline (chat-input fix) ────────────────────────────────
+// xterm emits a plain \r for Enter with or without Shift, so the modifier
+// never reaches tmux/pi. The composition installs a custom key handler that
+// translates Shift+Enter into a raw \n (pi's Ctrl+J newline alias) and
+// suppresses the default \r. These drive the pure classifier AND the wired
+// handler behavior — a regression that keeps the classifier but forgets to
+// suppress the default (returning true) would send the message anyway.
+import { shiftEnterByte } from "../renderer/terminal-tab.mjs";
+
+test("shiftEnterByte: Shift+Enter keydown → \\n; everything else passes through", () => {
+  const ev = (o) => ({ type: "keydown", key: "Enter", shiftKey: false, ctrlKey: false, altKey: false, metaKey: false, ...o });
+  assert.equal(shiftEnterByte(ev({ shiftKey: true })), "\n");
+  assert.equal(shiftEnterByte(ev({})), null, "plain Enter untouched (still sends)");
+  assert.equal(shiftEnterByte(ev({ shiftKey: true, type: "keyup" })), null, "keyup ignored");
+  assert.equal(shiftEnterByte(ev({ shiftKey: true, ctrlKey: true })), null, "extra modifiers pass through");
+  assert.equal(shiftEnterByte(ev({ shiftKey: true, metaKey: true })), null);
+  assert.equal(shiftEnterByte(ev({ shiftKey: true, altKey: true })), null);
+  assert.equal(shiftEnterByte(ev({ key: "a", shiftKey: true })), null, "shifted letters untouched");
+});
+
+test("custom key handler: Shift+Enter writes \\n to the pty and suppresses xterm's default", async () => {
+  const d = makeDoubles(Promise.resolve(5));
+  let handler = null;
+  const writes = [];
+  d.term.attachCustomKeyEventHandler = (h) => { handler = h; };
+  d.desk.termWrite = (id, data) => writes.push([id, data]);
+  const tab = mk(d);
+  await tab.start();
+  assert.equal(typeof handler, "function", "handler installed during onReady");
+  const ev = (o) => ({ type: "keydown", key: "Enter", shiftKey: false, ctrlKey: false, altKey: false, metaKey: false, ...o });
+  assert.equal(handler(ev({ shiftKey: true })), false, "default \\r suppressed");
+  assert.deepEqual(writes, [[5, "\n"]], "newline byte written to the live pty");
+  assert.equal(handler(ev({})), true, "plain Enter left to xterm (message sends)");
+  assert.equal(writes.length, 1, "no extra writes for pass-through keys");
+  await tab.close();
+  writes.length = 0;
+  assert.equal(handler(ev({ shiftKey: true })), false);
+  assert.deepEqual(writes, [], "no write after the pty is gone");
+});

@@ -289,7 +289,16 @@ test("desktop server: /api/agents lists persistent AND capability-defined agents
   // capability-defined agents (oas.review's reviewer) can resolve.
   execFileSync(process.execPath, [CLI, "install", "--dir", ROOT], { stdio: "ignore" });
   const port = 4000 + Math.floor(Math.random() * 2000);
-  const proc = spawn(process.execPath, [SRV, "start", "--port", String(port), "--dir", ROOT], { stdio: "ignore" });
+  // The 503 assertion below requires the server to find NO compatible CLI.
+  // On dev machines a real `oas` is often on PATH (the probe settles ok and
+  // the spawn attempt answers 409 instead) — strip every locator source so
+  // the test is deterministic in CI and locally alike. PATH must be empty of
+  // ANY toolchain: even /usr/bin/npm lets the npm-global source rediscover a
+  // real oas (review b2a1564).
+  const proc = spawn(process.execPath, [SRV, "start", "--port", String(port), "--dir", ROOT], {
+    stdio: "ignore",
+    env: { ...process.env, PATH: "/nonexistent", OAS_DESKTOP_OAS_BIN: "", SHELL: "/bin/false" },
+  });
   try {
     let up = false;
     for (let i = 0; i < 40 && !up; i++) {

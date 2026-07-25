@@ -11,6 +11,11 @@ import {
 } from "./common.mjs";
 import { cliAvailable, cliKnownUnavailable, cliStatus, refreshCli, onCliChange, cliCard } from "./cli-status.mjs";
 
+/** True while the CLI probe has never SETTLED (no response classified yet).
+ * Pending is card-less by design, so disabled buttons must explain
+ * themselves — and the poll must keep retrying until a response lands. */
+const cliProbePending = () => !cliStatus() && !cliKnownUnavailable();
+
 const CSS = `
 .souls { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--bg); }
 .souls-bar { display: flex; align-items: center; gap: 10px; height: var(--bar-h, 48px); flex: none; padding: 0 14px;
@@ -19,6 +24,8 @@ const CSS = `
 .souls-sum { color: var(--muted); font-size: 12.5px; }
 .souls-grid { flex: 1; overflow-y: auto; padding: 18px; display: grid; gap: 14px;
               grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); align-content: start; }
+.souls-grid .repo-head { grid-column: 1 / -1; color: var(--muted); font-size: 11px; font-weight: 650;
+                         text-transform: uppercase; letter-spacing: .06em; padding: 4px 2px 0; }
 .soul-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
              padding: 14px 16px; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 8px;
              text-align: left; font: inherit; color: var(--fg); }
@@ -75,7 +82,14 @@ export function mount(el, ctx) {
     refresh(s);
   });
   refresh(s);
-  s.timers.push(setInterval(() => refresh(s), 8000));
+  s.timers.push(setInterval(() => {
+    refresh(s);
+    // A boot-time transport failure leaves the CLI probe UNSETTLED (null
+    // state, no card) — without a retry the Spawn buttons stay dead forever
+    // with nothing on screen saying why. Keep re-fetching the cheap cached
+    // state until a response settles it either way (ok / carded).
+    if (cliProbePending()) refreshCli(ctx);
+  }, 8000));
 }
 
 export function unmount() {
@@ -159,7 +173,23 @@ function renderGrid(s) {
     s.cliCardHandle.el.style.gridColumn = "1/-1";
     grid.append(s.cliCardHandle.el);
   } else if (s.cliCardHandle) { s.cliCardHandle.dispose(); s.cliCardHandle = null; }
-  for (const a of list) grid.append(soulCard(s, a));
+  // Rendering-only repo grouping: cards sorted repo → name with a section
+  // header per repo (agent family = the card itself). Data order untouched.
+  const label = (a) => a.repoName || (a.repo ? String(a.repo).split("/").filter(Boolean).at(-1) : "") || "workspace";
+  const sorted = [...list].sort((a, b) =>
+    label(a).localeCompare(label(b)) || String(a.name).localeCompare(String(b.name)));
+  let lastRepo = null;
+  for (const a of sorted) {
+    const repo = label(a);
+    if (repo !== lastRepo) {
+      lastRepo = repo;
+      const rh = grid.ownerDocument.createElement("div");
+      rh.className = "repo-head";
+      rh.textContent = repo;
+      grid.append(rh);
+    }
+    grid.append(soulCard(s, a));
+  }
 }
 
 function soulCard(s, a) {
@@ -189,7 +219,11 @@ function soulCard(s, a) {
     spawn.title = attached
       ? "Attached-mode agent — spawn it from an owning instance’s work tree"
       : noCli
-        ? "Spawning requires a compatible installed oas CLI — see the card above"
+        // Pending probe renders NO card (frozen contract) — the tooltip must
+        // not point at a card that is not there.
+        ? (cliProbePending()
+          ? "Checking for a compatible oas CLI — spawning enables once it is verified"
+          : "Spawning requires a compatible installed oas CLI — see the card above")
         : `Spawn ${a.name}`;
     spawn.addEventListener("click", () => {
       if (!cliAvailable()) return; // state may have flipped since render

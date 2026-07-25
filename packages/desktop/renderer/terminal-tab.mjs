@@ -26,6 +26,21 @@ import { createTermLifecycle } from "./term-lifecycle.mjs";
  * @param {(e: unknown) => void} [deps.onError]
  * @returns {{ start: () => Promise<void>, close: () => Promise<void> }}
  */
+/* Shift+Enter must insert a newline in the agent's input line, not send the
+   message. xterm.js emits a plain \r for Enter regardless of Shift, so the
+   modifier is lost before tmux or the agent runtime ever sees it. pi binds
+   Ctrl+J (a raw \n linefeed) as its default newline alias precisely for
+   terminals that cannot deliver a real shift+enter through tmux (see pi
+   docs/terminal-setup.md), so translating Shift+Enter → \n here composes a
+   newline in every runtime that follows that convention while plain Enter
+   keeps sending. Returns the byte to write, or null to let xterm handle the
+   event. Pure — exported for tests. */
+export function shiftEnterByte(ev) {
+  if (ev.type !== "keydown") return null;
+  if (ev.key !== "Enter" || !ev.shiftKey || ev.ctrlKey || ev.altKey || ev.metaKey) return null;
+  return "\n";
+}
+
 export function createTerminalTab({ desk, term, tmux, wrap, isActive, fit, observe, onError = (e) => console.error(e) }) {
   let offData = null, offExit = null;
   let unobserve = null;
@@ -83,6 +98,14 @@ export function createTerminalTab({ desk, term, tmux, wrap, isActive, fit, obser
           banner("session ended — close this tab");
         });
         term.onData((data) => { if (life.ptyId() !== null) desk.termWrite(life.ptyId(), data); });
+        // Shift+Enter → newline (Ctrl+J alias); returning false suppresses
+        // xterm's default \r so the message is not sent instead.
+        term.attachCustomKeyEventHandler?.((ev) => {
+          const byte = shiftEnterByte(ev);
+          if (byte === null) return true;
+          if (life.ptyId() !== null) desk.termWrite(life.ptyId(), byte);
+          return false;
+        });
         term.onResize(({ cols, rows }) => { if (life.ptyId() !== null) desk.termResize(life.ptyId(), cols, rows); });
         unobserve = (observe || defaultObserve)(wrap);
         term.focus();

@@ -7,9 +7,75 @@ export function hasInstanceChildren(instances, instance) {
 }
 
 export function instanceRepoLabel(instance) {
-  if (instance.repoName) return instance.repoName;
+  if (instance.repoName) return String(instance.repoName);
   const path = instance.repo || instance.workspace || "";
   return String(path).split("/").filter(Boolean).at(-1) || "workspace";
+}
+
+/* ── roster grouping: repo → agent family (soul), with sort modes ── */
+
+export const ROSTER_SORTS = [
+  { id: "status", label: "Status (running first)" },
+  { id: "name", label: "Name" },
+];
+
+/** Comparator for one sibling level. "status" ranks running instances first,
+ * then by name; "name" is purely alphabetical. Unknown ids fall back to
+ * "status" so a stale persisted choice can never break rendering. */
+export function rosterRank(sortBy) {
+  const byName = (a, b) => String(a.instance).localeCompare(String(b.instance));
+  if (sortBy === "name") return byName;
+  return (a, b) => (!!a.running === !!b.running ? byName(a, b) : a.running ? -1 : 1);
+}
+
+/** Group a roster list repo → agent family (soul), each family's items in
+ * lineage order (parents before children, depth annotated) with siblings
+ * sorted by `sortBy`. Lineage links crossing family/repo boundaries are cut:
+ * such children render as roots of their own family group. Returns
+ * Map<repoLabel, Map<familyName, item[]>> with deterministic group order:
+ * repos and families alphabetical. */
+export function groupRosterFamilies(list, sortBy = "status") {
+  const rank = rosterRank(sortBy);
+  const repos = new Map();
+  for (const i of list) {
+    // instance.json is workspace-controlled: agent/repoName may arrive as
+    // non-strings through the reader. Coerce grouping keys so one malformed
+    // instance cannot throw in localeCompare and blank the whole roster.
+    const rName = String(instanceRepoLabel(i));
+    if (!repos.has(rName)) repos.set(rName, new Map());
+    const families = repos.get(rName);
+    const fName = String(i.agent || "?");
+    if (!families.has(fName)) families.set(fName, []);
+    families.get(fName).push(i);
+  }
+  const sortedRepos = new Map([...repos.entries()].sort(([a], [b]) => a.localeCompare(b)));
+  for (const [rName, families] of sortedRepos) {
+    const sortedFamilies = new Map([...families.entries()].sort(([a], [b]) => a.localeCompare(b)));
+    for (const [fName, items] of sortedFamilies) {
+      const byName = new Map(items.map((i) => [i.instance, i]));
+      const roots = items.filter((i) => !i.parentInstance || !byName.has(i.parentInstance));
+      const kids = (p) => items.filter((i) => i.parentInstance === p.instance);
+      const ordered = [];
+      const seen = new Set();
+      const walk = (i, depth) => {
+        if (seen.has(i.instance)) return; // cycle-safe
+        seen.add(i.instance);
+        ordered.push({ ...i, depth });
+        kids(i).sort(rank).forEach((k) => walk(k, depth + 1));
+      };
+      roots.sort(rank).forEach((r) => walk(r, 0));
+      for (const i of items) if (!seen.has(i.instance)) ordered.push({ ...i, depth: 0 });
+      sortedFamilies.set(fName, ordered);
+    }
+    sortedRepos.set(rName, sortedFamilies);
+  }
+  return sortedRepos;
+}
+
+/** Stable collapse key for a roster GROUP header (repo or repo+family),
+ * workspace-scoped like instance collapse keys. */
+export function rosterGroupKey(workspace, ...parts) {
+  return [`g:${workspace || ""}`, ...parts].join("\u0000");
 }
 
 /** VS Code-style guide segments for one row in a flattened parent-first tree.

@@ -3,7 +3,7 @@ type: Lesson
 title: Regression tests must exercise the layer that had the bug
 description: A regression test only pins a bug if it executes the code layer whose ordering or guard was wrong; for composition roots, move invariant-bearing lines into importable modules and leave entry points as one-line bindings.
 tags: [testing, regression, desktop, composition, mutation]
-timestamp: 2026-07-24
+timestamp: 2026-07-25
 ---
 
 A reviewer found a terminal ordering regression test that exercised
@@ -66,6 +66,11 @@ For Electron main-process composition roots, if a review finding names a line in
 `main.mjs`, the fix is not only that line. Move the invariant into a module the
 tests import, and leave the composition root with bindings so trivial that
 reverting them breaks an import rather than preserving a silent reimplementation.
+
+Renderer shell navigation has the same composition-root trap. A mounted view
+module is not reachable until `shell.mjs` consumes an importable nav manifest;
+see [Shell nav reachability needs an importable manifest](/lessons/shell-nav-reachability-manifest.md)
+for the `NAV`/loader/source-pin test shape.
 
 This complements the [async lifecycle lesson](/lessons/async-mount-close-race.md): the
 lifecycle primitive can be correct while its caller still violates the ownership

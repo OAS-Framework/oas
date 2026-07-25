@@ -7,11 +7,41 @@
    Contract: export mount(el, ctx) / unmount(). Plain ES module + DOM. */
 import {
   escapeHtml, miniMarkdown, apiJson, postJson, ensureTheme,
-  groupInstances, currentWorkspace, setWorkspace, adoptWorkspace, onWorkspaceChange,
+  currentWorkspace, setWorkspace, adoptWorkspace, onWorkspaceChange,
   renderWorkspaceSelect, wsQuery, instanceApiPath, workspaceGeneration,
 } from "./common.mjs";
+import { ROSTER_SORTS, groupRosterFamilies, rosterGroupKey } from "../instance-tree.mjs";
 
 let state = null;
+
+const SORT_KEY = "oas.desktop.rosterSort";
+/* Sort choice is WORKSPACE-SCOPED like the group collapse state (PR #29
+   maintainer finding): persisted as a { [canonicalWsId]: sortId } map so
+   workspace A's choice never leaks into B. Unknown/invalid persisted values
+   fall back to "status". Exported for the A→B→A round-trip regression. */
+export function savedSort(ws) {
+  try {
+    const map = JSON.parse(localStorage.getItem(SORT_KEY) || "{}");
+    const v = map && typeof map === "object" ? map[ws || ""] : null;
+    return ROSTER_SORTS.some((s) => s.id === v) ? v : "status";
+  } catch { return "status"; }
+}
+function persistSort(ws, sortBy) {
+  try {
+    let map;
+    try { map = JSON.parse(localStorage.getItem(SORT_KEY) || "{}"); } catch { map = {}; }
+    if (!map || typeof map !== "object" || Array.isArray(map)) map = {};
+    map[ws || ""] = sortBy;
+    localStorage.setItem(SORT_KEY, JSON.stringify(map));
+  } catch { /* storage-less env */ }
+}
+/* Re-read the persisted sort for the CURRENT workspace and sync the control.
+   Called on workspace switch and on silent server-side adoption. */
+function syncSortToWorkspace(s) {
+  s.sortBy = savedSort(currentWorkspace());
+  const sel = s.q("sortsel");
+  if (sel) sel.value = s.sortBy;
+}
 
 export function mount(el, ctx) {
   ensureTheme(el.ownerDocument);
@@ -20,6 +50,8 @@ export function mount(el, ctx) {
     panel: { instances: [] },
     sel: null,
     filterText: "",
+    sortBy: savedSort(currentWorkspace()),
+    collapsedGroups: new Set(),   // rosterGroupKey(ws, repo[, family]) — ws-scoped
     pendingSends: [],
     fastPollUntil: 0,
     chatReq: 0,               // request generation — stale responses never paint
@@ -36,6 +68,8 @@ export function mount(el, ctx) {
         <div class="filterbar bar">
           <select class="field wssel" style="display:none"></select>
           <input class="field filter" placeholder="Filter agents, repos, tasks…" autocomplete="off">
+          <select class="field sortsel" title="Sort instances within groups">${ROSTER_SORTS.map((o) =>
+            `<option value="${o.id}">${escapeHtml(o.label)}</option>`).join("")}</select>
         </div>
         <div class="groups"><div class="loading-block"><span class="spinner"></span> Loading roster…</div></div>
       </div>
@@ -56,6 +90,13 @@ export function mount(el, ctx) {
     </div>`;
   s.q = (cls) => el.querySelector("." + cls);
   s.q("filter").addEventListener("input", (e) => { s.filterText = e.target.value; renderRoster(s); });
+  const sortSel = s.q("sortsel");
+  sortSel.value = s.sortBy;
+  sortSel.addEventListener("change", (e) => {
+    s.sortBy = e.target.value;
+    persistSort(currentWorkspace(), s.sortBy);
+    renderRoster(s);
+  });
   s.q("wssel").addEventListener("change", (e) => setWorkspace(e.target.value));
   s.q("termbtn").onclick = () => { if (s.sel) s.ctx.openTerminal(s.sel); };
   s.q("intbtn").onclick = async () => {
@@ -63,7 +104,7 @@ export function mount(el, ctx) {
     try { await postJson(s.ctx, instanceApiPath("interrupt", s.sel), {}); } catch { /* idle instance */ }
     setTimeout(() => refreshChat(s, true), 350);
   };
-  s.unsubWs = onWorkspaceChange(() => { clearSelection(s); refreshPanel(s); });
+  s.unsubWs = onWorkspaceChange(() => { clearSelection(s); syncSortToWorkspace(s); refreshPanel(s); });
   refreshPanel(s);
   s.timers.push(setInterval(() => refreshPanel(s), 4000));
   s.timers.push(setInterval(() => refreshChat(s, false), 1500));
@@ -95,8 +136,10 @@ async function refreshPanel(s) {
   if (!s.alive || myGen !== workspaceGeneration()) return;
   s.panel = panel;
   if (panel.workspace && panel.workspace.id !== currentWorkspace()) {
-    // server resolved our (possibly stale) ws to a real one — adopt it silently
+    // server resolved our (possibly stale) ws to a real one — adopt it
+    // silently, then re-scope the sort to the adopted workspace
     adoptWorkspace(panel.workspace.id);
+    syncSortToWorkspace(s);
   }
   renderWorkspaceSelect(s.q("wssel"), panel.workspaces, panel.workspace?.id || "");
   renderRoster(s);
@@ -115,36 +158,67 @@ function renderRoster(s) {
     return;
   }
   if (!visible.length) { el.innerHTML = '<div class="empty">Nothing matches the filter.</div>'; return; }
-  for (const [wsName, repos] of groupInstances(visible)) {
+  // Filtering force-expands all groups (matches would otherwise hide inside
+  // collapsed headers) WITHOUT mutating the persisted collapse state.
+  const filtering = !!s.filterText.trim();
+  const ws = currentWorkspace();
+  const groupHeader = (cls, label, key, count) => {
+    const collapsed = !filtering && s.collapsedGroups.has(key);
+    const h = document.createElement("button");
+    h.type = "button";
+    h.className = cls + (collapsed ? " closed" : "");
+    h.setAttribute("aria-expanded", String(!collapsed));
+    h.innerHTML = `<span class="tri" aria-hidden="true">${collapsed ? "▸" : "▾"}</span>`
+      + `<span class="glabel">${escapeHtml(label)}</span>`
+      + (count ? `<span class="count">${escapeHtml(count)}</span>` : "");
+    if (filtering) {
+      h.disabled = true;
+      h.title = "Filtering temporarily expands all groups";
+    } else {
+      h.addEventListener("click", () => {
+        collapsed ? s.collapsedGroups.delete(key) : s.collapsedGroups.add(key);
+        renderRoster(s);
+      });
+    }
+    return { header: h, collapsed };
+  };
+  for (const [rName, families] of groupRosterFamilies(visible, s.sortBy)) {
     const g = document.createElement("div");
-    const total = [...repos.values()].reduce((n, v) => n + v.length, 0);
-    const runningN = [...repos.values()].flat().filter((i) => i.running).length;
-    const h = document.createElement("div");
-    h.className = "ghead";
-    h.innerHTML = `${escapeHtml(wsName)} <span class="count">${runningN}/${total} running</span>`;
-    g.appendChild(h);
-    const multiRepo = repos.size > 1;
-    for (const [rName, items] of repos) {
-      const rbox = document.createElement("div");
-      if (multiRepo) { const rh = document.createElement("div"); rh.className = "rhead"; rh.textContent = rName; rbox.appendChild(rh); }
-      for (const i of items) {
-        const d = document.createElement("div");
-        d.className = "inst" + (s.sel === i.instance ? " sel" : "") + (i.running ? "" : " idle") + (i.depth ? " child" : "");
-        d.innerHTML = `
-          <div class="iname"><span class="dot ${i.running ? "on" : ""}"></span>${escapeHtml(i.instance)}</div>
-          <div class="itask">${escapeHtml((i.task || "").slice(0, 100))}</div>
-          <div class="imeta">
-            <span class="chip rt">${escapeHtml(i.runtime)}</span>
-            <span class="chip">${escapeHtml(i.work)}${i.branch ? " · " + escapeHtml(i.branch) : ""}</span>
-            ${i.git && i.git.dirty ? `<span class="chip dirty">±${Number(i.git.dirty)}</span>` : ""}
-          </div>`;
-        d.onclick = () => select(s, i.instance);
-        rbox.appendChild(d);
+    const all = [...families.values()].flat();
+    const runningN = all.filter((i) => i.running).length;
+    const repoKey = rosterGroupKey(ws, rName);
+    const { header: rh, collapsed: repoClosed } =
+      groupHeader("ghead", rName, repoKey, `${runningN}/${all.length} running`);
+    g.appendChild(rh);
+    if (!repoClosed) {
+      for (const [fName, items] of families) {
+        const fbox = document.createElement("div");
+        const famKey = rosterGroupKey(ws, rName, fName);
+        const { header: fh, collapsed: famClosed } =
+          groupHeader("rhead", fName, famKey, String(items.length));
+        fbox.appendChild(fh);
+        if (!famClosed) for (const i of items) fbox.appendChild(instRow(s, i));
+        g.appendChild(fbox);
       }
-      g.appendChild(rbox);
     }
     el.appendChild(g);
   }
+}
+
+function instRow(s, i) {
+  const d = document.createElement("div");
+  d.className = "inst" + (s.sel === i.instance ? " sel" : "") + (i.running ? "" : " idle") + (i.depth ? " child" : "");
+  if (i.depth > 1) d.style.marginLeft = `${i.depth * 18}px`;
+  d.innerHTML = `
+    <div class="iname"><span class="dot ${i.running ? "on" : ""}"></span>${escapeHtml(i.instance)}</div>
+    <div class="itask">${escapeHtml((i.task || "").slice(0, 100))}</div>
+    <div class="imeta">
+      <span class="chip rt">${escapeHtml(i.runtime)}</span>
+      <span class="chip">${escapeHtml(i.work)}${i.branch ? " · " + escapeHtml(i.branch) : ""}</span>
+      ${i.git && i.git.dirty ? `<span class="chip dirty">±${Number(i.git.dirty)}</span>` : ""}
+    </div>`;
+  d.onclick = () => select(s, i.instance);
+  return d;
 }
 
 /* ── selection + detail head ── */
@@ -263,9 +337,26 @@ function turnHtml(s, t, idx) {
   return `<div class="turn ai">${inner}</div>`;
 }
 
+/* ── transcript copy support ──
+   The chat re-renders by innerHTML replacement on a 1.5s (or 400ms fast)
+   poll; any repaint destroys an in-progress mouse selection, which made the
+   transcript effectively uncopyable. A background repaint must therefore
+   yield to a live selection inside the box — the skipped frame retries on
+   the next tick once the user has copied or clicked away. Pure; exported
+   for tests. */
+export function selectionBlocksRepaint(box, doc = box.ownerDocument) {
+  const sel = doc.defaultView?.getSelection?.() || doc.getSelection?.();
+  if (!sel || sel.isCollapsed || sel.rangeCount === 0) return false;
+  const range = sel.getRangeAt(0);
+  return box.contains(range.commonAncestorContainer);
+}
+
 function renderChat(s, d, scroll) {
   const box = s.q("chat");
   if (!d) return;
+  // A live selection in the transcript wins over a background repaint —
+  // clear the signature so the skipped update paints on a later tick.
+  if (!scroll && selectionBlocksRepaint(box)) { s.lastChatSig = ""; return; }
   if (!d.available) { box.innerHTML = '<div class="empty"><span class="big">⎀</span>No session transcript found for this instance.</div>'; return; }
   const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 120;
   let html = d.turns.map((t, i) => turnHtml(s, t, i)).join("") || "";
