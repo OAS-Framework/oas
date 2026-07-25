@@ -2,6 +2,10 @@
 
 ## 2026-07-25
 * **Creation**: promoted [keep roster family grouping helpers inside instance-tree](/lessons/roster-family-grouping-helpers.md) from the oas-desktop-engineer-roster-grouping notes.
+* **Creation**: promoted [Polling innerHTML repaints destroy text selection](/lessons/polling-innerhtml-repaints-destroy-selection.md) from the oas-desktop-engineer-chat-input-copy notes.
+* **Update**: linked [Periodic repaints must not rebuild DOM under open forms](/lessons/poll-repaint-wipes-form-input.md) to the transcript-selection repaint barrier.
+* **Creation**: promoted [Shift+Enter through xterm/tmux must be translated to pi's Ctrl+J newline alias](/lessons/shift-enter-newline-via-ctrl-j-alias.md) from the oas-desktop-engineer-chat-input-copy notes.
+* **Update**: linked [Desktop terminal is a direct tmux attach via node-pty](/decisions/desktop-terminal-direct-attach.md) to the Shift+Enter xterm translation lesson.
 
 ## 2026-07-24
 * **Creation**: promoted [bounded OS resources spawned per user action need a hard cap in the owning process](/lessons/terminal-resource-cap-in-owning-process.md) from the oas-desktop-engineer-desktop-dist notes.

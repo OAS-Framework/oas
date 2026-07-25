@@ -3,7 +3,7 @@ type: Decision
 title: Desktop terminal is a direct tmux attach via node-pty
 description: The desktop app's integrated terminal spawns node-pty running `tmux attach-session` against an isolated per-tab tmux viewer session that contains only a link-window to the exact source window and pipes bytes over IPC to xterm.js.
 tags: [desktop, tmux, node-pty, xterm, terminal, exact-match]
-timestamp: 2026-07-24
+timestamp: 2026-07-25
 ---
 
 Per the desktop-app contract (binding): tmux stays the durable session host;
@@ -31,6 +31,9 @@ Key semantics, verified live:
   preflight uses an exact `=session:=window` target, and pty attach uses an
   exact `=<viewer>` target so stale roster entries fail loudly instead of
   prefix-matching a different live window.
+- xterm.js emits Enter as `\r` even when Shift is held, so the renderer maps
+  Shift+Enter keydown to pi's raw `\n` / Ctrl+J newline alias and suppresses
+  xterm's default carriage return; see [the Shift+Enter alias lesson](/lessons/shift-enter-newline-via-ctrl-j-alias.md).
 
 Because each tab opens bounded OS resources, terminal open also needs
 main-process reuse and hard-cap enforcement; renderer tab dedupe is only UX.
