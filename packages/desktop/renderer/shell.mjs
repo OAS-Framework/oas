@@ -460,8 +460,10 @@ async function openViewTab(name, title, extra = {}, key = `view:${name}`,
 // ── integrated terminal tab (the shell's own flagship view) ──────────────
 const pendingTerms = new Set(); // keys reserved while a roster fetch is in flight
 async function openTerminalTab(instance) {
-  // A tree selection opens its terminal directly; there is no standalone
-  // Instances destination now that the persistent roster is always present.
+  // A sidebar-tree selection opens its terminal directly — the persistent
+  // roster is the quick path to sessions. The full Instances STAGE (grouped
+  // roster, sorts, read-only transcript) is a separate first-class
+  // destination reachable via the nav rail and the ⌘K palette (shell-nav).
   setSidebarMode("instances");
   setNavActive(null);
   refreshContextRoster();
