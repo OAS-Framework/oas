@@ -15,49 +15,92 @@ export function instanceLinks(instance) {
   return out.filter((name) => name && name !== instance.instance);
 }
 
+/** Stable identity for one roster instance. Instance NAMES are only unique
+ * within one agents root — the kernel permits duplicate names across agent
+ * dirs/team repos — so graph code must never key nodes by bare name (a
+ * duplicate would silently hide a live instance; merged-state review
+ * f7c5769). The canonical home path is unique per instance; agentsRoot+name
+ * is the fallback; bare name only when the roster carries neither. */
+export function instanceId(instance) {
+  if (instance.home) return String(instance.home);
+  if (instance.agentsRoot) return `${instance.agentsRoot}\u0000${instance.instance}`;
+  return String(instance.instance);
+}
+
+/** Resolve one relation-edge NAME to the id of the instance it means.
+ * Relation names come from instance.json lineage, which is recorded within
+ * one deployment scope — so a name resolves to the same-agentsRoot instance
+ * first; a name that is globally unique resolves cross-root; an AMBIGUOUS
+ * name with no same-root candidate resolves to nothing (fail safe: two
+ * separate clusters, never a wrong merge or a hidden node). */
+function resolveLinkId(fromInstance, name, byName) {
+  const candidates = byName.get(name);
+  if (!candidates || !candidates.length) return null;
+  if (candidates.length === 1) return instanceId(candidates[0]);
+  const sameRoot = candidates.find((c) => c.agentsRoot && c.agentsRoot === fromInstance.agentsRoot);
+  return sameRoot ? instanceId(sameRoot) : null;
+}
+
 /** Group instances into agent CLUSTERS — connected components of the
  * undirected relation graph (parent/child spawn edges + sibling links).
  * Unrelated instances are single-node clusters. Within a cluster the
  * parent/child tree ordering is kept (parent-first walk with depth);
  * cluster members related only by sibling links sit at depth 0.
+ * Nodes are keyed by instanceId (composite identity), never bare name —
+ * duplicate names across repos render as distinct nodes.
  * Returns [{ key, instances: [{...instance, depth}] }] with clusters ranked
  * running-first then by first member name, matching the roster sort. */
 export function clusterInstances(instances, { links = instanceLinks } = {}) {
-  const byName = new Map(instances.map((i) => [i.instance, i]));
-  // undirected adjacency — edges to names outside this roster are ignored
-  const adj = new Map(instances.map((i) => [i.instance, new Set()]));
+  const byId = new Map(instances.map((i) => [instanceId(i), i]));
+  const byName = new Map();
   for (const i of instances) {
+    if (!byName.has(i.instance)) byName.set(i.instance, []);
+    byName.get(i.instance).push(i);
+  }
+  // undirected adjacency over IDs — unresolvable/ambiguous edges are ignored
+  const adj = new Map(instances.map((i) => [instanceId(i), new Set()]));
+  const parentIdOf = new Map(); // id -> resolved parent id (tree ordering)
+  for (const i of instances) {
+    const id = instanceId(i);
+    if (i.parentInstance) {
+      const pid = resolveLinkId(i, i.parentInstance, byName);
+      if (pid && pid !== id) parentIdOf.set(id, pid);
+    }
     for (const other of links(i)) {
-      if (!byName.has(other)) continue;
-      adj.get(i.instance).add(other);
-      adj.get(other).add(i.instance);
+      const oid = resolveLinkId(i, other, byName);
+      if (!oid || oid === id) continue;
+      adj.get(id).add(oid);
+      adj.get(oid).add(id);
     }
   }
   const rank = (a, b) => (a.running === b.running ? a.instance.localeCompare(b.instance) : a.running ? -1 : 1);
   const seen = new Set();
   const clusters = [];
   for (const start of [...instances].sort(rank)) {
-    if (seen.has(start.instance)) continue;
+    if (seen.has(instanceId(start))) continue;
     // collect the component
     const members = [];
-    const queue = [start.instance];
-    seen.add(start.instance);
+    const queue = [instanceId(start)];
+    seen.add(instanceId(start));
     while (queue.length) {
-      const name = queue.shift();
-      members.push(byName.get(name));
-      for (const next of adj.get(name) || []) if (!seen.has(next)) { seen.add(next); queue.push(next); }
+      const id = queue.shift();
+      members.push(byId.get(id));
+      for (const next of adj.get(id) || []) if (!seen.has(next)) { seen.add(next); queue.push(next); }
     }
     // parent-first tree order INSIDE the component (cycle-safe: the walk
     // visits each member once; leftovers append at depth 0)
-    const memberNames = new Set(members.map((i) => i.instance));
-    const kids = (p) => members.filter((i) => i.parentInstance === p.instance);
-    const roots = members.filter((i) => !i.parentInstance || !memberNames.has(i.parentInstance));
+    const memberIds = new Set(members.map(instanceId));
+    const kids = (p) => members.filter((i) => parentIdOf.get(instanceId(i)) === instanceId(p));
+    const roots = members.filter((i) => {
+      const pid = parentIdOf.get(instanceId(i));
+      return !pid || !memberIds.has(pid);
+    });
     roots.sort(rank);
     const ordered = [];
     const placed = new Set();
     const walk = (i, depth) => {
-      if (placed.has(i.instance)) return;
-      placed.add(i.instance);
+      if (placed.has(instanceId(i))) return;
+      placed.add(instanceId(i));
       ordered.push({ ...i, depth });
       kids(i).sort(rank).forEach((k) => walk(k, depth + 1));
     };

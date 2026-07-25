@@ -285,3 +285,55 @@ test("groupRosterFamilies tolerates malformed workspace-controlled metadata (non
   assert.ok(grouped.get("r").has("fam"), "well-formed family survives alongside malformed peers");
   assert.ok(grouped.get("r").has("?"), "missing agent coalesces to '?'");
 });
+
+test("clusterInstances: duplicate instance NAMES across repos render as distinct nodes (merged-state review f7c5769)", async () => {
+  const { clusterInstances, instanceId } = await import("../renderer/instance-tree.mjs");
+  // two live instances named "dev-1" in different agents roots — bare-name
+  // keying would silently drop one of them
+  const roster = [
+    { instance: "coord-1", agentsRoot: "/ws1/agents", home: "/ws1/agents/coord/instances/coord-1", running: true },
+    { instance: "dev-1", agentsRoot: "/ws1/agents", home: "/ws1/agents/dev/instances/dev-1",
+      parentInstance: "coord-1", running: true },
+    { instance: "dev-1", agentsRoot: "/ws2/agents", home: "/ws2/agents/dev/instances/dev-1", running: false },
+  ];
+  const clusters = clusterInstances(roster);
+  const allNodes = clusters.flatMap((c) => c.instances);
+  assert.equal(allNodes.length, 3, "every instance renders — duplicates never hide a live one");
+  assert.equal(new Set(allNodes.map(instanceId)).size, 3, "three distinct identities");
+  // the parent edge resolves to the SAME-ROOT dev-1 only
+  const ws1Cluster = clusters.find((c) => c.instances.some((i) => i.instance === "coord-1"));
+  assert.deepEqual(ws1Cluster.instances.map((i) => `${i.instance}@${i.agentsRoot}`),
+    ["coord-1@/ws1/agents", "dev-1@/ws1/agents"], "same-root child nests under its parent");
+  assert.equal(ws1Cluster.instances[1].depth, 1);
+  const ws2 = clusters.find((c) => c.instances.some((i) => i.agentsRoot === "/ws2/agents"));
+  assert.equal(ws2.instances.length, 1, "foreign same-named instance stays its own cluster");
+  assert.equal(ws2.instances[0].depth, 0);
+});
+
+test("clusterInstances: ambiguous cross-root relation names fail safe (no merge, no hidden node)", async () => {
+  const { clusterInstances } = await import("../renderer/instance-tree.mjs");
+  // parent name matches TWO foreign instances and none in the child's root:
+  // the edge must resolve to nothing rather than guess
+  const roster = [
+    { instance: "boss", agentsRoot: "/a/agents", home: "/a/x", running: true },
+    { instance: "boss", agentsRoot: "/b/agents", home: "/b/x", running: true },
+    { instance: "worker", agentsRoot: "/c/agents", home: "/c/x", parentInstance: "boss", running: true },
+  ];
+  const clusters = clusterInstances(roster);
+  assert.equal(clusters.length, 3, "ambiguous edge creates no cluster merge");
+  assert.equal(clusters.flatMap((c) => c.instances).length, 3, "all nodes still render");
+  // but a globally-UNIQUE name still resolves cross-root
+  const uniq = clusterInstances([
+    { instance: "coord", agentsRoot: "/a/agents", home: "/a/c", running: true },
+    { instance: "helper", agentsRoot: "/b/agents", home: "/b/h", parentInstance: "coord", running: true },
+  ]);
+  assert.equal(uniq.length, 1, "unique cross-root parent name still links");
+  assert.equal(uniq[0].instances[1].depth, 1);
+});
+
+test("instanceId: home wins, agentsRoot+name fallback, bare name last", async () => {
+  const { instanceId } = await import("../renderer/instance-tree.mjs");
+  assert.equal(instanceId({ instance: "a", home: "/h/a", agentsRoot: "/r" }), "/h/a");
+  assert.equal(instanceId({ instance: "a", agentsRoot: "/r" }), "/r\u0000a");
+  assert.equal(instanceId({ instance: "a" }), "a");
+});
