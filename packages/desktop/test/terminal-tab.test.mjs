@@ -159,23 +159,27 @@ test("term:open result translation: {error} → surfaces the message, no attach"
 // xterm emits a plain \r for Enter with or without Shift, so the modifier
 // never reaches tmux/pi. The composition installs a custom key handler that
 // translates Shift+Enter into a raw \n (pi's Ctrl+J newline alias) and
-// suppresses the default \r. These drive the pure classifier AND the wired
-// handler behavior — a regression that keeps the classifier but forgets to
-// suppress the default (returning true) would send the message anyway.
-import { shiftEnterByte } from "../renderer/terminal-tab.mjs";
+// suppresses the default \r. xterm invokes the handler for keydown,
+// keypress AND keyup of the same press — suppressing only keydown leaks a
+// \r through the keypress path, which SENT the message right after the
+// newline (the v0.18.4 field failure). These drive the pure classifier AND
+// the wired handler behavior — a regression that keeps the classifier but
+// forgets to suppress the default (returning true) would send anyway.
+import { shiftEnterAction } from "../renderer/terminal-tab.mjs";
 
-test("shiftEnterByte: Shift+Enter keydown → \\n; everything else passes through", () => {
+test("shiftEnterAction: Shift+Enter suppresses every event; \\n only on keydown", () => {
   const ev = (o) => ({ type: "keydown", key: "Enter", shiftKey: false, ctrlKey: false, altKey: false, metaKey: false, ...o });
-  assert.equal(shiftEnterByte(ev({ shiftKey: true })), "\n");
-  assert.equal(shiftEnterByte(ev({})), null, "plain Enter untouched (still sends)");
-  assert.equal(shiftEnterByte(ev({ shiftKey: true, type: "keyup" })), null, "keyup ignored");
-  assert.equal(shiftEnterByte(ev({ shiftKey: true, ctrlKey: true })), null, "extra modifiers pass through");
-  assert.equal(shiftEnterByte(ev({ shiftKey: true, metaKey: true })), null);
-  assert.equal(shiftEnterByte(ev({ shiftKey: true, altKey: true })), null);
-  assert.equal(shiftEnterByte(ev({ key: "a", shiftKey: true })), null, "shifted letters untouched");
+  assert.deepEqual(shiftEnterAction(ev({ shiftKey: true })), { suppress: true, byte: "\n" });
+  assert.deepEqual(shiftEnterAction(ev({ shiftKey: true, type: "keypress" })), { suppress: true, byte: null }, "keypress suppressed, no second write");
+  assert.deepEqual(shiftEnterAction(ev({ shiftKey: true, type: "keyup" })), { suppress: true, byte: null }, "keyup suppressed, no write");
+  assert.deepEqual(shiftEnterAction(ev({})), { suppress: false, byte: null }, "plain Enter untouched (still sends)");
+  assert.deepEqual(shiftEnterAction(ev({ shiftKey: true, ctrlKey: true })), { suppress: false, byte: null }, "extra modifiers pass through");
+  assert.deepEqual(shiftEnterAction(ev({ shiftKey: true, metaKey: true })), { suppress: false, byte: null });
+  assert.deepEqual(shiftEnterAction(ev({ shiftKey: true, altKey: true })), { suppress: false, byte: null });
+  assert.deepEqual(shiftEnterAction(ev({ key: "a", shiftKey: true })), { suppress: false, byte: null }, "shifted letters untouched");
 });
 
-test("custom key handler: Shift+Enter writes \\n to the pty and suppresses xterm's default", async () => {
+test("custom key handler: Shift+Enter writes \\n once and suppresses keydown, keypress and keyup", async () => {
   const d = makeDoubles(Promise.resolve(5));
   let handler = null;
   const writes = [];
@@ -185,12 +189,41 @@ test("custom key handler: Shift+Enter writes \\n to the pty and suppresses xterm
   await tab.start();
   assert.equal(typeof handler, "function", "handler installed during onReady");
   const ev = (o) => ({ type: "keydown", key: "Enter", shiftKey: false, ctrlKey: false, altKey: false, metaKey: false, ...o });
-  assert.equal(handler(ev({ shiftKey: true })), false, "default \\r suppressed");
+  assert.equal(handler(ev({ shiftKey: true })), false, "keydown suppressed (default \\r blocked)");
   assert.deepEqual(writes, [[5, "\n"]], "newline byte written to the live pty");
+  assert.equal(handler(ev({ shiftKey: true, type: "keypress" })), false, "keypress suppressed — the \\r leak that SENT the message");
+  assert.equal(handler(ev({ shiftKey: true, type: "keyup" })), false, "keyup suppressed");
+  assert.deepEqual(writes, [[5, "\n"]], "exactly one write for the whole chord");
   assert.equal(handler(ev({})), true, "plain Enter left to xterm (message sends)");
   assert.equal(writes.length, 1, "no extra writes for pass-through keys");
   await tab.close();
   writes.length = 0;
   assert.equal(handler(ev({ shiftKey: true })), false);
   assert.deepEqual(writes, [], "no write after the pty is gone");
+});
+
+// ── Option+drag local selection (copy fix) ────────────────────────────────
+// The viewer tmux session runs `mouse on`, so tmux consumes plain drags and
+// xterm never builds a local selection — copy from a terminal looked broken.
+// terminalOptions() must force macOptionClickForcesSelection on, and
+// shell.mjs must actually construct its Terminal through terminalOptions
+// (an inline options object would silently drop the invariant).
+import { terminalOptions } from "../renderer/terminal-tab.mjs";
+import { readFileSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+
+test("terminalOptions: forces Option+drag local selection and carries typography/theme", () => {
+  const o = terminalOptions({ fontSize: 13, fontFamily: "mono", theme: { background: "#000" } });
+  assert.equal(o.macOptionClickForcesSelection, true, "Option+drag must force a LOCAL xterm selection (tmux mouse-on eats plain drags)");
+  assert.equal(o.scrollback, 5000);
+  assert.equal(o.fontSize, 13);
+  assert.equal(o.fontFamily, "mono");
+  assert.deepEqual(o.theme, { background: "#000" });
+});
+
+test("shell.mjs constructs its Terminal through terminalOptions", () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const src = readFileSync(join(here, "..", "renderer", "shell.mjs"), "utf8");
+  assert.match(src, /new Terminal\(terminalOptions\(/, "shell must build xterm options via terminalOptions()");
 });

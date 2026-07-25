@@ -14,7 +14,7 @@ import {
 import { createPalette, isPaletteShortcut } from "./palette.mjs";
 import { createViewLifecycle } from "./view-lifecycle.mjs";
 import { reserveKey, whenKeyFree } from "./tab-keys.mjs";
-import { createTerminalTab } from "./terminal-tab.mjs";
+import { createTerminalTab, terminalOptions } from "./terminal-tab.mjs";
 import { createTabChrome, tabKeyAction, focusAfterLastTab } from "./tab-a11y.mjs";
 import { createIntentGate, prepareOwnedOpen } from "./open-intent.mjs";
 import { createWorkspaceSwitcher } from "./workspace-switcher.mjs";
@@ -504,12 +504,11 @@ async function openTerminalTabInner(instance, ws, key) {
   wrap.className = "term-wrap";
 
   const type = terminalTypography();
-  const term = new Terminal({
+  const term = new Terminal(terminalOptions({
     fontSize: type.fontSize,
     fontFamily: type.fontFamily,
     theme: xtermTheme(),
-    scrollback: 5000,
-  });
+  }));
   // live terminals follow app theme + persisted typography preferences
   const offTheme = onThemeChange(() => { term.options.theme = xtermTheme(); });
   const offTypography = onTerminalTypographyChange((next) => {
