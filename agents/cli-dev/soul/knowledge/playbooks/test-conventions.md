@@ -45,9 +45,13 @@ All kernel/CLI behavior tests live in `test/capabilities.test.mjs`
   use a fake `tmux` shim that appends `$@` to a log and exits 0, force the
   atomic anchor write to fail by making the anchor home directory `555`, and
   assert `new-window`, exact-match `kill-window`, spawn+retire hook events, no
-  zombie home, no temp leftover, and byte-identical anchor metadata. If the
-  test replaces PATH wholesale, include symlinks for tools the kernel/hooks
-  still shell out to (`git`, `node`, `chmod`, `sh`). See
+  zombie home, no temp leftover, and byte-identical anchor metadata. To prove
+  cleanup continues when a cleanup step itself throws, pre-create a non-empty
+  directory at the deterministic temp path so a naive temp unlink with
+  `rmSync(..., { force: true })` fails, then assert the original error still
+  surfaces and the later window, hook, scaffold, and anchor rollback assertions
+  still pass. If the test replaces PATH wholesale, include symlinks for tools
+  the kernel/hooks still shell out to (`git`, `node`, `chmod`, `sh`). See
   [cross-instance writes](/lessons/cross-instance-writes-commit-last.md).
 - Every CLI-level `E_BAD_ARGS` relation-matrix case needs a direct
   `spawnInstance(..., { launch: false })` equivalent that passes the raw

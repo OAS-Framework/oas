@@ -1,6 +1,8 @@
 # Knowledge Log
 
 ## 2026-07-25
+* **Update**: [cross-instance-writes-commit-last](/lessons/cross-instance-writes-commit-last.md) records that rollback cleanup steps must each be independently guarded so one cleanup failure cannot skip later compensation or mask the original error.
+* **Update**: [test-conventions](/playbooks/test-conventions.md) records the temp-path directory recipe for proving rollback continues after a cleanup step itself throws.
 * **Update**: [cross-instance-writes-commit-last](/lessons/cross-instance-writes-commit-last.md) merges the rollback completeness checklist: atomic temp+rename metadata writes, retire-hook compensation for capability state, and cleanup of launched/scaffolded side effects.
 * **Update**: [test-conventions](/playbooks/test-conventions.md) records the launched-path rollback test recipe with a recording fake tmux, forced atomic write failure, hook assertions, and PATH tool symlinks.
 * **Update**: [cross-instance-writes-commit-last](/lessons/cross-instance-writes-commit-last.md) records that final cross-instance metadata writes are themselves fallible and need compensation for prior launch/scaffold side effects.

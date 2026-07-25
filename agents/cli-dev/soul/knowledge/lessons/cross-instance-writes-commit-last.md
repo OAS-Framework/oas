@@ -43,6 +43,10 @@ the write a compensated transaction. A rollback-completeness review (fixed in
   still exists. Spawn hooks may have provisioned state keyed to files inside the
   home, such as an aweb identity and roster record; run matching retire hooks
   best-effort with the spawn hook metadata before deleting the worktree/home.
+- Every rollback step must be independently guarded. A failed cleanup action is
+  part of best-effort compensation, not a reason to skip later cleanup or mask
+  the original failure; keep rethrowing the original error after the rollback
+  chain finishes.
 - Rollback must remove launched/scaffolded side effects: kill the launched
   window by exact-match tmux target, remove the worktree/branch and scaffolded
   home, then rethrow with the rollback named. The invariant is all-or-nothing:
@@ -50,7 +54,10 @@ the write a compensated transaction. A rollback-completeness review (fixed in
 
 For multi-step operations with one cross-instance commit, use this sequence: own
 scaffolding → fallible external steps such as launch/hooks → atomic
-cross-instance commit with compensation for everything before it.
+cross-instance commit with compensation for everything before it. Do not treat
+`rmSync(..., { force: true })` as unthrowable cleanup: `force` suppresses
+missing paths, but `EPERM`, `EISDIR`, and I/O errors still propagate unless that
+specific step catches them.
 
 For launch-failure coverage, use a PATH directory with the fake runtime shims and
 a real `git` symlink, but no `tmux`. That forces `which("tmux")` to fail after
