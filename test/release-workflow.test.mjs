@@ -79,6 +79,19 @@ test("bump PR covers all three package manifests", () => {
   assert.match(prBlock, /gh pr create --base main/);
 });
 
+test("bump-PR branch push uses a fully-qualified destination ref (detached-HEAD safe)", () => {
+  // The publish job checks out the exact tag SHA (ref: github.sha) → detached
+  // HEAD. `git push origin HEAD:<name>` cannot infer refs/heads/ from a
+  // detached HEAD and fails ("not a full refname"), which is what broke the
+  // v0.18.2 bump-PR step. The destination must be fully qualified.
+  const prBlock = yml.slice(yml.indexOf("Open the version-bump PR"));
+  assert.match(prBlock, /git push origin "HEAD:refs\/heads\/\$\{BRANCH\}"/,
+    "bump-PR push must target HEAD:refs/heads/${BRANCH}");
+  // Reject the ambiguous partial-refname form that fails from a detached HEAD.
+  assert.ok(!/git push origin "HEAD:\$\{BRANCH\}"/.test(yml),
+    "the ambiguous HEAD:${BRANCH} form (no refs/heads/) must not reappear");
+});
+
 test("npm publication and GitHub Release are same-tag retryable (idempotent)", () => {
   // Re-running the publish job must skip already-live npm versions instead of
   // failing on npm's already-published rejection, and re-upload GH assets.

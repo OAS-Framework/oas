@@ -283,7 +283,12 @@ jobs:
           git add package.json package-lock.json packages/pi/package.json packages/desktop/package.json packages/desktop/package-lock.json
           git commit -m "release: ${GITHUB_REF_NAME} [skip ci]"
           BRANCH="release-bump/${GITHUB_REF_NAME}"
-          git push origin "HEAD:${BRANCH}"
+          # Fully-qualify the destination ref: the publish job checks out the
+          # exact tag SHA (ref: github.sha), so HEAD is DETACHED. Pushing
+          # `HEAD:<name>` from a detached HEAD cannot infer refs/heads/ and
+          # fails ("not a full refname"); `HEAD:refs/heads/<name>` is explicit
+          # and works in both attached and detached HEAD.
+          git push origin "HEAD:refs/heads/${BRANCH}"
           gh pr create --base main --head "${BRANCH}" \
             --title "release: ${GITHUB_REF_NAME} version bump" \
             --body "Automated version bump (root, pi, desktop) from the ${GITHUB_REF_NAME} release run. Zero-approval merge per branch protection."
