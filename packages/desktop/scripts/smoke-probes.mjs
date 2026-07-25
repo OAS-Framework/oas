@@ -25,15 +25,31 @@ export function abiProbeSource(asarMainPath) {
  * function never falls back to synchronous execution.
  * Returns { ok, detail }.
  */
-export async function runAbiProbe(reaper, appExe, asarMainPath, { timeout = 30000, env = process.env } = {}) {
+export async function runAbiProbe(reaper, appExe, asarMainPath, {
+  timeout = 30000, env = process.env, targetArch,
+  platform = process.platform, hostArch = process.arch,
+} = {}) {
   if (typeof reaper?.runTracked !== "function") {
     return { ok: false, detail: "probe runner requires a reaper with runTracked (async group-tracked execution is the contract)" };
   }
-  const r = await reaper.runTracked(appExe, ["-e", abiProbeSource(asarMainPath)], {
+  // macos-14 runners are arm64. For the x64 cross-build, invoke the packaged
+  // x64 Electron explicitly through Rosetta — auto-translation is not a
+  // sufficient CI contract and may not engage predictably. Executing the
+  // REAL x64 app + node-pty catches a wrong-arch native module.
+  const rosetta = platform === "darwin" && hostArch === "arm64" && targetArch === "x64";
+  const exe = rosetta ? "/usr/bin/arch" : appExe;
+  const args = rosetta
+    ? ["-x86_64", appExe, "-e", abiProbeSource(asarMainPath)]
+    : ["-e", abiProbeSource(asarMainPath)];
+  const r = await reaper.runTracked(exe, args, {
     timeout,
     env: { ...env, ELECTRON_RUN_AS_NODE: "1" },
   });
-  if (r.timedOut) return { ok: false, detail: "node-pty ABI probe timed out (group killed)" };
-  if (!r.stdout.includes("PTY_OK")) return { ok: false, detail: `node-pty ABI probe failed (exit ${r.code}): ${String(r.stdout).trim().slice(0, 300)}` };
-  return { ok: true, detail: "node-pty loads and spawns under the packaged Electron ABI (via app.asar)" };
+  const mode = rosetta ? " under Rosetta x86_64" : "";
+  if (r.timedOut) return { ok: false, detail: `node-pty ABI probe${mode} timed out (group killed)` };
+  if (!r.stdout.includes("PTY_OK")) {
+    const combined = `${String(r.stdout)}\n${String(r.stderr || "")}`.trim().slice(-500);
+    return { ok: false, detail: `node-pty ABI probe${mode} failed (exit ${r.code}): ${combined}` };
+  }
+  return { ok: true, detail: `node-pty loads and spawns under the packaged Electron ABI${mode} (via app.asar)` };
 }

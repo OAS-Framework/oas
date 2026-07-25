@@ -24,7 +24,7 @@ build-provenance attestations are published for every asset
 
 ### macOS: unsigned build
 
-The 0.18.1 installers are **unsigned and not notarized** (no signing
+The 0.18.2 installers are **unsigned and not notarized** (no signing
 credentials exist yet — nothing about this release claims otherwise).
 Gatekeeper will block the first launch:
 
@@ -47,7 +47,7 @@ all. Spawning agents runs through an installed `oas` CLI with Desktop API
 v1:
 
 ```bash
-npm install -g @oas-framework/oas@0.18.1
+npm install -g @oas-framework/oas@0.18.2
 ```
 
 Desktop 0.18 accepts CLI versions `>=0.18.0 <0.19.0` (released versions
@@ -80,17 +80,17 @@ scripted use: `--dir <workspace>` and `OAS_DESKTOP_PORT`.
 
 ## Migrating from the web panel / TUI pane
 
-0.18.1 removes the legacy `oas.web` browser panel, `oas pane`, and the
+0.18.2 removes the legacy `oas.web` browser panel, `oas pane`, and the
 `@oas-framework/oas/control-pane` export. The Desktop app replaces all
 three. Migration:
 
-1. Update the CLI everywhere: `npm install -g @oas-framework/oas@0.18.1`.
+1. Update the CLI everywhere: `npm install -g @oas-framework/oas@0.18.2`.
 2. Run `oas doctor` at each workspace scope and follow its guidance to
    remove stale `oas.web` config entries, locks, and installed artifacts.
 3. Install the Desktop app (above) and open your workspace.
 
 The full breaking-change list is in the
-[v0.18.1 release notes](release-notes/v0.18.1.md).
+[v0.18.2 release notes](release-notes/v0.18.2.md).
 
 ## Security posture
 
@@ -120,10 +120,44 @@ The full breaking-change list is in the
 For bugs, attach the terminal output of the app (`OAS Desktop` prints
 server and CLI-discovery logs to stdout) and your platform/arch.
 
+## Release verification ownership
+
+Installer CI gates what headless runners can prove reliably for every
+published platform/architecture: electron-builder completes, the expected
+DMG/ZIP/AppImage/DEB artifacts exist, node-pty's packaged `spawn-helper` is
+executable, and node-pty loads and spawns under the packaged Electron ABI.
+The macOS x64 leg cross-builds on macos-14 and installs Rosetta 2 so that its
+x64 Electron + node-pty ABI probe really executes; a wrong-architecture
+native module fails that leg.
+
+CI does **not** gate the packaged GUI launch: unsigned Electron apps do not
+have a reliable interactive windowserver in headless CI. Post-publish launch
+acceptance is therefore owned by the operator/maintainer, using the actual
+released installers (not a source checkout):
+
+1. Verify the asset checksum/attestation, install it outside the source tree,
+   and on macOS use right-click → **Open** for the unsigned Gatekeeper step.
+2. Launch OAS Desktop and open a real deployment; verify roster, brain and
+   Markdown reads.
+3. Attach an existing tmux terminal, confirm input/output, and close the tab
+   (the durable tmux window must survive).
+4. Verify the released global CLI is detected and Spawn is enabled; hide or
+   mismatch the CLI and confirm reads/terminal still work while Spawn disables
+   with recovery guidance.
+5. Repeat per published architecture where hardware is available. In
+   particular, launch-check macOS x64 on an Intel Mac if one is available;
+   CI's Rosetta ABI probe is the native-module proof, while this is the actual
+   shipped-installer/user-launch proof.
+
+Record the installed version, platform/architecture and outcome in the
+release verification notes. This post-publish check is acceptance — it does
+not weaken the pre-publish build/inventory/ABI gates.
+
 ## Building from source
 
 Developer docs live in [`packages/desktop/README.md`](../packages/desktop/README.md)
 (run, architecture, view contract) — packaging is `npm run dist`
 (electron-builder; unsigned, certificate auto-discovery disabled) and
-`npm run dist:smoke` verifies the packed artifact (inventory, node-pty
-under the packaged Electron ABI, headless app launch).
+`npm run dist:smoke` verifies the packed artifact. Build/release CI uses the
+marked build-verify mode (inventory + node-pty ABI, no GUI launch); a local
+interactive run may also exercise the launch phase.
