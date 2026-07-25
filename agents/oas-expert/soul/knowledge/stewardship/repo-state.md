@@ -15,6 +15,8 @@ than letting the file grow stale.
 
 ## On main
 
+- **PR #36 merged 2026-07-25 as `032c7a3`** — knowledge-only oas-desktop-engineer post-PR35 keybindings harvests. Preserves both keybindings developers' stranded post-merge harvests: dispatch-ineligible view-action semantics, crossed-mail coordination, PR35 follow-up queues, modal focus restoration, and the DEFAULT_KEYMAP/defaultChord split plus terminal allowlist delivery follow-ups. Final exact head `1e9980f`; all local gates, strict OKF for all 8 bundles, PR CI, and mergeability passed after two maintainer RETURNs. The remote `harvest/keybindings-wiring` branch is deleted; local branch cleanup is blocked by another worktree at `/private/tmp/harvest-wiring`. No product, release, manifest, package, or framework behavior changes.
+
 - **PR #35 merged 2026-07-25 as `7f1e5a7`** — Desktop user-editable
   keyboard shortcuts for all panel actions. Adds a central keybinding engine
   with localStorage overrides and sanitized explicit unbinds, a `Mod+,`
@@ -154,11 +156,15 @@ than letting the file grow stale.
 
 ## In flight
 
-- **PR #36 returned again 2026-07-25 at `617241c`** — oas-desktop-engineer post-PR35 keybindings harvests. Product/correctness/security now pass: the branch contains both the missing dispatch-ineligible view-action harvest and the core-dev modal-focus/delivery-follow-up harvests, with full local/CI gates green. Mergeability failed because the PR branch still does not contain current main (`77a2d08` plus this round-2 stewardship once pushed; merge-base was `efc62ca`). Awaiting dev-coordinator-keybindings fixed-mail after merging latest main, preserving the four harvest commits, and rerunning gates/CI.
+- (nothing currently recorded) — PR #36 reached terminal MERGED outcome; its
+  remote feature branch is deleted.
 
 ## Recent deliveries
 
 - (record PR #, one-line scope, verdict, merge/close date)
+- PR #36 oas-desktop-engineer post-PR35 keybindings harvests: MERGED
+  2026-07-25 as `032c7a3` after two RETURNs; remote branch deleted
+  (see delivery-log).
 - PR #36 round 2 oas-desktop-engineer post-PR35 keybindings harvests: RETURNED
   2026-07-25 for mergeability only after correctness/security/full gates passed
   at `617241c` (see delivery-log).
