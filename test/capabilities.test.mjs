@@ -1289,6 +1289,26 @@ test("parent-relation rollback after LAUNCH kills the window, compensates hooks,
     // Scaffold removed; no temp file remains next to the anchor meta.
     assert.equal(existsSync(join(root, "dev", "instances", "dev-zomb")), false, "no zombie home");
     assert.ok(!readdirSync(anchor.home).some((f) => f.includes(".tmp-")), "no leftover temp file");
+
+    // Temp-cleanup failure must not abort the rollback: pre-create a NON-EMPTY
+    // DIRECTORY at the deterministic temp path — writeFileSync fails (EISDIR,
+    // the original error) AND rmSync(tmpPath, {force:true}) throws (EISDIR/
+    // ENOTEMPTY without recursive), which previously aborted all remaining
+    // compensation (window kill, hooks, scaffold removal).
+    const tmpDir = `${anchorMetaPath}.tmp-dev-zomb2`;
+    mkdirSync(tmpDir); write(join(tmpDir, "blocker"), "x");
+    try {
+      assert.throws(
+        () => spawnInstance(root, agentDef, { instance: "dev-zomb2", relation: "parent", relativeTo: anchor.instance, tmuxSession: "oas-test-fake", launch: true }),
+        /failed to re-point anchor.*rolled back/s,
+        "original anchor-write error surfaces, not the temp-cleanup error");
+    } finally { rmSync(tmpDir, { recursive: true, force: true }); }
+    assert.equal(readFileSync(anchorMetaPath, "utf8"), before, "anchor still byte-identical");
+    const tmuxCalls2 = readFileSync(tmuxLog, "utf8");
+    assert.match(tmuxCalls2, /kill-window -t =oas-test-fake:=dev-zomb2/, "window killed despite temp-cleanup failure");
+    const events2 = readFileSync(hookLog, "utf8").trim().split("\n");
+    assert.ok(events2.includes("retire:dev-zomb2"), "hooks compensated despite temp-cleanup failure");
+    assert.equal(existsSync(join(root, "dev", "instances", "dev-zomb2")), false, "scaffold removed despite temp-cleanup failure");
   } finally { process.env.PATH = oldPath; }
 });
 
