@@ -1,6 +1,10 @@
 # Knowledge Log
 
 ## 2026-07-25
+* **Creation**: promoted [shell nav reachability needs an importable manifest](/lessons/shell-nav-reachability-manifest.md) from the oas-desktop-engineer-roster-grouping notes.
+* **Update**: linked [regression tests must exercise the layer that had the bug](/lessons/regression-tests-bug-layer.md) to the shell nav reachability manifest lesson.
+* **Creation**: promoted [string-coerce workspace metadata before roster grouping and sorting](/lessons/roster-grouping-string-coerce-metadata.md) from the oas-desktop-engineer-roster-grouping notes.
+* **Update**: linked [keep roster family grouping helpers inside instance-tree](/lessons/roster-family-grouping-helpers.md) to the string-coercion lesson for workspace-controlled instance metadata.
 * **Update**: merged the spawn-button pending probe note into [CLI degradation state must distinguish pending, compatible, and unavailable](/lessons/degradation-state-unknown-capable.md): pending CLI probes stay card-less and disabled but retry from the roster poll until settled, with a checking tooltip instead of a missing-card hint.
 * **Update**: merged the desktop-server test CLI-on-PATH note into [CLI locator tests need hermetic PATH and absolute fixtures](/lessons/fake-cli-fixtures-hostile-path.md): no-CLI degradation tests must strip env, PATH, npm-on-PATH, and login-shell locator sources.
 * **Creation**: promoted [keep roster family grouping helpers inside instance-tree](/lessons/roster-family-grouping-helpers.md) from the oas-desktop-engineer-roster-grouping notes.

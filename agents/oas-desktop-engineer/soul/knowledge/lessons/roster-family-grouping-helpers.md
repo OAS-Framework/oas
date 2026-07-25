@@ -29,5 +29,7 @@ Design details to preserve:
   `seen` set.
 - Unknown persisted sort IDs fall back to `status`, so stale `localStorage`
   cannot break rendering.
+- Grouping and sorting keys that come from workspace-controlled metadata must be
+  string-coerced before `localeCompare`; see [String-coerce workspace metadata before roster grouping and sorting](/lessons/roster-grouping-string-coerce-metadata.md).
 
 Related architecture: [Desktop renderer views port of the panel](/architecture/desktop-renderer-views-port.md).
