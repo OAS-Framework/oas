@@ -15,18 +15,18 @@ test("shell installs exactly one window keydown listener: the engine's handleKey
   const src = read("renderer/shell.mjs");
   const listeners = [...src.matchAll(/window\.addEventListener\("keydown"/g)];
   assert.equal(listeners.length, 1, "ONE window keydown listener (contract)");
-  assert.match(src, /window\.addEventListener\("keydown", \(e\) => handleKeydown\(e\)\)/);
+  assert.match(src, /window\.addEventListener\("keydown", \(e\) => \{ if \(!e\.defaultPrevented\) handleKeydown\(e\); \}\)/);
   assert.ok(!/isPaletteShortcut\(/.test(src), "ad-hoc palette shortcut check replaced by the engine");
 });
 
-test("shell registers the global + tabs action inventory", () => {
+test("shell registers global + tabs actions covered by the engine's DEFAULT_KEYMAP", () => {
   const src = read("renderer/shell.mjs");
   for (const id of [
-    "app.palette", "app.shortcuts", "app.theme", "app.workspaces", "roster.focus",
-    "term.fontBigger", "term.fontSmaller", "term.fontReset",
+    "app.palette", "app.shortcuts", "app.themeToggle", "app.workspaces", "sidebar.focusFilter",
+    "terminal.fontBigger", "terminal.fontSmaller", "terminal.fontReset",
     "tabs.next", "tabs.prev", "tabs.close",
   ]) assert.match(src, new RegExp(`id: "${id.replace(".", "\\.")}"`), `action ${id} registered`);
-  assert.match(src, /NAV\.forEach\(\(v, i\) => registerAction\(/, "stage actions derive from the nav manifest");
+  assert.match(src, /NAV\.forEach\(\(v\) => registerAction\(/, "stage actions derive from the nav manifest");
   assert.match(src, /setActiveContexts/, "shell drives active contexts");
 });
 

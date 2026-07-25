@@ -1,71 +1,256 @@
-/* oas desktop — keybindings engine (TRANSITIONAL STUB).
-   The real engine lands from the keybindings-core branch with the same
-   surface (action registry, chord matching, localStorage overrides,
-   terminal-safety policy, edit dialog in keybindings-editor.mjs). This stub
-   implements the agreed contract so the wiring branch is functional and
-   testable on its own; it is intended to be REPLACED wholesale when the core
-   engine merges into feature/keybindings — keep the exported names stable.
+// oas desktop — keybinding engine (pure logic; unit-tested without a DOM).
+//
+// One shared registry: the shell/wiring code registers actions
+// ({ id, label, context, run }); this module owns chord parsing, the default
+// keymap, user overrides (localStorage), context scoping, and dispatch.
+//
+// Terminal safety (mirrors palette.mjs isPaletteShortcut and app-menu.mjs):
+// when the keydown target is inside `.xterm`, on macOS ONLY chords whose
+// `Mod` resolves to ⌘ (meta) may fire — explicit Ctrl chords belong to the
+// attached program. On Linux/Windows the Ctrl key IS the terminal's control
+// key, so only an explicit allowlist of action ids (palette, tab next/prev/
+// close) may fire inside the terminal; every other Ctrl chord passes through.
 
-   Contract (frozen with the coordinator):
-     registerAction({ id, label, context, run, chord }) -> dispose()
-       context: "global" | "stage:hierarchy" | "stage:spawn" | "roster" | "tabs"
-       chord:   default chord string, e.g. "Mod+K", "Mod+Shift+K", "b", "+"
-     setActiveContexts(set)         // shell calls on state transitions
-     getBinding(actionId)           // current chord string or null
-     onKeymapChange(fn) -> unsubscribe
-     formatChord(chord, isMac)     // human label for palette/tooltips
-     handleKeydown(e)              // THE one window keydown listener
+const STORAGE_KEY = "oas-desktop-keymap";
 
-   Chord grammar: "+"-joined tokens, last token is the key; modifiers are
-   Mod (⌘ on macOS, Ctrl elsewhere), Ctrl, Alt, Shift. The literal keys
-   "+" and "-" are valid final tokens ("Mod++" = Mod plus "+").
+// ---------------------------------------------------------------- chords
 
-   Terminal-safety policy (generalizes the shipped isPaletteShortcut rule):
-   inside xterm ONLY metaKey-based chords fire — Ctrl/Alt/plain keys belong
-   to the attached program. In editable fields (input/textarea/
-   contenteditable) unmodified single-key chords never fire. */
+const MOD_ORDER = ["Mod", "Ctrl", "Alt", "Shift"];
 
-const OVERRIDES_KEY = "oas.keybindings";
+// e.key values normalized so layouts/shift variants land on one spelling.
+const KEY_ALIASES = new Map([
+  ["+", "="], // Shift-= / numpad plus both mean the "=" binding (Mod+=)
+  ["esc", "escape"],
+  [" ", "space"],
+  ["spacebar", "space"],
+]);
 
-const actions = new Map();          // id -> { id, label, context, run, chord }
-let activeContexts = new Set(["global"]);
+export function normalizeKey(key) {
+  const k = String(key || "").toLowerCase();
+  return KEY_ALIASES.get(k) || k;
+}
+
+/** Parse "Mod+Shift+K" → { key, mod, ctrl, alt, shift } or null. */
+export function parseChord(str) {
+  if (!str || typeof str !== "string") return null;
+  const parts = str.split("+");
+  // "Mod+=" splits as ["Mod", "", ""] — rejoin a trailing empty pair as "+".
+  if (parts.length >= 2 && parts[parts.length - 1] === "" && parts[parts.length - 2] === "") {
+    parts.splice(parts.length - 2, 2, "+");
+  }
+  const chord = { key: "", mod: false, ctrl: false, alt: false, shift: false };
+  for (const raw of parts) {
+    const p = raw.trim().toLowerCase();
+    if (p === "mod" || p === "cmdorctrl" || p === "cmd" || p === "meta") chord.mod = true;
+    else if (p === "ctrl" || p === "control") chord.ctrl = true;
+    else if (p === "alt" || p === "option") chord.alt = true;
+    else if (p === "shift") chord.shift = true;
+    else if (p) {
+      if (chord.key) return null; // two non-modifier keys — invalid
+      chord.key = normalizeKey(p);
+    }
+  }
+  if (!chord.key) return null;
+  return chord;
+}
+
+const KEY_LABELS = new Map([
+  ["escape", "Esc"], ["arrowup", "↑"], ["arrowdown", "↓"],
+  ["arrowleft", "←"], ["arrowright", "→"], ["space", "Space"],
+  ["tab", "Tab"], ["enter", "Enter"], ["backspace", "Backspace"],
+]);
+
+function keyLabel(key) {
+  return KEY_LABELS.get(key) || (key.length === 1 ? key.toUpperCase() : key[0].toUpperCase() + key.slice(1));
+}
+
+/** Human label for a chord (object or string). Mod = ⌘ on mac, Ctrl elsewhere. */
+export function formatChord(chord, isMac = defaultIsMac()) {
+  const c = typeof chord === "string" ? parseChord(chord) : chord;
+  if (!c) return "";
+  if (isMac) {
+    let s = "";
+    if (c.ctrl) s += "⌃";
+    if (c.alt) s += "⌥";
+    if (c.shift) s += "⇧";
+    if (c.mod) s += "⌘";
+    return s + keyLabel(c.key);
+  }
+  const parts = [];
+  if (c.mod || c.ctrl) parts.push("Ctrl");
+  if (c.alt) parts.push("Alt");
+  if (c.shift) parts.push("Shift");
+  parts.push(keyLabel(c.key));
+  return parts.join("+");
+}
+
+/** Canonical storage/comparison string for a chord object. */
+export function chordToString(chord) {
+  const c = typeof chord === "string" ? parseChord(chord) : chord;
+  if (!c) return null;
+  const parts = [];
+  if (c.mod) parts.push("Mod");
+  if (c.ctrl) parts.push("Ctrl");
+  if (c.alt) parts.push("Alt");
+  if (c.shift) parts.push("Shift");
+  parts.push(c.key === "=" ? "=" : keyLabel(c.key));
+  return parts.join("+");
+}
+
+/** Build a chord object from a keydown event (for the recorder + matching).
+ * On mac, metaKey is `Mod`; elsewhere ctrlKey is `Mod` (never both). */
+export function chordFromEvent(e, isMac = defaultIsMac()) {
+  const key = normalizeKey(e.key);
+  if (!key || ["meta", "control", "alt", "shift"].includes(key)) return null;
+  const chord = { key, mod: false, ctrl: false, alt: !!e.altKey, shift: !!e.shiftKey };
+  if (isMac) {
+    chord.mod = !!e.metaKey;
+    chord.ctrl = !!e.ctrlKey;
+  } else {
+    chord.mod = !!e.ctrlKey; // Ctrl plays the Mod role; explicit meta ignored
+  }
+  return chord;
+}
+
+/** Platform-concrete equality: does `chord` (with Mod) match the event chord? */
+function chordMatches(chord, evChord, isMac) {
+  if (!chord || !evChord) return false;
+  if (chord.key !== evChord.key || chord.alt !== evChord.alt || chord.shift !== evChord.shift) return false;
+  if (isMac) return chord.mod === evChord.mod && chord.ctrl === evChord.ctrl;
+  // non-mac: Mod and Ctrl are the same physical modifier
+  return (chord.mod || chord.ctrl) === (evChord.mod || evChord.ctrl);
+}
+
+function defaultIsMac() {
+  try {
+    return /mac/i.test(navigator.platform || "");
+  } catch { return false; }
+}
+
+// ---------------------------------------------------------------- defaults
+
+export const DEFAULT_KEYMAP = Object.freeze({
+  "app.palette": "Mod+K",
+  "app.shortcuts": "Mod+,",
+  "app.themeToggle": "Mod+Shift+T",
+  "stage.hierarchy": "Mod+1",
+  "stage.spawn": "Mod+2",
+  "tabs.next": "Ctrl+Tab",
+  "tabs.prev": "Ctrl+Shift+Tab",
+  "tabs.close": "Mod+W",
+  "sidebar.focusFilter": "Mod+Shift+E",
+  "terminal.fontBigger": "Mod+=",
+  "terminal.fontSmaller": "Mod+-",
+  "terminal.fontReset": "Mod+0",
+});
+
+// Action ids allowed to fire inside .xterm on Linux/Windows, where their
+// chords would otherwise belong to the attached program. Allowlisting by
+// action id (not chord) keeps the policy stable across user rebinds.
+export const TERMINAL_ALLOWLIST = Object.freeze([
+  "app.palette", "tabs.next", "tabs.prev", "tabs.close",
+]);
+
+export const CONTEXTS = Object.freeze([
+  "global", "stage:hierarchy", "stage:spawn", "roster", "tabs",
+]);
+
+// ---------------------------------------------------------------- registry
+
+const actions = new Map();   // id -> { id, label, context, run }
+let activeContexts = new Set();
 const keymapListeners = new Set();
 
-function overrides() {
-  try { return JSON.parse(localStorage.getItem(OVERRIDES_KEY) || "{}") || {}; }
-  catch { return {}; }
+/** Register an action; returns an unregister function. Re-registering an id
+ * replaces it (views re-mount). */
+export function registerAction({ id, label, context = "global", run }) {
+  if (!id || typeof run !== "function") throw new Error("registerAction: id and run required");
+  const action = { id, label: label || id, context, run };
+  actions.set(id, action);
+  return () => { if (actions.get(id) === action) actions.delete(id); };
 }
 
-function notifyKeymap() {
-  for (const fn of keymapListeners) { try { fn(); } catch (e) { console.error(e); } }
-}
-
-export function registerAction({ id, label, context = "global", run, chord = null }) {
-  if (!id || typeof run !== "function") throw new Error("registerAction: id and run are required");
-  actions.set(id, { id, label: label || id, context, run, chord });
-  notifyKeymap();
-  return () => { if (actions.get(id)?.run === run) { actions.delete(id); notifyKeymap(); } };
+/** Registered actions (editor rendering). */
+export function listActions() {
+  return [...actions.values()];
 }
 
 export function setActiveContexts(set) {
-  activeContexts = new Set(set);
-  activeContexts.add("global"); // global chords stay live in every context
+  activeContexts = new Set(set || []);
 }
 
-export function getActiveContexts() { return new Set(activeContexts); }
+function contextEligible(context) {
+  return context === "global" || activeContexts.has(context);
+}
 
+// ---------------------------------------------------------------- overrides
+
+function readOverrides() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    const obj = raw ? JSON.parse(raw) : null;
+    if (!obj || typeof obj !== "object" || Array.isArray(obj)) return {};
+    // Sanitize: only `null` (explicit unbind) or a parseable chord string
+    // survives — anything else (numbers, objects, junk strings) is discarded
+    // so a corrupted/legacy payload can never reach formatChord/matchEvent.
+    const clean = {};
+    for (const [id, value] of Object.entries(obj)) {
+      if (value === null) clean[id] = null;
+      else if (typeof value === "string") {
+        const canonical = chordToString(parseChord(value));
+        if (canonical) clean[id] = canonical;
+      }
+    }
+    return clean;
+  } catch { return {}; }
+}
+
+function writeOverrides(overrides) {
+  try {
+    if (Object.keys(overrides).length) localStorage.setItem(STORAGE_KEY, JSON.stringify(overrides));
+    else localStorage.removeItem(STORAGE_KEY);
+  } catch { /* storage-less */ }
+}
+
+let overrides = readOverrides();
+
+function notifyKeymapChange() {
+  for (const fn of [...keymapListeners]) { try { fn(); } catch { /* isolate listener */ } }
+}
+
+/** Effective chord string for an action (override ?? default), or null. */
 export function getBinding(actionId) {
-  const a = actions.get(actionId);
-  if (!a) return null;
-  const o = overrides();
-  return Object.prototype.hasOwnProperty.call(o, actionId) ? o[actionId] : a.chord;
+  if (Object.prototype.hasOwnProperty.call(overrides, actionId)) {
+    const v = overrides[actionId];
+    return v == null ? null : v; // explicit null = unbound
+  }
+  return DEFAULT_KEYMAP[actionId] ?? null;
 }
 
-export function setBinding(actionId, chord) {
-  const o = overrides();
-  if (chord === undefined) delete o[actionId]; else o[actionId] = chord;
-  try { localStorage.setItem(OVERRIDES_KEY, JSON.stringify(o)); } catch { /* private mode */ }
-  notifyKeymap();
+/** Persist an override: chord (string or object) or null to unbind. */
+export function setBinding(actionId, chordOrNull) {
+  if (chordOrNull == null) {
+    overrides[actionId] = null;
+  } else {
+    const s = chordToString(chordOrNull);
+    if (!s) return;
+    overrides[actionId] = s;
+  }
+  writeOverrides(overrides);
+  notifyKeymapChange();
+}
+
+export function resetBinding(actionId) {
+  if (!Object.prototype.hasOwnProperty.call(overrides, actionId)) return;
+  delete overrides[actionId];
+  writeOverrides(overrides);
+  notifyKeymapChange();
+}
+
+export function resetAllBindings() {
+  overrides = {};
+  writeOverrides(overrides);
+  notifyKeymapChange();
 }
 
 export function onKeymapChange(fn) {
@@ -73,104 +258,69 @@ export function onKeymapChange(fn) {
   return () => keymapListeners.delete(fn);
 }
 
-export function listActions() { return [...actions.values()]; }
+// ---------------------------------------------------------------- conflicts
 
-/** Parse a chord string into { key, mod, ctrl, alt, shift }. */
-export function parseChord(chord) {
-  if (!chord) return null;
-  const s = String(chord);
-  // The final token may itself be "+": split on "+" but keep a trailing key.
-  const parts = s.endsWith("+") ? [...s.slice(0, -1).split("+").filter(Boolean), "+"]
-    : s.split("+").filter(Boolean);
-  if (!parts.length) return null;
-  const key = parts.pop();
-  const p = { key: key.length === 1 ? key.toLowerCase() : key, mod: false, ctrl: false, alt: false, shift: false };
-  for (const raw of parts) {
-    const m = raw.toLowerCase();
-    if (m === "mod") p.mod = true;
-    else if (m === "ctrl" || m === "control") p.ctrl = true;
-    else if (m === "alt" || m === "option") p.alt = true;
-    else if (m === "shift") p.shift = true;
-  }
-  return p;
-}
-
-/** True when the keydown event matches the chord under the platform +
- * terminal-safety policy. Exported for tests and view-local key handlers. */
-export function matchesChord(e, chord, { isMac = navigator.platform.includes("Mac"), insideTerminal = false, editable = false } = {}) {
+/** First OTHER action whose effective binding collides with `chord` in a way
+ * visible from `context` (same context, or either side is global), optionally
+ * excluding one action id (the one being edited). Returns the action or null. */
+export function findConflict(chord, context, excludeId = null, isMac = defaultIsMac()) {
   const c = typeof chord === "string" ? parseChord(chord) : chord;
-  if (!c) return false;
-  const key = String(e.key || "");
-  const eventKey = key.length === 1 ? key.toLowerCase() : key;
-  if (eventKey !== (c.key.length === 1 ? c.key.toLowerCase() : c.key)) return false;
-  const wantMeta = c.mod && isMac;
-  const wantCtrl = c.ctrl || (c.mod && !isMac);
-  if (!!e.altKey !== c.alt) return false;
-  // Shift is part of many printable keys ("+", "?"); only enforce it for
-  // non-printable/letter keys or when the chord names it.
-  if (c.shift && !e.shiftKey) return false;
-  // Extra Shift only matches when the key is a shifted printable symbol
-  // (e.key already reflects the shifted character, e.g. "+"); for letters,
-  // digits, and named keys an unrequested Shift is a different chord.
-  if (!c.shift && e.shiftKey && (c.key.length > 1 || /[a-z0-9]/i.test(c.key))) return false;
-  const anyMods = wantMeta || wantCtrl || c.alt;
-  if (isMac && c.mod) {
-    // Mod on mac: meta strictly. But permit the Ctrl fallback OUTSIDE
-    // terminals so external keyboards behave like the shipped palette rule.
-    const metaMatch = e.metaKey && !e.ctrlKey;
-    const ctrlMatch = e.ctrlKey && !e.metaKey && !insideTerminal;
-    if (!metaMatch && !ctrlMatch) return false;
-  } else {
-    if (!!e.metaKey !== wantMeta) return false;
-    if (!!e.ctrlKey !== wantCtrl) return false;
+  if (!c) return null;
+  for (const action of actions.values()) {
+    if (action.id === excludeId) continue;
+    const bound = parseChord(getBinding(action.id) || "");
+    if (!bound) continue;
+    if (!chordMatches(bound, resolveForCompare(c, isMac), isMac)) continue;
+    if (context === "global" || action.context === "global" || action.context === context) return action;
   }
-  // Terminal safety: inside xterm only metaKey chords may fire.
-  if (insideTerminal && !e.metaKey) return false;
-  // Editable safety: unmodified keys type text; never steal them.
-  if (editable && !anyMods) return false;
-  return true;
+  return null;
 }
 
-/** Human-readable chord label: "⌘⇧K" on mac, "Ctrl+Shift+K" elsewhere. */
-export function formatChord(chord, isMac = navigator.platform.includes("Mac")) {
-  const c = parseChord(chord);
-  if (!c) return "";
-  const key = c.key.length === 1 ? c.key.toUpperCase() : c.key;
-  if (isMac) {
-    return [c.ctrl ? "⌃" : "", c.alt ? "⌥" : "", c.shift ? "⇧" : "", c.mod ? "⌘" : "", key].join("");
-  }
-  const mods = [];
-  if (c.mod || c.ctrl) mods.push("Ctrl");
-  if (c.alt) mods.push("Alt");
-  if (c.shift) mods.push("Shift");
-  return [...mods, key].join("+");
+// findConflict compares two stored chords (both may use Mod); flatten one to
+// the event-shaped side so chordMatches' non-mac Mod/Ctrl folding applies.
+function resolveForCompare(chord, isMac) {
+  if (isMac) return { ...chord };
+  return { ...chord, mod: chord.mod || chord.ctrl, ctrl: false };
 }
 
-/** THE window keydown handler — the shell installs exactly one. */
+// ---------------------------------------------------------------- dispatch
+
+/** Match a keydown to an eligible action id, or null. Honors context scoping
+ * and the terminal policy. `opts` is for tests: { isMac, insideTerminal }. */
+export function matchEvent(e, opts = {}) {
+  const isMac = opts.isMac ?? defaultIsMac();
+  const insideTerminal = opts.insideTerminal ?? !!e.target?.closest?.(".xterm");
+  const evChord = chordFromEvent(e, isMac);
+  if (!evChord) return null;
+
+  let globalHit = null;
+  let contextHit = null;
+  for (const action of actions.values()) {
+    if (!contextEligible(action.context)) continue;
+    const bound = parseChord(getBinding(action.id) || "");
+    if (!bound || !chordMatches(bound, evChord, isMac)) continue;
+    if (insideTerminal) {
+      if (isMac) {
+        // Only ⌘-resolved chords may fire inside xterm; Ctrl belongs to the pty.
+        if (!(bound.mod && evChord.mod)) continue;
+        if (evChord.ctrl) continue;
+      } else if (!TERMINAL_ALLOWLIST.includes(action.id)) {
+        continue; // Ctrl chords belong to the attached program
+      }
+    }
+    if (action.context === "global") globalHit = globalHit || action;
+    else contextHit = contextHit || action;
+  }
+  const hit = contextHit || globalHit; // specific context wins over global
+  return hit ? hit.id : null;
+}
+
+/** The single shell-level keydown listener body: match, prevent, run. */
 export function handleKeydown(e, opts = {}) {
-  // View-local handlers (e.g. hierarchy's canvas onKey) run first and
-  // preventDefault; the engine never double-dispatches a consumed key.
-  if (e.defaultPrevented) return false;
-  const target = e.target;
-  const insideTerminal = !!target?.closest?.(".xterm");
-  const editable = !!target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA"
-    || target.tagName === "SELECT" || target.isContentEditable === true);
-  const isMac = opts.isMac ?? navigator.platform.includes("Mac");
-  for (const a of actions.values()) {
-    if (a.context !== "global" && !activeContexts.has(a.context)) continue;
-    const chord = getBinding(a.id);
-    if (!chord) continue;
-    if (!matchesChord(e, chord, { isMac, insideTerminal, editable })) continue;
-    e.preventDefault();
-    try { a.run(e); } catch (err) { console.error(err); }
-    return true;
-  }
-  return false;
-}
-
-/** Test seam: wipe registry + listeners (never used by the shell). */
-export function _resetForTests() {
-  actions.clear();
-  keymapListeners.clear();
-  activeContexts = new Set(["global"]);
+  const id = matchEvent(e, opts);
+  if (!id) return false;
+  e.preventDefault();
+  const action = actions.get(id);
+  try { action.run(e); } catch { /* an action must not break dispatch */ }
+  return true;
 }

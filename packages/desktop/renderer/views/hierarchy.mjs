@@ -214,18 +214,19 @@ export function mount(el, ctx) {
   // keyboard: walk the tree, Enter opens terminal, f fits, Escape clears
   s.canvas.addEventListener("keydown", (e) => onKey(s, e));
 
-  // Register the canvas keys as REBINDABLE actions (context stage:hierarchy)
-  // so they appear in the shortcuts editor; dispatch stays view-local
-  // (onKey) — the engine's run() focuses the canvas and replays the intent
-  // when the chord fires outside it. Disposed on unmount.
+  // Register the canvas keys as actions (context stage:hierarchy) so they
+  // appear in the shortcuts editor. Default single-key dispatch stays
+  // view-local (onKey, scoped to the focused canvas) — the engine has no
+  // editable-field guard yet, so these carry no DEFAULT_KEYMAP chords; a
+  // user-bound chord dispatches through the engine. Disposed on unmount.
   s.disposers = [
-    registerAction({ id: "hier.fit", label: "Hierarchy: fit to screen", context: "stage:hierarchy", chord: "f", run: () => fit(s) }),
-    registerAction({ id: "hier.terminal", label: "Hierarchy: open terminal of selection", context: "stage:hierarchy", chord: "t", run: () => { if (s.sel) s.ctx.openTerminal(s.sel); } }),
-    registerAction({ id: "hier.brain", label: "Hierarchy: open Brain of selection", context: "stage:hierarchy", chord: "b", run: () => openSelBrain(s) }),
-    registerAction({ id: "hier.spawn", label: "Hierarchy: open the Spawn view", context: "stage:hierarchy", chord: "s", run: () => s.ctx.openView?.("spawn") }),
-    registerAction({ id: "hier.popover", label: "Hierarchy: open the action popover", context: "stage:hierarchy", chord: "o", run: () => { if (s.sel) openPop(s, s.sel); } }),
-    registerAction({ id: "hier.zoomIn", label: "Hierarchy: zoom in", context: "stage:hierarchy", chord: "+", run: () => zoomBy(s, 1.2) }),
-    registerAction({ id: "hier.zoomOut", label: "Hierarchy: zoom out", context: "stage:hierarchy", chord: "-", run: () => zoomBy(s, 1 / 1.2) }),
+    registerAction({ id: "hier.fit", label: "Hierarchy: fit to screen (f)", context: "stage:hierarchy", run: () => fit(s) }),
+    registerAction({ id: "hier.terminal", label: "Hierarchy: open terminal of selection (t)", context: "stage:hierarchy", run: () => { if (s.sel) s.ctx.openTerminal(s.sel); } }),
+    registerAction({ id: "hier.brain", label: "Hierarchy: open Brain of selection (b)", context: "stage:hierarchy", run: () => openSelBrain(s) }),
+    registerAction({ id: "hier.spawn", label: "Hierarchy: open the Spawn view (s)", context: "stage:hierarchy", run: () => s.ctx.openView?.("spawn") }),
+    registerAction({ id: "hier.popover", label: "Hierarchy: open the action popover (o)", context: "stage:hierarchy", run: () => { if (s.sel) openPop(s, s.sel); } }),
+    registerAction({ id: "hier.zoomIn", label: "Hierarchy: zoom in (+)", context: "stage:hierarchy", run: () => zoomBy(s, 1.2) }),
+    registerAction({ id: "hier.zoomOut", label: "Hierarchy: zoom out (-)", context: "stage:hierarchy", run: () => zoomBy(s, 1 / 1.2) }),
   ];
 
   s.unsubWs = onWorkspaceChange(() => { s.sel = null; s.fitted = false; s.nodeOffsets.clear(); refresh(s); });

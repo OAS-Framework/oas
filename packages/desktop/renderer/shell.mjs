@@ -15,6 +15,7 @@ import { createPalette } from "./palette.mjs";
 import {
   registerAction, setActiveContexts, getBinding, onKeymapChange, formatChord, handleKeydown,
 } from "./keybindings.mjs";
+import { createKeybindingsEditor } from "./keybindings-editor.mjs";
 import { rosterKeyAction, moveTarget } from "./roster-keys.mjs";
 import { createViewLifecycle } from "./view-lifecycle.mjs";
 import { reserveKey, whenKeyFree } from "./tab-keys.mjs";
@@ -643,7 +644,7 @@ for (const v of NAV) {
   const b = document.createElement("button");
   b.className = "nav-item";
   b.title = "Toggle light/dark theme";
-  b.dataset.action = "app.theme";
+  b.dataset.action = "app.themeToggle";
   b.innerHTML = `<span class="icon">◐</span><span class="label">Theme</span>`;
   b.addEventListener("click", () => toggleTheme());
   (foot || navEl).append(b);
@@ -666,34 +667,24 @@ const palette = createPalette({
     // View commands derive from the nav manifest so a new rail destination
     // can never be palette-invisible (review 8441961 nit).
     ...NAV.map((v) => ({ label: `View: ${v.label}`, detail: chordDetail(`stage.${v.name}`), run: () => showStage(v.name) })),
-    { label: "Theme: toggle light/dark", detail: chordDetail("app.theme"), run: () => toggleTheme() },
+    { label: "Theme: toggle light/dark", detail: chordDetail("app.themeToggle"), run: () => toggleTheme() },
     { label: "Shortcuts: edit keyboard shortcuts…", detail: chordDetail("app.shortcuts"), run: () => openShortcutsEditor() },
     { label: "Workspace: switch…", detail: chordDetail("app.workspaces"), run: () => workspaceLabel.openMenu() },
-    { label: "Instances: focus the sidebar roster", detail: chordDetail("roster.focus"), run: () => focusRoster() },
-    { label: "Terminal: increase font size", detail: chordDetail("term.fontBigger"), run: () => setTerminalFontSize(terminalTypography().fontSize + 1) },
-    { label: "Terminal: decrease font size", detail: chordDetail("term.fontSmaller"), run: () => setTerminalFontSize(terminalTypography().fontSize - 1) },
+    { label: "Instances: focus the sidebar roster", detail: chordDetail("sidebar.focusFilter"), run: () => focusRoster() },
+    { label: "Terminal: increase font size", detail: chordDetail("terminal.fontBigger"), run: () => setTerminalFontSize(terminalTypography().fontSize + 1) },
+    { label: "Terminal: decrease font size", detail: chordDetail("terminal.fontSmaller"), run: () => setTerminalFontSize(terminalTypography().fontSize - 1) },
     { label: "Terminal: set font family…", run: () => {
       const current = terminalTypography().fontFamily;
       const next = window.prompt("Terminal font family (CSS font-family value)", current);
       if (next !== null) setTerminalFontFamily(next);
     } },
-    { label: "Terminal: reset typography", detail: chordDetail("term.fontReset"), run: () => { setTerminalFontFamily(""); setTerminalFontSize(13); } },
+    { label: "Terminal: reset typography", detail: chordDetail("terminal.fontReset"), run: () => { setTerminalFontFamily(""); setTerminalFontSize(13); } },
   ],
 });
 
-// ── shortcuts editor (rail-footer button + palette + Mod+Shift+K) ───────
-// keybindings-editor.mjs ships with the engine (keybindings-core); until it
-// lands this degrades to a notice instead of a dead button.
-async function openShortcutsEditor() {
-  try {
-    const mod = await import("./keybindings-editor.mjs");
-    const open = mod.openEditor || mod.open || mod.default;
-    if (typeof open !== "function") throw new Error("no editor entry point");
-    open(document, ctx);
-  } catch {
-    alert("The shortcuts editor is not available in this build yet.");
-  }
-}
+// ── shortcuts editor (rail-footer button + palette + Mod+,) ────────────
+const shortcutsEditor = createKeybindingsEditor({ doc: document, isMac });
+function openShortcutsEditor() { shortcutsEditor.open(); }
 
 function focusRoster() {
   contextRosterEl?.querySelector(".ctx-filter")?.focus();
@@ -712,33 +703,35 @@ function cycleTab(delta) {
 }
 
 // ── action registry: every mouse affordance, one keyboard action ────────
-// Default chords are the stub's; the engine's localStorage overrides (and
-// the editor) rebind them. Registration order = dispatch order.
-registerAction({ id: "app.palette", label: "Open the command palette", context: "global", chord: "Mod+K", run: () => palette.toggle() });
-registerAction({ id: "app.shortcuts", label: "Edit keyboard shortcuts", context: "global", chord: "Mod+Shift+K", run: () => openShortcutsEditor() });
+// Default chords live in the engine's DEFAULT_KEYMAP (keybindings.mjs);
+// user overrides persist in localStorage via the shortcuts editor.
+registerAction({ id: "app.palette", label: "Open the command palette", context: "global", run: () => palette.toggle() });
+registerAction({ id: "app.shortcuts", label: "Edit keyboard shortcuts", context: "global", run: () => openShortcutsEditor() });
 // stage-switch actions derive from the nav manifest (same rule as the
 // palette): a new rail destination can never be shortcut-invisible.
-NAV.forEach((v, i) => registerAction({
+NAV.forEach((v) => registerAction({
   id: `stage.${v.name}`, label: `View: ${v.label}`, context: "global",
-  chord: `Mod+${i + 1}`, run: () => showStage(v.name),
+  run: () => showStage(v.name),
 }));
-registerAction({ id: "app.theme", label: "Toggle light/dark theme", context: "global", chord: "Mod+Shift+L", run: () => toggleTheme() });
-registerAction({ id: "app.workspaces", label: "Open the workspace switcher", context: "global", chord: "Mod+Shift+O", run: () => workspaceLabel.openMenu() });
-registerAction({ id: "roster.focus", label: "Focus the instance roster filter", context: "global", chord: "Mod+Shift+E", run: () => focusRoster() });
-registerAction({ id: "term.fontBigger", label: "Terminal: increase font size", context: "global", chord: "Mod+=", run: () => setTerminalFontSize(terminalTypography().fontSize + 1) });
-registerAction({ id: "term.fontSmaller", label: "Terminal: decrease font size", context: "global", chord: "Mod+-", run: () => setTerminalFontSize(terminalTypography().fontSize - 1) });
-registerAction({ id: "term.fontReset", label: "Terminal: reset typography", context: "global", chord: "Mod+0", run: () => { setTerminalFontFamily(""); setTerminalFontSize(13); } });
+registerAction({ id: "app.themeToggle", label: "Toggle light/dark theme", context: "global", run: () => toggleTheme() });
+registerAction({ id: "app.workspaces", label: "Open the workspace switcher", context: "global", run: () => workspaceLabel.openMenu() });
+registerAction({ id: "sidebar.focusFilter", label: "Focus the instance roster filter", context: "global", run: () => focusRoster() });
+registerAction({ id: "terminal.fontBigger", label: "Terminal: increase font size", context: "global", run: () => setTerminalFontSize(terminalTypography().fontSize + 1) });
+registerAction({ id: "terminal.fontSmaller", label: "Terminal: decrease font size", context: "global", run: () => setTerminalFontSize(terminalTypography().fontSize - 1) });
+registerAction({ id: "terminal.fontReset", label: "Terminal: reset typography", context: "global", run: () => { setTerminalFontFamily(""); setTerminalFontSize(13); } });
 // tabs: cycle + close work whether or not a tab trigger has focus (the
 // tab-a11y roving arrows stay as focus keys on the strip itself).
-registerAction({ id: "tabs.next", label: "Next tab", context: "tabs", chord: "Ctrl+Tab", run: () => cycleTab(1) });
-registerAction({ id: "tabs.prev", label: "Previous tab", context: "tabs", chord: "Ctrl+Shift+Tab", run: () => cycleTab(-1) });
-registerAction({ id: "tabs.close", label: "Close the active tab", context: "tabs", chord: "Mod+W", run: () => { if (activeTab != null) closeTab(activeTab, true); } });
+registerAction({ id: "tabs.next", label: "Next tab", context: "tabs", run: () => cycleTab(1) });
+registerAction({ id: "tabs.prev", label: "Previous tab", context: "tabs", run: () => cycleTab(-1) });
+registerAction({ id: "tabs.close", label: "Close the active tab", context: "tabs", run: () => { if (activeTab != null) closeTab(activeTab, true); } });
 
-// THE one window keydown listener — replaces the ad-hoc palette listener.
-// The engine's terminal-safety policy preserves the exact isPaletteShortcut
-// semantics for Mod+K (⌘K everywhere; Ctrl-K only outside xterm) and
-// generalizes them to every chord.
-window.addEventListener("keydown", (e) => handleKeydown(e));
+// THE one window keydown listener. The engine owns the terminal policy
+// (⌘ chords on mac; the action-id allowlist on Linux/Windows — Ctrl+K now
+// opens the palette inside xterm there, superseding the legacy
+// isPaletteShortcut pass-through). View-local handlers (hierarchy canvas,
+// roster rows, palette input) preventDefault the keys they consume; the
+// engine must not double-dispatch them.
+window.addEventListener("keydown", (e) => { if (!e.defaultPrevented) handleKeydown(e); });
 
 // rail-footer: Shortcuts button next to Theme
 {

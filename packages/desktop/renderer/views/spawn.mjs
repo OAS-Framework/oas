@@ -74,11 +74,16 @@ export function mount(el, ctx) {
   el.querySelector(".souls").addEventListener("keydown", (e) => {
     // Esc cancels the open spawn form from anywhere inside it (incl. the
     // task textarea — cancel is safe; submit stays click/button-only there).
-    if (e.key === "Escape" && s.sel) { e.preventDefault(); s.sel = null; s.selAgent = null; renderGrid(s); }
+    if (e.key === "Escape" && s.sel) { e.preventDefault(); s.sel = null; s.selAgent = null; renderGrid(s); return; }
+    // view-local single keys (never stolen from editable fields)
+    const editable = e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.isContentEditable;
+    if (editable) return;
+    if (e.key === "/") { e.preventDefault(); s.q("filter").focus(); }
+    else if (e.key === "b" && !e.target.closest?.(".soul-card")) { e.preventDefault(); brainOfFocusedCard(s); }
   });
   s.disposers = [
-    registerAction({ id: "spawn.filter", label: "Soul roster: focus the filter", context: "stage:spawn", chord: "/", run: () => s.q("filter").focus() }),
-    registerAction({ id: "spawn.brain", label: "Soul roster: open Brain of focused card", context: "stage:spawn", chord: "b", run: () => brainOfFocusedCard(s) }),
+    registerAction({ id: "spawn.filter", label: "Soul roster: focus the filter (/)", context: "stage:spawn", run: () => s.q("filter").focus() }),
+    registerAction({ id: "spawn.brain", label: "Soul roster: open Brain of focused card (b)", context: "stage:spawn", run: () => brainOfFocusedCard(s) }),
   ];
   // CLI degradation: refresh once on mount and re-render the grid whenever
   // availability flips — spawn buttons disable consistently with the card.

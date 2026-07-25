@@ -3,6 +3,8 @@
 ## 2026-07-25
 * **Creation**: promoted [keybindings wiring uses a transitional stub engine with a frozen coordinator contract](/decisions/keybindings-stub-coordinator-contract.md) from the oas-desktop-engineer-keybindings-wiring notes.
 * **Update**: merged the shell-nav palette command source-shape note into [Shell nav reachability needs an importable manifest](/lessons/shell-nav-reachability-manifest.md): `test/shell-nav.test.mjs` follows the `NAV.map(...)` palette command shape and should be updated with palette row changes while keeping stage actions NAV-derived.
+* **Creation**: promoted [Dialog chord recorders need a hoisted teardown reachable from close and rerender](/lessons/dialog-recorder-teardown-and-override-sanitization.md) from the oas-desktop-engineer-keybindings-core notes.
+* **Creation**: promoted [Keybinding engine terminal allowlist is action-id based, not chord based](/lessons/keybindings-terminal-allowlist-by-action-id.md) from the oas-desktop-engineer-keybindings-core notes.
 * **Update**: merged the xterm keypress-leak note into [Shift+Enter through xterm/tmux must be translated to pi's Ctrl+J newline alias](/lessons/shift-enter-newline-via-ctrl-j-alias.md): suppress every keydown/keypress/keyup event for the chord and write `\n` only on keydown, because xterm's keypress path can otherwise emit a submit `\r`.
 * **Creation**: promoted [tmux mouse-on viewers need modifier-forced xterm selection for copy](/lessons/tmux-mouse-on-xterm-selection-copy.md) from the oas-desktop-engineer-session-copy-newline notes.
 * **Creation**: promoted [scope rollback of a merged stage keeps the manifest tests as absence pins](/lessons/scope-rollback-absence-pins.md) from the oas-desktop-engineer-roster-scope-rollback notes.
