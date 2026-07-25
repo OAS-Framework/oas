@@ -31,8 +31,10 @@ export function instanceId(instance) {
  * Relation names come from instance.json lineage, which is recorded within
  * one deployment scope — so a name resolves to the same-agentsRoot instance
  * first; a name that is globally unique resolves cross-root; an AMBIGUOUS
- * name with no same-root candidate resolves to nothing (fail safe: two
- * separate clusters, never a wrong merge or a hidden node).
+ * name — no same-root candidate, or MORE THAN ONE same-root candidate
+ * (intra-root duplicates are legal and inherently ambiguous; merged-state
+ * review @7dd1e7b) — resolves to nothing (fail safe: two separate clusters,
+ * never a wrong merge, a false edge, or a hidden node).
  * EXPORTED as the one shared resolver — ux-designer's hierarchy/cluster
  * maps must use the same semantics rather than re-implementing them.
  * byName: Map<name, instance[]> over the same roster. */
@@ -40,8 +42,8 @@ export function resolveLinkId(fromInstance, name, byName) {
   const candidates = byName.get(name);
   if (!candidates || !candidates.length) return null;
   if (candidates.length === 1) return instanceId(candidates[0]);
-  const sameRoot = candidates.find((c) => c.agentsRoot && c.agentsRoot === fromInstance.agentsRoot);
-  return sameRoot ? instanceId(sameRoot) : null;
+  const sameRoot = candidates.filter((c) => c.agentsRoot && c.agentsRoot === fromInstance.agentsRoot);
+  return sameRoot.length === 1 ? instanceId(sameRoot[0]) : null;
 }
 
 /** Group instances into agent CLUSTERS — connected components of the
