@@ -160,10 +160,12 @@ test("recording does not survive dialog close or reset-all", (t) => {
 test("malformed persisted overrides are sanitized and cannot break the editor", async (t) => {
   // corrupt payload BEFORE the module (re)reads storage
   localStorage.setItem("oas-desktop-keymap",
-    JSON.stringify({ "app.palette": 42, "tabs.close": { evil: true }, "stage.hierarchy.focus": "NotAChord+", "x.legacy": "Mod+Shift+L", "x.unbound": null }));
+    JSON.stringify({ "app.palette": 42, "tabs.close": { evil: true }, "stage.hierarchy.focus": "Mod+K+P", "x.legacy": "Mod+Shift+L", "x.unbound": null }));
   const fresh = await import("../renderer/keybindings.mjs?fresh=" + Math.random());
   assert.equal(fresh.getBinding("app.palette"), "Mod+K", "non-string value discarded → default");
   assert.equal(fresh.getBinding("tabs.close"), "Mod+W", "object value discarded → default");
+  assert.equal(fresh.getBinding("stage.hierarchy.focus"), null,
+    "unparsable chord string (two main keys) discarded → no default → unbound");
   assert.equal(fresh.getBinding("x.legacy"), "Mod+Shift+L", "valid chord survives");
   assert.equal(fresh.getBinding("x.unbound"), null, "explicit null unbind survives");
   localStorage.removeItem("oas-desktop-keymap");
