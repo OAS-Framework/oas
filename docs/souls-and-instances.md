@@ -114,12 +114,29 @@ OAS agents can run `oas spawn` when their instructions or the
 human ask them to create another expert instance. The spawned agent is another
 full OAS instance, with its own soul, home, worktree, and lifecycle.
 
-Spawn lineage is **explicit**: `oas spawn --parent <instance>` records the
-named instance as `parentInstance` (and `spawnOrigin: instance`); attached-mode
-spawns without `--parent` nest under the owner of the shared work tree. Any
-other spawn — including one from a shell that inherited an agent's environment
-variables — is operator-origin and appears top-level. Agents spawning
-sub-agents should pass `--parent "$OAS_INSTANCE"`.
+Spawn lineage is **explicit** and relation-based:
+`oas spawn --relation child|sibling|parent|unrelated --relative-to <instance>`
+declares what the new instance IS to an existing one (`--parent <instance>` is
+sugar for `--relative-to <instance> --relation child`):
+
+- **child** — nests under the anchor: `parentInstance` = anchor,
+  `spawnOrigin: instance`.
+- **parent** — the NEW instance becomes the anchor's parent: it inherits the
+  anchor's old lineage slot, and the anchor's `instance.json` is re-pointed so
+  its `parentInstance` is the new instance (a reviewer/maintainer of your work
+  sits above you).
+- **sibling** — a peer in the anchor's cluster: it shares the anchor's parent
+  when one exists; when the anchor is a root, the new instance records an
+  explicit `siblingInstance` link so the cluster is still derivable from
+  `oas status --json` (`parentInstance` + `siblingInstance` edges).
+- **unrelated** (default) — no link, operator-origin, top-level.
+
+Attached-mode spawns without a relation still nest under the owner of the
+shared work tree; an explicit `--relation unrelated` suppresses that
+auto-parenting. Any other spawn — including one from a shell that inherited
+an agent's environment variables — is operator-origin and appears top-level.
+Agents spawning sub-agents should pass `--parent "$OAS_INSTANCE"` (or the
+relation that fits).
 
 If the workspace has a messaging integration such as aweb, spawned instances
 can also receive identities and coordinate with each other automatically. The

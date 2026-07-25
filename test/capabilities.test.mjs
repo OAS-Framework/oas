@@ -868,6 +868,141 @@ test("--parent accepts capability-defined parent instances homing under local-ag
   });
 });
 
+test("spawn relations: child/sibling/parent/unrelated, sugar equivalence, validation", () => {
+  const base = temp(); const repo = join(base, "repo"); gitRepo(repo);
+  const root = join(repo, "agents");
+  write(join(root, "dev", "soul", "soul.yaml"), `name: dev\nkind: persistent\nrepo: ${repo}\nwork: checkout\nruntime: pi\n`);
+  write(join(root, "dev", "soul", "AGENTS.md"), "# dev\n");
+  mkdirSync(join(root, "dev", "instances"), { recursive: true });
+  const env = { ...process.env, PATH: fakeRuntimes(base), PI_AGENTS_TMUX_SESSION: "oas-test-nosuch" };
+  delete env.PI_AGENTS_ROOT;
+  const spawn = (...extra) => spawnSync(process.execPath, [CLI, "spawn", "dev", "--no-launch", "--json", ...extra], { cwd: repo, env, encoding: "utf8" });
+  const metaOf = (home) => JSON.parse(readFileSync(join(home, "instance.json"), "utf8"));
+
+  // Root anchor: no relation flags → unrelated (as today).
+  let r = spawn("--purpose", "anchor");
+  assert.equal(r.status, 0, r.stderr);
+  const anchor = jsonResult(r);
+  assert.equal(anchor.parent, null); assert.equal(anchor.relation, null);
+
+  // child: --relation child --relative-to === --parent sugar (same recorded fields).
+  r = spawn("--purpose", "kid", "--relation", "child", "--relative-to", anchor.instance);
+  assert.equal(r.status, 0, r.stderr);
+  const kid = jsonResult(r);
+  assert.equal(kid.parent, anchor.instance);
+  assert.equal(kid.relation, "child");
+  assert.equal(kid.spawnOrigin, "instance");
+  r = spawn("--purpose", "kid-sugar", "--parent", anchor.instance);
+  assert.equal(r.status, 0, r.stderr);
+  const sugar = jsonResult(r);
+  assert.equal(sugar.parent, anchor.instance);
+  assert.equal(sugar.relation, "child", "--parent is sugar for --relation child");
+  const kidMeta = metaOf(kid.home); const sugarMeta = metaOf(sugar.home);
+  assert.equal(kidMeta.parentInstance, sugarMeta.parentInstance);
+  assert.equal(kidMeta.relation, sugarMeta.relation);
+  assert.equal(kidMeta.siblingInstance, undefined);
+
+  // sibling of a CHILD: shares the child's parent (same cluster, same level).
+  r = spawn("--purpose", "peer", "--relation", "sibling", "--relative-to", kid.instance);
+  assert.equal(r.status, 0, r.stderr);
+  const peer = jsonResult(r);
+  assert.equal(peer.parent, anchor.instance, "sibling of a child shares the parent");
+  assert.equal(peer.sibling, null);
+  assert.equal(metaOf(peer.home).relativeTo, kid.instance);
+
+  // sibling of a ROOT: no parent to share → explicit siblingInstance link keeps one cluster.
+  r = spawn("--purpose", "rootpeer", "--relation", "sibling", "--relative-to", anchor.instance);
+  assert.equal(r.status, 0, r.stderr);
+  const rootPeer = jsonResult(r);
+  assert.equal(rootPeer.parent, null);
+  assert.equal(rootPeer.sibling, anchor.instance, "root sibling records siblingInstance");
+  assert.equal(metaOf(rootPeer.home).siblingInstance, anchor.instance);
+
+  // parent: the NEW instance becomes the anchor's parent; anchor lineage re-pointed.
+  r = spawn("--purpose", "boss", "--relation", "parent", "--relative-to", kid.instance);
+  assert.equal(r.status, 0, r.stderr);
+  const boss = jsonResult(r);
+  assert.equal(boss.parent, anchor.instance, "new parent inherits the anchor's old slot");
+  assert.equal(metaOf(kid.home).parentInstance, boss.instance, "anchor re-pointed to the new instance");
+
+  // parent of a ROOT: new instance is top-level, anchor nests under it.
+  r = spawn("--purpose", "rootboss", "--relation", "parent", "--relative-to", anchor.instance);
+  assert.equal(r.status, 0, r.stderr);
+  const rootBoss = jsonResult(r);
+  assert.equal(rootBoss.parent, null);
+  assert.equal(metaOf(anchor.home).parentInstance, rootBoss.instance);
+
+  // unrelated: explicit flag behaves like the default and takes no --relative-to.
+  r = spawn("--purpose", "stranger", "--relation", "unrelated");
+  assert.equal(r.status, 0, r.stderr);
+  const stranger = jsonResult(r);
+  assert.equal(stranger.parent, null); assert.equal(stranger.relation, null);
+  assert.equal(stranger.spawnOrigin, "operator");
+
+  // status --json exposes the lineage fields desktop consumes.
+  r = spawnSync(process.execPath, [CLI, "status", "--json"], { cwd: repo, env, encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  const status = JSON.parse(r.stdout);
+  const insts = status.agents.find((a) => a.name === "dev").instances;
+  const sKid = insts.find((i) => i.instance === kid.instance);
+  assert.equal(sKid.parentInstance, boss.instance);
+  const sPeer = insts.find((i) => i.instance === rootPeer.instance);
+  assert.equal(sPeer.siblingInstance, anchor.instance);
+
+  // Validation errors (E_BAD_ARGS / not-found), all before scaffolding.
+  // JSON mode: failures are a stdout envelope with a stable error code.
+  const fail = (re, ...extra) => {
+    const x = spawn("--purpose", "bad", ...extra);
+    assert.equal(x.status, 1);
+    const env2 = JSON.parse(x.stdout);
+    assert.equal(env2.ok, false);
+    assert.match(env2.error?.message || "", re);
+  };
+  fail(/--relation child requires --relative-to/, "--relation", "child");
+  fail(/--relation sibling requires --relative-to/, "--relation", "sibling");
+  fail(/--relation parent requires --relative-to/, "--relation", "parent");
+  fail(/unknown --relation "boss"/, "--relation", "boss", "--relative-to", anchor.instance);
+  fail(/--relative-to requires --relation/, "--relative-to", anchor.instance);
+  fail(/--relation unrelated takes no --relative-to/, "--relation", "unrelated", "--relative-to", anchor.instance);
+  fail(/use one form, not both/, "--parent", anchor.instance, "--relation", "child", "--relative-to", anchor.instance);
+  fail(/--relation needs a value/, "--relation", "--relative-to", anchor.instance);
+  fail(/does not match any known instance/, "--relation", "sibling", "--relative-to", "no-such-instance");
+
+  // Explicit unrelated on an ATTACHED spawn suppresses the work-tree-owner
+  // auto-parenting (an explicit "no link" directive), while attached WITHOUT
+  // a relation still nests (behavior unchanged).
+  // CLI-level first — the original bug was bin/oas.mjs STRIPPING "unrelated"
+  // before calling the kernel, so this must go through the full CLI path.
+  r = spawn("--purpose", "cli-att-un", "--work", "attached", "--work-dir", join(anchor.home, "work"), "--relation", "unrelated");
+  assert.equal(r.status, 0, r.stderr);
+  const cliAttUn = jsonResult(r);
+  assert.equal(cliAttUn.parent, null, "CLI: explicit --relation unrelated suppresses attached auto-parenting");
+  assert.equal(cliAttUn.spawnOrigin, "operator");
+  r = spawn("--purpose", "cli-att", "--work", "attached", "--work-dir", join(anchor.home, "work"));
+  assert.equal(r.status, 0, r.stderr);
+  const cliAtt = jsonResult(r);
+  assert.equal(cliAtt.parent, anchor.instance, "CLI: attached without relation still auto-parents");
+  const agentDef = findAgent(root, "dev");
+  const oldPath = process.env.PATH;
+  process.env.PATH = fakeRuntimes(base);
+  try {
+    const att = spawnInstance(root, agentDef, { instance: "dev-att", work: "attached", workDir: join(anchor.home, "work"), launch: false });
+    assert.equal(att.parentInstance, anchor.instance, "attached without relation still auto-parents");
+    const attUn = spawnInstance(root, agentDef, { instance: "dev-att-un", work: "attached", workDir: join(anchor.home, "work"), relation: "unrelated", launch: false });
+    assert.equal(attUn.parentInstance, undefined, "explicit unrelated suppresses attached auto-parenting");
+    assert.equal(attUn.spawnOrigin, "operator");
+
+    // Direct-kernel rejection happens BEFORE scaffolding and hooks: no home dir remains.
+    const assertNoHome = (name, fn, re) => {
+      assert.throws(fn, re);
+      assert.equal(existsSync(join(root, "dev", "instances", name)), false, `${name}: no instance dir left behind`);
+    };
+    assertNoHome("dev-badrel", () => spawnInstance(root, agentDef, { instance: "dev-badrel", relation: "boss", relativeTo: anchor.instance, launch: false }), /unknown relation/);
+    assertNoHome("dev-norel", () => spawnInstance(root, agentDef, { instance: "dev-norel", relation: "sibling", launch: false }), /needs a relative-to/);
+    assertNoHome("dev-noanchor", () => spawnInstance(root, agentDef, { instance: "dev-noanchor", relation: "sibling", relativeTo: "no-such-instance", launch: false }), /was not found/);
+  } finally { process.env.PATH = oldPath; }
+});
+
 test("lineage is deployment-local: --parent from an unrelated deployment is rejected", () => {
   const base = temp();
   // Deployment A: the caller's instance lives here.
