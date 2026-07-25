@@ -1,6 +1,9 @@
 # Knowledge Log
 
 ## 2026-07-25
+* **Update**: [test-conventions](/playbooks/test-conventions.md) records that name-resolution tests need local-soul fixtures because overlapping discovery phases only double-count there.
+* **Update**: [lineage-edge-ambiguity-posture](/lessons/lineage-edge-ambiguity-posture.md) records canonical-home de-duplication before treating all-match enumeration results as intra-root duplicates.
+* **Creation**: [overlapping-instance-home-scans-dedupe](/lessons/overlapping-instance-home-scans-dedupe.md) records the `findInstanceHomes` lesson that overlapping `listAgents`/`localAgentBases` scans must dedupe local souls by canonical home.
 * **Update**: [lineage-edge-ambiguity-posture](/lessons/lineage-edge-ambiguity-posture.md) records the inherited-edge two-root validation rule and the need to reject intra-root duplicate instance names that no root qualifier can disambiguate.
 * **Update**: [spawn-relations-lineage-fields](/architecture/spawn-relations-lineage-fields.md) records the spawn validation boundary for copied lineage names and intra-root duplicate anchor matches.
 * **Creation**: [lineage-edge-ambiguity-posture](/lessons/lineage-edge-ambiguity-posture.md) records that bare-name lineage edges must enumerate candidates, disambiguate with `--relative-root`/`o.relativeRoot` when needed, and verify both forward and reverse recorded edges from their consumer roots.
