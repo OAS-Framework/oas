@@ -3,7 +3,7 @@ type: Lesson
 title: Periodic repaints must not rebuild DOM under open forms
 description: Periodic roster polls must treat an open form as a repaint barrier, because rebuilding the DOM can erase typed-but-unsubmitted spawn text and submit task "".
 tags: [desktop-app, spawn, forms, polling, data-loss, renderer, gotcha]
-timestamp: 2026-07-24
+timestamp: 2026-07-25
 ---
 
 # Periodic repaints must not rebuild DOM under open forms
@@ -50,8 +50,10 @@ fallbacks can throw or match the wrong card.
 Any periodically repainted renderer surface that can host user input must treat
 an editable control with uncommitted user state as a repaint barrier. "No async
 mutation is in flight" is not the same as "there is no user state to lose";
-typing exists in the DOM before any request or operation token exists. This
-complements [shared-form operation ownership](/lessons/shared-form-operation-token.md),
+typing exists in the DOM before any request or operation token exists. Text
+selection inside a repainted transcript is the same category of browser-owned
+state; see [Polling innerHTML repaints destroy text selection](/lessons/polling-innerhtml-repaints-destroy-selection.md).
+This complements [shared-form operation ownership](/lessons/shared-form-operation-token.md),
 which protects the same form after async dispatch.
 
 # Regression pattern

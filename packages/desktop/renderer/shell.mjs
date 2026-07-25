@@ -18,13 +18,14 @@ import { createTerminalTab } from "./terminal-tab.mjs";
 import { createTabChrome, tabKeyAction, focusAfterLastTab } from "./tab-a11y.mjs";
 import { createIntentGate, prepareOwnedOpen } from "./open-intent.mjs";
 import { createWorkspaceSwitcher } from "./workspace-switcher.mjs";
+import { NAV, stageSidebarMode, loadStageView } from "./shell-nav.mjs";
 import {
   collapseKey, hasInstanceChildren, instanceRepoLabel, treeGuideSegments, filterInstanceTree, instanceVisibleInTree,
   captureTreeRenderState, configureDisclosure, rosterResponseOwns, clusterInstances, clusterSeparator,
 } from "./instance-tree.mjs";
 import {
-  terminalTabsForWorkspace, tabVisibleInContext, canActivateTab,
-  fallbackTabForContext, terminalOpenOwnsWorkspace,
+  tabVisibleInContext, canActivateTab,
+  fallbackTabForContext, terminalOpenOwnsWorkspace, restoreTerminalTab,
 } from "./workspace-tabs.mjs";
 
 const desk = window.oasDesktop;
@@ -57,9 +58,7 @@ const ctx = {
   openExternal: (url) => window.open(url, "_blank", "noreferrer"),
   // additive shell affordance (views feature-detect it): switch the STAGE
   // to a named sidebar view (stage views are not tabs — see below).
-  openView: (name) => name === "instances"
-    ? contextRosterEl?.querySelector(".ctx-filter")?.focus()
-    : showStage(name),
+  openView: (name) => showStage(name),
 };
 
 // ── stage: the sidebar-driven main surface ──────────────────────────
@@ -73,7 +72,7 @@ let stageOp = 0;            // switch generation — a slow mount must not paint
 
 async function showStage(name) {
   const v = NAV.find((x) => x.name === name);
-  setSidebarMode(name === "spawn" ? "souls" : "overview");
+  setSidebarMode(stageSidebarMode(name));
   setNavActive(name);
   showTabLayer(false);
   if (stage && stage.name === name) return;   // already on this surface
@@ -83,7 +82,7 @@ async function showStage(name) {
   if (prev) { try { await prev.life.close(); } catch (e) { console.error(e); } prev.el.remove(); }
   if (myOp !== stageOp) return;               // superseded by a faster switch
   let mod;
-  try { mod = await import(`./views/${name}.mjs`); }
+  try { mod = await loadStageView(name); }
   catch (e) {
     if (myOp !== stageOp) return;
     stageHost.innerHTML = `<div class="placeholder"><h2>${name}</h2><div>view module failed to load: ${e.message}</div></div>`;
@@ -291,11 +290,15 @@ function renderContextRoster(instances) {
 function showTerminalContext() {
   setSidebarMode("instances");
   refreshContextRoster();
-  const openTerms = terminalTabsForWorkspace(tabs, currentWorkspace());
-  if (openTerms.length) { activateTab(openTerms.at(-1)[0]); return; }
-  // With the tree permanently visible there is no standalone Instances stage.
-  // Closing/switching away from the last terminal restores the prior surface.
-  setSidebarMode(stage?.name === "spawn" ? "souls" : "overview");
+  // Per-workspace active-tab memory: switching back to a workspace restores
+  // the terminal that was active there (stale/foreign keys fall back to the
+  // most recently opened terminal of the workspace).
+  const ws = currentWorkspace();
+  const restored = restoreTerminalTab(tabs, ws, wsActiveTerminal.get(ws));
+  if (restored) { activateTab(restored[0]); return; }
+  // With the tree permanently visible, closing/switching away from the last
+  // terminal restores the prior stage surface.
+  setSidebarMode(stageSidebarMode(stage?.name));
   showTabLayer(false);
   setNavActive(stage?.name || "hierarchy");
 }
@@ -306,6 +309,7 @@ const tabhost = document.getElementById("tabhost");
 const tabs = new Map(); // id -> { tabEl, triggerEl, closeEl, paneEl, title, key, onClose, onShow }
 let nextTabId = 1;
 let activeTab = null;
+const wsActiveTerminal = new Map(); // workspace id -> last-active terminal tab key
 const brainIntents = createIntentGate();
 
 /** key: optional dedup key — activating an existing tab instead of opening a
@@ -350,6 +354,9 @@ function activateTab(id) {
   // the mutation boundary before its pane can become active/receive input.
   if (!canActivateTab(current, currentWorkspace())) return false;
   activeTab = id;
+  if (current?.kind === "terminal" && current.workspace) {
+    wsActiveTerminal.set(current.workspace, current.key);
+  }
   if (current?.kind === "terminal") {
     setSidebarMode("instances");
     setNavActive(null);
@@ -459,8 +466,10 @@ async function openViewTab(name, title, extra = {}, key = `view:${name}`,
 // ── integrated terminal tab (the shell's own flagship view) ──────────────
 const pendingTerms = new Set(); // keys reserved while a roster fetch is in flight
 async function openTerminalTab(instance) {
-  // A tree selection opens its terminal directly; there is no standalone
-  // Instances destination now that the persistent roster is always present.
+  // A sidebar-tree selection opens its terminal directly — the persistent
+  // roster is the quick path to sessions. The full Instances STAGE (grouped
+  // roster, sorts, read-only transcript) is a separate first-class
+  // destination reachable via the nav rail and the ⌘K palette (shell-nav).
   setSidebarMode("instances");
   setNavActive(null);
   refreshContextRoster();
@@ -547,12 +556,11 @@ async function openTerminalTabInner(instance, ws, key) {
 }
 
 // ── nav rail ──────────────────────────────────────────────────────────────
-// Two first-class navigation surfaces: hierarchy and soul roster. Instances
-// live permanently below them; selecting one opens its terminal artifact.
-const NAV = [
-  { name: "hierarchy", label: "Active", icon: "⌘", title: "Active — live cluster overview" },
-  { name: "spawn", label: "Soul roster", icon: "✦", title: "Soul roster" },
-];
+// First-class stage destinations come from shell-nav.mjs (NAV) so tests can
+// prove every entry resolves to a real mount-exporting view. The permanent
+// instance tree in the sidebar stays the quick path to terminals; the
+// Instances STAGE is the full roster with grouping/sorts + read-only
+// transcript (was unreachable pre-merge — merged-state review finding).
 const navEl = document.getElementById("nav");
 for (const v of NAV) {
   const b = document.createElement("button");
@@ -586,8 +594,9 @@ const palette = createPalette({
   },
   openTerminal: (name) => openTerminalTab(name),
   commands: [
-    { label: "View: Active", run: () => showStage("hierarchy") },
-    { label: "View: Soul roster", run: () => showStage("spawn") },
+    // View commands derive from the nav manifest so a new rail destination
+    // can never be palette-invisible (review 8441961 nit).
+    ...NAV.map((v) => ({ label: `View: ${v.label}`, run: () => showStage(v.name) })),
     { label: "Theme: toggle light/dark", run: () => toggleTheme() },
     { label: "Terminal: increase font size", run: () => setTerminalFontSize(terminalTypography().fontSize + 1) },
     { label: "Terminal: decrease font size", run: () => setTerminalFontSize(terminalTypography().fontSize - 1) },

@@ -4,6 +4,7 @@ import { JSDOM } from "jsdom";
 import {
   collapseKey, hasInstanceChildren, instanceRepoLabel, treeGuideSegments, filterInstanceTree, instanceVisibleInTree,
   captureTreeRenderState, configureDisclosure, rosterResponseOwns,
+  ROSTER_SORTS, rosterRank, groupRosterFamilies, rosterGroupKey,
 } from "../renderer/instance-tree.mjs";
 
 const instances = [
@@ -212,4 +213,75 @@ test("sidebar cluster separator: accessible boundary with NO visible glyph or na
     assert.equal(el.className, "ctx-cluster-sep");
     dom.window.close();
   });
+});
+
+/* ── roster grouping: repo → agent family, sort modes ── */
+
+const roster = [
+  { instance: "b-idle", agent: "beta", repoName: "repo1", running: false },
+  { instance: "a-run", agent: "beta", repoName: "repo1", running: true },
+  { instance: "kid", agent: "beta", repoName: "repo1", parentInstance: "a-run", running: false },
+  { instance: "solo", agent: "alpha", repoName: "repo1", running: false },
+  { instance: "other", agent: "gamma", repoName: "repo0", running: true },
+];
+
+test("groupRosterFamilies groups repo → family alphabetically with lineage order inside", () => {
+  const grouped = groupRosterFamilies(roster, "status");
+  assert.deepEqual([...grouped.keys()], ["repo0", "repo1"], "repos alphabetical");
+  assert.deepEqual([...grouped.get("repo1").keys()], ["alpha", "beta"], "families alphabetical");
+  const beta = grouped.get("repo1").get("beta");
+  assert.deepEqual(beta.map((i) => i.instance), ["a-run", "kid", "b-idle"],
+    "status sort: running root first, child under its parent, idle root last");
+  assert.deepEqual(beta.map((i) => i.depth), [0, 1, 0], "depth annotated");
+});
+
+test("groupRosterFamilies name sort is alphabetical regardless of running state", () => {
+  const beta = groupRosterFamilies(roster, "name").get("repo1").get("beta");
+  assert.deepEqual(beta.map((i) => i.instance), ["a-run", "kid", "b-idle"],
+    "children still nest under parents");
+  const flat = groupRosterFamilies([
+    { instance: "z", agent: "f", repoName: "r", running: true },
+    { instance: "a", agent: "f", repoName: "r", running: false },
+  ], "name").get("r").get("f");
+  assert.deepEqual(flat.map((i) => i.instance), ["a", "z"]);
+});
+
+test("rosterRank falls back to status for unknown sort ids and ROSTER_SORTS covers both modes", () => {
+  assert.deepEqual(ROSTER_SORTS.map((s) => s.id), ["status", "name"]);
+  const rank = rosterRank("bogus-persisted-value");
+  assert.ok(rank({ instance: "z", running: true }, { instance: "a", running: false }) < 0,
+    "unknown id ranks running first (status fallback)");
+});
+
+test("groupRosterFamilies cuts cross-family parent links and survives cycles", () => {
+  const cross = [
+    { instance: "p", agent: "fam1", repoName: "r", running: true },
+    { instance: "c", agent: "fam2", repoName: "r", parentInstance: "p", running: true },
+    { instance: "x", agent: "loop", repoName: "r", parentInstance: "y", running: false },
+    { instance: "y", agent: "loop", repoName: "r", parentInstance: "x", running: false },
+  ];
+  const grouped = groupRosterFamilies(cross);
+  assert.deepEqual(grouped.get("r").get("fam2").map((i) => ({ n: i.instance, d: i.depth })),
+    [{ n: "c", d: 0 }], "cross-family child renders as a root of its own family");
+  const loop = grouped.get("r").get("loop").map((i) => i.instance).sort();
+  assert.deepEqual(loop, ["x", "y"], "malformed cycle members all render exactly once");
+});
+
+test("rosterGroupKey is workspace-scoped and repo vs repo+family keys differ", () => {
+  assert.notEqual(rosterGroupKey("wsA", "repo"), rosterGroupKey("wsB", "repo"));
+  assert.notEqual(rosterGroupKey("ws", "repo"), rosterGroupKey("ws", "repo", "fam"));
+});
+
+test("groupRosterFamilies tolerates malformed workspace-controlled metadata (non-string agent/repoName)", () => {
+  const grouped = groupRosterFamilies([
+    { instance: "ok", agent: "fam", repoName: "r", running: true },
+    { instance: "bad-agent", agent: {}, repoName: "r", running: false },
+    { instance: "bad-repo", agent: "fam", repoName: { x: 1 }, running: false },
+    { instance: "no-agent", repoName: "r", running: false },
+  ]);
+  const all = [...grouped.values()].flatMap((f) => [...f.values()].flat()).map((i) => i.instance);
+  assert.deepEqual(all.sort(), ["bad-agent", "bad-repo", "no-agent", "ok"],
+    "every instance renders once; no localeCompare throw blanks the roster");
+  assert.ok(grouped.get("r").has("fam"), "well-formed family survives alongside malformed peers");
+  assert.ok(grouped.get("r").has("?"), "missing agent coalesces to '?'");
 });
