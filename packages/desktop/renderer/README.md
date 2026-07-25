@@ -31,7 +31,10 @@ light, WCAG AA); views style themselves against tokens only, scoped under
 - **keybindings.mjs** — the keymap engine: action registry
   (`registerAction`/`setActiveContexts`), `DEFAULT_KEYMAP`, user overrides
   persisted under `localStorage["oas-desktop-keymap"]`, chord
-  parse/format/match, and dispatch (`matchEvent`/`handleKeydown`). Terminal
+  parse/format/match, and dispatch (`matchEvent`/`handleKeydown`). The engine
+  skips already-consumed (`defaultPrevented`) events, and unmodified/
+  shift-only chords never fire while an editable field (input, textarea,
+  select, contenteditable) has focus. Terminal
   policy: inside `.xterm`, on macOS only ⌘-resolved chords fire; on
   Linux/Windows only `TERMINAL_ALLOWLIST` action ids (palette, tab
   next/prev/close) may fire — all other Ctrl chords belong to the attached

@@ -216,9 +216,11 @@ export function mount(el, ctx) {
 
   // Register the canvas keys as actions (context stage:hierarchy) so they
   // appear in the shortcuts editor. Default single-key dispatch stays
-  // view-local (onKey, scoped to the focused canvas) — the engine has no
-  // editable-field guard yet, so these carry no DEFAULT_KEYMAP chords; a
-  // user-bound chord dispatches through the engine. Disposed on unmount.
+  // view-local (onKey, scoped to the focused canvas): the engine now guards
+  // unmodified chords off editable fields, but canvas-focus scoping is still
+  // tighter than context scoping (stage visible ≠ canvas focused), so these
+  // carry no DEFAULT_KEYMAP chords; a user-bound chord dispatches through
+  // the engine. Disposed on unmount.
   s.disposers = [
     registerAction({ id: "hier.fit", label: "Hierarchy: fit to screen (f)", context: "stage:hierarchy", run: () => fit(s) }),
     registerAction({ id: "hier.terminal", label: "Hierarchy: open terminal of selection (t)", context: "stage:hierarchy", run: () => { if (s.sel) s.ctx.openTerminal(s.sel); } }),
