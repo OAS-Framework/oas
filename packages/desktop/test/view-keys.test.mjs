@@ -11,29 +11,44 @@ const actions = [
 
 test("default chords fire while the engine reports the action unbound", () => {
   const binding = () => null;
-  assert.equal(resolveViewKey(ev("b"), actions, { isMac: false, binding }), "hier.brain");
-  assert.equal(resolveViewKey(ev("f"), actions, { isMac: false, binding }), "hier.fit");
-  assert.equal(resolveViewKey(ev("x"), actions, { isMac: false, binding }), null);
+  const registered = () => [];
+  assert.equal(resolveViewKey(ev("b"), actions, { isMac: false, binding, registered }), "hier.brain");
+  assert.equal(resolveViewKey(ev("f"), actions, { isMac: false, binding, registered }), "hier.fit");
+  assert.equal(resolveViewKey(ev("x"), actions, { isMac: false, binding, registered }), null);
 });
 
 test("a rebound action answers its new chord and its old default stops firing", () => {
   const binding = (id) => (id === "hier.brain" ? "X" : null);
-  assert.equal(resolveViewKey(ev("x"), actions, { isMac: false, binding }), "hier.brain");
-  assert.equal(resolveViewKey(ev("b"), actions, { isMac: false, binding }), null,
+  const registered = () => [];
+  assert.equal(resolveViewKey(ev("x"), actions, { isMac: false, binding, registered }), "hier.brain");
+  assert.equal(resolveViewKey(ev("b"), actions, { isMac: false, binding, registered }), null,
     "old default must not fire after rebinding");
 });
 
 test("an explicit binding on a key beats another action's default on the same key", () => {
   const binding = (id) => (id === "hier.fit" ? "B" : null);
-  assert.equal(resolveViewKey(ev("b"), actions, { isMac: false, binding }), "hier.fit",
+  const registered = () => [];
+  assert.equal(resolveViewKey(ev("b"), actions, { isMac: false, binding, registered }), "hier.fit",
     "bound chord wins over an unbound action's default");
+});
+
+test("a local default yields to an explicit binding on a NON-view action (review 93ff03d)", () => {
+  // the user deliberately bound "b" to a global action; the hierarchy's
+  // local default for hier.brain must not shadow it
+  const binding = (id) => (id === "app.doThing" ? "B" : null);
+  const registered = () => [{ id: "app.doThing", context: "global" }, { id: "hier.brain", context: "stage:hierarchy" }];
+  assert.equal(resolveViewKey(ev("b"), actions, { isMac: false, binding, registered }), null,
+    "view default must not intercept a chord explicitly bound elsewhere");
+  // but an unrelated explicit binding does not disable other defaults
+  assert.equal(resolveViewKey(ev("f"), actions, { isMac: false, binding, registered }), "hier.fit");
 });
 
 test("modifier chords from the engine match platform Mod folding", () => {
   const binding = (id) => (id === "hier.brain" ? "Mod+B" : null);
-  assert.equal(resolveViewKey(ev("b", { ctrlKey: true }), actions, { isMac: false, binding }), "hier.brain");
-  assert.equal(resolveViewKey(ev("b", { metaKey: true }), actions, { isMac: true, binding }), "hier.brain");
-  assert.equal(resolveViewKey(ev("b"), actions, { isMac: false, binding }), null);
+  const registered = () => [];
+  assert.equal(resolveViewKey(ev("b", { ctrlKey: true }), actions, { isMac: false, binding, registered }), "hier.brain");
+  assert.equal(resolveViewKey(ev("b", { metaKey: true }), actions, { isMac: true, binding, registered }), "hier.brain");
+  assert.equal(resolveViewKey(ev("b"), actions, { isMac: false, binding, registered }), null);
 });
 
 test("isEditableTarget covers input/textarea/select/contenteditable", () => {

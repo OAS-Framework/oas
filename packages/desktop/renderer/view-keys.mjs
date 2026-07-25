@@ -7,7 +7,7 @@
    rebindable from the shortcuts editor: a rebound action answers its new
    chord and its old default stops firing; a default never shadows another
    action's explicit binding on the same key. */
-import { getBinding, parseChord, chordFromEvent } from "./keybindings.mjs";
+import { getBinding, parseChord, chordFromEvent, listActions } from "./keybindings.mjs";
 
 /** True when a keydown target is an editable control (typing surface). */
 export function isEditableTarget(target) {
@@ -39,8 +39,15 @@ function chordsEqual(a, b, isMac) {
 /** Resolve a view keydown to an action id, or null.
  * `actions` = [{ id, chord }] where chord is the view's DEFAULT chord string.
  * Engine bindings (overrides) win; defaults apply only to actions the engine
- * reports unbound, and only when no bound action already claims the event. */
-export function resolveViewKey(e, actions, { isMac = /mac/i.test(navigator.platform || ""), binding = getBinding } = {}) {
+ * reports unbound, and only when the event chord is not claimed by ANY other
+ * registered action's explicit binding — a local default must never shadow
+ * a chord the user deliberately bound elsewhere (review 93ff03d).
+ * KNOWN LIMIT (routed to the core dev as a contract addendum): getBinding()
+ * cannot distinguish "no default" from an explicit editor unbind, so
+ * Backspace-unbinding a view action falls back to its local default and the
+ * editor shows these actions as unbound; fixing both needs registerAction to
+ * carry default-chord metadata in the engine. */
+export function resolveViewKey(e, actions, { isMac = /mac/i.test(navigator.platform || ""), binding = getBinding, registered = listActions } = {}) {
   const evChord = chordFromEvent(e, isMac);
   if (!evChord) return null;
   const unbound = [];
@@ -51,6 +58,15 @@ export function resolveViewKey(e, actions, { isMac = /mac/i.test(navigator.platf
     } else {
       unbound.push(a);
     }
+  }
+  if (!unbound.length) return null;
+  // the event chord may be explicitly bound to a NON-view action (global or
+  // another context); the local default yields to that deliberate binding
+  const viewIds = new Set(actions.map((a) => a.id));
+  for (const other of registered()) {
+    if (viewIds.has(other.id)) continue;
+    const bound = parseChord(binding(other.id) || "");
+    if (bound && chordsEqual(bound, evChord, isMac)) return null;
   }
   for (const a of unbound) {
     if (chordsEqual(parseChord(a.chord || ""), evChord, isMac)) return a.id;
