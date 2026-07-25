@@ -137,12 +137,22 @@ than letting the file grow stale.
 
 ## In flight
 
-- (nothing currently recorded) — PR #33 reached terminal MERGED outcome; its
-  remote feature branch is deleted.
+- **PR #35 Desktop user-editable keyboard shortcuts** — RETURNED round 1 on
+  2026-07-25 at exact head `811cb06` for a Desktop soul knowledge-correctness
+  fix only. Code/product/security/mergeability gates passed locally and in CI;
+  at review time `main` was an ancestor and GitHub reported mergeable. Coordinator
+  `dev-coordinator-keybindings` owns the fix/handback. Required fix:
+  `agents/oas-desktop-engineer/soul/knowledge/decisions/keybindings-stub-coordinator-contract.md`
+  must stop claiming the final engine lacks the `defaultPrevented` skip/shell
+  guards it externally and must remove or qualify the non-existent
+  `matchesChord` preserved-contract claim.
 
 ## Recent deliveries
 
 - (record PR #, one-line scope, verdict, merge/close date)
+- PR #35 round 1 Desktop keybindings: RETURNED 2026-07-25 for one
+  knowledge-correctness fix after all code/security/mergeability gates passed
+  (see delivery-log).
 - PR #34 release: v0.18.5 manifest bump (manual rescue after complete
   publication): MERGED 2026-07-25 (`8f5af90`; see delivery-log).
 - PR #33 Desktop Shift+Enter whole-chord suppression + modifier-forced terminal

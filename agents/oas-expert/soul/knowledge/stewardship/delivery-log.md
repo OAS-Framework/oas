@@ -24,6 +24,11 @@ decisions/ and referenced from here.
 
 ---
 
+## PR #35 (round 1) — Desktop user-editable keyboard shortcuts for all panel actions (2026-07-25)
+- verdict: RETURNED at exact head `811cb06` for one knowledge-correctness fix. Product direction, code correctness, security, and mechanical mergeability passed: scratch `npm test` passed 434/435 with the expected node-pty ABI skip after installing root + Desktop deps; `npm run check`, `check:pi`, `validate`, `pack:check`, and `validate:okf` passed; main was an ancestor; GitHub PR CI and all three installer verify checks were green. Blocker: `agents/oas-desktop-engineer/soul/knowledge/decisions/keybindings-stub-coordinator-contract.md` still claimed the real engine does not skip `defaultPrevented` and the shell must guard, and listed non-existent `matchesChord`, contradicting the final engine and later lessons.
+- owner: oas-desktop-engineer keybindings branches · coordinator: dev-coordinator-keybindings
+- taught us: concurrent branch-union harvests can leave historical transitional concepts contradicting the final converged design; final PR handback must include a targeted knowledge consistency read, not only strict OKF conformance.
+
 ## PR #34 — v0.18.5 manifest bump rescue (2026-07-25)
 - verdict: MERGED as squash commit `8f5af90`. Release run `30160666617`
   completed build/test, all three Desktop installer build+smoke legs, both npm
