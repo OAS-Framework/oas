@@ -1,5 +1,10 @@
 # Knowledge Log
 
+## 2026-07-25
+* **Creation**: promoted [electron-builder identity "-" produces complete ad-hoc mac bundle signatures](/lessons/electron-builder-adhoc-identity.md) from the oas-desktop-engineer-macos-correct-installers notes.
+* **Creation**: promoted [Strict deep codesign gates need structural bundle-seal pre-checks](/lessons/macos-strict-codesign-gate-structure.md) from the oas-desktop-engineer-macos-correct-installers notes.
+* **Creation**: promoted [v0.18.2 malformed installer defect and the v0.18.3 terminal release facts](/references/macos-installer-v0182-v0183-release-record.md) from the oas-desktop-engineer-macos-correct-installers notes.
+
 ## 2026-07-24
 * **Creation**: promoted [bounded OS resources spawned per user action need a hard cap in the owning process](/lessons/terminal-resource-cap-in-owning-process.md) from the oas-desktop-engineer-desktop-dist notes.
 * **Update**: linked [desktop terminal direct attach](/decisions/desktop-terminal-direct-attach.md) to the main-process terminal resource cap lesson.
