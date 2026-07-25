@@ -42,15 +42,40 @@ oas create <name> [--description ...] [--type <agent-type>] [--repo ...] [--work
 # workspace mode = cross-repo coordinator: ./work is the whole team scope; read
 # all member repos, edit none; soul knowledge updates arrive as PRs to the
 # soul's home repo via `oas okf harvest`
-oas spawn <agent> [--task ...] [--purpose ...] [--parent <instance>] [--no-launch] [--json]
-# lineage is explicit: agents spawning sub-agents MUST pass --parent "$OAS_INSTANCE"
-# (or their own instance name); without --parent the spawn is operator-origin and
-# appears top-level. Attached-mode spawns nest under the work-tree owner automatically.
+oas spawn <agent> [--task ...] [--purpose ...] [--relation child|sibling|parent|unrelated --relative-to <instance>] [--parent <instance>] [--no-launch] [--json]
+# lineage is explicit: agents spawning sub-agents declare their RELATION to the
+# new instance with --relation + --relative-to (--parent X is sugar for
+# --relative-to X --relation child). Without a relation the spawn is
+# operator-origin and appears top-level. Attached-mode spawns nest under the
+# work-tree owner automatically (explicit --relation unrelated suppresses this).
 # when config declares team:, spawn/retire also resolve souls and instances
 # defined in sibling repos of the team scope (unique match wins; the instance
 # homes with its owning repo, works in that repo, resolves that repo's config)
 oas retire <instance> [--delete-branch]
 ```
+
+### Spawn relations — choosing how the new instance relates to you
+
+When you spawn, declare what the new instance IS to you — the workspace is
+viewed as clusters of related agents, and the relation is how clusters form:
+
+- **child** (`--relation child --relative-to <you>`, or `--parent <you>`) —
+  the new instance works FOR you and nests under you. Example: a coordinator
+  spawning the developers of its feature.
+- **parent** (`--relation parent --relative-to <you>`) — the new instance
+  oversees YOU: your recorded lineage is re-pointed so it becomes your parent.
+  Example: spawning a maintainer/reviewer of your own work — the reviewer sits
+  above you.
+- **sibling** (`--relation sibling --relative-to <you>`) — a peer at your
+  level, in your cluster. Example: enlisting a peer coordinator in another
+  repo, or an architecture coordinator helping you.
+- **unrelated** (default, no flags) — no link. Example: work with no
+  connection to yours.
+
+This is judgment, not mandate: every workspace differs, and a soul's own
+explicit relation instructions (in its AGENTS.md or task briefing) take
+precedence over these defaults. When unsure which relation fits, check with
+the human.
 
 Do not spawn on your own judgment. Spawn when the human asks or a documented
 workflow requires it.
