@@ -15,6 +15,12 @@ than letting the file grow stale.
 
 ## On main
 
+- **PR #30 merged 2026-07-25 as `935d142`**: post-v0.18.3 knowledge-only
+  harvest from cli-dev and oas-desktop-engineer. Promotes the corrected macOS
+  installer signing/release lessons, strict codesign gate structure, release
+  workflow/static-test gotchas, and a read-only aweb trust-mismatch diagnostic
+  skill. No product, release, manifest, or framework behavior changes.
+
 - **RELEASED v0.18.3 (2026-07-25)** — corrected macOS installers. Tag `v0.18.3`
   on PR #27 merge commit `921f44a`. Published `@oas-framework/oas@0.18.3` +
   `@oas-framework/pi@0.18.3` (npm latest) and GitHub Release v0.18.3 with all
@@ -91,6 +97,8 @@ than letting the file grow stale.
 ## Recent deliveries
 
 - (record PR #, one-line scope, verdict, merge/close date)
+- PR #30 post-v0.18.3 cli-dev/Desktop knowledge and skill harvest: MERGED
+  2026-07-25 (`935d142`); strict OKF passed all 8 bundles (see delivery-log).
 - PR #29 Desktop UX fixes: RETURNED 2026-07-25 at `fb1f1bc` for global-vs-
   per-workspace roster sort persistence and branch staleness; re-review pending
   (see delivery-log).

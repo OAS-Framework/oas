@@ -24,6 +24,25 @@ decisions/ and referenced from here.
 
 ---
 
+## PR #30 — post-v0.18.3 corrected-installer knowledge harvest (2026-07-25)
+- verdict: MERGED as merge commit `935d142` at exact head `a220a306`. Product
+  direction, correctness, security, and mergeability PASS. Scope is 13 files,
+  all under cli-dev or oas-desktop-engineer soul knowledge/skills; no product,
+  release, manifest, or framework behavior changes. Strict repo OKF PASS across
+  all 8 bundles (0 errors, 0 warnings). Independent merged-state reviewer
+  `reviewer-a220a30` on required `github-copilot/claude-opus-4.8:high` APPROVED
+  with no blockers/security findings; required CI green. Maintainer approval was
+  recorded as a PR comment because the shared GitHub account cannot approve its
+  own PR.
+- owner: cli-dev + oas-desktop-engineer memory harvests · coordinator:
+  dev-coordinator-1
+- taught us: a knowledge-only integration still benefits from an exact-head
+  merged-state review because security guidance can alter operator behavior.
+  Here the aweb mismatch skill stayed safe: diagnostics are read-only, it bans
+  ad hoc identity repair, and sensitive actions still require independent
+  confirmation. The sole reviewer nit (updating a concept timestamp alongside
+  an Update log entry) was harmless.
+
 ## PR #29 (round 1) — Desktop UX fixes: spawn/chat/roster/workspace tabs (2026-07-25)
 - verdict: RETURNED at exact head `fb1f1bc`. Direction and security PASS;
   clean scratch full gate PASS (359 tests pass, one intentional node-pty ABI
