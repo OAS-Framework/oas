@@ -1,6 +1,8 @@
 # Knowledge Log
 
 ## 2026-07-25
+* **Creation**: [rollback-probes-argv-and-fail-closed](/lessons/rollback-probes-argv-and-fail-closed.md) records that public refs in rollback probes must be argv-safe and that unverifiable cleanup probes are incomplete, not absent.
+* **Update**: [test-conventions](/playbooks/test-conventions.md) records the malicious-ref rollback probe test and the exact-edit/stash rule for temporary bug simulations.
 * **Update**: [cross-instance-writes-commit-last](/lessons/cross-instance-writes-commit-last.md) records structured failure channels and effect verification for hook, tmux, and git rollback cleanup truthfulness.
 * **Update**: [test-conventions](/playbooks/test-conventions.md) records stateful tmux and pinned-worktree recipes for exercising swallowed failures, silent successes, and cleanup effect checks.
 * **Update**: [cross-instance-writes-commit-last](/lessons/cross-instance-writes-commit-last.md) records truthful rollback diagnostics: collect cleanup failures, verify effects, and report incomplete cleanup without masking the original error.

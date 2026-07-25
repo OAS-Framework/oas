@@ -62,6 +62,10 @@ All kernel/CLI behavior tests live in `test/capabilities.test.mjs`
   subdir plus `chmod 555` on `work/`) before removal, then assert the diagnostic
   names the remaining worktree/branch and the test verifies `git worktree list
   --porcelain` plus `rev-parse --verify --quiet refs/heads/<branch>` effects.
+  For public ref/branch values in rollback probes, use a ref accepted by
+  `git check-ref-format` that contains `$(touch${IFS}<marker>)`, assert the
+  marker never appears, and exercise probe failures separately from absence;
+  see [rollback probes](/lessons/rollback-probes-argv-and-fail-closed.md).
   Restore modes in cleanup before deleting the temp tree. If the test replaces
   PATH wholesale, include symlinks for tools the kernel/hooks and shims still
   shell out to (`git`, `node`, `chmod`, `sh`, `grep`, `sed`, `mv`, `cat`,
@@ -81,7 +85,10 @@ All kernel/CLI behavior tests live in `test/capabilities.test.mjs`
   --relation unrelated --json`) and assert the CLI-visible effect, such as
   `parent === null`; a direct `spawnInstance()` test can stay green if the CLI
   regresses before calling the kernel. When cheap, temporarily reintroduce the
-  original bug, confirm the test fails, then revert so the coverage has teeth.
+  original bug, confirm the test fails, then revert so the coverage has teeth;
+  do not use `git checkout <file>` to undo a temporary bug simulation in a file
+  that also contains uncommitted work, because it discards both. Apply and
+  reverse the simulation with exact edits or stash the real changes first.
 - A clean checkout needs dependencies installed in both the repo root and
   `packages/desktop`; otherwise desktop tests can fail with missing transitive
   ESM packages such as `marked` before the kernel/CLI change under test runs.
