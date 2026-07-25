@@ -9,7 +9,7 @@ import {
   escapeHtml, apiJson, postJson, ensureTheme,
   setWorkspace, onWorkspaceChange, renderWorkspaceSelect, wsQuery, workspaceGeneration,
 } from "./common.mjs";
-import { cliAvailable, cliKnownUnavailable, cliStatus, refreshCli, onCliChange, cliCard } from "./cli-status.mjs";
+import { cliAvailable, cliKnownUnavailable, cliStatus, refreshCli, onCliChange, cliCard, cliRelationsAvailable } from "./cli-status.mjs";
 
 const CSS = `
 .souls { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--bg); }
@@ -216,12 +216,16 @@ function spawnForm(s, a) {
   const refOptions = (s.panelInstances || [])
     .map((i) => `<option value="${escapeHtml(i.instance)}">${escapeHtml(i.instance)}${i.running ? "" : " (idle)"}</option>`)
     .join("");
+  // Relation UI only when the verified CLI supports spawn-time relations
+  // (older v1 CLIs would silently spawn an unrelated instance); unknown
+  // probes render capable — the server fails closed (cli-no-relations).
+  const relations = cliRelationsAvailable();
   f.innerHTML = `
     <label>Purpose (optional — becomes part of the instance name)
       <input class="field fpurpose" placeholder="e.g. pr42" autocomplete="off"></label>
     <label>Task (optional — empty spawns an instance awaiting your instructions)
       <textarea class="field ftask" rows="4" placeholder="What should this instance do?"></textarea></label>
-    <label>Relation (optional — link the new instance to an existing one)
+    ${relations ? `<label>Relation (optional — link the new instance to an existing one)
       <select class="field frelation">
         <option value="unrelated" selected>unrelated — no link</option>
         <option value="child">child — nests under the reference instance</option>
@@ -232,14 +236,14 @@ function spawnForm(s, a) {
       <select class="field frelto">
         <option value="">— select an instance —</option>
         ${refOptions}
-      </select></label>
+      </select></label>` : ""}
     <div class="frow">
       <button class="act fspawn">Spawn</button>
       <button class="act fcancel">Cancel</button>
       <span class="fstatus"></span>
     </div>`;
   // the picker only appears when a relation is chosen — unrelated needs none
-  f.querySelector(".frelation").addEventListener("change", (e) => {
+  f.querySelector(".frelation")?.addEventListener("change", (e) => {
     f.querySelector(".frelto-label").style.display = e.target.value === "unrelated" ? "none" : "";
   });
   f.addEventListener("click", (e) => e.stopPropagation()); // clicks in the form never re-select the card
@@ -249,12 +253,15 @@ function spawnForm(s, a) {
     status: f.querySelector(".fstatus"),
     purpose: () => f.querySelector(".fpurpose").value,
     task: () => f.querySelector(".ftask").value,
-    relation: () => f.querySelector(".frelation").value,
-    relativeTo: () => f.querySelector(".frelto").value,
+    relation: () => f.querySelector(".frelation")?.value ?? "unrelated",
+    relativeTo: () => f.querySelector(".frelto")?.value ?? "",
     clear: () => {
       f.querySelector(".fpurpose").value = ""; f.querySelector(".ftask").value = "";
-      f.querySelector(".frelation").value = "unrelated"; f.querySelector(".frelto").value = "";
-      f.querySelector(".frelto-label").style.display = "none";
+      const rel = f.querySelector(".frelation");
+      if (rel) {
+        rel.value = "unrelated"; f.querySelector(".frelto").value = "";
+        f.querySelector(".frelto-label").style.display = "none";
+      }
     },
   }));
   return f;

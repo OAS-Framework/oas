@@ -179,6 +179,11 @@ async function spawnAgent({ agent, agentsRoot, task, purpose, relation, relative
     err.code = "cli-unavailable";
     throw err;
   }
+  // Relation flags are a NEWER v1 surface: older v1 CLIs ignore unknown
+  // spawn options and report success, silently creating an UNRELATED
+  // instance. Fail closed instead of degrading silently (review f921f7d).
+  const relErr = locator.relationSupportError(cliState, { relation, relativeTo });
+  if (relErr) throw relErr;
   // Spawn-time relations: pass through to the CLI adapter, which owns the
   // argv allowlist and pair validation (relation ⇔ relativeTo) — invalid
   // values resolve as stable E_BAD_ARGS envelopes, never reach the CLI.
@@ -252,6 +257,9 @@ function cliStatus() {
     version: cliState.version || null,
     source: cliState.source || null,
     required: { desktopApi: locator.DESKTOP_API, range: ">=0.18.0 <0.19.0" },
+    // Capability flag for the spawn form: relation UI is hidden/disabled
+    // when the accepted CLI predates spawn-time relations.
+    relations: !!cliState.ok && locator.supportsRelations(cliState.version),
     probedAt: cliState.probedAt || null,
     tried: cliState.tried || [],
   };

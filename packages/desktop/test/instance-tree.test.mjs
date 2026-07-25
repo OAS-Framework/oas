@@ -181,3 +181,22 @@ test("clusterInstances: edges to instances outside the roster do not join or cra
   ]);
   assert.equal(clusters.length, 2, "dangling links leave both as single-node clusters");
 });
+
+test("clusterInstances: cluster key is deterministic under liveness changes (review f921f7d nit)", async () => {
+  const { clusterInstances } = await import("../renderer/instance-tree.mjs");
+  const pair = (aRunning, bRunning) => [
+    { instance: "b-peer", siblingInstance: "a-peer", running: bRunning },
+    { instance: "a-peer", running: aRunning },
+  ];
+  const keyOf = (list) => clusterInstances(list)[0].key;
+  assert.equal(keyOf(pair(true, false)), "a-peer");
+  assert.equal(keyOf(pair(false, true)), "a-peer",
+    "which member is running must not change the visible cluster name");
+  // parented cluster: the label is the root, regardless of who is running
+  const tree = (rootRunning) => [
+    { instance: "z-root", running: rootRunning },
+    { instance: "a-child", parentInstance: "z-root", running: !rootRunning },
+  ];
+  assert.equal(keyOf(tree(true)), "z-root");
+  assert.equal(keyOf(tree(false)), "z-root", "root name labels the cluster even when idle");
+});

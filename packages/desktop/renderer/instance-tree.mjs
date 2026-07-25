@@ -63,7 +63,12 @@ export function clusterInstances(instances, { links = instanceLinks } = {}) {
     };
     roots.forEach((r) => walk(r, 0));
     for (const i of [...members].sort(rank)) walk(i, 0); // malformed cycles must not hide members
-    clusters.push({ key: ordered[0].instance, instances: ordered });
+    // Deterministic cluster label: the lexically-smallest ROOT name —
+    // independent of liveness, so the visible cluster name does not flip
+    // when a different member starts/stops running (review f921f7d nit).
+    // Running-first `rank` still governs display ORDER within the cluster.
+    const rootNames = (roots.length ? roots : members).map((i) => i.instance).sort();
+    clusters.push({ key: rootNames[0], instances: ordered });
   }
   return clusters;
 }
