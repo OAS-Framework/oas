@@ -124,3 +124,15 @@ to the owning developer(s), re-merge, re-gate, re-review.
   complete; then retire the developer and shepherd the docs PR yourself. See
   [Retire developers without holding on docs-only follow-up
   PRs](../knowledge/lessons/retire-dev-without-docs-pr.md).
+- Fresh integration worktrees need a local `packages/desktop` install before
+  desktop gates: if desktop tests fail en masse with missing `jsdom` or other
+  package imports, run `cd packages/desktop && npm install` inside the
+  integration worktree before treating them as feature regressions. See
+  [Integration worktrees need packages/desktop npm install before the
+  gate](../knowledge/lessons/integration-worktree-desktop-npm-install.md).
+- If a merged-state review fix makes a feature reachable by adding a new
+  user-facing surface (tab, sidebar, menu, stage), pause before merging and
+  ask the human/maintainer whether that product surface is in scope; prefer
+  satisfying reachability inside existing surfaces when possible. See
+  [Merged-state review fixes can overreach scope — validate new user-facing
+  surfaces with the human](../knowledge/lessons/review-fix-scope-overreach.md).
