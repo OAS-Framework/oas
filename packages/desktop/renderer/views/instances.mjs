@@ -7,11 +7,18 @@
    Contract: export mount(el, ctx) / unmount(). Plain ES module + DOM. */
 import {
   escapeHtml, miniMarkdown, apiJson, postJson, ensureTheme,
-  groupInstances, currentWorkspace, setWorkspace, adoptWorkspace, onWorkspaceChange,
+  currentWorkspace, setWorkspace, adoptWorkspace, onWorkspaceChange,
   renderWorkspaceSelect, wsQuery, instanceApiPath, workspaceGeneration,
 } from "./common.mjs";
+import { ROSTER_SORTS, groupRosterFamilies, rosterGroupKey } from "../instance-tree.mjs";
 
 let state = null;
+
+const SORT_KEY = "oas.desktop.rosterSort";
+function savedSort() {
+  try { const v = localStorage.getItem(SORT_KEY); return ROSTER_SORTS.some((s) => s.id === v) ? v : "status"; }
+  catch { return "status"; }
+}
 
 export function mount(el, ctx) {
   ensureTheme(el.ownerDocument);
@@ -20,6 +27,8 @@ export function mount(el, ctx) {
     panel: { instances: [] },
     sel: null,
     filterText: "",
+    sortBy: savedSort(),
+    collapsedGroups: new Set(),   // rosterGroupKey(ws, repo[, family]) — ws-scoped
     pendingSends: [],
     fastPollUntil: 0,
     chatReq: 0,               // request generation — stale responses never paint
@@ -36,6 +45,8 @@ export function mount(el, ctx) {
         <div class="filterbar bar">
           <select class="field wssel" style="display:none"></select>
           <input class="field filter" placeholder="Filter agents, repos, tasks…" autocomplete="off">
+          <select class="field sortsel" title="Sort instances within groups">${ROSTER_SORTS.map((o) =>
+            `<option value="${o.id}">${escapeHtml(o.label)}</option>`).join("")}</select>
         </div>
         <div class="groups"><div class="loading-block"><span class="spinner"></span> Loading roster…</div></div>
       </div>
@@ -56,6 +67,13 @@ export function mount(el, ctx) {
     </div>`;
   s.q = (cls) => el.querySelector("." + cls);
   s.q("filter").addEventListener("input", (e) => { s.filterText = e.target.value; renderRoster(s); });
+  const sortSel = s.q("sortsel");
+  sortSel.value = s.sortBy;
+  sortSel.addEventListener("change", (e) => {
+    s.sortBy = e.target.value;
+    try { localStorage.setItem(SORT_KEY, s.sortBy); } catch { /* storage-less env */ }
+    renderRoster(s);
+  });
   s.q("wssel").addEventListener("change", (e) => setWorkspace(e.target.value));
   s.q("termbtn").onclick = () => { if (s.sel) s.ctx.openTerminal(s.sel); };
   s.q("intbtn").onclick = async () => {
@@ -115,36 +133,67 @@ function renderRoster(s) {
     return;
   }
   if (!visible.length) { el.innerHTML = '<div class="empty">Nothing matches the filter.</div>'; return; }
-  for (const [wsName, repos] of groupInstances(visible)) {
+  // Filtering force-expands all groups (matches would otherwise hide inside
+  // collapsed headers) WITHOUT mutating the persisted collapse state.
+  const filtering = !!s.filterText.trim();
+  const ws = currentWorkspace();
+  const groupHeader = (cls, label, key, count) => {
+    const collapsed = !filtering && s.collapsedGroups.has(key);
+    const h = document.createElement("button");
+    h.type = "button";
+    h.className = cls + (collapsed ? " closed" : "");
+    h.setAttribute("aria-expanded", String(!collapsed));
+    h.innerHTML = `<span class="tri" aria-hidden="true">${collapsed ? "▸" : "▾"}</span>`
+      + `<span class="glabel">${escapeHtml(label)}</span>`
+      + (count ? `<span class="count">${escapeHtml(count)}</span>` : "");
+    if (filtering) {
+      h.disabled = true;
+      h.title = "Filtering temporarily expands all groups";
+    } else {
+      h.addEventListener("click", () => {
+        collapsed ? s.collapsedGroups.delete(key) : s.collapsedGroups.add(key);
+        renderRoster(s);
+      });
+    }
+    return { header: h, collapsed };
+  };
+  for (const [rName, families] of groupRosterFamilies(visible, s.sortBy)) {
     const g = document.createElement("div");
-    const total = [...repos.values()].reduce((n, v) => n + v.length, 0);
-    const runningN = [...repos.values()].flat().filter((i) => i.running).length;
-    const h = document.createElement("div");
-    h.className = "ghead";
-    h.innerHTML = `${escapeHtml(wsName)} <span class="count">${runningN}/${total} running</span>`;
-    g.appendChild(h);
-    const multiRepo = repos.size > 1;
-    for (const [rName, items] of repos) {
-      const rbox = document.createElement("div");
-      if (multiRepo) { const rh = document.createElement("div"); rh.className = "rhead"; rh.textContent = rName; rbox.appendChild(rh); }
-      for (const i of items) {
-        const d = document.createElement("div");
-        d.className = "inst" + (s.sel === i.instance ? " sel" : "") + (i.running ? "" : " idle") + (i.depth ? " child" : "");
-        d.innerHTML = `
-          <div class="iname"><span class="dot ${i.running ? "on" : ""}"></span>${escapeHtml(i.instance)}</div>
-          <div class="itask">${escapeHtml((i.task || "").slice(0, 100))}</div>
-          <div class="imeta">
-            <span class="chip rt">${escapeHtml(i.runtime)}</span>
-            <span class="chip">${escapeHtml(i.work)}${i.branch ? " · " + escapeHtml(i.branch) : ""}</span>
-            ${i.git && i.git.dirty ? `<span class="chip dirty">±${Number(i.git.dirty)}</span>` : ""}
-          </div>`;
-        d.onclick = () => select(s, i.instance);
-        rbox.appendChild(d);
+    const all = [...families.values()].flat();
+    const runningN = all.filter((i) => i.running).length;
+    const repoKey = rosterGroupKey(ws, rName);
+    const { header: rh, collapsed: repoClosed } =
+      groupHeader("ghead", rName, repoKey, `${runningN}/${all.length} running`);
+    g.appendChild(rh);
+    if (!repoClosed) {
+      for (const [fName, items] of families) {
+        const fbox = document.createElement("div");
+        const famKey = rosterGroupKey(ws, rName, fName);
+        const { header: fh, collapsed: famClosed } =
+          groupHeader("rhead", fName, famKey, String(items.length));
+        fbox.appendChild(fh);
+        if (!famClosed) for (const i of items) fbox.appendChild(instRow(s, i));
+        g.appendChild(fbox);
       }
-      g.appendChild(rbox);
     }
     el.appendChild(g);
   }
+}
+
+function instRow(s, i) {
+  const d = document.createElement("div");
+  d.className = "inst" + (s.sel === i.instance ? " sel" : "") + (i.running ? "" : " idle") + (i.depth ? " child" : "");
+  if (i.depth > 1) d.style.marginLeft = `${i.depth * 18}px`;
+  d.innerHTML = `
+    <div class="iname"><span class="dot ${i.running ? "on" : ""}"></span>${escapeHtml(i.instance)}</div>
+    <div class="itask">${escapeHtml((i.task || "").slice(0, 100))}</div>
+    <div class="imeta">
+      <span class="chip rt">${escapeHtml(i.runtime)}</span>
+      <span class="chip">${escapeHtml(i.work)}${i.branch ? " · " + escapeHtml(i.branch) : ""}</span>
+      ${i.git && i.git.dirty ? `<span class="chip dirty">±${Number(i.git.dirty)}</span>` : ""}
+    </div>`;
+  d.onclick = () => select(s, i.instance);
+  return d;
 }
 
 /* ── selection + detail head ── */

@@ -238,3 +238,73 @@ test("brain: roster failure re-enables the selector; a stale failure cannot unlo
     g.document = saved.document; g.window = saved.window; g.localStorage = saved.localStorage;
   }
 });
+
+test("instances roster: repo → family grouping, sort modes, collapse, filter force-expand", async () => {
+  const { JSDOM } = await import("jsdom");
+  const dom = new JSDOM("<!doctype html><body><div id=el></div>", { url: "http://127.0.0.1/" });
+  const g = globalThis;
+  const saved = { document: g.document, window: g.window, localStorage: g.localStorage };
+  g.document = dom.window.document; g.window = dom.window; g.localStorage = dom.window.localStorage;
+  try {
+    const view = await import("../renderer/views/instances.mjs");
+    const el = dom.window.document.getElementById("el");
+    const panel = {
+      workspace: { id: "" }, workspaces: [],
+      instances: [
+        { instance: "a-idle", agent: "beta", repoName: "repo1", running: false, runtime: "pi", work: "worktree" },
+        { instance: "z-run", agent: "beta", repoName: "repo1", running: true, runtime: "pi", work: "worktree" },
+        { instance: "solo", agent: "alpha", repoName: "repo0", running: true, runtime: "pi", work: "worktree" },
+      ],
+    };
+    const ctx = {
+      api: (p) => Promise.resolve(p.startsWith("/api/panel") ? panel : {}),
+      openFile: () => {}, openTerminal: () => {},
+    };
+    view.mount(el, ctx);
+    await new Promise((r) => setTimeout(r, 20));
+    const groups = el.querySelector(".groups");
+    // repo headers alphabetical, family headers under them
+    const repoHeads = [...groups.querySelectorAll("button.ghead .glabel")].map((n) => n.textContent);
+    assert.deepEqual(repoHeads, ["repo0", "repo1"], "repo groups alphabetical");
+    const famHeads = [...groups.querySelectorAll("button.rhead .glabel")].map((n) => n.textContent);
+    assert.deepEqual(famHeads, ["alpha", "beta"], "family (soul) sub-groups");
+    // default status sort: running before idle within the beta family
+    let names = [...groups.querySelectorAll(".inst .iname")].map((n) => n.textContent.trim());
+    assert.deepEqual(names, ["solo", "z-run", "a-idle"], "running first within groups");
+    // sort by name
+    const sortSel = el.querySelector(".sortsel");
+    sortSel.value = "name";
+    sortSel.dispatchEvent(new dom.window.Event("change"));
+    names = [...groups.querySelectorAll(".inst .iname")].map((n) => n.textContent.trim());
+    assert.deepEqual(names, ["solo", "a-idle", "z-run"], "alphabetical within groups");
+    // collapse the repo1 group — its families and rows disappear, repo0 stays
+    const repo1Head = [...groups.querySelectorAll("button.ghead")]
+      .find((h) => h.querySelector(".glabel").textContent === "repo1");
+    repo1Head.click();
+    names = [...el.querySelectorAll(".inst .iname")].map((n) => n.textContent.trim());
+    assert.deepEqual(names, ["solo"], "collapsed repo hides its instances");
+    const collapsedHead = [...el.querySelectorAll("button.ghead")]
+      .find((h) => h.querySelector(".glabel").textContent === "repo1");
+    assert.equal(collapsedHead.getAttribute("aria-expanded"), "false");
+    // filtering force-expands collapsed groups without mutating the state
+    const filter = el.querySelector(".filter");
+    filter.value = "a-idle";
+    filter.dispatchEvent(new dom.window.Event("input"));
+    names = [...el.querySelectorAll(".inst .iname")].map((n) => n.textContent.trim());
+    assert.deepEqual(names, ["a-idle"], "filter reveals matches inside a collapsed group");
+    assert.ok([...el.querySelectorAll("button.ghead")].every((h) => h.disabled),
+      "group toggles inert while filtering");
+    filter.value = "";
+    filter.dispatchEvent(new dom.window.Event("input"));
+    names = [...el.querySelectorAll(".inst .iname")].map((n) => n.textContent.trim());
+    assert.deepEqual(names, ["solo"], "persisted collapse state survives the filter round-trip");
+    // family-level collapse
+    const alphaHead = [...el.querySelectorAll("button.rhead")]
+      .find((h) => h.querySelector(".glabel").textContent === "alpha");
+    alphaHead.click();
+    assert.deepEqual([...el.querySelectorAll(".inst")].length, 0, "family collapse hides its rows");
+    view.unmount();
+  } finally {
+    g.document = saved.document; g.window = saved.window; g.localStorage = saved.localStorage;
+  }
+});

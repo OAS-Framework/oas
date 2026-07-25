@@ -19,6 +19,8 @@ const CSS = `
 .souls-sum { color: var(--muted); font-size: 12.5px; }
 .souls-grid { flex: 1; overflow-y: auto; padding: 18px; display: grid; gap: 14px;
               grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); align-content: start; }
+.souls-grid .repo-head { grid-column: 1 / -1; color: var(--muted); font-size: 11px; font-weight: 650;
+                         text-transform: uppercase; letter-spacing: .06em; padding: 4px 2px 0; }
 .soul-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
              padding: 14px 16px; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 8px;
              text-align: left; font: inherit; color: var(--fg); }
@@ -159,7 +161,23 @@ function renderGrid(s) {
     s.cliCardHandle.el.style.gridColumn = "1/-1";
     grid.append(s.cliCardHandle.el);
   } else if (s.cliCardHandle) { s.cliCardHandle.dispose(); s.cliCardHandle = null; }
-  for (const a of list) grid.append(soulCard(s, a));
+  // Rendering-only repo grouping: cards sorted repo → name with a section
+  // header per repo (agent family = the card itself). Data order untouched.
+  const label = (a) => a.repoName || (a.repo ? String(a.repo).split("/").filter(Boolean).at(-1) : "") || "workspace";
+  const sorted = [...list].sort((a, b) =>
+    label(a).localeCompare(label(b)) || String(a.name).localeCompare(String(b.name)));
+  let lastRepo = null;
+  for (const a of sorted) {
+    const repo = label(a);
+    if (repo !== lastRepo) {
+      lastRepo = repo;
+      const rh = grid.ownerDocument.createElement("div");
+      rh.className = "repo-head";
+      rh.textContent = repo;
+      grid.append(rh);
+    }
+    grid.append(soulCard(s, a));
+  }
 }
 
 function soulCard(s, a) {
