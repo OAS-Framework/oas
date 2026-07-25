@@ -1,6 +1,8 @@
 # Knowledge Log
 
 ## 2026-07-25
+* **Update**: skills/pr-review — added branch-union harvest semantic knowledge consistency checks; strict OKF only validates structure, so review new/changed concepts for stale transitional claims.
+* **Creation**: [PR reviews need semantic knowledge consistency checks after branch-union harvests](/lessons/pr-review-knowledge-consistency-after-branch-union.md) — strict OKF can pass while harvested concepts contradict the final converged design; maintainer PR review must semantically read new/changed knowledge after branch-union harvests.
 * **Update**: [Repo state](/stewardship/repo-state.md) records v0.18.5 publication and deployment verification, resolution of the PR #32/#33 corrective-release thread, and this machine's tooling update; the [delivery log](/stewardship/delivery-log.md) records PR #34's manifest-bump rescue.
 * **Creation**: [xterm custom key overrides must classify the whole physical chord](/lessons/xterm-custom-key-handler-whole-chord.md) — xterm invokes a custom key event handler across keydown, keypress, and keyup, so a modifier override must suppress every relevant phase while emitting its replacement byte exactly once.
 * **Update**: skills/pr-review — added the surface-removal inventory gotcha: user-visible fallback and recovery copy must move with a removed UI surface, and tests should pin the replacement destination instead of only asserting generic failure.

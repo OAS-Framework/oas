@@ -137,12 +137,24 @@ than letting the file grow stale.
 
 ## In flight
 
-- (nothing currently recorded) — PR #33 reached terminal MERGED outcome; its
-  remote feature branch is deleted.
+- **PR #35 Desktop user-editable keyboard shortcuts** — RETURNED round 2 on
+  2026-07-25 at exact head `b5651b6` for mergeability only. The round-1
+  knowledge finding is fixed, the additional code deltas passed maintainer
+  delta review, local full/strict gates passed, and GitHub PR CI plus all three
+  installer checks were green. The branch is stale because `origin/main` is not
+  an ancestor after the round-1 stewardship commit(s); coordinator
+  `dev-coordinator-keybindings` owns merging the latest main and handing back a
+  settled exact head.
 
 ## Recent deliveries
 
 - (record PR #, one-line scope, verdict, merge/close date)
+- PR #35 round 2 Desktop keybindings: RETURNED 2026-07-25 for mergeability
+  only after all code/knowledge/security gates passed at `b5651b6`; branch must
+  merge latest main (see delivery-log).
+- PR #35 round 1 Desktop keybindings: RETURNED 2026-07-25 for one
+  knowledge-correctness fix after all code/security/mergeability gates passed
+  (see delivery-log).
 - PR #34 release: v0.18.5 manifest bump (manual rescue after complete
   publication): MERGED 2026-07-25 (`8f5af90`; see delivery-log).
 - PR #33 Desktop Shift+Enter whole-chord suppression + modifier-forced terminal

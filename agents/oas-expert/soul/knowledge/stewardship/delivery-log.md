@@ -24,6 +24,16 @@ decisions/ and referenced from here.
 
 ---
 
+## PR #35 (round 2) — Desktop user-editable keyboard shortcuts for all panel actions (2026-07-25)
+- verdict: RETURNED at exact head `b5651b6` for mergeability only. The round-1 knowledge finding was fixed in `bc95b5c`: the transitional stub concept now marks `matchesChord` as stub-only, states the final engine owns the `defaultPrevented` and editable-field guards, and cross-links the superseding lessons. The additional code deltas (`afd2114` surface-guarded view-local action dispatch and `0649fa0` deletion of the dormant legacy `resolveViewKey` chord fallback) passed maintainer delta review. Fresh local gates passed: `npm test` 433/434 with the expected node-pty ABI skip, `check`, `check:pi`, `validate`, `validate:okf`, and `pack:check`; GitHub PR CI plus all three installer checks were green. Mergeability failed because `origin/main` was no longer an ancestor after the maintainer stewardship commit from round 1 (`merge-base b10dd13`, main at least `54b2f2c`), so the author must merge the latest main and hand back a settled exact head.
+- owner: oas-desktop-engineer keybindings branches · coordinator: dev-coordinator-keybindings
+- taught us: stewardship commits after a RETURN intentionally advance main; final handback must merge the latest stewardship-bearing main, not just the code base that existed when the return was issued.
+
+## PR #35 (round 1) — Desktop user-editable keyboard shortcuts for all panel actions (2026-07-25)
+- verdict: RETURNED at exact head `811cb06` for one knowledge-correctness fix. Product direction, code correctness, security, and mechanical mergeability passed: scratch `npm test` passed 434/435 with the expected node-pty ABI skip after installing root + Desktop deps; `npm run check`, `check:pi`, `validate`, `pack:check`, and `validate:okf` passed; main was an ancestor; GitHub PR CI and all three installer verify checks were green. Blocker: `agents/oas-desktop-engineer/soul/knowledge/decisions/keybindings-stub-coordinator-contract.md` still claimed the real engine does not skip `defaultPrevented` and the shell must guard, and listed non-existent `matchesChord`, contradicting the final engine and later lessons.
+- owner: oas-desktop-engineer keybindings branches · coordinator: dev-coordinator-keybindings
+- taught us: concurrent branch-union harvests can leave historical transitional concepts contradicting the final converged design; final PR handback must include a targeted knowledge consistency read, not only strict OKF conformance.
+
 ## PR #34 — v0.18.5 manifest bump rescue (2026-07-25)
 - verdict: MERGED as squash commit `8f5af90`. Release run `30160666617`
   completed build/test, all three Desktop installer build+smoke legs, both npm
