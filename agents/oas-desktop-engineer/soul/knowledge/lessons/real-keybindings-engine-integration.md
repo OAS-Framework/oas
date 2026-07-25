@@ -25,6 +25,9 @@ shape.
 - The real engine's `handleKeydown` does not skip `defaultPrevented` events.
   The shell listener must guard `if (!e.defaultPrevented)` before calling it when
   a view-local handler has already claimed a key event.
+- User-recorded bare-key bindings can still match through the shell's window
+  listener from editable targets, so call `allowsEngineDispatch(e)` at the shell
+  dispatch site as described in [the editable-target guard lesson](/lessons/window-engine-dispatch-editable-guard.md).
 - Terminal safety follows the action-id allowlist, so Ctrl+K opens the palette
   inside xterm on Linux/Windows instead of passing through to the terminal.
 
@@ -32,4 +35,5 @@ shape.
 
 - [Keybindings wiring used a transitional stub engine with a frozen coordinator contract](/decisions/keybindings-stub-coordinator-contract.md)
 - [View-local shortcuts resolve chords through the engine keymap](/decisions/view-local-shortcuts-engine-keymap.md)
+- [Window-level engine dispatch needs an editable-target guard](/lessons/window-engine-dispatch-editable-guard.md)
 - [Keybinding engine terminal allowlist is action-id based, not chord based](/lessons/keybindings-terminal-allowlist-by-action-id.md)
