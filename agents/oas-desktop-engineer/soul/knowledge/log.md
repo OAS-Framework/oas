@@ -1,6 +1,8 @@
 # Knowledge Log
 
 ## 2026-07-25
+* **Update**: merged the spawn-button pending probe note into [CLI degradation state must distinguish pending, compatible, and unavailable](/lessons/degradation-state-unknown-capable.md): pending CLI probes stay card-less and disabled but retry from the roster poll until settled, with a checking tooltip instead of a missing-card hint.
+* **Update**: merged the desktop-server test CLI-on-PATH note into [CLI locator tests need hermetic PATH and absolute fixtures](/lessons/fake-cli-fixtures-hostile-path.md): no-CLI degradation tests must strip env, PATH, npm-on-PATH, and login-shell locator sources.
 * **Creation**: promoted [keep roster family grouping helpers inside instance-tree](/lessons/roster-family-grouping-helpers.md) from the oas-desktop-engineer-roster-grouping notes.
 
 ## 2026-07-24
