@@ -8,7 +8,7 @@
 // chrome stays a thin rail so nothing is duplicated.
 // (groupInstances is not imported here: the feature branch renders the
 // sidebar roster via clusterInstances — lineage clusters with identity keys.)
-import { currentWorkspace, setWorkspace, adoptWorkspace, onWorkspaceChange } from "./views/common.mjs";
+import { currentWorkspace, setWorkspace, adoptWorkspace, onWorkspaceChange, httpError } from "./views/common.mjs";
 import {
   initTheme, toggleTheme, xtermTheme, onThemeChange,
   terminalTypography, setTerminalFontSize, setTerminalFontFamily, onTerminalTypographyChange,
@@ -23,8 +23,8 @@ import { createWorkspaceSwitcher } from "./workspace-switcher.mjs";
 import { NAV, stageSidebarMode, loadStageView } from "./shell-nav.mjs";
 import {
   collapseKey, hasInstanceChildren, instanceRepoLabel, treeGuideSegments, filterInstanceTree, instanceVisibleInTree,
-  captureTreeRenderState, configureDisclosure, rosterResponseOwns, clusterInstances, clusterSeparator,
-  instanceId, terminalKey, resolveTerminalOpen,
+  captureTreeRenderState, configureDisclosure, rosterResponseOwns, clusterSeparator,
+  instanceId, terminalKey, resolveTerminalOpen, visibleClusters,
 } from "./instance-tree.mjs";
 import {
   tabVisibleInContext, canActivateTab,
@@ -37,14 +37,7 @@ initTheme();
 // ── ctx (shared by all views) ─────────────────────────────────────────────
 async function api(pathname, opts) {
   const r = await desk.api(pathname, opts);
-  if (!r.ok) {
-    // Mark RECEIVED HTTP errors so consumers (cli-status settled-state
-    // classification) can distinguish them from transport failures, which
-    // reject inside desk.api itself.
-    const err = new Error(r.body?.error || `HTTP ${r.status} for ${pathname}`);
-    err.status = r.status;
-    throw err;
-  }
+  if (!r.ok) throw httpError(r, pathname);
   return r.body;
 }
 
@@ -216,8 +209,10 @@ function renderContextRoster(instances) {
   // from SPACING/STRUCTURE (human re-test: no visible glyph) — multi-member
   // clusters get an invisible separator that still exposes the group
   // boundary to AT (role=separator + aria-label); single-node clusters get
-  // nothing.
-  for (const cluster of clusterInstances(visible)) {
+  // nothing. Clusters are computed on the FULL roster then projected to
+  // visible members — clustering a filtered subset could forge edges from
+  // globally ambiguous names (merged-state review @3e76616).
+  for (const cluster of visibleClusters(instances, visible)) {
     const items = cluster.instances;
     if (items.length > 1) {
       listEl.append(clusterSeparator(document, items.length));

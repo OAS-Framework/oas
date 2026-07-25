@@ -382,7 +382,7 @@ function openSpawnModal(s, a) {
             <option value="claude">claude</option>
           </select></label>
         <label>Model (optional — defaults to the agent's definition${a.model ? `: ${escapeHtml(a.model)}` : ""})
-          <input class="field fmodel" placeholder="${escapeHtml(a.model || "runtime default")}" autocomplete="off"></label>
+          <input class="field fmodel" autocomplete="off"></label>
         <div class="frow">
           <button class="act fspawn">Spawn</button>
           <button class="act fcancel">Cancel</button>
@@ -392,6 +392,12 @@ function openSpawnModal(s, a) {
     </section>`;
   const dialog = modal.querySelector(".spawn-dialog");
   buildRefOptions(modal.querySelector(".frelto")); // safe DOM construction (never innerHTML)
+  // SECURITY (merged-state review @3e76616): a.model is workspace-controlled
+  // and escapeHtml is TEXT-context only (it does not escape quotes) — an
+  // attribute interpolation lets `model: 'x" onpointerenter="...'` break out
+  // and run with the privileged bridge. Assign the placeholder as a DOM
+  // PROPERTY, never via innerHTML attribute text.
+  modal.querySelector(".fmodel").placeholder = a.model || "runtime default";
   const f = modal; // field lookups span the whole modal
 
   // One source of truth for the relation controls' render state, applied at

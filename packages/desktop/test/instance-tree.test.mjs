@@ -476,3 +476,47 @@ test("resolveLinkId: intra-root duplicate names are inherently ambiguous — no 
   const childCluster = clusters.find((c) => c.instances.some((i) => i.instance === "child-1"));
   assert.equal(childCluster.instances.length, 1, "ambiguous edge ignored — child stays a single-node cluster");
 });
+
+test("filterInstanceTree: identity-aware — same-named twins don't leak into each other's filters; ambiguous ancestors include nothing (merged-state review @3e76616)", async () => {
+  const m = await import("../renderer/instance-tree.mjs");
+  const parentA = { instance: "coord", agentsRoot: "/A/agents", home: "/A/agents/c/instances/coord" };
+  const parentB = { instance: "coord", agentsRoot: "/B/agents", home: "/B/agents/c/instances/coord" };
+  const childA = { instance: "dev-child", agentsRoot: "/A/agents", home: "/A/agents/d/instances/dev-child", parentInstance: "coord" };
+  const roster = [parentA, parentB, childA];
+  // childA matches; its ancestor "coord" is AMBIGUOUS (two candidates, one
+  // per root but resolution is same-root-first): only /A's coord is included
+  const out = m.filterInstanceTree(roster, "dev-child");
+  assert.deepEqual(out.map((i) => i.home), [parentA.home, childA.home],
+    "ancestor resolves via resolveLinkId to the SAME-ROOT parent only — the /B twin never leaks in");
+  // intra-root duplicate ancestors: inherently ambiguous → no ancestor included
+  const dupA = { instance: "coord", agentsRoot: "/A/agents", home: "/A/agents/c2/instances/coord" };
+  const out2 = m.filterInstanceTree([parentA, dupA, childA], "dev-child");
+  assert.deepEqual(out2.map((i) => i.home), [childA.home],
+    "ambiguous parent edge includes NO ancestor — never an arbitrary same-named pick");
+  // inclusion keys by identity: filtering for the /A parent's repo does not
+  // drag in the /B twin
+  const out3 = m.filterInstanceTree(roster, "coord");
+  assert.equal(out3.length, 2, "both name matches included (each on its own identity)");
+});
+
+test("visibleClusters: clusters computed on the FULL roster, projected to visible — filtering never forges an edge from a globally ambiguous name (merged-state review @3e76616)", async () => {
+  const m = await import("../renderer/instance-tree.mjs");
+  const dupA = { instance: "coord", agentsRoot: "/A/agents", home: "/A/c1/coord" };
+  const dupB = { instance: "coord", agentsRoot: "/A/agents", home: "/A/c2/coord" };
+  const child = { instance: "dev-child", agentsRoot: "/A/agents", home: "/A/d/dev-child", parentInstance: "coord" };
+  const full = [dupA, dupB, child];
+  // full-roster resolution: the parent edge is ambiguous → child is a
+  // single-node cluster. If clusters were computed on the FILTERED subset
+  // [dupA, child], the name would become unique and forge a false edge.
+  const projected = m.visibleClusters(full, [dupA, child]);
+  const childCluster = projected.find((c) => c.instances.some((i) => i.instance === "dev-child"));
+  assert.equal(childCluster.instances.length, 1,
+    "ambiguity judged on the FULL roster — hiding one duplicate cannot re-link the child");
+  // clusters with no visible member disappear; visible members keep depth
+  const parent = { instance: "solo-parent", agentsRoot: "/A/agents", home: "/A/p/solo-parent" };
+  const kid = { instance: "kid", agentsRoot: "/A/agents", home: "/A/k/kid", parentInstance: "solo-parent" };
+  const projected2 = m.visibleClusters([parent, kid, dupA], [kid]);
+  assert.equal(projected2.length, 1, "cluster with no visible members dropped");
+  assert.equal(projected2[0].instances[0].instance, "kid");
+  assert.equal(projected2[0].instances[0].depth, 1, "depth from the FULL-roster tree is preserved");
+});
