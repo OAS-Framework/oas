@@ -41,8 +41,10 @@ decisions/ and referenced from here.
 - taught us: a surface-removal inventory must cover user-visible fallback and
   recovery copy, not only imports, nav entries, modules, and CSS. A broad
   “operation failed truthfully” assertion can stay green while directing users
-  to a destination the same PR deleted. Corrective source is on main but needs
-  a new patch release; v0.18.4 artifacts remain immutable.
+  to a destination the same PR deleted. See [Surface removal inventories must
+  include user-facing recovery copy](/lessons/surface-removal-inventory-user-guidance.md).
+  Corrective source is on main but needs a new patch release; v0.18.4 artifacts
+  remain immutable.
 
 ## PR #31 — v0.18.4 manifest bump rescue (2026-07-25)
 - verdict: MERGED as squash commit `fda7498`. The tag-driven v0.18.4 release
