@@ -182,6 +182,24 @@ test("smoke probe contract: runAbiProbe refuses to run without a reaper runTrack
   assert.equal(callsSeen[0].opts.timeout, 1234);
   assert.ok(callsSeen[0].args[1].includes("pty-alive"), "probe source travels through the tracked run");
   assert.ok(abiProbeSource("/x").includes("createRequire"), "probe source resolves node-pty via app.asar");
+  // x64 cross-build on an arm64 mac MUST explicitly execute through Rosetta.
+  // This is what proves the packaged x64 node-pty native is genuinely x64;
+  // inventory alone would let a wrong-arch binary sail through.
+  callsSeen.length = 0;
+  const x64R = await runAbiProbe(reaper, "/pkg/x64/App", "/pkg/x64/app.asar/main.mjs", {
+    timeout: 90000, env: {}, targetArch: "x64", platform: "darwin", hostArch: "arm64",
+  });
+  assert.equal(x64R.ok, true);
+  assert.equal(callsSeen[0].exe, "/usr/bin/arch", "Rosetta launcher used explicitly");
+  assert.deepEqual(callsSeen[0].args.slice(0, 3), ["-x86_64", "/pkg/x64/App", "-e"]);
+  assert.ok(callsSeen[0].args[3].includes("pty-alive"), "ABI probe source passed after the x64 app");
+  assert.match(x64R.detail, /Rosetta x86_64/, "evidence reports the Rosetta path honestly");
+  // Native arm64 package must not route through Rosetta.
+  callsSeen.length = 0;
+  await runAbiProbe(reaper, "/pkg/arm/App", "/pkg/arm/app.asar/main.mjs", {
+    targetArch: "arm64", platform: "darwin", hostArch: "arm64",
+  });
+  assert.equal(callsSeen[0].exe, "/pkg/arm/App");
   // timeout and failure map to structured results
   const tR = await runAbiProbe({ runTracked: async () => ({ stdout: "", code: null, timedOut: true }) }, "/a", "/m");
   assert.equal(tR.ok, false); assert.match(tR.detail, /timed out/);

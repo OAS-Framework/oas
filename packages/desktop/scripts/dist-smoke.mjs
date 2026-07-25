@@ -105,7 +105,10 @@ if (!existsSync(app.exe)) fail(`packaged executable missing: ${app.exe}`);
   // Probe via the extracted runner (scripts/smoke-probes.mjs): the runner
   // CONTRACTUALLY requires the reaper's runTracked — async, detached,
   // group-tracked; reintroducing synchronous execution fails its tests.
-  const r = await runAbiProbe(reaper, app.exe, join(app.resources, "app.asar", "main.mjs"), { timeout: PHASE_BUDGET_MS.abiProbe });
+  const r = await runAbiProbe(reaper, app.exe, join(app.resources, "app.asar", "main.mjs"), {
+    timeout: PHASE_BUDGET_MS.abiProbe,
+    targetArch: process.env.OAS_SMOKE_TARGET_ARCH || process.arch,
+  });
   if (!r.ok) fail(r.detail);
   ok(r.detail);
 }

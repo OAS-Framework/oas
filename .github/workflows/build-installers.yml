@@ -86,6 +86,7 @@ jobs:
         env:
           OAS_SMOKE_SKIP_LAUNCH: "1"
           OAS_SMOKE_BUILD_VERIFY: "1"
+          OAS_SMOKE_TARGET_ARCH: ${{ matrix.arch }}
         run: npm run dist:smoke
 
       # Upload the distributables so the produced AppImage/DEB/DMG/ZIP names
