@@ -118,6 +118,7 @@ The full breaking-change list is in the
 | "Compatible oas CLI required" card | No CLI, or version outside `>=0.18.0 <0.19.0`. Install/update, or **Choose oas…** to point at the right binary; **Retry** re-probes. Spawn is disabled until a compatible CLI is verified. |
 | Spawn disabled, no card | The probe hasn't settled yet (transient, resolves in ms). If it persists, the backend is unreachable — restart the app. |
 | Terminals fail to open ("could not attach") | tmux missing, or no live session for that instance. Install tmux (`tmux -V`); check `tmux ls`. |
+| Can't select/copy text in a terminal tab | The terminal runs with tmux mouse handling, so a plain drag scrolls/passes through. Hold **Option** (macOS) or **Shift** while dragging to make a local selection, then copy (Cmd+C / right-click → Copy). |
 | macOS "app is damaged / can't be opened" | Ad-hoc-signed (not notarized) build + quarantine. Right-click → Open, or clear the quarantine attribute (above). If it persists, verify the bundle: `codesign --verify --deep --strict --verbose=2 "/Applications/OAS Desktop.app"` — a non-zero exit means a broken artifact, report it. |
 | Roster empty | The opened directory isn't an OAS workspace (needs `agents/` or `local-agents/`, or a team scope). Use the workspace switcher → Add workspace to select the right root. |
 

@@ -15,6 +15,38 @@ than letting the file grow stale.
 
 ## On main
 
+- **RELEASED v0.18.5 (2026-07-25)** — corrective Desktop patch containing
+  PR #32 and PR #33. Tag `v0.18.5` on `a0052bd` (both corrective merges plus
+  release notes). Published `@oas-framework/oas@0.18.5` +
+  `@oas-framework/pi@0.18.5` and GitHub Release v0.18.5 with all six Desktop
+  installers, SHA256SUMS.txt, and build provenance. Release run `30160666617`
+  passed build/test and macOS arm64/x64 plus Linux x64 installer build+smoke;
+  its only failure was the known org-policy block on Actions-created PRs after
+  publication. Manifests were bumped through manual rescue PR #34 (`8f5af90`).
+  The published kernel passed a clean create→spawn→inspect→retire deployment
+  probe; this machine's global kernel and Pi bridge were updated to 0.18.5 with
+  clean OAS and LFX doctors. Per coordinator instruction, running Desktop app
+  processes were not touched.
+
+- **PR #33 merged 2026-07-25 as `595159e`** — fixes both remaining v0.18.4
+  terminal field failures: Shift+Enter suppresses xterm keydown/keypress/keyup
+  while writing one newline, and modifier-forced local xterm selection enables
+  terminal copy with tmux mouse mode (Option on macOS, Shift on non-macOS).
+  Final exact head `d75fa3a`; human live verification, local full/affected
+  gates, strict OKF, required CI, and all three installer checks passed after
+  two maintainer RETURNs. Released with PR #32 in v0.18.5; v0.18.4 remains
+  immutable.
+
+- **PR #32 merged 2026-07-25 as `97f66c9`** — corrective rollback for the
+  out-of-scope PR #29 Instances rail destination and second roster sidebar.
+  The shell again exposes only Active overview and Soul roster as stages; the
+  permanent sidebar remains the instances context. The deleted stage/view,
+  tests, docs, and 104 lines of stage-only CSS are gone, with absence pins;
+  shared grouping helpers remain for separately owned sidebar work. Final exact
+  head `69641c9`; full local gate, human live workspace test, independent
+  reviewer, required CI, and all three installer checks passed. Released in
+  v0.18.5; immutable v0.18.4 artifacts remain unchanged.
+
 - **RELEASED v0.18.4 (2026-07-25)** — Desktop UX fixes from PR #29. Tag
   `v0.18.4` on `a84443a` (PR #29 merge plus release notes). Published
   `@oas-framework/oas@0.18.4` + `@oas-framework/pi@0.18.4` and GitHub Release
@@ -26,8 +58,8 @@ than letting the file grow stale.
   (`fda7498`). The published kernel passed a clean create→spawn→inspect→retire
   deployment probe and reported Desktop API v1 at version 0.18.4. A human
   subsequently identified an out-of-scope Desktop navigation regression in
-  PR #29; v0.18.4 is immutable and a corrective patch is required (see open
-  threads).
+  PR #29. Corrective source landed in PR #32; v0.18.4 remains immutable and a
+  new patch release is required (see open threads).
 
 - **PR #29 merged 2026-07-25 as `b7203eb`** — Desktop UX fixes: spawn view
   retries an unsettled CLI probe with truthful pending UI; Shift+Enter inserts
@@ -99,18 +131,26 @@ than letting the file grow stale.
 - Earlier oas.web and Control Pane deliveries remain in the delivery log and
   donor-soul knowledge as migration history; their product surfaces are no
   longer present on main.
-- Framework source and Desktop artifacts are now **0.18.4** (root/pi npm plus
+- Framework source and Desktop artifacts are now **0.18.5** (root/pi npm plus
   GitHub Release installers). Capabilities at: oas.review 1.1.6, oas.okf
   **1.4.0**, oas.aweb 1.5.1, oas.jira 1.0.0.
 
 ## In flight
 
-- (nothing currently recorded) — PR #29 reached terminal MERGED outcome; its
+- (nothing currently recorded) — PR #33 reached terminal MERGED outcome; its
   remote feature branch is deleted.
 
 ## Recent deliveries
 
 - (record PR #, one-line scope, verdict, merge/close date)
+- PR #34 release: v0.18.5 manifest bump (manual rescue after complete
+  publication): MERGED 2026-07-25 (`8f5af90`; see delivery-log).
+- PR #33 Desktop Shift+Enter whole-chord suppression + modifier-forced terminal
+  copy selection: MERGED 2026-07-25 as `595159e` after two RETURNs; released
+  with PR #32 in v0.18.5 (see delivery-log).
+- PR #32 Desktop Instances-stage scope rollback: MERGED 2026-07-25 as
+  `97f66c9` after one correctness+mergeability RETURN; released with PR #33 in
+  v0.18.5 (see delivery-log).
 - PR #31 release: v0.18.4 manifest bump (manual bump-PR rescue after complete
   publication): MERGED 2026-07-25 (`fda7498`; see delivery-log).
 - PR #30 post-v0.18.3 cli-dev/Desktop knowledge and skill harvest: MERGED
@@ -155,13 +195,6 @@ than letting the file grow stale.
 
 ## Open threads
 
-- **v0.18.4 corrective Desktop patch required**: a coordinator HOLD arrived
-  after v0.18.4 had already published. The human identified that PR #29 added
-  an Instances navigation tab plus an extra sidebar outside the requested
-  scope; grouping belongs in the existing roster sidebar instead. Do not move,
-  delete, or republish the immutable v0.18.4 artifacts. A corrective PR is
-  forthcoming and must drive a new patch version after review.
-
 - aweb channel awakening drops (2 consecutive repros 2026-07-23): verdict
   mail from short-lived reviewer identities delivered and marked READ
   server-side but no awakening injected into the recipient's idle session —
@@ -189,10 +222,10 @@ than letting the file grow stale.
   conclusion=failure run whose ONLY failed step is the bump-PR create; npm +
   GitHub Release already succeeded (never retag). Rescue each time: create +
   squash-merge the `release-bump/vX.Y.Z` branch manually (done for v0.18.3 as
-  PR #28 and v0.18.4 as PR #31). Needs an org admin to relax the Actions-PR
-  policy to fully automate.
+  PR #28, v0.18.4 as PR #31, and v0.18.5 as PR #34). Needs an org admin to
+  relax the Actions-PR policy to fully automate.
   Rescue procedure is in the git-tag-release skill.
-- Published artifacts are now v0.18.4. The macOS installers retain complete
+- Published artifacts are now v0.18.5. The macOS installers retain complete
   ad-hoc signatures passing strict deep codesign; earlier release assets remain
   untouched.
 - webpanel-dev instance worktrees still hold deleted branches locally

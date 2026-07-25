@@ -3,9 +3,11 @@
 // View contract (binding, from the desktop-app contract): each view is an ES
 // module in ./views/ exporting mount(el, ctx) / unmount(), where
 //   ctx = { api(pathname, opts), openFile(path), openTerminal(instance) }
-// The shell owns tabs/navigation and provides ctx. The full roster (with
-// chat transcript, spawn) lives in the ported views — the shell chrome
-// stays a thin rail so nothing is duplicated.
+// The shell owns tabs/navigation and provides ctx. The full functionality
+// (hierarchy, spawn, brain, markdown) lives in the ported views — the shell
+// chrome stays a thin rail so nothing is duplicated.
+// (groupInstances is not imported here: the feature branch renders the
+// sidebar roster via clusterInstances — lineage clusters with identity keys.)
 import { currentWorkspace, setWorkspace, adoptWorkspace, onWorkspaceChange } from "./views/common.mjs";
 import {
   initTheme, toggleTheme, xtermTheme, onThemeChange,
@@ -14,7 +16,7 @@ import {
 import { createPalette, isPaletteShortcut } from "./palette.mjs";
 import { createViewLifecycle } from "./view-lifecycle.mjs";
 import { reserveKey, whenKeyFree } from "./tab-keys.mjs";
-import { createTerminalTab } from "./terminal-tab.mjs";
+import { createTerminalTab, terminalOptions } from "./terminal-tab.mjs";
 import { createTabChrome, tabKeyAction, focusAfterLastTab } from "./tab-a11y.mjs";
 import { createIntentGate, prepareOwnedOpen } from "./open-intent.mjs";
 import { createWorkspaceSwitcher } from "./workspace-switcher.mjs";
@@ -480,9 +482,8 @@ const pendingTerms = new Set(); // keys with a tab CREATION in flight (post-reso
  * become ambiguous (resolution refuses before dedup can activate). */
 async function openTerminalTab(ref) {
   // A sidebar-tree selection opens its terminal directly — the persistent
-  // roster is the quick path to sessions. The full Instances STAGE (grouped
-  // roster, sorts, read-only transcript) is a separate first-class
-  // destination reachable via the nav rail and the ⌘K palette (shell-nav).
+  // sidebar roster IS the instances surface (there is no Instances stage;
+  // scope correction of PR #29).
   setSidebarMode("instances");
   setNavActive(null);
   refreshContextRoster();
@@ -534,12 +535,11 @@ async function openTerminalTabInner(inst, ws, key, owns) {
   wrap.className = "term-wrap";
 
   const type = terminalTypography();
-  const term = new Terminal({
+  const term = new Terminal(terminalOptions({
     fontSize: type.fontSize,
     fontFamily: type.fontFamily,
     theme: xtermTheme(),
-    scrollback: 5000,
-  });
+  }));
   // live terminals follow app theme + persisted typography preferences
   const offTheme = onThemeChange(() => { term.options.theme = xtermTheme(); });
   const offTypography = onTerminalTypographyChange((next) => {
@@ -582,9 +582,8 @@ async function openTerminalTabInner(inst, ws, key, owns) {
 // ── nav rail ──────────────────────────────────────────────────────────────
 // First-class stage destinations come from shell-nav.mjs (NAV) so tests can
 // prove every entry resolves to a real mount-exporting view. The permanent
-// instance tree in the sidebar stays the quick path to terminals; the
-// Instances STAGE is the full roster with grouping/sorts + read-only
-// transcript (was unreachable pre-merge — merged-state review finding).
+// instance tree in the sidebar is the instances surface itself — selecting
+// an instance opens its terminal; there is no separate Instances stage.
 const navEl = document.getElementById("nav");
 for (const v of NAV) {
   const b = document.createElement("button");

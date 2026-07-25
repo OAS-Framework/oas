@@ -9,6 +9,10 @@
 * **Update**: updated [desktop cluster grouping sibling-link extractor seam](/decisions/desktop-cluster-grouping-sibling-seam.md) to consume the final `siblingInstance`, `relation`, and `relativeTo` kernel contract.
 * **Creation**: promoted [desktop cluster grouping sibling-link extractor seam](/decisions/desktop-cluster-grouping-sibling-seam.md) from the oas-desktop-engineer-agent-relations notes.
 * **Creation**: promoted [no-CLI desktop server tests must hide the real oas CLI](/lessons/no-cli-desktop-server-tests-real-oas-cli.md) from the oas-desktop-engineer-agent-relations notes.
+* **Update**: merged the xterm keypress-leak note into [Shift+Enter through xterm/tmux must be translated to pi's Ctrl+J newline alias](/lessons/shift-enter-newline-via-ctrl-j-alias.md): suppress every keydown/keypress/keyup event for the chord and write `\n` only on keydown, because xterm's keypress path can otherwise emit a submit `\r`.
+* **Creation**: promoted [tmux mouse-on viewers need modifier-forced xterm selection for copy](/lessons/tmux-mouse-on-xterm-selection-copy.md) from the oas-desktop-engineer-session-copy-newline notes.
+* **Creation**: promoted [scope rollback of a merged stage keeps the manifest tests as absence pins](/lessons/scope-rollback-absence-pins.md) from the oas-desktop-engineer-roster-scope-rollback notes.
+* **Update**: linked [shell nav reachability needs an importable manifest](/lessons/shell-nav-reachability-manifest.md) and [dormant surface removals need absence inventory tests](/lessons/dormant-surface-removal-inventory.md) to the scope-rollback absence-pins lesson.
 * **Creation**: promoted [shell nav reachability needs an importable manifest](/lessons/shell-nav-reachability-manifest.md) from the oas-desktop-engineer-roster-grouping notes.
 * **Update**: linked [regression tests must exercise the layer that had the bug](/lessons/regression-tests-bug-layer.md) to the shell nav reachability manifest lesson.
 * **Creation**: promoted [string-coerce workspace metadata before roster grouping and sorting](/lessons/roster-grouping-string-coerce-metadata.md) from the oas-desktop-engineer-roster-grouping notes.
