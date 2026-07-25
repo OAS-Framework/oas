@@ -74,13 +74,17 @@ BEFORE retiring — it is the last gate of the review.
 ## Operational gotchas
 
 - **Strict OKF does not prove harvested knowledge is semantically current**:
-  when a PR includes harvested soul knowledge from multiple feature branches or
-  branch-union conflict resolutions, read the new and changed concepts for stale
-  transitional claims. Ask whether each concept describes the final converged
-  design, or clearly marks historical behavior as superseded and links to the
-  superseding concept; do not let green code/tests plus strict OKF substitute
-  for this semantic consistency check. See
-  `knowledge/lessons/pr-review-knowledge-consistency-after-branch-union.md`.
+  when a PR includes harvested soul knowledge from multiple feature branches,
+  branch-union conflict resolutions, or cherry-picked terminal harvest commits,
+  read the new and changed concepts for stale transitional claims. Ask whether
+  each concept describes the final converged design, or clearly marks historical
+  behavior as superseded and links to the superseding concept; do not let green
+  code/tests plus strict OKF substitute for this semantic consistency check. For
+  harvest cherry-picks, compare the source branch state at the original terminal
+  harvest commit with the PR head for linked or relied-upon concepts, not only
+  the cherry-picked final diff. See
+  `knowledge/lessons/pr-review-knowledge-consistency-after-branch-union.md` and
+  `knowledge/lessons/harvest-cherrypick-parent-state.md`.
 - **Surface removals need user-guidance inventory**: when a PR removes a UI
   surface, stage, view, or destination, do not stop at imports, navigation
   entries, modules, and CSS. Search user-visible fallback/recovery copy, error

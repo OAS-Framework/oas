@@ -1,5 +1,6 @@
 # Lessons
 
+* [Harvest cherry-picks must preserve source branch state, not only terminal commits](harvest-cherrypick-parent-state.md) - A terminal harvest commit can depend on unmerged semantic knowledge fixes in its parent branch, so reviewers must compare source-branch state for linked concepts before accepting a cherry-picked final diff.
 * [PR reviews need semantic knowledge consistency checks after branch-union harvests](pr-review-knowledge-consistency-after-branch-union.md) - Strict OKF validation proves structure, not truth; branch-union harvests need a human semantic read so transitional concepts match the final converged design or mark history as superseded.
 * [xterm custom key overrides must classify the whole physical chord](xterm-custom-key-handler-whole-chord.md) - xterm invokes a custom key event handler across keydown, keypress, and keyup, so a modifier override must suppress every relevant phase while emitting its replacement byte exactly once.
 * [Surface removal inventories must include user-facing recovery copy](surface-removal-inventory-user-guidance.md) - When removing a UI surface, inventory user-facing fallback and recovery text as well as imports, navigation, modules, and styles.
