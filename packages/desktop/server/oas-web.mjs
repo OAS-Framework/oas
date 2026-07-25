@@ -112,6 +112,8 @@ function panelData(wsId) {
       home: i.home, agentsRoot: i.agentsRoot,
       workspace: dirname(i.agentsRoot), repoName: (i.repo || dirname(i.agentsRoot)).split("/").pop(),
       parentInstance: i.parentInstance || null,
+      siblingInstance: i.siblingInstance || null,
+      relation: i.relation || null,
       tmux: i.tmux, git: i.git, task: i.task, next: i.next,
       team: i.team || null,
     })),

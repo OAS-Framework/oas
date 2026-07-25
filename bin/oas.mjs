@@ -26,7 +26,7 @@ import {
   resolveOasConfig, resolveWorkMode, composeInstanceAgentsMd, parseYamlNested, packagedInject, teamAgentRoots,
   findTeamAgent, findTeamInstance, findCapabilityAgent, findInstanceHome, listCapabilityAgents, workspaceOf,
   ensureRoot, findRoot, findAgent, listAgents, listInstances, listAgentDefs, createAgent as coreCreateAgent,
-  spawnInstance, retireInstance, upsertLocalAgent, defaultRepo,
+  spawnInstance, retireInstance, upsertLocalAgent, defaultRepo, RELATIONS,
 } from "../lib/core.mjs";
 
 const args = process.argv.slice(2);
@@ -651,7 +651,7 @@ function spawnCmd() {
   const bail = (code, msg) => (JSON_MODE ? jsonFail(code, msg) : die(msg));
   const note = (msg) => (JSON_MODE ? console.error(msg) : console.log(msg));
   const name = args[1];
-  if (!name || name.startsWith("--")) bail("E_USAGE", "usage: oas spawn <agent> [--task <text>|--task-file <f>] [--purpose <slug>] [--parent <instance>] [--repo <r>] [--work worktree|checkout|attached|workspace] [--work-dir <owner-work>] [--runtime pi|claude] [--model <m>] [--branch <b>] [--instructions-file <f>|--def-file <f>] [--no-launch] [--json]");
+  if (!name || name.startsWith("--")) bail("E_USAGE", "usage: oas spawn <agent> [--task <text>|--task-file <f>] [--purpose <slug>] [--relation child|sibling|parent|unrelated --relative-to <instance>] [--parent <instance>] [--repo <r>] [--work worktree|checkout|attached|workspace] [--work-dir <owner-work>] [--runtime pi|claude] [--model <m>] [--branch <b>] [--instructions-file <f>|--def-file <f>] [--no-launch] [--json]");
   let root;
   try { root = ensureRoot(flag("dir") || process.cwd()); }
   catch (e) { bail("E_NO_DEPLOYMENT", e.message || e); throw e; }
@@ -693,17 +693,30 @@ function spawnCmd() {
       bail("E_BAD_ARGS", `"${name}" is a persistent agent — spawn it without --instructions-file/--def-file`);
     }
   }
-  // Lineage is explicit: --parent names the parent instance (agents spawning
-  // sub-agents pass their own name, e.g. --parent "$OAS_INSTANCE"). Without it,
-  // the spawn is operator-origin and lands top-level — ambient env vars in the
-  // shell are never treated as parentage.
+  // Lineage is explicit: --relation child|sibling|parent|unrelated anchors the new
+  // instance to --relative-to <instance>. --parent X is sugar for
+  // --relative-to X --relation child (agents spawning sub-agents pass their own
+  // name, e.g. --parent "$OAS_INSTANCE"). Without a relation, the spawn is
+  // operator-origin and lands top-level — ambient env vars in the shell are
+  // never treated as parentage.
   const parent = flag("parent");
   if (parent !== undefined && (parent === true || !String(parent).trim())) bail("E_BAD_ARGS", "--parent needs an instance name");
-  if (parent) {
+  let relation = flag("relation");
+  if (relation !== undefined && (relation === true || !String(relation).trim())) bail("E_BAD_ARGS", "--relation needs a value: child|sibling|parent|unrelated");
+  if (relation && !RELATIONS.includes(relation)) bail("E_BAD_ARGS", `unknown --relation "${relation}" (child|sibling|parent|unrelated)`);
+  let relativeTo = flag("relative-to");
+  if (relativeTo !== undefined && (relativeTo === true || !String(relativeTo).trim())) bail("E_BAD_ARGS", "--relative-to needs an instance name");
+  if (relation && relation !== "unrelated" && !relativeTo) bail("E_BAD_ARGS", `--relation ${relation} requires --relative-to <instance>`);
+  if (relativeTo && !relation) bail("E_BAD_ARGS", "--relative-to requires --relation child|sibling|parent");
+  if (relation === "unrelated" && relativeTo) bail("E_BAD_ARGS", "--relation unrelated takes no --relative-to");
+  if (parent && (relation || relativeTo)) bail("E_BAD_ARGS", "--parent is sugar for --relative-to <instance> --relation child — use one form, not both");
+  if (parent) { relation = "child"; relativeTo = parent; }
+  if (relation === "unrelated") relation = undefined;
+  if (relativeTo) {
     // findInstanceHome also sees capability-defined agents' instance homes
     // (local-agents/<name>/ without a local soul) — e.g. a reviewer passing
     // --parent "$OAS_INSTANCE" from a capability agent.
-    if (!findInstanceHome(root, parent) && !findTeamInstance(flag("dir") || process.cwd(), parent)) bail("E_PARENT_NOT_FOUND", `--parent "${parent}" does not match any known instance`);
+    if (!findInstanceHome(root, relativeTo) && !findTeamInstance(flag("dir") || process.cwd(), relativeTo)) bail(parent ? "E_PARENT_NOT_FOUND" : "E_RELATIVE_NOT_FOUND", `${parent ? "--parent" : "--relative-to"} "${relativeTo}" does not match any known instance`);
   }
   const taskText = flag("task");
   if (taskText === true) bail("E_BAD_ARGS", "--task needs a value (use --task-file for long tasks)");
@@ -713,7 +726,7 @@ function spawnCmd() {
   let r;
   try {
     r = spawnInstance(root, agent, {
-      purpose: flag("purpose"), task: taskText, taskFile: taskFileFlag, parent,
+      purpose: flag("purpose"), task: taskText, taskFile: taskFileFlag, relation, relativeTo,
       repo: flag("repo") || agent.repo || defaultRepo(workspaceOf(root)) || defaultRepo(process.cwd()),
       work: flag("work"), workDir: flag("work-dir"), runtime: flag("runtime"), model: flag("model"), branch: flag("branch"),
       launch: !args.includes("--no-launch"),
@@ -726,6 +739,7 @@ function spawnCmd() {
       branch: r.branch || null, launched: r.launched, warnings: r.warnings || [],
       tmux: r.tmux || null, repo: r.repo || null, runtime: r.runtime || null,
       model: r.model || null, parent: r.parentInstance || null,
+      sibling: r.siblingInstance || null, relation: r.relation || null,
       spawnOrigin: r.spawnOrigin, attach: r.attach,
     });
     return;
@@ -1044,8 +1058,10 @@ Usage:
   oas spawn <agent> [--task <text>]         spawn an instance (tmux; --no-launch
       [--purpose <slug>] [--repo <r>]       = scaffold only); --instructions-file/
       [--parent <instance>]                 --def-file creates a local agent;
-      [--work worktree|checkout|attached|workspace]  --parent nests under an existing
-      [--work-dir <owner-work>] [--runtime pi|claude] [--model <m>] [--branch <b>]  instance (default: top-level)
+      [--relation child|sibling|parent|unrelated]    --relation + --relative-to anchor the
+      [--relative-to <instance>]            new instance to an existing one; --parent X
+      [--work worktree|checkout|attached|workspace]  = sugar for --relative-to X --relation
+      [--work-dir <owner-work>] [--runtime pi|claude] [--model <m>] [--branch <b>]  child (default: unrelated, top-level)
       [--instructions-file <f>|--def-file <f>] [--no-launch] [--json]
                                             with team: declared, unknown local souls
                                             resolve across the team scope's repos
