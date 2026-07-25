@@ -9,7 +9,7 @@
 //   * integrated terminal: node-pty running `tmux attach-session` per
 //     terminal tab, bytes streamed to xterm.js over IPC. Closing a tab kills
 //     the pty ONLY — the tmux session is the durable host and must survive.
-import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from "electron";
 import { spawn, execFileSync } from "node:child_process";
 import { existsSync, readFileSync, realpathSync, writeFileSync, lstatSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -426,6 +426,20 @@ ipcMain.on("term:close", (e, id) => {
 });
 
 // ---- window -------------------------------------------------------------
+// Application menu: without an Edit role menu, Cmd+C/V/X/A are dead in the
+// renderer on macOS — transcript text could be selected but never copied.
+// Role-based menus only; no custom accelerators or click handlers.
+function installAppMenu() {
+  const template = [
+    ...(process.platform === "darwin" ? [{ role: "appMenu" }] : []),
+    { role: "fileMenu" },
+    { role: "editMenu" },
+    { role: "viewMenu" },
+    { role: "windowMenu" },
+  ];
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
 async function createWindow() {
   const win = new BrowserWindow({
     width: 1400,
@@ -452,9 +466,25 @@ async function createWindow() {
     if (/^https?:/.test(url)) shell.openExternal(url);
   });
   await win.loadFile(join(HERE, "renderer", "index.html"));
+  // Right-click copy for selected transcript/view text (and standard edit
+  // actions in editable fields). Menu items come from Electron's editFlags —
+  // nothing shows when nothing is applicable.
+  win.webContents.on("context-menu", (_event, params) => {
+    const items = [];
+    if (params.isEditable) {
+      items.push({ role: "cut", enabled: params.editFlags.canCut });
+      items.push({ role: "copy", enabled: params.editFlags.canCopy });
+      items.push({ role: "paste", enabled: params.editFlags.canPaste });
+      items.push({ role: "selectAll", enabled: params.editFlags.canSelectAll });
+    } else if (params.selectionText.trim()) {
+      items.push({ role: "copy", enabled: params.editFlags.canCopy });
+    }
+    if (items.length) Menu.buildFromTemplate(items).popup({ window: win });
+  });
 }
 
 app.whenReady().then(async () => {
+  installAppMenu();
   sweepOrphanViewers(); // a previously crashed desktop must not leak viewer sessions
   try { await ensureServer(); }
   catch (e) { console.error(`oas-desktop: ${e.message}`); }
