@@ -65,6 +65,10 @@ body {
 .ctx-list { flex: 1; min-height: 0; overflow-y: auto; padding: 0 7px 14px; }
 .ctx-repo { min-height: 24px; padding: 4px 8px 2px; margin-top: 0; color: var(--faint); font-size: 10.5px; font-weight: 600;
             overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Anonymous cluster boundary: pure spacing, no visible glyph (human re-test).
+   The element stays in the DOM as role=separator so AT users still get the
+   group boundary. */
+.ctx-cluster-sep { height: 12px; }
 .ctx-tree-row { position: relative; width: 100%; min-height: 42px; display: flex; align-items: center;
                 padding-left: calc(3px + var(--depth) * 14px); }
 .ctx-inst { min-width: 0; flex: 1; height: 40px; display: flex; align-items: center; gap: 8px;

@@ -73,6 +73,19 @@ export function clusterInstances(instances, { links = instanceLinks } = {}) {
   return clusters;
 }
 
+/** Anonymous cluster boundary for the instances sidebar (human re-test on
+ * feature/agent-relations): NO visible glyph or name — the group reads from
+ * spacing — but the element keeps role=separator + an aria-label with the
+ * member count so AT users still get the boundary. Importable so the
+ * regression exercises the exact builder the shell uses. */
+export function clusterSeparator(doc, memberCount) {
+  const el = doc.createElement("div");
+  el.className = "ctx-cluster-sep";
+  el.setAttribute("role", "separator");
+  el.setAttribute("aria-label", `Agent cluster of ${memberCount} related instances`);
+  return el;
+}
+
 export function hasInstanceChildren(instances, instance) {
   return instances.some((candidate) => candidate.parentInstance === instance);
 }

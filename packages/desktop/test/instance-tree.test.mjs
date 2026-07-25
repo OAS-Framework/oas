@@ -200,3 +200,16 @@ test("clusterInstances: cluster key is deterministic under liveness changes (rev
   assert.equal(keyOf(tree(true)), "z-root");
   assert.equal(keyOf(tree(false)), "z-root", "root name labels the cluster even when idle");
 });
+
+test("sidebar cluster separator: accessible boundary with NO visible glyph or name (human re-test)", () => {
+  const dom = new JSDOM("<!doctype html><html><body></body></html>");
+  return import("../renderer/instance-tree.mjs").then((m) => {
+    const el = m.clusterSeparator(dom.window.document, 3);
+    assert.equal(el.getAttribute("role"), "separator", "AT boundary preserved");
+    assert.match(el.getAttribute("aria-label"), /3 related instances/, "label carries the member count");
+    assert.equal(el.textContent, "", "NO visible glyph or text — the boundary reads from spacing only");
+    assert.ok(!el.getAttribute("aria-label").includes("◎"), "no glyph smuggled into the label");
+    assert.equal(el.className, "ctx-cluster-sep");
+    dom.window.close();
+  });
+});
