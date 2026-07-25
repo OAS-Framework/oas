@@ -75,8 +75,8 @@ export function mount(el, ctx) {
   // dispatch stays view-local and editable-guarded.
   s.q("souls-grid").addEventListener("keydown", (e) => onGridKey(s, e));
   s.viewActions = [
-    { id: "spawn.filter", chord: "/", run: () => s.q("filter").focus() },
-    { id: "spawn.brain", chord: "b", run: () => brainOfFocusedCard(s) },
+    { id: "spawn.filter", run: () => s.q("filter").focus() },
+    { id: "spawn.brain", run: () => brainOfFocusedCard(s) },
   ];
   el.querySelector(".souls").addEventListener("keydown", (e) => {
     // Esc cancels the open spawn form from anywhere inside it (incl. the

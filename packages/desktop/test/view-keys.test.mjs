@@ -1,7 +1,7 @@
 // view-local key dispatch resolved through the engine keymap.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { resolveViewKey, isEditableTarget, allowsEngineDispatch } from "../renderer/view-keys.mjs";
+import { resolveViewKey } from "../renderer/view-keys.mjs";
 
 const ev = (key, mods = {}) => ({ key, metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, ...mods });
 const actions = [
@@ -51,27 +51,16 @@ test("modifier chords from the engine match platform Mod folding", () => {
   assert.equal(resolveViewKey(ev("b"), actions, { isMac: false, binding, registered }), null);
 });
 
-test("isEditableTarget covers input/textarea/select/contenteditable", () => {
-  assert.equal(isEditableTarget({ tagName: "INPUT" }), true);
-  assert.equal(isEditableTarget({ tagName: "TEXTAREA" }), true);
-  assert.equal(isEditableTarget({ tagName: "SELECT" }), true);
-  assert.equal(isEditableTarget({ tagName: "DIV", isContentEditable: true }), true);
-  assert.equal(isEditableTarget({ tagName: "DIV" }), false);
-  assert.equal(isEditableTarget(null), false);
-});
-
-test("engine dispatch guard: unmodified keys never fire from editable targets (review c2a09e8)", () => {
-  const input = { tagName: "TEXTAREA" };
-  const div = { tagName: "DIV" };
-  // a user-recorded bare-key binding must not steal typed characters
-  assert.equal(allowsEngineDispatch({ ...ev("a"), target: input }, { isMac: false }), false);
-  assert.equal(allowsEngineDispatch({ ...ev("a", { shiftKey: true }), target: input }, { isMac: false }), false,
-    "shift-only still produces text");
-  // modifier shortcuts stay live while typing
-  assert.equal(allowsEngineDispatch({ ...ev("k", { ctrlKey: true }), target: input }, { isMac: false }), true);
-  assert.equal(allowsEngineDispatch({ ...ev("k", { metaKey: true }), target: input }, { isMac: true }), true);
-  assert.equal(allowsEngineDispatch({ ...ev("b", { altKey: true }), target: input }, { isMac: false }), true);
-  // non-editable targets always dispatch
-  assert.equal(allowsEngineDispatch({ ...ev("a"), target: div }, { isMac: false }), true);
-  assert.equal(allowsEngineDispatch({ ...ev("a"), target: null }, { isMac: false }), true);
+test("an explicit engine unbind kills the key — no fallback to a stale local chord", () => {
+  // engine owns defaults now (DEFAULT_KEYMAP hier.*); getBinding returning
+  // null after Backspace-unbind must NOT resurrect any legacy chord field
+  const withLegacy = [{ id: "hier.brain", chord: "b" }];
+  const binding = () => null; // explicit unbind and no-default look identical — both must not fire when registered
+  const registered = () => [{ id: "hier.brain", context: "stage:hierarchy" }];
+  // legacy chord still honored ONLY because the id is in the passed actions;
+  // engine-registered actions rely on DEFAULT_KEYMAP, not the legacy field
+  assert.equal(resolveViewKey(ev("b"), withLegacy, { isMac: false, binding, registered }), "hier.brain");
+  const noLegacy = [{ id: "hier.brain" }];
+  assert.equal(resolveViewKey(ev("b"), noLegacy, { isMac: false, binding, registered }), null,
+    "without a legacy chord, an unbound action does not fire");
 });

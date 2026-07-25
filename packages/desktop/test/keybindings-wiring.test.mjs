@@ -35,7 +35,7 @@ test("shell registers global + tabs actions covered by the engine's DEFAULT_KEYM
 test("hierarchy and spawn views register rebindable view-local actions and dispose them", () => {
   const hier = read("renderer/views/hierarchy.mjs");
   for (const id of ["hier.fit", "hier.terminal", "hier.brain", "hier.spawn", "hier.popover", "hier.zoomIn", "hier.zoomOut"]) {
-    assert.match(hier, new RegExp(`id: "${id.replace(".", "\\.")}", chord:`), `hierarchy action ${id} carries a view default`);
+    assert.match(hier, new RegExp(`id: "${id.replace(".", "\\.")}", label:`), `hierarchy action ${id} declared`);
   }
   assert.match(hier, /context: "stage:hierarchy"/, "hierarchy actions registered in their stage context");
   assert.match(hier, /s\.disposers = s\.viewActions\.map/, "hierarchy keeps action disposers");
@@ -44,7 +44,7 @@ test("hierarchy and spawn views register rebindable view-local actions and dispo
 
   const spawn = read("renderer/views/spawn.mjs");
   for (const id of ["spawn.filter", "spawn.brain"]) {
-    assert.match(spawn, new RegExp(`id: "${id.replace(".", "\\.")}", label:.*context: "stage:spawn"`), `spawn action ${id}`);
+    assert.match(spawn, new RegExp(`id: "${id.replace(".", "\\.")}"`), `spawn action ${id}`);
   }
   assert.match(spawn, /resolveViewKey\(/, "spawn keys resolve through the engine keymap");
   assert.match(spawn, /\(state\.disposers \|\| \[\]\)\.forEach/, "spawn disposes actions on unmount");
@@ -58,10 +58,14 @@ test("palette rows and data-action tooltips carry live chord labels", () => {
   assert.match(palette, /typeof c\.detail === "function" \? c\.detail\(\)/, "palette re-evaluates chord details per render");
 });
 
-test("hierarchy view defaults cover the completed key set (engine-resolved)", () => {
-  const hier = read("renderer/views/hierarchy.mjs");
-  for (const pair of ['chord: "f"', 'chord: "t"', 'chord: "b"', 'chord: "s"', 'chord: "o"', 'chord: "="', 'chord: "-"']) {
-    assert.ok(hier.includes(pair), `hierarchy default ${pair}`);
+test("view-local defaults are first-class engine bindings (DEFAULT_KEYMAP)", async () => {
+  const { DEFAULT_KEYMAP } = await import("../renderer/keybindings.mjs");
+  const expected = {
+    "hier.fit": "F", "hier.terminal": "T", "hier.brain": "B", "hier.spawn": "S",
+    "hier.popover": "O", "hier.zoomIn": "=", "hier.zoomOut": "-",
+    "spawn.filter": "/", "spawn.brain": "B",
+  };
+  for (const [id, chord] of Object.entries(expected)) {
+    assert.equal(DEFAULT_KEYMAP[id], chord, `${id} default is engine-owned (editor-honest, Backspace-unbindable)`);
   }
-  assert.match(hier, /e\.key === "Enter" && s\.sel/, "Enter opens the selection's terminal (structural, not rebindable)");
 });

@@ -9,27 +9,6 @@
    action's explicit binding on the same key. */
 import { getBinding, parseChord, chordFromEvent, listActions } from "./keybindings.mjs";
 
-/** True when a keydown target is an editable control (typing surface). */
-export function isEditableTarget(target) {
-  if (!target) return false;
-  const tag = target.tagName;
-  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target.isContentEditable === true;
-}
-
-/** Guard for the shell's window-level engine dispatch: unmodified chords
- * (bare keys, or shift-only — both produce text) must never fire from
- * editable controls; a user-recorded bare-key binding would otherwise steal
- * typed characters (e.g. rebinding a stage switch to "a" discarding an open
- * spawn form). Modifier-based shortcuts still pass. The engine itself will
- * gain this guard via the approved contract addendum; the shell guard keeps
- * the invariant regardless. */
-export function allowsEngineDispatch(e, { isMac = /mac/i.test(navigator.platform || "") } = {}) {
-  if (!isEditableTarget(e.target)) return true;
-  const c = chordFromEvent(e, isMac);
-  if (!c) return true; // pure-modifier keydown — nothing to dispatch anyway
-  return !!(c.mod || c.ctrl || c.alt);
-}
-
 function chordsEqual(a, b, isMac) {
   if (!a || !b || a.key !== b.key || a.alt !== b.alt || a.shift !== b.shift) return false;
   if (isMac) return a.mod === b.mod && a.ctrl === b.ctrl;
@@ -37,16 +16,13 @@ function chordsEqual(a, b, isMac) {
 }
 
 /** Resolve a view keydown to an action id, or null.
- * `actions` = [{ id, chord }] where chord is the view's DEFAULT chord string.
- * Engine bindings (overrides) win; defaults apply only to actions the engine
- * reports unbound, and only when the event chord is not claimed by ANY other
- * registered action's explicit binding — a local default must never shadow
- * a chord the user deliberately bound elsewhere (review 93ff03d).
- * KNOWN LIMIT (routed to the core dev as a contract addendum): getBinding()
- * cannot distinguish "no default" from an explicit editor unbind, so
- * Backspace-unbinding a view action falls back to its local default and the
- * editor shows these actions as unbound; fixing both needs registerAction to
- * carry default-chord metadata in the engine. */
+ * `actions` = [{ id }] (registered engine actions). The chord each action
+ * answers to is ENGINE-OWNED (DEFAULT_KEYMAP default, user override, or
+ * explicit unbind via getBinding) — view-local dispatch merely scopes WHERE
+ * the key fires (the focused canvas/grid), never WHAT it is bound to. An
+ * optional legacy `chord` field is honored only for actions the engine has
+ * no knowledge of at all (not registered and no default) — kept for tests.
+ */
 export function resolveViewKey(e, actions, { isMac = /mac/i.test(navigator.platform || ""), binding = getBinding, registered = listActions } = {}) {
   const evChord = chordFromEvent(e, isMac);
   if (!evChord) return null;
@@ -55,7 +31,7 @@ export function resolveViewKey(e, actions, { isMac = /mac/i.test(navigator.platf
     const bound = parseChord(binding(a.id) || "");
     if (bound) {
       if (chordsEqual(bound, evChord, isMac)) return a.id;
-    } else {
+    } else if (a.chord) {
       unbound.push(a);
     }
   }

@@ -151,6 +151,18 @@ export const DEFAULT_KEYMAP = Object.freeze({
   "terminal.fontBigger": "Mod+=",
   "terminal.fontSmaller": "Mod+-",
   "terminal.fontReset": "Mod+0",
+  // view-local stage actions (registered by their views on mount; dispatch
+  // is view-scoped — see renderer/view-keys.mjs — but the DEFAULTS live here
+  // so the editor shows them honestly and Backspace/reset behave):
+  "hier.fit": "F",
+  "hier.terminal": "T",
+  "hier.brain": "B",
+  "hier.spawn": "S",
+  "hier.popover": "O",
+  "hier.zoomIn": "=",
+  "hier.zoomOut": "-",
+  "spawn.filter": "/",
+  "spawn.brain": "B",
 });
 
 // Action ids allowed to fire inside .xterm on Linux/Windows, where their
