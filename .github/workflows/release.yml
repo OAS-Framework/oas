@@ -129,8 +129,8 @@ jobs:
   # ------------------------------------------------------------ Desktop side
   # Interface seam owned by the Desktop engineer: each matrix job checks out
   # the exact tag SHA, bumps packages/desktop to the tag version, builds the
-  # installers via `npm run dist` (electron-builder internals are the
-  # Desktop package's concern), and uploads a `desktop-<os>-<arch>` artifact
+  # ad-hoc signed installers via `npm run dist` (electron-builder internals are
+  # the Desktop package's concern), and uploads a `desktop-<os>-<arch>` artifact
   # containing only the distributable files for that platform.
   #
   # packages/desktop deliverables for this seam (tracked in
@@ -160,8 +160,9 @@ jobs:
             builder_args: --x64
     runs-on: ${{ matrix.os }}
     env:
-      # macOS installers ship AD-HOC signed (no Developer ID, not notarized) —
-      # certificate auto-discovery stays disabled; no signing secrets exist here.
+      # Desktop installers ship AD-HOC signed — NOT Developer ID signed and
+      # NOT notarized. Disable certificate discovery so no keychain identity
+      # can leak in; ad-hoc signing needs no secrets.
       CSC_IDENTITY_AUTO_DISCOVERY: "false"
     steps:
       - uses: actions/checkout@v4
@@ -207,10 +208,12 @@ jobs:
           codesign --verify --deep --strict --verbose=2 "$APP"
 
       # Release and build-only CI run the SAME proven smoke: artifact
-      # inventory + spawn-helper mode + node-pty under the packaged Electron
-      # ABI. GUI launch is operator/maintainer-owned post-publish acceptance;
-      # headless CI has no reliable interactive windowserver for ad-hoc-signed,
-      # non-notarized apps.
+      # inventory + strict deep codesign verification of the packaged .app
+      # (macOS legs — unconditional; rejects the v0.18.2 partial/absent
+      # signature class) + spawn-helper mode + node-pty under the packaged
+      # Electron ABI. GUI launch is operator/maintainer-owned post-publish
+      # acceptance; headless CI has no reliable interactive windowserver for
+      # apps without Developer ID trust.
       - name: Installed-artifact smoke (build-verify)
         working-directory: packages/desktop
         env:

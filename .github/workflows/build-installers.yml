@@ -45,10 +45,19 @@ jobs:
             builder_args: --x64
     runs-on: ${{ matrix.os }}
     env:
-      # macOS artifacts are AD-HOC signed (no Developer ID, not notarized) —
-      # certificate auto-discovery stays disabled (same as the release
-      # matrix). No signing secrets are referenced here.
+      # Ad-hoc signed, NOT Developer ID signed and NOT notarized — disable
+      # certificate discovery (same as the release matrix) so no keychain
+      # identity can leak in; ad-hoc signing (electron-builder identity "-")
+      # is deterministic and needs no secrets.
       CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      # electron-builder SKIPS mac signing on pull_request builds
+      # (builder-util isPullRequest() sees GITHUB_BASE_REF) unless this is
+      # set — without it the PR legs ship the exact unsigned/partial-adhoc
+      # defect this workflow gates against and the codesign phase fails.
+      # Safe here: no signing secrets exist in this repo and the identity is
+      # the deterministic ad-hoc "-" — there is nothing for a fork PR to
+      # exfiltrate.
+      CSC_FOR_PULL_REQUEST: "true"
     steps:
       - uses: actions/checkout@v4
 
@@ -57,9 +66,10 @@ jobs:
           node-version: 22
 
       # (No xvfb / display needed: the build-verify smoke runs the static
-      # inventory + node-pty ABI checks, not the packaged GUI launch — that
-      # needs an interactive windowserver a non-notarized app can't get on CI
-      # runners and is verified out of band.)
+      # inventory + strict codesign + node-pty ABI checks, not the packaged
+      # GUI launch — that needs an interactive windowserver an app without
+      # Developer ID trust can't get on CI runners and is verified out of
+      # band.)
       - name: Install deps (root + packages/desktop)
         run: |
           npm ci
@@ -72,7 +82,7 @@ jobs:
         if: runner.os == 'macOS' && matrix.arch == 'x64'
         run: sudo softwareupdate --install-rosetta --agree-to-license
 
-      - name: Build installers (macOS ad-hoc signed)
+      - name: Build ad-hoc signed installers
         working-directory: packages/desktop
         run: npm run dist -- ${{ matrix.builder_args }}
 
@@ -93,11 +103,13 @@ jobs:
           codesign --verify --deep --strict --verbose=2 "$APP"
 
       # Installed-artifact smoke, BUILD-VERIFY mode: inventory (artifact names
-      # + plausible sizes) + node-pty under the packaged Electron ABI. The
-      # packaged GUI LAUNCH is skipped (OAS_SMOKE_BUILD_VERIFY authorizes the
-      # skip under CI) — it needs a display non-notarized apps don't get on CI
-      # runners; the installer BUILD + native-module ABI are the meaningful
-      # evidence here.
+      # + plausible sizes) + strict deep codesign verification of the packaged
+      # .app bundle (macOS legs — unconditional, rejects the v0.18.2
+      # partial/absent-signature class) + node-pty under the packaged Electron
+      # ABI. The packaged GUI LAUNCH is skipped (OAS_SMOKE_BUILD_VERIFY
+      # authorizes the skip under CI) — it needs a display ad-hoc-signed apps
+      # don't get on CI runners; the installer BUILD + signature +
+      # native-module ABI are the meaningful evidence here.
       - name: Installed-artifact smoke (build-verify)
         working-directory: packages/desktop
         env:

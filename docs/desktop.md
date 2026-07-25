@@ -25,11 +25,12 @@ build-provenance attestations are published for every asset
 ### macOS: ad-hoc signed build
 
 The macOS installers are **ad-hoc signed — not Developer ID signed and not
-notarized** (no Apple signing credentials exist yet — nothing about a
-release claims otherwise). The `.app` bundles carry complete ad-hoc
-signatures that pass `codesign --verify --deep --strict`, but ad-hoc
-signatures carry no identified-developer identity, so Gatekeeper will still
-block the first launch:
+notarized** (no Apple signing credentials exist; nothing about this release
+claims identified-developer trust). The app bundle carries a complete,
+valid ad-hoc signature — every nested helper and framework is signed and
+the bundle passes `codesign --verify --deep --strict` — but ad-hoc
+signatures carry no identity Gatekeeper can trust, so it will still block
+the first launch of a downloaded (quarantined) copy:
 
 - Right-click the app → **Open** → **Open** (once; subsequent launches are
   normal), or
@@ -164,7 +165,9 @@ not weaken the pre-publish build/inventory/ABI gates.
 
 Developer docs live in [`packages/desktop/README.md`](../packages/desktop/README.md)
 (run, architecture, view contract) — packaging is `npm run dist`
-(electron-builder; macOS ad-hoc signed, certificate auto-discovery disabled) and
+(electron-builder; macOS ad-hoc signed — not Developer ID, not notarized —
+certificate auto-discovery disabled) and
 `npm run dist:smoke` verifies the packed artifact. Build/release CI uses the
-marked build-verify mode (inventory + node-pty ABI, no GUI launch); a local
+marked build-verify mode (inventory + strict codesign verification +
+node-pty ABI, no GUI launch); a local
 interactive run may also exercise the launch phase.
