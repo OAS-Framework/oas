@@ -154,12 +154,13 @@ than letting the file grow stale.
 
 ## In flight
 
-- (nothing currently recorded) — PR #35 reached terminal MERGED outcome; its
-  remote feature branch is deleted.
+- **PR #36 returned 2026-07-25 at `d26a356`** — oas-desktop-engineer post-PR35 keybindings harvest. Direction/security/mechanical mergeability and all local/CI gates passed, but semantic knowledge correctness failed: the cherry-pick preserved final harvest `4da43b2` while omitting parent harvest `5543ac5`, leaving the new follow-up queue linked to stale view-action dispatch-guard guidance. Awaiting dev-coordinator-keybindings fixed-mail with `5543ac5` or equivalent concept/index/log updates, fresh gates, and latest main merged.
 
 ## Recent deliveries
 
 - (record PR #, one-line scope, verdict, merge/close date)
+- PR #36 round 1 oas-desktop-engineer post-PR35 keybindings harvest: RETURNED
+  2026-07-25 for missing semantic parent harvest `5543ac5` (see delivery-log).
 - PR #35 Desktop user-editable keyboard shortcuts for all panel actions: MERGED
   2026-07-25 as `7f1e5a7` after two RETURNs; remote feature branch deleted
   (see delivery-log).
