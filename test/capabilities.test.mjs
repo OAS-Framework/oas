@@ -1213,6 +1213,18 @@ test("attached owner discovery reaches all-local sibling scopes (no agents/ dir)
       /ambiguous/,
       "shadowed all-local owner rejected even with explicit --parent");
     assert.equal(existsSync(join(rootB, "dev", "instances", "dev-att-sh")), false, "no stray home scaffolded");
+
+    // Retire-splice must ALSO reach the all-local scope (its nonexistent
+    // agents/ root is in the scan set): an orphan homed under A's
+    // local-agents whose parent lives in repo B gets repaired when that
+    // parent retires — this fails if the splice drops unresolvable roots.
+    const bossB = spawnInstance(rootB, findAgent(rootB, "dev"), { instance: "dev-la-boss", launch: false });
+    const orphanA = spawnInstance(rootA, helperAgent, { instance: "helper-orphan", relation: "child", relativeTo: bossB.instance, launch: false });
+    const orphanMeta = () => JSON.parse(readFileSync(join(orphanA.home, "instance.json"), "utf8"));
+    assert.equal(orphanMeta().parentInstance, bossB.instance, "cross-repo child into the all-local scope");
+    const rr = retireInstance(rootB, bossB.instance, { keepDir: false });
+    assert.ok(rr.relinked?.some((x) => x.instance === orphanA.instance), "splice reports the all-local orphan");
+    assert.equal(orphanMeta().parentInstance, undefined, "all-local orphan repaired to root");
   } finally { process.env.PATH = oldPath; }
 });
 
