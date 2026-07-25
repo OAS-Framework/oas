@@ -148,6 +148,9 @@ export function formatChord(chord, isMac = navigator.platform.includes("Mac")) {
 
 /** THE window keydown handler — the shell installs exactly one. */
 export function handleKeydown(e, opts = {}) {
+  // View-local handlers (e.g. hierarchy's canvas onKey) run first and
+  // preventDefault; the engine never double-dispatches a consumed key.
+  if (e.defaultPrevented) return false;
   const target = e.target;
   const insideTerminal = !!target?.closest?.(".xterm");
   const editable = !!target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA"
