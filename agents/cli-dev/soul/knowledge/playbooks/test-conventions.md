@@ -65,7 +65,11 @@ All kernel/CLI behavior tests live in `test/capabilities.test.mjs`
   For public ref/branch values in rollback probes, use a ref accepted by
   `git check-ref-format` that contains `$(touch${IFS}<marker>)`, assert the
   marker never appears, and exercise probe failures separately from absence;
-  see [rollback probes](/lessons/rollback-probes-argv-and-fail-closed.md).
+  see [rollback probes](/lessons/rollback-probes-argv-and-fail-closed.md). To
+  cover worktree canonicalization, create the worktree through a symlinked
+  agents root, force `git worktree remove` to fail through a delegating fake Git
+  wrapper, and assert rollback reports the canonical registered path; see
+  [canonical worktree verification](/lessons/canonical-worktree-verification.md).
   Restore modes in cleanup before deleting the temp tree. If the test replaces
   PATH wholesale, include symlinks for tools the kernel/hooks and shims still
   shell out to (`git`, `node`, `chmod`, `sh`, `grep`, `sed`, `mv`, `cat`,

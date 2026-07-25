@@ -1,6 +1,9 @@
 # Knowledge Log
 
 ## 2026-07-25
+* **Creation**: [canonical-worktree-verification](/lessons/canonical-worktree-verification.md) records the symlink canonicalization rollback gotcha: capture `realpath(work)` before removal and compare exact NUL-delimited `git worktree list --porcelain -z` records.
+* **Update**: [rollback-probes-argv-and-fail-closed](/lessons/rollback-probes-argv-and-fail-closed.md) links the general argv-safe, fail-closed rule to exact canonical worktree record parsing.
+* **Update**: [test-conventions](/playbooks/test-conventions.md) records the symlinked-agents-root regression fixture for canonical Git worktree rollback diagnostics.
 * **Creation**: [rollback-probes-argv-and-fail-closed](/lessons/rollback-probes-argv-and-fail-closed.md) records that public refs in rollback probes must be argv-safe and that unverifiable cleanup probes are incomplete, not absent.
 * **Update**: [test-conventions](/playbooks/test-conventions.md) records the malicious-ref rollback probe test and the exact-edit/stash rule for temporary bug simulations.
 * **Update**: [cross-instance-writes-commit-last](/lessons/cross-instance-writes-commit-last.md) records structured failure channels and effect verification for hook, tmux, and git rollback cleanup truthfulness.
