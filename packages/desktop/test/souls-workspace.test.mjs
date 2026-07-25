@@ -448,9 +448,11 @@ test("Spawn modal: pre-relations CLI gates the RELATED options + picker disabled
   const common = await import("../renderer/views/common.mjs");
   const spawn = await import("../renderer/views/spawn.mjs");
   const cliStatusMod2 = await import("../renderer/views/cli-status.mjs");
-  // verified CLI, but PROVEN relations-incapable (relations:false from the probe)
+  // verified CLI, but PROVEN relations-incapable (relations:false from the
+  // probe). relationsMin is deliberately OMITTED: the note must fall back to
+  // spawn.mjs's own constant, so a stale fallback fails here (review 69bf9dc).
   const CLI_OLD = { ok: true, bin: "/seed/oas", version: "0.18.0", source: "path",
-    required: { desktopApi: 1, range: ">=0.18.0 <0.19.0" }, relations: false, relationsMin: "0.18.6", probedAt: 1, tried: [] };
+    required: { desktopApi: 1, range: ">=0.18.0 <0.19.0" }, relations: false, probedAt: 1, tried: [] };
   await cliStatusMod2.refreshCli({ api: async () => ({ ok: true, status: 200, json: async () => CLI_OLD }) });
   const previousWs = common.currentWorkspace();
   const agent = { name: "dev", agentsRoot: "/a", description: "", runtime: "pi", work: "workspace", repo: true, repoName: "r" };
@@ -478,7 +480,8 @@ test("Spawn modal: pre-relations CLI gates the RELATED options + picker disabled
     assert.ok(doc.querySelector(".spawn-dialog .frelto"), "reference picker still rendered");
     const note = doc.querySelector(".spawn-dialog .frelnote");
     assert.ok(note, "explanatory note present");
-    assert.match(note.textContent, /oas >= 0\.18\.6/, "note names the required version");
+    assert.match(note.textContent, /oas >= 0\.18\.6/,
+      "note names the required version FROM THE RENDERER FALLBACK (fixture omits relationsMin)");
   } finally {
     spawn.unmount();
     await seedCliAvailable(); // restore shared CLI state for later suites
