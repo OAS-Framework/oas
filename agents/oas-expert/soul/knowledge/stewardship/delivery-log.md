@@ -24,6 +24,58 @@ decisions/ and referenced from here.
 
 ---
 
+## PR #29 (round 2) — Desktop UX fixes re-review (2026-07-25)
+- verdict: RETURNED at exact head `23e3c71` for mergeability only. The round-1
+  correctness ask is fully fixed by `9c7c5c6`: sort persistence is a
+  canonical-workspace-ID map, resynced on explicit switch and silent adoption,
+  with safe legacy/corrupt fallbacks and behavioral A→B→A coverage. Fresh full
+  gate PASS: 379 tests pass + one intentional node-pty ABI skip; check/validate/
+  pack pass; Desktop soul OKF strict 71/0/0. Direction/security remain PASS.
+  Mergeability FAIL: PR #30 advanced `origin/main` after the branch's earlier
+  main merge; GitHub reports DIRTY/CONFLICTING and `git merge-tree` reproduces
+  the conflict in `agents/oas-desktop-engineer/soul/knowledge/log.md`. Author
+  must merge latest main, union the append-only log, and return green exact-head
+  PR + installer checks.
+- owner: dev-coordinator-parallel-2 · coordinator: dev-coordinator-parallel-2
+- taught us: same-soul feature and harvest PRs conflict even when product code
+  is independent; final handoff must follow all parallel knowledge harvests and
+  bind to current main immediately before merge.
+
+## PR #30 — post-v0.18.3 corrected-installer knowledge harvest (2026-07-25)
+- verdict: MERGED as merge commit `935d142` at exact head `a220a306`. Product
+  direction, correctness, security, and mergeability PASS. Scope is 13 files,
+  all under cli-dev or oas-desktop-engineer soul knowledge/skills; no product,
+  release, manifest, or framework behavior changes. Strict repo OKF PASS across
+  all 8 bundles (0 errors, 0 warnings). Independent merged-state reviewer
+  `reviewer-a220a30` on required `github-copilot/claude-opus-4.8:high` APPROVED
+  with no blockers/security findings; required CI green. Maintainer approval was
+  recorded as a PR comment because the shared GitHub account cannot approve its
+  own PR.
+- owner: cli-dev + oas-desktop-engineer memory harvests · coordinator:
+  dev-coordinator-1
+- taught us: a knowledge-only integration still benefits from an exact-head
+  merged-state review because security guidance can alter operator behavior.
+  Here the aweb mismatch skill stayed safe: diagnostics are read-only, it bans
+  ad hoc identity repair, and sensitive actions still require independent
+  confirmation. The sole reviewer nit (updating a concept timestamp alongside
+  an Update log entry) was harmless.
+
+## PR #29 (round 1) — Desktop UX fixes: spawn/chat/roster/workspace tabs (2026-07-25)
+- verdict: RETURNED at exact head `fb1f1bc`. Direction and security PASS;
+  clean scratch full gate PASS (359 tests pass, one intentional node-pty ABI
+  skip; check/validate/pack; Desktop soul OKF strict 71/0/0). Correctness FAIL:
+  the PR promises per-workspace roster sort persistence, but
+  `views/instances.mjs` reads/writes one global `oas.desktop.rosterSort` key,
+  so A's choice leaks into B; asked for canonical-workspace scoping and an
+  A→B→A regression. Mergeability FAIL: branch was 10 commits behind current
+  main (`e1ea91c` vs merge-base `f453b3e`), including v0.18.3 Desktop signing/
+  packaging changes; author must merge main and return a green combined head.
+- owner: dev-coordinator-parallel-2 · coordinator: dev-coordinator-parallel-2
+- taught us: persistence described as “per workspace” needs a cross-workspace
+  switching regression; a one-workspace localStorage test can pass while the
+  preference silently leaks across workspace identity. Release version remains
+  a release-time choice, not a feature-PR bump.
+
 ## PR #27 — publish valid ad-hoc-signed macOS installers (2026-07-25)
 - verdict: MERGED as merge commit `921f44a` — exact head `77b7ae4`. Corrected
   the v0.18.2 macOS installer defect (arm64 shipped an incomplete
