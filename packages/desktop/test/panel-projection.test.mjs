@@ -42,3 +42,40 @@ test("/api/panel projection: absent relation metadata is stable null, never unde
     assert.equal(out[field], null, `${field} is a stable null when absent`);
   }
 });
+
+/* ── /api/spawn error shaping (review f1e3211) ── */
+
+function spawnError() {
+  const src = readFileSync(SRV, "utf8");
+  const m = src.match(/\/\* OASWEB_SPAWNERR_BEGIN[^*]*\*\/([\s\S]*?)\/\* OASWEB_SPAWNERR_END \*\//);
+  assert.ok(m, "SPAWNERR block markers present");
+  return new Function(m[1] + "\nreturn spawnErrorPayload;")();
+}
+
+test("/api/spawn errors: E_RELATIVE_AMBIGUOUS passes through UNSLICED; others stay tightly capped", () => {
+  const shape = spawnError();
+  // realistic case-(d) inherited-edge message: two absolute homes, ambiguous
+  // name differs from any picked anchor, >300 chars end to end
+  const homes = [
+    "/Users/someone/very/long/workspace/path/agents/dev-coordinator/instances/dev-coordinator-parallel",
+    "/Users/someone/other/equally/long/team/checkout/local-agents/dev-coordinator/instances/dev-coordinator-parallel",
+  ];
+  const long = `relation "sibling": inherited lineage edge "dev-coordinator-parallel" is ambiguous — `
+    + `it matches ${homes[0]} and ${homes[1]}; qualify with --relative-root or rename one instance`;
+  assert.ok(long.length > 300, "fixture exercises the truncation boundary");
+  const err = Object.assign(new Error(long), { code: "E_RELATIVE_AMBIGUOUS" });
+  const { status, body } = shape(err);
+  assert.equal(status, 409);
+  assert.equal(body.code, "E_RELATIVE_AMBIGUOUS");
+  assert.equal(body.error, long, "the full kernel message survives — both homes and the remedy tail reach the renderer");
+  // other codes keep the tight cap (unbounded upstream text guard)
+  const noisy = Object.assign(new Error("x".repeat(1000)), { code: "E_SPAWN_FAILED" });
+  assert.equal(shape(noisy).body.error.length, 300, "non-ambiguity errors stay capped at 300");
+  // NO fixed cap for this code: even paths past any arbitrary threshold
+  // survive (the adapter's 4 MiB envelope bound is the real upstream guard;
+  // review 835a05f)
+  const huge = Object.assign(new Error("y".repeat(5000)), { code: "E_RELATIVE_AMBIGUOUS" });
+  assert.equal(shape(huge).body.error.length, 5000, "deeply nested multi-home diagnostics are never sliced");
+  // degradation code maps to 503
+  assert.equal(shape(Object.assign(new Error("no cli"), { code: "cli-unavailable" })).status, 503);
+});

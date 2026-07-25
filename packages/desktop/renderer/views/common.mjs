@@ -26,7 +26,11 @@ export async function apiJson(ctx, pathname, opts) {
   if (!r || typeof r.json !== "function") return r; // shell returned parsed data
   let d;
   try { d = await r.json(); } catch { d = {}; }
-  if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+  if (!r.ok) {
+    const err = new Error(d.error || `HTTP ${r.status}`);
+    if (d.code) err.code = d.code; // stable CLI/domain code (e.g. cli-unavailable, E_RELATIVE_AMBIGUOUS)
+    throw err;
+  }
   return d;
 }
 export function postJson(ctx, pathname, body) {

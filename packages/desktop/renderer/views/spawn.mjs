@@ -11,10 +11,16 @@ import {
   setWorkspace, onWorkspaceChange, renderWorkspaceSelect, wsQuery, workspaceGeneration,
 } from "./common.mjs";
 import { cliAvailable, cliKnownUnavailable, cliStatus, refreshCli, onCliChange, cliCard, cliRelationsAvailable } from "./cli-status.mjs";
+import { distinguishingRootTags } from "../instance-tree.mjs";
 
 /** Required-version label for the disabled relation note — from the probe
  * payload when the backend provides it, else the pinned desktop default. */
-function relationsMinLabel() { return cliStatus()?.relationsMin || "0.18.3"; }
+function relationsMinLabel() { return cliStatus()?.relationsMin || "0.18.5"; }
+
+/** True while the CLI probe has never SETTLED (no response classified yet).
+ * Pending is card-less by design, so disabled buttons must explain
+ * themselves — and the poll must keep retrying until a response lands. */
+const cliProbePending = () => !cliStatus() && !cliKnownUnavailable();
 
 const CSS = `
 .souls { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--bg); }
@@ -24,6 +30,8 @@ const CSS = `
 .souls-sum { color: var(--muted); font-size: 12.5px; }
 .souls-grid { flex: 1; overflow-y: auto; padding: 18px; display: grid; gap: 14px;
               grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); align-content: start; }
+.souls-grid .repo-head { grid-column: 1 / -1; color: var(--muted); font-size: 11px; font-weight: 650;
+                         text-transform: uppercase; letter-spacing: .06em; padding: 4px 2px 0; }
 .soul-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
              padding: 14px 16px; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 8px;
              text-align: left; font: inherit; color: var(--fg); }
@@ -106,7 +114,14 @@ export function mount(el, ctx) {
     refresh(s);
   });
   refresh(s);
-  s.timers.push(setInterval(() => refresh(s), 8000));
+  s.timers.push(setInterval(() => {
+    refresh(s);
+    // A boot-time transport failure leaves the CLI probe UNSETTLED (null
+    // state, no card) — without a retry the Spawn buttons stay dead forever
+    // with nothing on screen saying why. Keep re-fetching the cheap cached
+    // state until a response settles it either way (ok / carded).
+    if (cliProbePending()) refreshCli(ctx);
+  }, 8000));
 }
 
 export function unmount() {
@@ -184,7 +199,23 @@ function renderGrid(s) {
     s.cliCardHandle.el.style.gridColumn = "1/-1";
     grid.append(s.cliCardHandle.el);
   } else if (s.cliCardHandle) { s.cliCardHandle.dispose(); s.cliCardHandle = null; }
-  for (const a of list) grid.append(soulCard(s, a));
+  // Rendering-only repo grouping: cards sorted repo → name with a section
+  // header per repo (agent family = the card itself). Data order untouched.
+  const label = (a) => a.repoName || (a.repo ? String(a.repo).split("/").filter(Boolean).at(-1) : "") || "workspace";
+  const sorted = [...list].sort((a, b) =>
+    label(a).localeCompare(label(b)) || String(a.name).localeCompare(String(b.name)));
+  let lastRepo = null;
+  for (const a of sorted) {
+    const repo = label(a);
+    if (repo !== lastRepo) {
+      lastRepo = repo;
+      const rh = grid.ownerDocument.createElement("div");
+      rh.className = "repo-head";
+      rh.textContent = repo;
+      grid.append(rh);
+    }
+    grid.append(soulCard(s, a));
+  }
 }
 
 function soulCard(s, a) {
@@ -213,7 +244,11 @@ function soulCard(s, a) {
     spawn.title = attached
       ? "Attached-mode agent — spawn it from an owning instance’s work tree"
       : noCli
-        ? "Spawning requires a compatible installed oas CLI — see the card above"
+        // Pending probe renders NO card (frozen contract) — the tooltip must
+        // not point at a card that is not there.
+        ? (cliProbePending()
+          ? "Checking for a compatible oas CLI — spawning enables once it is verified"
+          : "Spawning requires a compatible installed oas CLI — see the card above")
         : `Spawn ${a.name}`;
     spawn.addEventListener("click", () => {
       if (!cliAvailable()) return; // state may have flipped since render
@@ -270,9 +305,32 @@ function openSpawnModal(s, a) {
   const modal = doc.createElement("div");
   modal.className = "spawn-modal";
   const titleId = "spawn-dialog-title";
-  const refOptions = (s.panelInstances || [])
-    .map((i) => `<option value="${escapeHtml(i.instance)}">${escapeHtml(i.instance)}${i.running ? "" : " (idle)"}</option>`)
-    .join("");
+  // Picker options carry BOTH halves of the anchor identity: the visible
+  // value is the instance name (what the user reads), dataset.root is the
+  // agents root it homes in — always sent as --relative-root so cross-root
+  // name shadowing can never make the spawn ambiguous (kernel contract:
+  // E_RELATIVE_AMBIGUOUS). Duplicate names get a SHORTEST-UNIQUE root tag
+  // (naive one-segment tags collide: /a/project/agents vs /b/project/agents;
+  // review cbd5bb3). Options are built with createElement/textContent/
+  // dataset — roots are workspace paths and must never travel through
+  // innerHTML attribute interpolation (injection surface; review cbd5bb3).
+  const nameCounts = new Map();
+  for (const i of s.panelInstances || []) nameCounts.set(i.instance, (nameCounts.get(i.instance) || 0) + 1);
+  const dupRoots = (s.panelInstances || [])
+    .filter((i) => (nameCounts.get(i.instance) || 0) > 1)
+    .map((i) => i.agentsRoot);
+  const rootTags = distinguishingRootTags(dupRoots);
+  const buildRefOptions = (select) => {
+    for (const i of s.panelInstances || []) {
+      const opt = doc.createElement("option");
+      opt.value = i.instance;
+      opt.dataset.root = i.agentsRoot || "";
+      const dup = (nameCounts.get(i.instance) || 0) > 1 && i.agentsRoot;
+      const tag = dup ? ` [${rootTags.get(String(i.agentsRoot)) || i.agentsRoot}]` : "";
+      opt.textContent = `${i.instance}${tag}${i.running ? "" : " (idle)"}`;
+      select.append(opt);
+    }
+  };
   // ALL options are ALWAYS VISIBLE (human requirement): purpose, task,
   // relation + reference instance, runtime and model overrides. The CLI
   // capability gate never HIDES the relation controls — on a pre-relations
@@ -312,7 +370,6 @@ function openSpawnModal(s, a) {
             </select>
             <select class="field frelto" disabled aria-label="Which instance">
               <option value="">— which instance? —</option>
-              ${refOptions}
             </select>
           </div>
           <div class="freldesc" aria-live="polite"></div>
@@ -334,6 +391,7 @@ function openSpawnModal(s, a) {
       </div>
     </section>`;
   const dialog = modal.querySelector(".spawn-dialog");
+  buildRefOptions(modal.querySelector(".frelto")); // safe DOM construction (never innerHTML)
   const f = modal; // field lookups span the whole modal
 
   // One source of truth for the relation controls' render state, applied at
@@ -404,6 +462,7 @@ function openSpawnModal(s, a) {
     task: () => f.querySelector(".ftask").value,
     relation: () => f.querySelector(".frelation").value,
     relativeTo: () => f.querySelector(".frelto").value,
+    relativeRoot: () => f.querySelector(".frelto").selectedOptions?.[0]?.dataset?.root || "",
     runtime: () => f.querySelector(".fruntime").value,
     model: () => f.querySelector(".fmodel").value,
     clear: () => {
@@ -512,6 +571,9 @@ export async function doSpawn(s, ui) {
       purpose: ui.purpose() || undefined,
       relation: relation !== "unrelated" ? relation : undefined,
       relativeTo: relation !== "unrelated" ? relativeTo : undefined,
+      // anchor root: ALWAYS sent with a related spawn when the picker knows
+      // it — disambiguates cross-root name shadowing (E_RELATIVE_AMBIGUOUS)
+      relativeRoot: relation !== "unrelated" ? ((ui.relativeRoot ? ui.relativeRoot() : "") || undefined) : undefined,
       runtime: (ui.runtime ? ui.runtime() : "") || undefined,
       model: (ui.model ? ui.model() : "") || undefined,
     });
@@ -533,7 +595,20 @@ export async function doSpawn(s, ui) {
     ui.status.textContent = `Spawned ${d.instance}${d.launched ? " — session running" : ""}. Opening terminal…`;
     s.ctx.openTerminal(d.instance);
   } catch (e) {
-    if (owns()) { ui.status.classList?.add("err"); ui.status.textContent = `Spawn failed: ${e.message || e}`; }
+    if (owns()) {
+      ui.status.classList?.add("err");
+      // Ambiguous relation identity (kernel E_RELATIVE_AMBIGUOUS). The
+      // picker ALWAYS sends the anchor's root, so this rarely means "pick
+      // better": the kernel also fires it when an already-qualified target
+      // cannot round-trip under shadowing, when a parent relation's
+      // generated name is shadowed, and on INHERITED bare-name edges copied
+      // from the anchor (case d) — names this form never sent. The kernel
+      // message names the conflicting instance and homes: surface it
+      // verbatim with the general remedy (reviews cbd5bb3 + f1e3211).
+      ui.status.textContent = e.code === "E_RELATIVE_AMBIGUOUS"
+        ? `Spawn failed: ${e.message} — instance names collide across agent roots; rename or retire the shadowing instance (or pick a different purpose) and retry.`
+        : `Spawn failed: ${e.message || e}`;
+    }
   } finally {
     if (owns()) { ui.btn.disabled = false; ui.btn.textContent = "Spawn"; }
   }

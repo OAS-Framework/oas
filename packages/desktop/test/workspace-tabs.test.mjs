@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   terminalTabsForWorkspace, tabVisibleInContext, canActivateTab,
-  fallbackTabForContext, terminalOpenOwnsWorkspace,
+  fallbackTabForContext, terminalOpenOwnsWorkspace, restoreTerminalTab,
 } from "../renderer/workspace-tabs.mjs";
 
 test("terminal tabs: same-named A/B instances remain workspace-scoped", () => {
@@ -35,4 +35,32 @@ test("shell deferred open: A completion loses ownership after switch to B", () =
   assert.equal(terminalOpenOwnsWorkspace("wsA", "wsA"), true);
   assert.equal(terminalOpenOwnsWorkspace("wsA", "wsB"), false,
     "late A /api/panel completion must be discarded before addTab auto-activation");
+});
+
+test("workspace switch-back restores the remembered active terminal", () => {
+  const tabs = new Map([
+    [1, { kind: "terminal", workspace: "wsA", key: "term:wsA:dev-1" }],
+    [2, { kind: "terminal", workspace: "wsA", key: "term:wsA:dev-2" }],
+    [3, { kind: "terminal", workspace: "wsB", key: "term:wsB:dev-1" }],
+  ]);
+  // dev-1 was active in wsA even though dev-2 was opened later
+  const [id] = restoreTerminalTab(tabs, "wsA", "term:wsA:dev-1");
+  assert.equal(id, 1, "remembered wsA active tab wins over most-recent");
+});
+
+test("restore falls back to most recent when memory is stale or foreign", () => {
+  const tabs = new Map([
+    [1, { kind: "terminal", workspace: "wsA", key: "term:wsA:dev-1" }],
+    [2, { kind: "terminal", workspace: "wsA", key: "term:wsA:dev-2" }],
+    [3, { kind: "terminal", workspace: "wsB", key: "term:wsB:dev-1" }],
+  ]);
+  // remembered tab was closed → most recently opened wsA terminal
+  assert.equal(restoreTerminalTab(tabs, "wsA", "term:wsA:closed")[0], 2);
+  // no memory at all → most recent
+  assert.equal(restoreTerminalTab(tabs, "wsA", undefined)[0], 2);
+  // a wsB key must never restore into wsA (same-named instances hazard):
+  // candidates are workspace-filtered, so the foreign key falls back
+  assert.equal(restoreTerminalTab(tabs, "wsA", "term:wsB:dev-1")[0], 2);
+  // workspace with no terminals → null (caller falls back to the stage)
+  assert.equal(restoreTerminalTab(tabs, "wsC", "term:wsC:dev-1"), null);
 });

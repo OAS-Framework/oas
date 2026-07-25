@@ -1,5 +1,10 @@
 # Knowledge Log
 
+## 2026-07-25
+* **Creation**: added [Electron linker signatures are not complete ad-hoc app-bundle signatures](/lessons/electron-builder-complete-adhoc-signing.md) from dev-coordinator-1 note.
+* **Creation**: added [electron-builder skips macOS signing in pull-request CI unless explicitly enabled](/lessons/electron-builder-pr-signing.md) from dev-coordinator-1 note.
+* **Creation**: added [Global capability presence can block repo-scoped lock restoration](/lessons/restore-capabilities-global-shadow.md) from dev-coordinator-1 note.
+
 ## 2026-07-24
 * **Creation**: added [Desktop succession direction — maintainer positions](/decisions/desktop-succession-maintainer-positions.md) from dev-coordinator-1 note.
 

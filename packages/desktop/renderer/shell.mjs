@@ -18,13 +18,15 @@ import { createTerminalTab } from "./terminal-tab.mjs";
 import { createTabChrome, tabKeyAction, focusAfterLastTab } from "./tab-a11y.mjs";
 import { createIntentGate, prepareOwnedOpen } from "./open-intent.mjs";
 import { createWorkspaceSwitcher } from "./workspace-switcher.mjs";
+import { NAV, stageSidebarMode, loadStageView } from "./shell-nav.mjs";
 import {
   collapseKey, hasInstanceChildren, instanceRepoLabel, treeGuideSegments, filterInstanceTree, instanceVisibleInTree,
   captureTreeRenderState, configureDisclosure, rosterResponseOwns, clusterInstances, clusterSeparator,
+  instanceId, terminalKey, resolveTerminalOpen,
 } from "./instance-tree.mjs";
 import {
-  terminalTabsForWorkspace, tabVisibleInContext, canActivateTab,
-  fallbackTabForContext, terminalOpenOwnsWorkspace,
+  tabVisibleInContext, canActivateTab,
+  fallbackTabForContext, terminalOpenOwnsWorkspace, restoreTerminalTab,
 } from "./workspace-tabs.mjs";
 
 const desk = window.oasDesktop;
@@ -57,9 +59,7 @@ const ctx = {
   openExternal: (url) => window.open(url, "_blank", "noreferrer"),
   // additive shell affordance (views feature-detect it): switch the STAGE
   // to a named sidebar view (stage views are not tabs — see below).
-  openView: (name) => name === "instances"
-    ? contextRosterEl?.querySelector(".ctx-filter")?.focus()
-    : showStage(name),
+  openView: (name) => showStage(name),
 };
 
 // ── stage: the sidebar-driven main surface ──────────────────────────
@@ -73,7 +73,7 @@ let stageOp = 0;            // switch generation — a slow mount must not paint
 
 async function showStage(name) {
   const v = NAV.find((x) => x.name === name);
-  setSidebarMode(name === "spawn" ? "souls" : "overview");
+  setSidebarMode(stageSidebarMode(name));
   setNavActive(name);
   showTabLayer(false);
   if (stage && stage.name === name) return;   // already on this surface
@@ -83,7 +83,7 @@ async function showStage(name) {
   if (prev) { try { await prev.life.close(); } catch (e) { console.error(e); } prev.el.remove(); }
   if (myOp !== stageOp) return;               // superseded by a faster switch
   let mod;
-  try { mod = await import(`./views/${name}.mjs`); }
+  try { mod = await loadStageView(name); }
   catch (e) {
     if (myOp !== stageOp) return;
     stageHost.innerHTML = `<div class="placeholder"><h2>${name}</h2><div>view module failed to load: ${e.message}</div></div>`;
@@ -226,9 +226,12 @@ function renderContextRoster(instances) {
         rowWrap.className = "ctx-tree-row";
         rowWrap.style.setProperty("--depth", String(i.depth || 0));
         const activeKey = tabs.get(activeTab)?.key;
-        const isActive = activeKey === `term:${ws}:${i.instance}`;
-        const key = collapseKey(ws, i.instance);
-        const hasChildren = hasInstanceChildren(instances, i.instance);
+        const isActive = activeKey === terminalKey(ws, i);
+        // Collapse and focus state key by IDENTITY, not bare name: two
+        // same-named instances from different agents roots collapse and
+        // focus independently (review 46f3fdc).
+        const key = collapseKey(ws, instanceId(i));
+        const hasChildren = hasInstanceChildren(instances, i);
         const collapsed = collapsedInstances.has(key);
 
         // VS Code-style ancestry guides: exhausted ancestor branches vanish;
@@ -248,7 +251,7 @@ function renderContextRoster(instances) {
         disclosure.tabIndex = hasChildren ? 0 : -1;
         if (hasChildren) {
           configureDisclosure(disclosure, {
-            instance: i.instance, collapsed, filtering,
+            instance: instanceId(i), label: i.instance, collapsed, filtering,
             onToggle: () => {
               if (collapsed) collapsedInstances.delete(key); else collapsedInstances.add(key);
               renderContextRoster(contextInstances);
@@ -261,7 +264,7 @@ function renderContextRoster(instances) {
 
         const row = document.createElement("button");
         row.type = "button";
-        row.dataset.treeInstance = i.instance;
+        row.dataset.treeInstance = instanceId(i);
         row.dataset.treeControl = "terminal";
         row.className = "ctx-inst" + (i.running ? "" : " idle") + (isActive ? " active" : "");
         row.disabled = !i.running;
@@ -279,7 +282,9 @@ function renderContextRoster(instances) {
         meta.title = `Repository: ${meta.textContent}`;
         copy.append(name, meta);
         row.append(dot, copy);
-        row.addEventListener("click", () => openTerminalTab(i.instance));
+        // pass the FULL reference: same-named instances in other agents
+        // roots must open THEIR tmux session, not the first name match
+        row.addEventListener("click", () => openTerminalTab({ instance: i.instance, home: i.home, agentsRoot: i.agentsRoot }));
         rowWrap.append(guides, disclosure, row);
         listEl.append(rowWrap);
       }
@@ -291,11 +296,15 @@ function renderContextRoster(instances) {
 function showTerminalContext() {
   setSidebarMode("instances");
   refreshContextRoster();
-  const openTerms = terminalTabsForWorkspace(tabs, currentWorkspace());
-  if (openTerms.length) { activateTab(openTerms.at(-1)[0]); return; }
-  // With the tree permanently visible there is no standalone Instances stage.
-  // Closing/switching away from the last terminal restores the prior surface.
-  setSidebarMode(stage?.name === "spawn" ? "souls" : "overview");
+  // Per-workspace active-tab memory: switching back to a workspace restores
+  // the terminal that was active there (stale/foreign keys fall back to the
+  // most recently opened terminal of the workspace).
+  const ws = currentWorkspace();
+  const restored = restoreTerminalTab(tabs, ws, wsActiveTerminal.get(ws));
+  if (restored) { activateTab(restored[0]); return; }
+  // With the tree permanently visible, closing/switching away from the last
+  // terminal restores the prior stage surface.
+  setSidebarMode(stageSidebarMode(stage?.name));
   showTabLayer(false);
   setNavActive(stage?.name || "hierarchy");
 }
@@ -306,6 +315,7 @@ const tabhost = document.getElementById("tabhost");
 const tabs = new Map(); // id -> { tabEl, triggerEl, closeEl, paneEl, title, key, onClose, onShow }
 let nextTabId = 1;
 let activeTab = null;
+const wsActiveTerminal = new Map(); // workspace id -> last-active terminal tab key
 const brainIntents = createIntentGate();
 
 /** key: optional dedup key — activating an existing tab instead of opening a
@@ -350,6 +360,9 @@ function activateTab(id) {
   // the mutation boundary before its pane can become active/receive input.
   if (!canActivateTab(current, currentWorkspace())) return false;
   activeTab = id;
+  if (current?.kind === "terminal" && current.workspace) {
+    wsActiveTerminal.set(current.workspace, current.key);
+  }
   if (current?.kind === "terminal") {
     setSidebarMode("instances");
     setNavActive(null);
@@ -457,31 +470,27 @@ async function openViewTab(name, title, extra = {}, key = `view:${name}`,
 }
 
 // ── integrated terminal tab (the shell's own flagship view) ──────────────
-const pendingTerms = new Set(); // keys reserved while a roster fetch is in flight
-async function openTerminalTab(instance) {
-  // A tree selection opens its terminal directly; there is no standalone
-  // Instances destination now that the persistent roster is always present.
+const pendingTerms = new Set(); // keys with a tab CREATION in flight (post-resolution — dedup for concurrent opens of one resolved identity)
+/** ref: either a bare instance name (views, palette — resolved only when
+ * unambiguous) or { instance, home?, agentsRoot? } (sidebar rows — exact).
+ * ORDER MATTERS (review 7d740f9): the reference is resolved against the
+ * roster FIRST and the dedup key derives from the RESOLVED instance, so a
+ * bare-name open and a sidebar open of the same identity share one tab —
+ * and an existing tab can never be activated for a name that has since
+ * become ambiguous (resolution refuses before dedup can activate). */
+async function openTerminalTab(ref) {
+  // A sidebar-tree selection opens its terminal directly — the persistent
+  // roster is the quick path to sessions. The full Instances STAGE (grouped
+  // roster, sorts, read-only transcript) is a separate first-class
+  // destination reachable via the nav rail and the ⌘K palette (shell-nav).
   setSidebarMode("instances");
   setNavActive(null);
   refreshContextRoster();
   // Honor the views' workspace bus: an instance selected in a secondary
   // (server-advertised) workspace must resolve against THAT roster, and a
-  // same-named instance in another workspace is a different terminal.
+  // same-named instance in another workspace — or another agents root
+  // (review 46f3fdc) — is a different terminal.
   const ws = currentWorkspace();
-  const key = `term:${ws}:${instance}`;
-  await whenKeyFree(key);
-  for (const [tid, t] of tabs) if (t.key === key) { activateTab(tid); return; }
-  if (pendingTerms.has(key)) return; // an open for this key is already in flight
-  pendingTerms.add(key);
-  try {
-    await openTerminalTabInner(instance, ws, key);
-  } finally {
-    pendingTerms.delete(key);
-  }
-}
-
-async function openTerminalTabInner(instance, ws, key) {
-  // Resolve the tmux target from the roster of the selected workspace.
   const owns = () => terminalOpenOwnsWorkspace(ws, currentWorkspace());
   let panel;
   try {
@@ -490,12 +499,36 @@ async function openTerminalTabInner(instance, ws, key) {
     if (!owns()) return; // stale rejection belongs to the old workspace
     throw e;
   }
-  // Workspace changed while /api/panel was in flight: discard BEFORE addTab
-  // (addTab auto-activates, so a late A open could otherwise receive B input).
   if (!owns()) return;
-  const inst = panel.instances.find((i) => i.instance === instance);
-  if (!inst) return alert(`unknown instance "${instance}"`);
-  if (!inst.running || !inst.tmux?.session) return alert(`"${instance}" has no live tmux session`);
+  // Identity-aware resolution BEFORE any key/tab decision (resolveTerminalOpen
+  // encodes the ordering; review 7d740f9): an exact home/agentsRoot reference
+  // finds ITS instance; a bare name resolves only when unambiguous — the
+  // first same-named match could be another agents root's tmux session.
+  const r = resolveTerminalOpen(panel.instances, ref, ws);
+  if (r.error) {
+    return alert(r.error === "ambiguous"
+      ? `several instances are named "${r.name}" — open it from the sidebar tree, which addresses the exact one`
+      : `unknown instance "${r.name}"`);
+  }
+  const { inst, key } = r;
+  await whenKeyFree(key);
+  for (const [tid, t] of tabs) if (t.key === key) { activateTab(tid); return; }
+  if (pendingTerms.has(key)) return; // an open for this key is already in flight
+  pendingTerms.add(key);
+  try {
+    await openTerminalTabInner(inst, ws, key, owns);
+  } finally {
+    pendingTerms.delete(key);
+  }
+}
+
+async function openTerminalTabInner(inst, ws, key, owns) {
+  // inst is the RESOLVED roster instance (openTerminalTab resolves + keys
+  // before dedup; review 7d740f9). Re-check ownership here — whenKeyFree
+  // may have waited across a workspace switch.
+  if (!owns()) return;
+  const name = inst.instance;
+  if (!inst.running || !inst.tmux?.session) return alert(`"${name}" has no live tmux session`);
 
   const wrap = document.createElement("div");
   wrap.className = "term-wrap";
@@ -529,7 +562,7 @@ async function openTerminalTabInner(instance, ws, key) {
   });
 
   const made = addTab({
-    title: `⌗ ${instance}`,
+    title: `⌗ ${name}`,
     key,
     kind: "terminal",
     workspace: ws,
@@ -547,12 +580,11 @@ async function openTerminalTabInner(instance, ws, key) {
 }
 
 // ── nav rail ──────────────────────────────────────────────────────────────
-// Two first-class navigation surfaces: hierarchy and soul roster. Instances
-// live permanently below them; selecting one opens its terminal artifact.
-const NAV = [
-  { name: "hierarchy", label: "Active", icon: "⌘", title: "Active — live cluster overview" },
-  { name: "spawn", label: "Soul roster", icon: "✦", title: "Soul roster" },
-];
+// First-class stage destinations come from shell-nav.mjs (NAV) so tests can
+// prove every entry resolves to a real mount-exporting view. The permanent
+// instance tree in the sidebar stays the quick path to terminals; the
+// Instances STAGE is the full roster with grouping/sorts + read-only
+// transcript (was unreachable pre-merge — merged-state review finding).
 const navEl = document.getElementById("nav");
 for (const v of NAV) {
   const b = document.createElement("button");
@@ -586,8 +618,9 @@ const palette = createPalette({
   },
   openTerminal: (name) => openTerminalTab(name),
   commands: [
-    { label: "View: Active", run: () => showStage("hierarchy") },
-    { label: "View: Soul roster", run: () => showStage("spawn") },
+    // View commands derive from the nav manifest so a new rail destination
+    // can never be palette-invisible (review 8441961 nit).
+    ...NAV.map((v) => ({ label: `View: ${v.label}`, run: () => showStage(v.name) })),
     { label: "Theme: toggle light/dark", run: () => toggleTheme() },
     { label: "Terminal: increase font size", run: () => setTerminalFontSize(terminalTypography().fontSize + 1) },
     { label: "Terminal: decrease font size", run: () => setTerminalFontSize(terminalTypography().fontSize - 1) },

@@ -1,5 +1,8 @@
 # Lessons
 
+* [Electron linker signatures are not complete ad-hoc app-bundle signatures](electron-builder-complete-adhoc-signing.md) - A macOS Electron executable can report an ad-hoc linker signature while the app bundle lacks sealed resources and fails Gatekeeper as damaged.
+* [electron-builder skips macOS signing in pull-request CI unless explicitly enabled](electron-builder-pr-signing.md) - Pull-request installer rehearsals need CSC_FOR_PULL_REQUEST=true or electron-builder can skip even deterministic ad-hoc signing and invalidate release evidence.
+* [Global capability presence can block repo-scoped lock restoration](restore-capabilities-global-shadow.md) - Bare oas install can incorrectly treat a global capability artifact as satisfying a different repo-scoped lock for the same capability ID.
 * [Concurrent harvests of one soul need owner reconciliation for knowledge conflicts](concurrent-harvest-conflicts-one-soul.md) - When parallel instances of one soul harvest into separate branches, log.md conflicts can be unioned mechanically but competing knowledge concepts and indexes should be reconciled by an owner instance of that soul.
 * [Reviewer deaths can come from tmux prefix-target kills](reviewer-deaths-tmux-prefix-targets.md) - A reviewer that stops cleanly mid-turn and loses its tmux window was likely killed externally; check delayed mail first, then spawn a fresh one-shot reviewer and retire the dead instance.
 * [Fix doc nits in notes before the harvest runs](fix-note-errors-before-harvest.md) - Review findings that touch a developer's knowledge notes must be corrected before oas okf harvest, or inaccurate content is promoted into the soul.

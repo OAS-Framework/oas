@@ -450,7 +450,7 @@ test("Spawn modal: pre-relations CLI gates the RELATED options + picker disabled
   const cliStatusMod2 = await import("../renderer/views/cli-status.mjs");
   // verified CLI, but PROVEN relations-incapable (relations:false from the probe)
   const CLI_OLD = { ok: true, bin: "/seed/oas", version: "0.18.0", source: "path",
-    required: { desktopApi: 1, range: ">=0.18.0 <0.19.0" }, relations: false, relationsMin: "0.18.3", probedAt: 1, tried: [] };
+    required: { desktopApi: 1, range: ">=0.18.0 <0.19.0" }, relations: false, relationsMin: "0.18.5", probedAt: 1, tried: [] };
   await cliStatusMod2.refreshCli({ api: async () => ({ ok: true, status: 200, json: async () => CLI_OLD }) });
   const previousWs = common.currentWorkspace();
   const agent = { name: "dev", agentsRoot: "/a", description: "", runtime: "pi", work: "workspace", repo: true, repoName: "r" };
@@ -478,7 +478,7 @@ test("Spawn modal: pre-relations CLI gates the RELATED options + picker disabled
     assert.ok(doc.querySelector(".spawn-dialog .frelto"), "reference picker still rendered");
     const note = doc.querySelector(".spawn-dialog .frelnote");
     assert.ok(note, "explanatory note present");
-    assert.match(note.textContent, /oas >= 0\.18\.3/, "note names the required version");
+    assert.match(note.textContent, /oas >= 0\.18\.5/, "note names the required version");
   } finally {
     spawn.unmount();
     await seedCliAvailable(); // restore shared CLI state for later suites
@@ -565,8 +565,8 @@ test("Spawn modal tracks CLI capability LIVE: relations flip disables/enables co
   const common = await import("../renderer/views/common.mjs");
   const spawn = await import("../renderer/views/spawn.mjs");
   const cliMod = await import("../renderer/views/cli-status.mjs");
-  const status = (relations) => ({ ok: true, bin: "/seed/oas", version: relations ? "0.18.3" : "0.18.0",
-    source: "path", required: { desktopApi: 1, range: ">=0.18.0 <0.19.0" }, relations, relationsMin: "0.18.3", probedAt: 1, tried: [] });
+  const status = (relations) => ({ ok: true, bin: "/seed/oas", version: relations ? "0.18.5" : "0.18.0",
+    source: "path", required: { desktopApi: 1, range: ">=0.18.0 <0.19.0" }, relations, relationsMin: "0.18.5", probedAt: 1, tried: [] });
   const seed = (relations) => cliMod.refreshCli({ api: async () => ({ ok: true, status: 200, json: async () => status(relations) }) });
   await seed(true);
   const previousWs = common.currentWorkspace();
@@ -609,7 +609,7 @@ test("Spawn modal tracks CLI capability LIVE: relations flip disables/enables co
     assert.equal(ref.disabled, true, "downgrade disables the reference picker");
     const note = doc.querySelector(".frelnote");
     assert.equal(note.hidden, false, "version note appears live");
-    assert.match(note.textContent, /oas >= 0\.18\.3/, "note names the required version");
+    assert.match(note.textContent, /oas >= 0\.18\.5/, "note names the required version");
     assert.equal(doc.querySelector(".ftask").value, "typed task text", "typed fields survive the resync");
     assert.equal(rel.value, "child", "chosen relation value preserved (visible, disabled)");
     // the completed phrase must NOT keep promising the spawn that submit
@@ -727,6 +727,160 @@ test("Spawn modal: relation + instance form ONE grouped fieldset with plain-lang
     ref.dispatchEvent(new dom.window.Event("change"));
     assert.match(group.querySelector(".freldesc").textContent, /spawn as a child of coord-1/,
       "completed choice reads as one plain-language sentence");
+  } finally {
+    spawn.unmount();
+    common.setWorkspace(previousWs);
+    globalThis.setInterval = oldSetInterval;
+    dom.window.close();
+    if (oldDocument === undefined) delete globalThis.document; else globalThis.document = oldDocument;
+    if (oldWindow === undefined) delete globalThis.window; else globalThis.window = oldWindow;
+  }
+});
+
+test("Spawn modal: picker sends the anchor's agents root; E_RELATIVE_AMBIGUOUS surfaces with guidance", async () => {
+  const dom = new JSDOM("<!doctype html><html><head></head><body><div id=host></div></body></html>", { url: "http://localhost" });
+  const oldDocument = globalThis.document;
+  const oldWindow = globalThis.window;
+  const oldSetInterval = globalThis.setInterval;
+  globalThis.document = dom.window.document;
+  globalThis.window = dom.window;
+  globalThis.setInterval = () => ({ fake: true });
+  const common = await import("../renderer/views/common.mjs");
+  const spawn = await import("../renderer/views/spawn.mjs");
+  await seedCliAvailable();
+  const previousWs = common.currentWorkspace();
+  const agent = { name: "dev", agentsRoot: "/a", description: "", runtime: "pi", work: "workspace", repo: true, repoName: "r" };
+  // duplicate name "dev-1" across two roots — picker must disambiguate
+  const roster = [
+    { instance: "dev-1", agentsRoot: "/ws1/agents", running: true },
+    { instance: "dev-1", agentsRoot: "/ws2/agents", running: false },
+    { instance: "solo", agentsRoot: "/ws1/agents", running: true },
+  ];
+  const posts = [];
+  let failNext = null;
+  const ctx = {
+    api: (pathname, opts = {}) => {
+      if (pathname === "/api/cli" || pathname === "/api/cli/reprobe") return Promise.resolve(CLI_OK);
+      if (opts.method === "POST") {
+        posts.push(JSON.parse(opts.body));
+        if (failNext) { const body = failNext; failNext = null;
+          return Promise.resolve({ ok: false, status: 409, json: async () => body }); }
+        return Promise.resolve({ ok: true, status: 200, json: async () => ({ instance: "x" }) });
+      }
+      return Promise.resolve({ ok: true, status: 200, json: async () => pathname.startsWith("/api/agents")
+        ? { agents: [agent] }
+        : { instances: roster, workspace: { id: "w" }, workspaces: [] } });
+    },
+    openTerminal: () => {},
+  };
+  try {
+    common.setWorkspace("w");
+    spawn.mount(dom.window.document.getElementById("host"), ctx);
+    await tick(); await tick();
+    const doc = dom.window.document;
+    doc.querySelector(".spawn-act").click();
+    const ref = doc.querySelector(".frelto");
+    // duplicate-name options carry distinct data-root and a visible root tag
+    const dupOpts = [...ref.options].filter((o) => o.value === "dev-1");
+    assert.equal(dupOpts.length, 2, "both same-named instances are listed");
+    assert.notEqual(dupOpts[0].dataset.root, dupOpts[1].dataset.root, "options carry distinct roots");
+    assert.ok(dupOpts.every((o) => /\[.+\]/.test(o.textContent)), "duplicates show a distinguishing root tag");
+    const soloOpt = [...ref.options].find((o) => o.value === "solo");
+    assert.ok(!/\[.+\]/.test(soloOpt.textContent), "unique names stay untagged");
+    // a related spawn sends the selected option's root as relativeRoot
+    const rel = doc.querySelector(".frelation");
+    rel.value = "child";
+    rel.dispatchEvent(new dom.window.Event("change"));
+    dupOpts[1].selected = true; // the /ws2 twin
+    doc.querySelector(".fspawn").click();
+    await tick(); await tick(); await tick();
+    assert.equal(posts.length, 1);
+    assert.equal(posts[0].relativeTo, "dev-1");
+    assert.equal(posts[0].relativeRoot, "/ws2/agents", "the anchor's agents root travels with the name");
+    // kernel ambiguity error surfaces with actionable guidance (fresh modal —
+    // the first spawn's roster wait still owns the old form's button)
+    doc.querySelector(".spawn-dialog .fcancel").click();
+    doc.querySelector(".spawn-act").click();
+    const form = doc.querySelector(".spawn-dialog");
+    const rel2 = form.querySelector(".frelation");
+    rel2.value = "child";
+    rel2.dispatchEvent(new dom.window.Event("change"));
+    form.querySelector(".frelto").value = "dev-1";
+    // realistic case-(d) payload: INHERITED edge whose ambiguous name is NOT
+    // the picked anchor, two absolute homes, >300 chars — the endpoint
+    // preserves E_RELATIVE_AMBIGUOUS messages past the generic cap (review
+    // f1e3211) and the renderer must surface the tail verbatim
+    const caseD = `relation "child": inherited lineage edge "other-coord" is ambiguous — it matches `
+      + `/Users/u/very/long/workspace/path/agents/other-coord/instances/other-coord and `
+      + `/Users/u/second/equally/long/team/checkout/local-agents/other-coord/instances/other-coord; `
+      + `qualify with --relative-root or rename one instance`;
+    assert.ok(caseD.length > 300, "fixture exercises the truncation boundary");
+    failNext = { error: caseD, code: "E_RELATIVE_AMBIGUOUS" };
+    form.querySelector(".fspawn").click();
+    await tick(); await tick(); await tick();
+    const status = form.querySelector(".fstatus").textContent;
+    assert.ok(status.includes(caseD),
+      "the COMPLETE kernel message surfaces — both homes and the remedy tail, ambiguous name ≠ picked anchor");
+    assert.match(status, /rename or retire the shadowing instance/,
+      "general remedy — never advises re-picking, which the always-sent root makes futile");
+  } finally {
+    spawn.unmount();
+    common.setWorkspace(previousWs);
+    globalThis.setInterval = oldSetInterval;
+    dom.window.close();
+    if (oldDocument === undefined) delete globalThis.document; else globalThis.document = oldDocument;
+    if (oldWindow === undefined) delete globalThis.window; else globalThis.window = oldWindow;
+  }
+});
+
+test("Spawn modal picker: hostile paths stay inert; colliding root tags render distinct labels (review cbd5bb3)", async () => {
+  const dom = new JSDOM("<!doctype html><html><head></head><body><div id=host></div></body></html>", { url: "http://localhost" });
+  const oldDocument = globalThis.document;
+  const oldWindow = globalThis.window;
+  const oldSetInterval = globalThis.setInterval;
+  globalThis.document = dom.window.document;
+  globalThis.window = dom.window;
+  globalThis.setInterval = () => ({ fake: true });
+  const common = await import("../renderer/views/common.mjs");
+  const spawn = await import("../renderer/views/spawn.mjs");
+  await seedCliAvailable();
+  const previousWs = common.currentWorkspace();
+  const agent = { name: "dev", agentsRoot: "/a", description: "", runtime: "pi", work: "workspace", repo: true, repoName: "r" };
+  // hostile path: HTML-significant characters in a valid workspace path;
+  // plus two roots whose naive one-segment tag collides ("project")
+  const evilRoot = `/tmp/x"><img src=x onerror=alert(1)>/agents`;
+  const roster = [
+    { instance: "dev-1", agentsRoot: "/a/project/agents", running: true },
+    { instance: "dev-1", agentsRoot: "/b/project/agents", running: true },
+    { instance: "evil", agentsRoot: evilRoot, running: true },
+    { instance: "evil", agentsRoot: "/plain/agents", running: true },
+  ];
+  const ctx = {
+    api: (pathname, opts = {}) => {
+      if (pathname === "/api/cli" || pathname === "/api/cli/reprobe") return Promise.resolve(CLI_OK);
+      if (opts.method === "POST") return Promise.resolve({ ok: true, status: 200, json: async () => ({ instance: "x" }) });
+      return Promise.resolve({ ok: true, status: 200, json: async () => pathname.startsWith("/api/agents")
+        ? { agents: [agent] }
+        : { instances: roster, workspace: { id: "w" }, workspaces: [] } });
+    },
+    openTerminal: () => {},
+  };
+  try {
+    common.setWorkspace("w");
+    spawn.mount(dom.window.document.getElementById("host"), ctx);
+    await tick(); await tick();
+    const doc = dom.window.document;
+    doc.querySelector(".spawn-act").click();
+    const ref = doc.querySelector(".frelto");
+    // hostile path never becomes markup: no injected node, dataset intact
+    assert.equal(doc.querySelector("img"), null, "no element injected from a hostile workspace path");
+    const evilOpt = [...ref.options].find((o) => o.dataset.root === evilRoot);
+    assert.ok(evilOpt, "hostile path preserved byte-for-byte in dataset.root");
+    assert.ok(evilOpt.textContent.includes("evil"), "option renders as text");
+    // colliding tags: both dev-1 labels differ
+    const devLabels = [...ref.options].filter((o) => o.value === "dev-1").map((o) => o.textContent);
+    assert.equal(devLabels.length, 2);
+    assert.notEqual(devLabels[0], devLabels[1], "duplicate option labels are actually distinguishable");
   } finally {
     spawn.unmount();
     common.setWorkspace(previousWs);

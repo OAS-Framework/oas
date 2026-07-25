@@ -57,6 +57,10 @@ const SPAWN_ARG_RULES = {
   // NEVER forwarded — the CLI treats absence as unrelated.
   relation:   { flag: "--relation",    re: /^(child|sibling|parent)$/ },
   relativeTo: { flag: "--relative-to", re: /^[a-z0-9][a-z0-9._-]*$/i },     // instance-name slug
+  // Anchor disambiguation (kernel contract addition): the agents root the
+  // anchor homes in. Names shadow across roots, so the desktop ALWAYS sends
+  // the pair when it spawns related — path-shaped, never option-shaped.
+  relativeRoot: { flag: "--relative-root", re: /^[^-][^\0]*$/ },
 };
 export function spawnArgv(agent, workspaceDir, taskFile, opts = {}) {
   const agentName = String(agent);
@@ -71,6 +75,11 @@ export function spawnArgv(agent, workspaceDir, taskFile, opts = {}) {
     const e = new Error(hasRelation
       ? "a relation requires --relative-to <instance>"
       : "--relative-to requires a relation (child|sibling|parent)");
+    e.code = "E_BAD_ARGS"; throw e;
+  }
+  // relativeRoot rides along with the pair only — alone it is meaningless
+  if (!hasRef && opts.relativeRoot !== undefined && opts.relativeRoot !== null && opts.relativeRoot !== "") {
+    const e = new Error("--relative-root requires --relation and --relative-to");
     e.code = "E_BAD_ARGS"; throw e;
   }
   const argv = ["spawn", agentName, "--dir", String(workspaceDir), "--task-file", String(taskFile)];
