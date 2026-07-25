@@ -1,24 +1,25 @@
-// Shell navigation reachability — merged-state review regression for
-// feature/desktop-ux-fixes: the Instances view (repo → family grouping,
-// sort controls, read-only transcript) shipped UNREACHABLE because the
-// production shell's NAV had no entry for it and openView("instances")
-// only focused the sidebar filter. The nav manifest now lives in
-// shell-nav.mjs — the SAME objects shell.mjs renders into the rail and the
-// SAME loader showStage() calls — so this suite proves every rail
-// destination actually resolves to a mountable view.
+// Shell navigation reachability + Instances-stage ABSENCE pins.
+//
+// History: PR #29 shipped a first-class "Instances" nav stage
+// (views/instances.mjs). The human rejected that surface as scope overreach
+// — the instances context is the shell's PERMANENT sidebar roster, not a
+// rail destination. This suite pins both directions:
+//   - every remaining NAV entry resolves to a real mount-exporting module
+//     (the manifest lesson from the original reachability regression), and
+//   - the Instances stage stays gone (inventory-style absence pin, so a
+//     stray revert/cherry-pick cannot silently reship it).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { NAV, stageSidebarMode, loadStageView } from "../renderer/shell-nav.mjs";
 
 const PKG = join(dirname(fileURLToPath(import.meta.url)), "..");
 
-test("NAV exposes the Instances stage alongside hierarchy and spawn", () => {
-  const names = NAV.map((v) => v.name);
-  assert.ok(names.includes("instances"), "Instances view must be reachable from the nav rail");
-  assert.ok(names.includes("hierarchy") && names.includes("spawn"), "existing destinations kept");
+test("NAV is exactly the two pre-#29 destinations — no Instances stage", () => {
+  assert.deepEqual(NAV.map((v) => v.name), ["hierarchy", "spawn"],
+    "rail destinations are Active overview and Soul roster only");
   for (const v of NAV) {
     assert.ok(v.label && v.icon && v.title, `${v.name} entry carries full rail chrome`);
   }
@@ -34,23 +35,17 @@ test("every NAV destination loads a real mount-exporting view module", async () 
 
 test("stage sidebar pairing: spawn shows souls, others keep the overview tree", () => {
   assert.equal(stageSidebarMode("spawn"), "souls");
-  assert.equal(stageSidebarMode("instances"), "overview");
   assert.equal(stageSidebarMode("hierarchy"), "overview");
   assert.equal(stageSidebarMode(undefined), "overview", "no-stage fallback stays overview");
 });
 
 test("shell.mjs consumes the manifest: rail built from shell-nav NAV, openView routes to showStage", () => {
-  // The manifest test above proves the destinations are valid; this pins that
-  // the production shell actually USES them (a re-inlined local NAV or a
-  // filter-focus openView special case would regress reachability silently).
   const src = readFileSync(join(PKG, "renderer", "shell.mjs"), "utf8");
   assert.match(src, /import\s*\{[^}]*\bNAV\b[^}]*\}\s*from\s*"\.\/shell-nav\.mjs"/,
     "shell imports NAV from shell-nav.mjs");
   assert.ok(!/const NAV\s*=/.test(src), "no shadowing local NAV manifest");
   assert.match(src, /openView:\s*\(name\)\s*=>\s*showStage\(name\)/,
     "openView routes every named view through the stage host");
-  assert.ok(!/openView[^\n]*ctx-filter/.test(src),
-    'openView("instances") no longer degrades to focusing the sidebar filter');
 });
 
 test("palette view commands derive from NAV — no hard-coded destination list to drift", () => {
@@ -58,4 +53,14 @@ test("palette view commands derive from NAV — no hard-coded destination list t
   assert.match(src, /NAV\.map\(\(v\) => \(\{ label: `View: \$\{v\.label\}`, run: \(\) => showStage\(v\.name\) \}\)\)/,
     "palette view commands are generated from the nav manifest");
   assert.ok(!/label:\s*"View: /.test(src), "no hard-coded View: palette entries remain");
+});
+
+test("inventory: the Instances stage view is gone and nothing references it", () => {
+  assert.ok(!existsSync(join(PKG, "renderer", "views", "instances.mjs")),
+    "views/instances.mjs must not ship");
+  for (const f of ["renderer/shell.mjs", "renderer/shell-nav.mjs", "renderer/harness.html"]) {
+    const src = readFileSync(join(PKG, f), "utf8");
+    assert.ok(!/views\/instances\.mjs/.test(src), `${f}: imports the deleted Instances view`);
+    assert.ok(!/data-view="instances"/.test(src), `${f}: dormant Instances tab entry`);
+  }
 });

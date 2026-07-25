@@ -142,7 +142,7 @@ test("desktop harness: every shipped view has a tab in the shared harness", () =
   const views = readdirSync(viewsDir).filter((f) => f.endsWith(".mjs"))
     .filter((f) => /export (async )?function mount\(/.test(readFileSync(join(viewsDir, f), "utf8")))
     .map((f) => f.replace(/\.mjs$/, ""));
-  assert.ok(views.length >= 5, `shipped views found (got: ${views.join(", ")})`);
+  assert.ok(views.length >= 4, `shipped views found (got: ${views.join(", ")})`);
   const harness = readFileSync(join(rendererDir, "harness.html"), "utf8");
   for (const v of views)
     assert.ok(harness.includes(`data-view="${v}"`), `harness.html has a tab for the "${v}" view`);

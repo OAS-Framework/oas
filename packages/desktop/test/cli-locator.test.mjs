@@ -225,11 +225,12 @@ test("relationSupportError: related spawns fail closed on old v1 CLIs, plain spa
 
 test("relations floor also covers --relative-root: the last pre-addition releases are NOT relation-capable (review cbd5bb3)", async () => {
   const { supportsRelations, relationSupportError, RELATIONS_MIN } = await import("../cli-locator.mjs");
-  // 0.18.4 is the last released CLI predating BOTH the relation flags and
-  // the --relative-root qualifier; older v1 CLIs ignore unknown spawn
-  // options, so an accepted pre-addition CLI would silently discard the
-  // qualifier and could link the wrong same-named anchor.
-  for (const v of ["0.18.3", "0.18.4"]) {
+  // 0.18.5 is the last released CLI predating BOTH the relation flags and
+  // the --relative-root qualifier (it shipped from a branch WITHOUT the
+  // feature); older v1 CLIs ignore unknown spawn options, so an accepted
+  // pre-addition CLI would silently discard the qualifier and could link
+  // the wrong same-named anchor.
+  for (const v of ["0.18.3", "0.18.4", "0.18.5"]) {
     assert.equal(supportsRelations(v), false, `${v} predates the qualifier — must not receive relation flags`);
     const err = relationSupportError({ ok: true, version: v }, { relation: "child", relativeTo: "x" });
     assert.ok(err && err.code === "cli-no-relations", `${v} fails closed before any relation/qualifier flag is emitted`);

@@ -24,6 +24,101 @@ decisions/ and referenced from here.
 
 ---
 
+## PR #34 — v0.18.5 manifest bump rescue (2026-07-25)
+- verdict: MERGED as squash commit `8f5af90`. Release run `30160666617`
+  completed build/test, all three Desktop installer build+smoke legs, both npm
+  publishes, provenance, checksums, and GitHub Release v0.18.5 before the known
+  org policy blocked Actions from creating the bump PR. The workflow-created
+  branch contained exactly the five expected root/pi/Desktop manifest and
+  lockfile changes (0.18.4→0.18.5); manual PR #34 restored the protected-main
+  flow and deleted the branch.
+- owner: oas-expert-release-desktop-ux · coordinator: dev-coordinator-parallel-2
+- taught us: nothing new — the documented org-policy rescue path remains
+  necessary, while the fully qualified detached-HEAD branch push still works.
+
+## PR #33 (round 3) — Desktop Shift+Enter send leak and terminal copy selection (2026-07-25)
+- verdict: MERGED as merge commit `595159e` at exact head `d75fa3a` after two
+  RETURNs. All four gates PASS. The feature suppresses every xterm event in a
+  Shift+Enter chord while writing one `\n` on keydown, and enables xterm's
+  modifier-forced local selection for terminal copy (Option on macOS, Shift on
+  non-macOS). It preserves PR #32's Instances-stage removal and carries accurate
+  Desktop knowledge. Fresh final affected gate passed 30/30 merged-head tests,
+  check/check:pi, strict OKF for all 8 bundles, and diff-check; the earlier full
+  scratch gate passed 382 tests plus validate/pack/smoke; human live verification
+  and all four exact-head CI/installer checks passed. Approval was recorded as a
+  PR comment (shared account), expected-head merge succeeded, and the remote
+  branch was deleted.
+- owner: oas-desktop-engineer-session-copy-newline · coordinator:
+  dev-coordinator-parallel-2
+- taught us: xterm custom key handlers span keydown, keypress, and keyup, so a
+  replacement chord must suppress all phases and emit once. Also, a handback can
+  be truthfully fresh yet immediately superseded by the maintainer's own
+  previously launched harvest; settle reviewer-driven commits before the final
+  handoff. The next patch release must combine PR #32 and PR #33 without
+  modifying immutable v0.18.4 artifacts.
+
+## PR #33 (round 2) — Desktop Shift+Enter send leak and terminal copy selection (2026-07-25)
+- verdict: RETURNED at exact head `0a9c6df` for one knowledge-correctness fix
+  plus mergeability. The branch correctly merged main twice, preserved PR #32's
+  Instances-stage removal and this PR's `terminalOptions(...)` construction,
+  unioned the append-only soul log, and passed 30/30 targeted merged-head tests,
+  Desktop strict OKF (76 concepts, 0 errors/warnings), diff-check, the owner's
+  repeated full gates, and all four exact-head CI/installer checks. Correctness
+  FAIL: the updated Shift+Enter lesson still names removed classifier
+  `shiftEnterByte(ev)` instead of `shiftEnterAction(ev)`, and the product comment
+  says Shift+drag works “everywhere” although shipped xterm uses Option on macOS
+  and Shift only on non-macOS. Mergeability FAIL: reviewer-driven harvest
+  `71b4aa1` completed after handback and advanced main, so current main is no
+  longer an ancestor. Author must fix both claims, merge final current main,
+  rerun the affected/full gate, and return a settled exact SHA.
+- owner: oas-desktop-engineer-session-copy-newline · coordinator:
+  dev-coordinator-parallel-2
+- taught us: nothing new beyond the existing settled-handback lesson — the
+  owner rechecked correctly, but the maintainer's own previously launched
+  harvest landed during the handoff window. Round 2 deliberately launches no
+  further harvest before the next handback.
+
+## PR #33 (round 1) — Desktop Shift+Enter send leak and terminal copy selection (2026-07-25)
+- verdict: RETURNED at exact head `605607a` for mergeability only. Product
+  direction, correctness, and security PASS. Fresh scratch gate passed 382
+  tests (381 pass, one intentional node-pty ABI skip), check/check:pi,
+  validate/strict OKF/pack/smoke; human live verification passed; all four
+  exact-head PR/installer checks are green. Mergeability FAIL: the branch is
+  based on `d3b0e69` and does not contain current main `41272b6`, missing seven
+  PR #32/main commits. Both sides changed `packages/desktop/renderer/shell.mjs`;
+  GitHub currently auto-merges it cleanly, but the author must merge current
+  main, preserve both changes, rerun the full gate, and return a settled green
+  exact head.
+- owner: oas-desktop-engineer-session-copy-newline · coordinator:
+  dev-coordinator-parallel-2
+- taught us: xterm's custom key callback spans keydown, keypress, and keyup; a
+  modifier override that suppresses only keydown can still leak a default
+  keypress byte. Behavioral regressions must drive the whole physical chord,
+  not just the first DOM event. The pending next patch should combine this fix
+  with PR #32's already-landed correction; immutable v0.18.4 stays untouched.
+
+## PR #32 — remove the out-of-scope Desktop Instances stage (2026-07-25)
+- verdict: MERGED as merge commit `97f66c9` at exact head `69641c9` after one
+  RETURN. Direction and security passed throughout. Round 1 returned because a
+  delayed-spawn fallback still directed users to the deleted “Instances view”
+  and the branch lacked current main. Round 2 points and regression-pins that
+  path to the permanent sidebar roster, corrects stale stage-era comments, and
+  contains main `d3b0e69`. Fresh final gate passed: root 376 tests + one
+  intentional skip, check/check:pi/validate/strict OKF/pack/smoke, Desktop
+  183/183, human live workspace verification, independent reviewer APPROVE,
+  and all four exact-head GitHub CI/installer checks. Approval was recorded as
+  a PR comment (shared account); expected-head merge succeeded. The remote
+  branch was deleted manually because the owner's worktree holds it locally.
+- owner: oas-desktop-engineer-roster-scope-rollback · coordinator:
+  dev-coordinator-parallel-2
+- taught us: a surface-removal inventory must cover user-visible fallback and
+  recovery copy, not only imports, nav entries, modules, and CSS. A broad
+  “operation failed truthfully” assertion can stay green while directing users
+  to a destination the same PR deleted. See [Surface removal inventories must
+  include user-facing recovery copy](/lessons/surface-removal-inventory-user-guidance.md).
+  Corrective source is on main but needs a new patch release; v0.18.4 artifacts
+  remain immutable.
+
 ## PR #31 — v0.18.4 manifest bump rescue (2026-07-25)
 - verdict: MERGED as squash commit `fda7498`. The tag-driven v0.18.4 release
   completed build/test, all three Desktop installer build+smoke legs, both npm

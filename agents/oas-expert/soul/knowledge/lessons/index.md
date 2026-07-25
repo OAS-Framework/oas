@@ -1,5 +1,7 @@
 # Lessons
 
+* [xterm custom key overrides must classify the whole physical chord](xterm-custom-key-handler-whole-chord.md) - xterm invokes a custom key event handler across keydown, keypress, and keyup, so a modifier override must suppress every relevant phase while emitting its replacement byte exactly once.
+* [Surface removal inventories must include user-facing recovery copy](surface-removal-inventory-user-guidance.md) - When removing a UI surface, inventory user-facing fallback and recovery text as well as imports, navigation, modules, and styles.
 * [Final PR handback requires reviewer-driven merges to be settled](final-handback-requires-settled-reviewer-merges.md) - A green handed-back SHA is stale if an in-flight reviewer can still add a fix or regression; maintainers must bind approval to the actual stable PR head and its own check run.
 * [A source-kernel update can expose missing locked capability artifacts](source-kernel-update-can-expose-missing-capability-artifacts.md) - After linking a local framework checkout as the active CLI, verify every deployment with doctor; restore missing artifacts explicitly, and use a path reinstall plus renewed trust when a same-version marketplace source has drifted from its lock integrity.
 * [Instance-name filesystem lookups must reject path traversal before joining](instance-name-filesystem-containment.md) - Any helper that maps an instance-name argument to an instance home must validate the name and enforce immediate-child containment before filesystem existence checks or destructive lifecycle operations.

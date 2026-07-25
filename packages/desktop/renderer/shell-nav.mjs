@@ -1,14 +1,15 @@
 /* oas desktop — shell navigation manifest + stage-view loader.
    Extracted from shell.mjs so shell-level tests can exercise the SAME
-   name→module wiring the production rail uses (regression: the Instances
-   view shipped unreachable because no NAV entry loaded it — merged-state
-   review of feature/desktop-ux-fixes). shell.mjs binds these one-to-one. */
+   name→module wiring the production rail uses. shell.mjs binds these
+   one-to-one. */
 
 /** First-class stage destinations on the nav rail. Every entry's `name`
- * must resolve through loadStageView to a mount-exporting view module. */
+ * must resolve through loadStageView to a mount-exporting view module.
+ * There is deliberately NO "instances" stage: the instances context is the
+ * shell's permanent sidebar roster (below the rail), not a rail destination
+ * (scope correction of PR #29 — the human rejected the extra tab/sidebar). */
 export const NAV = [
   { name: "hierarchy", label: "Active overview", icon: "⌘", title: "Active overview" },
-  { name: "instances", label: "Instances", icon: "▤", title: "Instance roster, transcripts and details" },
   { name: "spawn", label: "Soul roster", icon: "✦", title: "Soul roster" },
 ];
 
