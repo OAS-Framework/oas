@@ -38,7 +38,7 @@ read what the current task needs, not everything.
 * [lessons/exact-tag-detached-head-refspec.md](lessons/exact-tag-detached-head-refspec.md) - Switching a release workflow checkout from main to github.sha preserves exact-tag integrity but leaves the runner in detached HEAD, so version-bump pushes must use a fully-qualified destination such as HEAD:refs/heads/<branch>.
 * [lessons/release-bump-pr-org-policy-block.md](lessons/release-bump-pr-org-policy-block.md) - A release can publish npm and GitHub Release successfully while the final version-bump PR is blocked by org policy, so publication-first ordering keeps the release live and leaves only manual PR rescue.
 * [lessons/kernel-validation-before-side-effects.md](lessons/kernel-validation-before-side-effects.md) - spawnInstance options that can be rejected (relations, anchors, relation sugar conflicts) must be checked in their raw caller shape before normalization and before mkdir/hooks because CLI prechecks do not protect direct kernel callers.
-* [lessons/cross-instance-writes-commit-last.md](lessons/cross-instance-writes-commit-last.md) - Spawn-style operations must put cross-instance metadata writes after earlier fallible steps, and compensate any launched/scaffolded side effects if that final write fails, to avoid half-recorded lineage.
+* [lessons/cross-instance-writes-commit-last.md](lessons/cross-instance-writes-commit-last.md) - Spawn-style operations need late atomic cross-instance metadata writes and rollback that compensates launched windows, scaffolded files, and external capability state.
 * [lessons/names-are-not-identity.md](lessons/names-are-not-identity.md) - Cross-instance references by bare name must be resolved from the referrer's context and realpath-compared before acting; path-identified owners need path-first matching and name round-trip verification before recording.
 * [lessons/path-first-resolution-round-trip.md](lessons/path-first-resolution-round-trip.md) - When a path identifies an instance but metadata records a name, search candidate homes by path first and accept the name only if it resolves back to the same home from the consumer's context.
 * [lessons/lineage-edge-ambiguity-posture.md](lessons/lineage-edge-ambiguity-posture.md) - Any operation recording or copying a bare-name cross-instance edge needs all-match enumeration, rejection of intra-root duplicates, and round-trip validation from every context that will interpret the stored name.
@@ -48,7 +48,7 @@ read what the current task needs, not everything.
 ## Playbooks
 
 * [playbooks/release-tag-driven-ci.md](playbooks/release-tag-driven-ci.md) - Releases are cut by pushing a vX.Y.Z tag on main which makes CI bump and publish packages; local version bumps break the workflow, retries must skip already-published artifacts, and verification means installing the published artifact.
-* [playbooks/test-conventions.md](playbooks/test-conventions.md) - test/capabilities.test.mjs house style: temp dirs, fixtureSoul, fakeRuntimes, spawnSync of the CLI.
+* [playbooks/test-conventions.md](playbooks/test-conventions.md) - Kernel and CLI tests run node:test against temp directories with fixture souls, fake/runtime tmux shims on PATH, spawnSync of bin/oas.mjs for CLI behavior, and regression coverage at the layer where bugs occurred.
 
 ## References
 

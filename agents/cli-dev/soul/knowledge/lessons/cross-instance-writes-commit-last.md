@@ -1,7 +1,7 @@
 ---
 type: Lesson
-title: Cross-instance mutations need late commits and compensation
-description: Spawn-style operations must put cross-instance metadata writes after earlier fallible steps, and compensate any launched/scaffolded side effects if that final write fails, to avoid half-recorded lineage.
+title: Cross-instance mutations need late atomic commits and compensation
+description: Spawn-style operations need late atomic cross-instance metadata writes and rollback that compensates launched windows, scaffolded files, and external capability state.
 tags: [kernel, spawn, transactionality, lineage, ordering, compensation]
 timestamp: 2026-07-25
 ---
@@ -31,14 +31,26 @@ Order side effects by who owns the mutated state:
 
 The "last" cross-instance write is also fallible. When an irreversible-ish step
 such as a tmux launch must precede the write, ordering alone is not enough: make
-the write a compensated transaction. On metadata-write failure, kill the launched
-window by exact-match tmux target, remove the worktree/branch and scaffolded
-home, then rethrow with the rollback named. The invariant is all-or-nothing:
-either the agent is live and lineage is recorded, or neither remains.
+the write a compensated transaction. A rollback-completeness review (fixed in
+4b74c68) added three checklist items for that transaction:
+
+- The guarded metadata write must be atomic. Do not use `writeFileSync` on the
+  target, because a mid-write ENOSPC/IO failure can truncate the other
+  instance's `instance.json` before rollback can help. Write a same-directory
+  `<target>.tmp-<uniq>` file, `renameSync` it over the target, and remove the
+  temp file in catch paths.
+- Rollback must compensate external capability state while the scaffolded home
+  still exists. Spawn hooks may have provisioned state keyed to files inside the
+  home, such as an aweb identity and roster record; run matching retire hooks
+  best-effort with the spawn hook metadata before deleting the worktree/home.
+- Rollback must remove launched/scaffolded side effects: kill the launched
+  window by exact-match tmux target, remove the worktree/branch and scaffolded
+  home, then rethrow with the rollback named. The invariant is all-or-nothing:
+  either the agent is live and lineage is recorded, or neither remains.
 
 For multi-step operations with one cross-instance commit, use this sequence: own
-scaffolding → fallible external steps such as launch → cross-instance commit
-with compensation for everything before it.
+scaffolding → fallible external steps such as launch/hooks → atomic
+cross-instance commit with compensation for everything before it.
 
 For launch-failure coverage, use a PATH directory with the fake runtime shims and
 a real `git` symlink, but no `tmux`. That forces `which("tmux")` to fail after

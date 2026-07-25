@@ -1,7 +1,7 @@
 ---
 type: Playbook
 title: Test conventions in test/capabilities.test.mjs
-description: Kernel and CLI tests run node:test against temp directories with fixture souls, fake runtime binaries on PATH, spawnSync of bin/oas.mjs for CLI behavior, and regression coverage at the layer where bugs occurred.
+description: Kernel and CLI tests run node:test against temp directories with fixture souls, fake/runtime tmux shims on PATH, spawnSync of bin/oas.mjs for CLI behavior, and regression coverage at the layer where bugs occurred.
 tags: [testing, conventions, fixtures, cli, regression, tmux]
 timestamp: 2026-07-25
 ---
@@ -23,7 +23,9 @@ All kernel/CLI behavior tests live in `test/capabilities.test.mjs`
   — returns `{ repo, root, soul, agent }`.
 - **`fakeRuntimes(base)`**: writes executable no-op `pi` and `claude` shims
   and returns a PATH prefix — spawn tests never launch a real runtime; pass
-  the PATH via env to the spawned process.
+  the PATH via env to the spawned process. For launched-path rollback tests,
+  add a fake `tmux` that records its argv and exits 0 so launch succeeds
+  without touching a real session.
 - **CLI behavior**: `spawnSync(process.execPath, [CLI, ...args], { cwd, env })`
   against `bin/oas.mjs` — test the actual command surface (init, install,
   spawn, retire, status), asserting on stdout/stderr and filesystem effects.
@@ -39,7 +41,13 @@ All kernel/CLI behavior tests live in `test/capabilities.test.mjs`
 - Cross-instance metadata-write failure tests need both failure forcing and
   rollback assertions: chmod the anchor `instance.json` to `444` and its
   directory to `555`, assert the throw plus no scaffolded home and unchanged
-  anchor, then restore modes in `finally`. See
+  anchor, then restore modes in `finally`. For the post-launch rollback branch,
+  use a fake `tmux` shim that appends `$@` to a log and exits 0, force the
+  atomic anchor write to fail by making the anchor home directory `555`, and
+  assert `new-window`, exact-match `kill-window`, spawn+retire hook events, no
+  zombie home, no temp leftover, and byte-identical anchor metadata. If the
+  test replaces PATH wholesale, include symlinks for tools the kernel/hooks
+  still shell out to (`git`, `node`, `chmod`, `sh`). See
   [cross-instance writes](/lessons/cross-instance-writes-commit-last.md).
 - Every CLI-level `E_BAD_ARGS` relation-matrix case needs a direct
   `spawnInstance(..., { launch: false })` equivalent that passes the raw

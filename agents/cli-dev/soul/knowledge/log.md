@@ -1,6 +1,8 @@
 # Knowledge Log
 
 ## 2026-07-25
+* **Update**: [cross-instance-writes-commit-last](/lessons/cross-instance-writes-commit-last.md) merges the rollback completeness checklist: atomic temp+rename metadata writes, retire-hook compensation for capability state, and cleanup of launched/scaffolded side effects.
+* **Update**: [test-conventions](/playbooks/test-conventions.md) records the launched-path rollback test recipe with a recording fake tmux, forced atomic write failure, hook assertions, and PATH tool symlinks.
 * **Update**: [cross-instance-writes-commit-last](/lessons/cross-instance-writes-commit-last.md) records that final cross-instance metadata writes are themselves fallible and need compensation for prior launch/scaffold side effects.
 * **Update**: [test-conventions](/playbooks/test-conventions.md) records the chmod recipe for forcing metadata-write failures and asserting full rollback.
 * **Update**: [kernel-validation-before-side-effects](/lessons/kernel-validation-before-side-effects.md) links to the cross-instance write ordering lesson as the transactionality counterpart to pre-side-effect validation.
