@@ -1,6 +1,7 @@
 # Knowledge Log
 
 ## 2026-07-25
+* **Update**: [Repo state](/stewardship/repo-state.md) records the post-publication human finding that PR #29's added Instances navigation/sidebar was out of scope and v0.18.4 now requires an immutable-version corrective patch.
 * **Update**: [Repo state](/stewardship/repo-state.md) records the v0.18.4 Desktop UX release, published package/installer verification, clean deployment probe, and PR #31 manifest-bump rescue; the [delivery log](/stewardship/delivery-log.md) records PR #31's terminal outcome.
 
 ## 2026-07-24
