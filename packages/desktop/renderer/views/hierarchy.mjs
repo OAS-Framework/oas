@@ -20,6 +20,7 @@ import {
   renderWorkspaceSelect, wsQuery, workspaceGeneration,
 } from "./common.mjs";
 import { registerAction } from "../keybindings.mjs";
+import { resolveViewKey } from "../view-keys.mjs";
 
 const CSS = `
 .hier { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--bg); color: var(--fg);
@@ -215,19 +216,22 @@ export function mount(el, ctx) {
   s.canvas.addEventListener("keydown", (e) => onKey(s, e));
 
   // Register the canvas keys as actions (context stage:hierarchy) so they
-  // appear in the shortcuts editor. Default single-key dispatch stays
-  // view-local (onKey, scoped to the focused canvas) — the engine has no
-  // editable-field guard yet, so these carry no DEFAULT_KEYMAP chords; a
-  // user-bound chord dispatches through the engine. Disposed on unmount.
-  s.disposers = [
-    registerAction({ id: "hier.fit", label: "Hierarchy: fit to screen (f)", context: "stage:hierarchy", run: () => fit(s) }),
-    registerAction({ id: "hier.terminal", label: "Hierarchy: open terminal of selection (t)", context: "stage:hierarchy", run: () => { if (s.sel) s.ctx.openTerminal(s.sel); } }),
-    registerAction({ id: "hier.brain", label: "Hierarchy: open Brain of selection (b)", context: "stage:hierarchy", run: () => openSelBrain(s) }),
-    registerAction({ id: "hier.spawn", label: "Hierarchy: open the Spawn view (s)", context: "stage:hierarchy", run: () => s.ctx.openView?.("spawn") }),
-    registerAction({ id: "hier.popover", label: "Hierarchy: open the action popover (o)", context: "stage:hierarchy", run: () => { if (s.sel) openPop(s, s.sel); } }),
-    registerAction({ id: "hier.zoomIn", label: "Hierarchy: zoom in (+)", context: "stage:hierarchy", run: () => zoomBy(s, 1.2) }),
-    registerAction({ id: "hier.zoomOut", label: "Hierarchy: zoom out (-)", context: "stage:hierarchy", run: () => zoomBy(s, 1 / 1.2) }),
+  // appear in the shortcuts editor and are truly REBINDABLE: onKey resolves
+  // each keydown through the engine keymap (view-keys.mjs) — a user override
+  // wins and the old default stops firing. Dispatch stays canvas-local so
+  // plain keys can never leak into inputs. Disposed on unmount.
+  s.viewActions = [
+    { id: "hier.fit", chord: "f", label: "Hierarchy: fit to screen", run: () => fit(s) },
+    { id: "hier.terminal", chord: "t", label: "Hierarchy: open terminal of selection", run: () => { if (s.sel) s.ctx.openTerminal(s.sel); } },
+    { id: "hier.brain", chord: "b", label: "Hierarchy: open Brain of selection", run: () => openSelBrain(s) },
+    { id: "hier.spawn", chord: "s", label: "Hierarchy: open the Spawn view", run: () => s.ctx.openView?.("spawn") },
+    { id: "hier.popover", chord: "o", label: "Hierarchy: open the action popover", run: () => { if (s.sel) openPop(s, s.sel); } },
+    { id: "hier.zoomIn", chord: "=", label: "Hierarchy: zoom in", run: () => zoomBy(s, 1.2) },
+    { id: "hier.zoomOut", chord: "-", label: "Hierarchy: zoom out", run: () => zoomBy(s, 1 / 1.2) },
   ];
+  s.disposers = s.viewActions.map((a) => registerAction({
+    id: a.id, label: a.label, context: "stage:hierarchy", run: a.run,
+  }));
 
   s.unsubWs = onWorkspaceChange(() => { s.sel = null; s.fitted = false; s.nodeOffsets.clear(); refresh(s); });
   refresh(s);
@@ -513,18 +517,20 @@ function openSelBrain(s) {
   if (i) s.ctx.openBrain?.(i.agent);
 }
 
-/* keyboard tree-walk over the laid-out nodes */
+/* keyboard tree-walk over the laid-out nodes. Escape/Enter/arrows are the
+   tree's structural keys (not rebindable); everything else resolves through
+   the engine keymap so shortcut-editor rebinds take effect here. */
 function onKey(s, e) {
   const list = s.panel.instances || [];
   if (!list.length) return;
   if (e.key === "Escape") { s.sel = null; paintSelection(s); closePop(s); return; }
-  if (e.key === "f") { e.preventDefault(); fit(s); return; }
-  if ((e.key === "Enter" || e.key === "t") && s.sel) { e.preventDefault(); s.ctx.openTerminal(s.sel); return; }
-  if (e.key === "b" && s.sel) { e.preventDefault(); openSelBrain(s); return; }
-  if (e.key === "s") { e.preventDefault(); s.ctx.openView?.("spawn"); return; }
-  if (e.key === "o" && s.sel) { e.preventDefault(); openPop(s, s.sel); return; }
-  if (e.key === "+" || e.key === "=") { e.preventDefault(); zoomBy(s, 1.2); return; }
-  if (e.key === "-") { e.preventDefault(); zoomBy(s, 1 / 1.2); return; }
+  if (e.key === "Enter" && s.sel) { e.preventDefault(); s.ctx.openTerminal(s.sel); return; }
+  const hit = resolveViewKey(e, s.viewActions);
+  if (hit) {
+    e.preventDefault();
+    s.viewActions.find((a) => a.id === hit)?.run();
+    return;
+  }
   if (!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)) return;
   e.preventDefault();
   if (!s.sel) { select(s, list[0].instance); return; }
