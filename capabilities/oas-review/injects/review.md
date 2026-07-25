@@ -11,7 +11,9 @@ oas spawn reviewer --work attached --work-dir "$PWD/work" \
 ```
 
 - `--purpose "<short-sha>"` gives the reviewer a unique, commit-relevant
-  instance name (`reviewer-<short-sha>`); attached mode nests it under you.
+  instance name (`reviewer-<short-sha>`); attached mode shares your work tree
+  and automatically makes the reviewer your child (attached agents are always
+  children of the work-tree owner — no relation flags needed or allowed).
 - The reviewer reviews **that commit's diff only** and reports back **by aweb
   mail** to you (verdict `APPROVE` / `APPROVE WITH NITS` / `NEEDS CHANGES`).
   Do not wait actively: finish your turn and go idle — the aweb channel
@@ -32,7 +34,7 @@ oas spawn reviewer --work attached --work-dir "$PWD/work" \
   another oas-expert instance is live:
 
   ```bash
-  oas spawn oas-expert --purpose "pr<n>" --parent "$OAS_INSTANCE" \
+  oas spawn oas-expert --purpose "pr<n>" --relation parent --relative-to "$OAS_INSTANCE" \
     --task "Maintainer review of PR #<n>: run your pr-review gates. You own this PR to its terminal outcome — on RETURN stay alive and idle for my fixed-mail, re-review, repeat; on merge/close record the delivery in your stewardship knowledge and retire yourself. Report verdicts to <your-instance> by aweb mail."
   ```
 

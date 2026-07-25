@@ -124,16 +124,23 @@ sugar for `--relative-to <instance> --relation child`):
 - **parent** — the NEW instance becomes the anchor's parent: it inherits the
   anchor's old lineage slot, and the anchor's `instance.json` is re-pointed so
   its `parentInstance` is the new instance (a reviewer/maintainer of your work
-  sits above you).
+  sits above you). Retirement splices lineage: when any instance retires,
+  instances pointing at it (parent or sibling links) inherit its COMPLETE
+  surviving lineage — both its parent and sibling links, whichever edge type
+  pointed at it — so a retired parent-relation maintainer hands its children
+  back to the parent it displaced (restoring absorbed sibling links too), and
+  no instance is left pointing at a missing one. The splice scans every agents
+  root in the team scope, since relations can cross member repos.
 - **sibling** — a peer in the anchor's cluster: it shares the anchor's parent
   when one exists; when the anchor is a root, the new instance records an
   explicit `siblingInstance` link so the cluster is still derivable from
   `oas status --json` (`parentInstance` + `siblingInstance` edges).
 - **unrelated** (default) — no link, operator-origin, top-level.
 
-Attached-mode spawns without a relation still nest under the owner of the
-shared work tree; an explicit `--relation unrelated` suppresses that
-auto-parenting. Any other spawn — including one from a shell that inherited
+Attached-mode spawns are ALWAYS children of the owner of the shared work tree
+(design decision: an attached agent serves that owner); relation flags other
+than a redundant child-of-owner are rejected. Any other spawn — including one
+from a shell that inherited
 an agent's environment variables — is operator-origin and appears top-level.
 Agents spawning sub-agents should pass `--parent "$OAS_INSTANCE"` (or the
 relation that fits).

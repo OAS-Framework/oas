@@ -1,8 +1,8 @@
 ---
 type: Playbook
 title: Test conventions in test/capabilities.test.mjs
-description: Kernel and CLI tests run node:test against temp directories with fixture souls, fake runtime binaries on PATH, and spawnSync of bin/oas.mjs for CLI behavior — follow these helpers instead of inventing new scaffolding.
-tags: [testing, conventions, fixtures, cli, tmux]
+description: Kernel and CLI tests run node:test against temp directories with fixture souls, fake runtime binaries on PATH, spawnSync of bin/oas.mjs for CLI behavior, and regression coverage at the layer where bugs occurred.
+tags: [testing, conventions, fixtures, cli, regression, tmux]
 timestamp: 2026-07-25
 ---
 
@@ -40,6 +40,12 @@ All kernel/CLI behavior tests live in `test/capabilities.test.mjs`
   (`{ ok: false, error: { ... } }`), not stderr text. Parse stdout for stable
   error codes; reserve stderr assertions for non-JSON `die()` paths and JSON
   mode progress notes.
+- Regression tests must exercise the layer where the bug lived. For CLI-surface
+  bugs, spawn `bin/oas.mjs` with `spawnSync(...)` (for example `--work attached
+  --relation unrelated --json`) and assert the CLI-visible effect, such as
+  `parent === null`; a direct `spawnInstance()` test can stay green if the CLI
+  regresses before calling the kernel. When cheap, temporarily reintroduce the
+  original bug, confirm the test fails, then revert so the coverage has teeth.
 - A clean checkout needs dependencies installed in both the repo root and
   `packages/desktop`; otherwise desktop tests can fail with missing transitive
   ESM packages such as `marked` before the kernel/CLI change under test runs.

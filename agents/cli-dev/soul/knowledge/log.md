@@ -1,6 +1,26 @@
 # Knowledge Log
 
 ## 2026-07-25
+* **Creation**: [team-agent-roots-nonexistent-roots](/lessons/team-agent-roots-nonexistent-roots.md) records that nonexistent `teamAgentRoots()` entries are anchors for `localAgentBases(root)` and must survive failed realpath normalization.
+* **Update**: [team-scope-and-cross-repo-spawn](/lessons/team-scope-and-cross-repo-spawn.md) clarifies that team roots are not existence-filtered because all-local member scopes may only have `local-agents/`.
+* **Update**: [spawn-relations-lineage-fields](/architecture/spawn-relations-lineage-fields.md) points retire-splice scanners at the nonexistent-roots fallback rule.
+* **Creation**: [path-first-resolution-round-trip](/lessons/path-first-resolution-round-trip.md) records the path-first, name round-trip rule for path-identified instances whose metadata stores names.
+* **Update**: [names-are-not-identity](/lessons/names-are-not-identity.md) distinguishes path-first owner matching from name-based identity and adds the symlinked checkout matching gotcha.
+* **Update**: [attached-spawns-child-of-work-owner](/decisions/attached-spawns-child-of-work-owner.md) records that explicit parent fallback cannot bypass a failed known-instance owner round trip.
+* **Update**: [spawn-lineage-explicit-only](/decisions/spawn-lineage-explicit-only.md) updates attached-mode owner verification to scan paths before accepting the recordable parent name.
+* **Update**: [spawn-relations-lineage-fields](/architecture/spawn-relations-lineage-fields.md) replaces realpath-only attached owner inference with path-first matching and name round-trip verification.
+* **Creation**: [names-are-not-identity](/lessons/names-are-not-identity.md) records that bare instance names and path-shaped work owners must resolve to canonical homes before relation repair or attached-owner inference acts.
+* **Update**: [spawn-relations-lineage-fields](/architecture/spawn-relations-lineage-fields.md) clarifies retire splice proof: resolve lineage names from each referrer's context and realpath-match before relinking.
+* **Update**: [spawn-lineage-explicit-only](/decisions/spawn-lineage-explicit-only.md) records that attached work owner fallback is canonical only when an instance's work realpath matches the workDir; non-instance trees need explicit parent.
+* **Update**: [attached-spawns-child-of-work-owner](/decisions/attached-spawns-child-of-work-owner.md) clarifies that attached ownership is verified, not inferred lexically from `<name>/work`.
+* **Creation**: [attached-spawns-child-of-work-owner](/decisions/attached-spawns-child-of-work-owner.md) records the human decision that attached work mode always makes the attached agent a child of the work-tree owner and rejects contradictory relation flags.
+* **Update**: [spawn-lineage-explicit-only](/decisions/spawn-lineage-explicit-only.md) clarifies that attached-mode parentage is a binding lineage source, not a negatable fallback.
+* **Update**: [spawn-relations-lineage-fields](/architecture/spawn-relations-lineage-fields.md) records attached-mode relation rejection and complete cross-type, team-wide retirement splice rules.
+* **Update**: [relation-policy-migration-and-retire-splice](/lessons/relation-policy-migration-and-retire-splice.md) generalizes lineage repair ownership to both sides of lifecycle events across the scope where references can be created.
+* **Creation**: [relation-policy-migration-and-retire-splice](/lessons/relation-policy-migration-and-retire-splice.md) records that relation policy changes must migrate all agent-facing spawn recipes and define retire-time repair for mutated lineage.
+* **Update**: [spawn-relations-lineage-fields](/architecture/spawn-relations-lineage-fields.md) records retireInstance splice repair and its `relinked[]` reporting for links pointing at a retiree.
+* **Update**: [spawn-lineage-explicit-only](/decisions/spawn-lineage-explicit-only.md) broadens the recipe migration rule from spawn semantics to relation policy changes.
+* **Update**: [test-conventions](/playbooks/test-conventions.md) records that CLI-layer regressions need CLI-surface tests, and that briefly reintroducing the original bug can prove the test has teeth.
 * **Creation**: [kernel-validation-before-side-effects](/lessons/kernel-validation-before-side-effects.md) records that rejectable `spawnInstance` relation and anchor options must validate before mkdir/hooks, and that explicit unrelated must survive normalization until fallback handling.
 * **Update**: [spawn-relations-lineage-fields](/architecture/spawn-relations-lineage-fields.md) clarifies explicit unrelated normalization and kernel-side pre-scaffold anchor validation.
 * **Update**: [test-conventions](/playbooks/test-conventions.md) records that rejected spawn option tests must assert no instance directory remains.

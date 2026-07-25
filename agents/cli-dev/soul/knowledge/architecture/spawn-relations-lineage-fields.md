@@ -1,7 +1,7 @@
 ---
 type: Concept
 title: Spawn relations map to sparse lineage fields
-description: oas spawn relations use parentInstance for ordinary child and non-root sibling cases, siblingInstance only for root-sibling edges, and parent relation re-points the anchor through a slot-inheriting new parent.
+description: oas spawn relations use sparse parentInstance/siblingInstance fields, attached work mode forces child-of-work-owner, and retireInstance splices complete surviving lineage for links that point at a retiree.
 tags: [spawn, lineage, relations, kernel, cli]
 timestamp: 2026-07-25
 ---
@@ -27,10 +27,57 @@ sugar for the child relation.
   edges confuse traversal.
 - **Unrelated** is normalized away before recording. Absent lineage fields mean
   unrelated; consumers should never see `relation: "unrelated"` as stored
-  metadata. During option parsing, however, an explicit unrelated request must
-  survive as an `explicitUnrelated`-style fact until defaults and fallbacks have
-  run, so attached-mode auto-parenting does not treat explicit negation as an
-  omitted relation.
+  metadata. During option parsing an explicit unrelated request can survive long
+  enough to bypass ordinary non-attached relation defaults, but it cannot
+  suppress attached-mode parentage.
+
+# Attached work mode
+
+Attached work mode owns the lineage decision: an attached spawn records the
+shared work-tree owner as `parentInstance`. Relation flags that contradict that
+child-of-owner shape are invalid (`E_BAD_ARGS` at the CLI and a kernel throw for
+programmatic callers). Only an explicit redundant child-of-owner request is
+accepted, because capability hooks may pass the parent explicitly.
+
+The work-tree owner is identity-sensitive. Resolve it path-first over known
+candidate homes in the local root and team scope. Symlinked checkout-mode
+`work` directories all realpath to the same shared repository, so match those
+by lexical parent relation; match real work directories by realpath equality.
+Only record a candidate name after resolving that name from the attached
+instance's context lands back on the same home. Path shape alone is not proof,
+and a same-named local instance that breaks the round trip is ambiguous.
+Legitimate non-instance integration work trees need explicit ownership
+(`--parent`) only when the path matches no known instance work. The binding
+policy is recorded in
+[attached-spawns-child-of-work-owner](/decisions/attached-spawns-child-of-work-owner.md)
+and [path-first resolution](/lessons/path-first-resolution-round-trip.md).
+
+# Retirement repair
+
+Relations that write cross-instance links must specify what happens when either
+side retires. `retireInstance` splices a retiree out of the graph: any instance
+whose `parentInstance` or `siblingInstance` names the retiree inherits the
+retiree's complete surviving lineage, regardless of which edge type pointed at
+the retiree. Same-type substitution is not enough: a parent-linked child still
+needs a retiree's surviving sibling edge, and a sibling-linked peer still needs a
+retiree's surviving parent edge. If the retiree had no surviving links, affected
+instances become roots; dangling sibling links are dropped. The result includes
+`relinked[]` so callers can report which instances were repaired.
+
+This repair is required for parent relation: an ephemeral parent retiring should
+hand anchored instances back to the displaced parent instead of leaving
+`parentInstance` pointing at a missing instance. Because spawn can resolve
+anchors across member repositories, retirement repair must scan every
+`teamAgentRoots` root, not only the retiree's local repo. A bare lineage value is
+not enough to identify the retiree: resolve it from the referrer's agents root
+using the same local-first, then team-scope precedence spawn uses, and splice
+only when that resolved home realpath-matches the retiree's home. Run the splice
+before deleting the retiree home, or this proof is impossible. Local-only scopes
+may lack an `agents/` directory, so failed realpath checks must fall back to
+`resolve(root)` rather than dropping the root. See the
+[nonexistent roots lesson](/lessons/team-agent-roots-nonexistent-roots.md), the broader
+[relation-policy lesson](/lessons/relation-policy-migration-and-retire-splice.md),
+and [identity lesson](/lessons/names-are-not-identity.md).
 
 # Validation boundary
 

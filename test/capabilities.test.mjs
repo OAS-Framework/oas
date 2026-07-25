@@ -968,29 +968,41 @@ test("spawn relations: child/sibling/parent/unrelated, sugar equivalence, valida
   fail(/--relation needs a value/, "--relation", "--relative-to", anchor.instance);
   fail(/does not match any known instance/, "--relation", "sibling", "--relative-to", "no-such-instance");
 
-  // Explicit unrelated on an ATTACHED spawn suppresses the work-tree-owner
-  // auto-parenting (an explicit "no link" directive), while attached WITHOUT
-  // a relation still nests (behavior unchanged).
-  // CLI-level first — the original bug was bin/oas.mjs STRIPPING "unrelated"
-  // before calling the kernel, so this must go through the full CLI path.
+  // ATTACHED agents are ALWAYS children of the work-tree owner (design
+  // decision): no relation flags → auto-parent from the canonically resolved
+  // owner; non-child relations → rejected; a non-instance work dir requires an
+  // explicit --parent naming the owner.
   r = spawn("--purpose", "cli-att-un", "--work", "attached", "--work-dir", join(anchor.home, "work"), "--relation", "unrelated");
-  assert.equal(r.status, 0, r.stderr);
-  const cliAttUn = jsonResult(r);
-  assert.equal(cliAttUn.parent, null, "CLI: explicit --relation unrelated suppresses attached auto-parenting");
-  assert.equal(cliAttUn.spawnOrigin, "operator");
+  assert.equal(r.status, 1);
+  assert.match(JSON.parse(r.stdout).error?.message || "", /always children/);
+  r = spawn("--purpose", "cli-att-par", "--work", "attached", "--work-dir", join(anchor.home, "work"), "--relation", "parent", "--relative-to", anchor.instance);
+  assert.equal(r.status, 1);
+  assert.match(JSON.parse(r.stdout).error?.message || "", /always children/);
   r = spawn("--purpose", "cli-att", "--work", "attached", "--work-dir", join(anchor.home, "work"));
   assert.equal(r.status, 0, r.stderr);
   const cliAtt = jsonResult(r);
-  assert.equal(cliAtt.parent, anchor.instance, "CLI: attached without relation still auto-parents");
+  assert.equal(cliAtt.parent, anchor.instance, "CLI: attached auto-parents under the work-tree owner");
   const agentDef = findAgent(root, "dev");
   const oldPath = process.env.PATH;
   process.env.PATH = fakeRuntimes(base);
   try {
     const att = spawnInstance(root, agentDef, { instance: "dev-att", work: "attached", workDir: join(anchor.home, "work"), launch: false });
-    assert.equal(att.parentInstance, anchor.instance, "attached without relation still auto-parents");
-    const attUn = spawnInstance(root, agentDef, { instance: "dev-att-un", work: "attached", workDir: join(anchor.home, "work"), relation: "unrelated", launch: false });
-    assert.equal(attUn.parentInstance, undefined, "explicit unrelated suppresses attached auto-parenting");
-    assert.equal(attUn.spawnOrigin, "operator");
+    assert.equal(att.parentInstance, anchor.instance, "attached auto-parents under the work-tree owner");
+    // Kernel enforces the invariant too (covers soul-default attached mode):
+    // contradictory relations rejected; redundant child-of-owner allowed.
+    assert.throws(() => spawnInstance(root, agentDef, { instance: "dev-att-un", work: "attached", workDir: join(anchor.home, "work"), relation: "unrelated", launch: false }), /always children/);
+    assert.throws(() => spawnInstance(root, agentDef, { instance: "dev-att-sib", work: "attached", workDir: join(anchor.home, "work"), relation: "sibling", relativeTo: anchor.instance, launch: false }), /always children/);
+    const attKid = spawnInstance(root, agentDef, { instance: "dev-att-kid", work: "attached", workDir: join(anchor.home, "work"), parent: anchor.instance, launch: false });
+    assert.equal(attKid.parentInstance, anchor.instance, "redundant child-of-owner is accepted");
+    // Ownership is CANONICAL, not lexical: a path merely SHAPED like <owner>/work
+    // never records a nonexistent parent, and a non-instance tree (e.g. a
+    // coordinator's integration worktree) requires an explicit --parent owner.
+    const fakeOwner = join(base, "not-an-instance", "work"); mkdirSync(fakeOwner, { recursive: true });
+    assert.throws(() => spawnInstance(root, agentDef, { instance: "dev-att-fake", work: "attached", workDir: fakeOwner, launch: false }), /not a known instance/);
+    const integ = join(base, "integration-tree"); mkdirSync(integ, { recursive: true });
+    assert.throws(() => spawnInstance(root, agentDef, { instance: "dev-att-integ", work: "attached", workDir: integ, launch: false }), /not a known instance/);
+    const owned = spawnInstance(root, agentDef, { instance: "dev-att-owned", work: "attached", workDir: integ, parent: anchor.instance, launch: false });
+    assert.equal(owned.parentInstance, anchor.instance, "non-instance tree with explicit --parent owner attaches as its child");
 
     // Direct-kernel rejection happens BEFORE scaffolding and hooks: no home dir remains.
     const assertNoHome = (name, fn, re) => {
@@ -1000,6 +1012,219 @@ test("spawn relations: child/sibling/parent/unrelated, sugar equivalence, valida
     assertNoHome("dev-badrel", () => spawnInstance(root, agentDef, { instance: "dev-badrel", relation: "boss", relativeTo: anchor.instance, launch: false }), /unknown relation/);
     assertNoHome("dev-norel", () => spawnInstance(root, agentDef, { instance: "dev-norel", relation: "sibling", launch: false }), /needs a relative-to/);
     assertNoHome("dev-noanchor", () => spawnInstance(root, agentDef, { instance: "dev-noanchor", relation: "sibling", relativeTo: "no-such-instance", launch: false }), /was not found/);
+  } finally { process.env.PATH = oldPath; }
+});
+
+test("retire splices lineage: orphans inherit the retiree's links (parent-relation reviewer cycle)", () => {
+  const base = temp(); const repo = join(base, "repo"); gitRepo(repo);
+  const root = join(repo, "agents");
+  write(join(root, "dev", "soul", "soul.yaml"), `name: dev\nkind: persistent\nrepo: ${repo}\nwork: checkout\nruntime: pi\n`);
+  write(join(root, "dev", "soul", "AGENTS.md"), "# dev\n");
+  mkdirSync(join(root, "dev", "instances"), { recursive: true });
+  const oldPath = process.env.PATH;
+  process.env.PATH = fakeRuntimes(base);
+  const metaOf = (name) => JSON.parse(readFileSync(join(root, "dev", "instances", name, "instance.json"), "utf8"));
+  try {
+    const agentDef = findAgent(root, "dev");
+    // coordinator → developer (child) → reviewer (parent relation over the developer).
+    const coord = spawnInstance(root, agentDef, { instance: "dev-coord", launch: false });
+    const developer = spawnInstance(root, agentDef, { instance: "dev-worker", relation: "child", relativeTo: coord.instance, launch: false });
+    const reviewer = spawnInstance(root, agentDef, { instance: "dev-rev", relation: "parent", relativeTo: developer.instance, launch: false });
+    assert.equal(reviewer.parentInstance, coord.instance, "reviewer takes the developer's slot under the coordinator");
+    assert.equal(metaOf(developer.instance).parentInstance, reviewer.instance);
+    // Reviewer retires → the developer returns to the coordinator (no dangling parent).
+    const r = retireInstance(root, reviewer.instance, { keepDir: false });
+    assert.ok(r.relinked?.some((x) => x.instance === developer.instance && x.parentInstance === coord.instance), "retire reports the splice");
+    assert.equal(metaOf(developer.instance).parentInstance, coord.instance, "developer re-pointed to its previous parent");
+    // Root-parent case: reviewer over a ROOT instance → on retire the root becomes a root again.
+    const solo = spawnInstance(root, agentDef, { instance: "dev-solo", launch: false });
+    const rev2 = spawnInstance(root, agentDef, { instance: "dev-rev2", relation: "parent", relativeTo: solo.instance, launch: false });
+    assert.equal(metaOf(solo.instance).parentInstance, rev2.instance);
+    retireInstance(root, rev2.instance, { keepDir: false });
+    assert.equal(metaOf(solo.instance).parentInstance, undefined, "root anchor is a root again after its reviewer retires");
+    // Sibling-link splice: root sibling link to a retiring instance is dropped.
+    const peer = spawnInstance(root, agentDef, { instance: "dev-peer", relation: "sibling", relativeTo: solo.instance, launch: false });
+    assert.equal(metaOf(peer.instance).siblingInstance, solo.instance);
+    // Mixed edge types: reviewer R as parent over root-sibling peer absorbs
+    // peer's sibling link (R.siblingInstance = solo). Retiring R must restore
+    // BOTH: peer loses parent AND regains the sibling link — the orphan inherits
+    // the retiree's COMPLETE lineage, not just the same-typed edge.
+    const rev3 = spawnInstance(root, agentDef, { instance: "dev-rev3", relation: "parent", relativeTo: peer.instance, launch: false });
+    assert.equal(rev3.siblingInstance, solo.instance, "parent-relation reviewer absorbs the anchor's sibling link");
+    assert.equal(metaOf(peer.instance).parentInstance, rev3.instance);
+    assert.equal(metaOf(peer.instance).siblingInstance, undefined);
+    retireInstance(root, rev3.instance, { keepDir: false });
+    assert.equal(metaOf(peer.instance).parentInstance, undefined, "peer is a root again");
+    assert.equal(metaOf(peer.instance).siblingInstance, solo.instance, "cross-type splice restores the sibling cluster link");
+    retireInstance(root, solo.instance, { keepDir: false });
+    assert.equal(metaOf(peer.instance).siblingInstance, undefined, "dangling sibling link dropped on retire");
+  } finally { process.env.PATH = oldPath; }
+});
+
+test("retire splice crosses member repos inside a team deployment", () => {
+  const base = temp();
+  const ws = join(base, "ws"); mkdirSync(ws, { recursive: true });
+  write(join(ws, "oas-config.yaml"), "team:\n  name: t\n");
+  const mkMember = (repoName, soulName) => {
+    const repo = join(ws, repoName); gitRepo(repo);
+    write(join(repo, "oas-config.yaml"), "capabilities:\n  additive: {}\n");
+    const root = join(repo, "agents");
+    write(join(root, soulName, "soul", "soul.yaml"), `name: ${soulName}\nkind: persistent\nrepo: ${repo}\nwork: checkout\nruntime: pi\n`);
+    write(join(root, soulName, "soul", "AGENTS.md"), `# ${soulName}\n`);
+    mkdirSync(join(root, soulName, "instances"), { recursive: true });
+    return { repo, root };
+  };
+  const a = mkMember("repo-a", "dev");
+  const b = mkMember("repo-b", "expert");
+  const oldPath = process.env.PATH;
+  process.env.PATH = fakeRuntimes(base);
+  try {
+    // Anchor lives in repo A; the parent-relation instance homes in repo B
+    // (spawn resolves cross-repo anchors via findTeamInstance).
+    const anchor = spawnInstance(a.root, findAgent(a.root, "dev"), { instance: "dev-anchor", launch: false });
+    const boss = spawnInstance(b.root, findAgent(b.root, "expert"), { instance: "expert-boss", relation: "parent", relativeTo: anchor.instance, launch: false });
+    const anchorMeta = () => JSON.parse(readFileSync(join(a.root, "dev", "instances", anchor.instance, "instance.json"), "utf8"));
+    assert.equal(anchorMeta().parentInstance, boss.instance, "cross-repo parent relation recorded");
+    // Retiring the repo-B instance must repair the repo-A anchor: the splice
+    // scans every team agents root, not just the retiree's.
+    const r = retireInstance(b.root, boss.instance, { keepDir: false });
+    assert.ok(r.relinked?.some((x) => x.instance === anchor.instance), "splice reached the sibling repo");
+    assert.equal(anchorMeta().parentInstance, undefined, "repo-A anchor no longer points at the retired repo-B instance");
+  } finally { process.env.PATH = oldPath; }
+});
+
+test("retire splice is identity-safe: a same-named instance in another repo keeps its links", () => {
+  const base = temp();
+  const ws = join(base, "ws"); mkdirSync(ws, { recursive: true });
+  write(join(ws, "oas-config.yaml"), "team:\n  name: t\n");
+  const mkMember = (repoName) => {
+    const repo = join(ws, repoName); gitRepo(repo);
+    write(join(repo, "oas-config.yaml"), "capabilities:\n  additive: {}\n");
+    const root = join(repo, "agents");
+    write(join(root, "dev", "soul", "soul.yaml"), `name: dev\nkind: persistent\nrepo: ${repo}\nwork: checkout\nruntime: pi\n`);
+    write(join(root, "dev", "soul", "AGENTS.md"), "# dev\n");
+    mkdirSync(join(root, "dev", "instances"), { recursive: true });
+    return { repo, root };
+  };
+  const a = mkMember("repo-a");
+  const b = mkMember("repo-b");
+  const oldPath = process.env.PATH;
+  process.env.PATH = fakeRuntimes(base);
+  try {
+    // SAME instance name in both repos (names are only unique per agent dir).
+    const bossA = spawnInstance(a.root, findAgent(a.root, "dev"), { instance: "dev-boss", launch: false });
+    const bossB = spawnInstance(b.root, findAgent(b.root, "dev"), { instance: "dev-boss", launch: false });
+    assert.equal(bossA.instance, bossB.instance, "fixture: duplicate names across repos");
+    // Each repo's child points at ITS OWN dev-boss (local-first resolution).
+    const kidA = spawnInstance(a.root, findAgent(a.root, "dev"), { instance: "dev-kid", relation: "child", relativeTo: "dev-boss", launch: false });
+    const kidB = spawnInstance(b.root, findAgent(b.root, "dev"), { instance: "dev-kid-b", relation: "child", relativeTo: "dev-boss", launch: false });
+    const metaOf = (root2, name2) => JSON.parse(readFileSync(join(root2, "dev", "instances", name2, "instance.json"), "utf8"));
+    assert.equal(metaOf(a.root, kidA.instance).parentInstance, "dev-boss");
+    assert.equal(metaOf(b.root, kidB.instance).parentInstance, "dev-boss");
+    // Retiring repo-A's dev-boss must orphan ONLY repo-A's kid: repo-B's edge
+    // resolves (local-first) to the still-live repo-B dev-boss and is untouched.
+    const r = retireInstance(a.root, "dev-boss", { keepDir: false });
+    assert.equal(metaOf(a.root, kidA.instance).parentInstance, undefined, "repo-A kid orphaned to root");
+    assert.equal(metaOf(b.root, kidB.instance).parentInstance, "dev-boss", "repo-B kid keeps its own same-named parent");
+    assert.ok(!(r.relinked || []).some((x) => x.instance === kidB.instance), "repo-B edge not reported as relinked");
+  } finally { process.env.PATH = oldPath; }
+});
+
+test("attached ownership is path-first: a same-named local instance cannot shadow the tree's true owner", () => {
+  const base = temp();
+  const ws = join(base, "ws"); mkdirSync(ws, { recursive: true });
+  write(join(ws, "oas-config.yaml"), "team:\n  name: t\n");
+  const mkMember = (repoName) => {
+    const repo = join(ws, repoName); gitRepo(repo);
+    write(join(repo, "oas-config.yaml"), "capabilities:\n  additive: {}\n");
+    const root = join(repo, "agents");
+    write(join(root, "dev", "soul", "soul.yaml"), `name: dev\nkind: persistent\nrepo: ${repo}\nwork: checkout\nruntime: pi\n`);
+    write(join(root, "dev", "soul", "AGENTS.md"), "# dev\n");
+    mkdirSync(join(root, "dev", "instances"), { recursive: true });
+    return { repo, root };
+  };
+  const a = mkMember("repo-a");
+  const b = mkMember("repo-b");
+  const oldPath = process.env.PATH;
+  process.env.PATH = fakeRuntimes(base);
+  try {
+    // Same instance name in both repos; the trees differ.
+    const bossA = spawnInstance(a.root, findAgent(a.root, "dev"), { instance: "dev-boss", launch: false });
+    spawnInstance(b.root, findAgent(b.root, "dev"), { instance: "dev-boss", launch: false });
+    // Spawning ATTACHED from repo B onto repo A's dev-boss/work: the path-first
+    // match finds A's boss, but from B's root the NAME "dev-boss" resolves to
+    // B's (local-first) — recording it would link the child to the wrong
+    // instance. Reject as ambiguous, both with and without an explicit parent.
+    assert.throws(
+      () => spawnInstance(b.root, findAgent(b.root, "dev"), { instance: "dev-att-x", work: "attached", workDir: join(a.root, "dev", "instances", bossA.instance, "work"), launch: false }),
+      /ambiguous/,
+      "ownership inference rejects the shadowed owner");
+    assert.throws(
+      () => spawnInstance(b.root, findAgent(b.root, "dev"), { instance: "dev-att-y", work: "attached", workDir: join(a.root, "dev", "instances", bossA.instance, "work"), parent: "dev-boss", launch: false }),
+      /ambiguous/,
+      "explicit --parent cannot bypass the shadow check — the tree IS an instance's work");
+    // No stray homes were scaffolded by the rejected spawns.
+    assert.equal(existsSync(join(b.root, "dev", "instances", "dev-att-x")), false);
+    assert.equal(existsSync(join(b.root, "dev", "instances", "dev-att-y")), false);
+    // Unambiguous case still works from the OWNING repo: A's boss tree, A's root.
+    const ok = spawnInstance(a.root, findAgent(a.root, "dev"), { instance: "dev-att-ok", work: "attached", workDir: join(a.root, "dev", "instances", bossA.instance, "work"), launch: false });
+    assert.equal(ok.parentInstance, bossA.instance, "owner resolved by path where the name is unambiguous");
+  } finally { process.env.PATH = oldPath; }
+});
+
+test("attached owner discovery reaches all-local sibling scopes (no agents/ dir)", () => {
+  const base = temp();
+  const ws = join(base, "ws"); mkdirSync(ws, { recursive: true });
+  write(join(ws, "oas-config.yaml"), "team:\n  name: t\n");
+  // Repo A: ALL-LOCAL — no agents/ dir, its soul lives under local-agents/.
+  const repoA = join(ws, "repo-a"); gitRepo(repoA);
+  write(join(repoA, "oas-config.yaml"), "capabilities:\n  additive: {}\n");
+  const laDir = join(repoA, "local-agents");
+  write(join(laDir, "helper", "soul", "soul.yaml"), `name: helper\nkind: local\nrepo: ${repoA}\nwork: worktree\nruntime: pi\n`);
+  write(join(laDir, "helper", "soul", "AGENTS.md"), "# helper\n");
+  mkdirSync(join(laDir, "helper", "instances"), { recursive: true });
+  // Repo B: regular agents/ root; spawns attach onto A's local instance tree.
+  const repoB = join(ws, "repo-b"); gitRepo(repoB);
+  write(join(repoB, "oas-config.yaml"), "capabilities:\n  additive: {}\n");
+  const rootB = join(repoB, "agents");
+  write(join(rootB, "dev", "soul", "soul.yaml"), `name: dev\nkind: persistent\nrepo: ${repoB}\nwork: checkout\nruntime: pi\n`);
+  write(join(rootB, "dev", "soul", "AGENTS.md"), "# dev\n");
+  mkdirSync(join(rootB, "dev", "instances"), { recursive: true });
+  const oldPath = process.env.PATH;
+  process.env.PATH = fakeRuntimes(base);
+  try {
+    const rootA = join(repoA, "agents"); // nonexistent — the all-local case
+    const helperAgent = findAgent(rootA, "helper");
+    assert.ok(helperAgent, "fixture: local soul resolves through the nonexistent agents/ root");
+    const owner = spawnInstance(rootA, helperAgent, { instance: "helper-owner", launch: false });
+    // Owner discovery from repo B must reach A's local-agents instance even
+    // though teamAgentRoots yields A's NONEXISTENT agents/ root for it.
+    const kid = spawnInstance(rootB, findAgent(rootB, "dev"), { instance: "dev-att-la", work: "attached", workDir: join(owner.home, "work"), launch: false });
+    assert.equal(kid.parentInstance, owner.instance, "all-local sibling owner discovered by path");
+    // Shadow + explicit parent must still be rejected: same-named instance in
+    // B's OWN local-agents (names are only unique per agent dir).
+    const laB = join(repoB, "local-agents");
+    write(join(laB, "helper", "soul", "soul.yaml"), `name: helper\nkind: local\nrepo: ${repoB}\nwork: worktree\nruntime: pi\n`);
+    write(join(laB, "helper", "soul", "AGENTS.md"), "# helper\n");
+    mkdirSync(join(laB, "helper", "instances"), { recursive: true });
+    spawnInstance(rootB, findAgent(rootB, "helper"), { instance: owner.instance, launch: false });
+    assert.throws(
+      () => spawnInstance(rootB, findAgent(rootB, "dev"), { instance: "dev-att-sh", work: "attached", workDir: join(owner.home, "work"), parent: owner.instance, launch: false }),
+      /ambiguous/,
+      "shadowed all-local owner rejected even with explicit --parent");
+    assert.equal(existsSync(join(rootB, "dev", "instances", "dev-att-sh")), false, "no stray home scaffolded");
+
+    // Retire-splice must ALSO reach the all-local scope (its nonexistent
+    // agents/ root is in the scan set): an orphan homed under A's
+    // local-agents whose parent lives in repo B gets repaired when that
+    // parent retires — this fails if the splice drops unresolvable roots.
+    const bossB = spawnInstance(rootB, findAgent(rootB, "dev"), { instance: "dev-la-boss", launch: false });
+    const orphanA = spawnInstance(rootA, helperAgent, { instance: "helper-orphan", relation: "child", relativeTo: bossB.instance, launch: false });
+    const orphanMeta = () => JSON.parse(readFileSync(join(orphanA.home, "instance.json"), "utf8"));
+    assert.equal(orphanMeta().parentInstance, bossB.instance, "cross-repo child into the all-local scope");
+    const rr = retireInstance(rootB, bossB.instance, { keepDir: false });
+    assert.ok(rr.relinked?.some((x) => x.instance === orphanA.instance), "splice reports the all-local orphan");
+    assert.equal(orphanMeta().parentInstance, undefined, "all-local orphan repaired to root");
   } finally { process.env.PATH = oldPath; }
 });
 

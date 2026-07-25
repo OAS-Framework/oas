@@ -8,9 +8,9 @@
       "trustedExecutables": true
     },
     "oas.review": {
-      "source": "marketplace:oas.review@1.1.6",
-      "version": "1.1.6",
-      "integrity": "sha256-5682e5ce5dccee795acaf1905cb69eb552e59421e098c0215129d7f9f7ee7262",
+      "source": "marketplace:oas.review@1.1.7",
+      "version": "1.1.7",
+      "integrity": "sha256-c62ad64991ba7d48d0b0713fa9a04309d0c4db68c81b61e0080a231665506405",
       "trustedExecutables": true
     },
     "oas.okf": {

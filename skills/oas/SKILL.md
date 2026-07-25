@@ -46,8 +46,8 @@ oas spawn <agent> [--task ...] [--purpose ...] [--relation child|sibling|parent|
 # lineage is explicit: agents spawning sub-agents declare their RELATION to the
 # new instance with --relation + --relative-to (--parent X is sugar for
 # --relative-to X --relation child). Without a relation the spawn is
-# operator-origin and appears top-level. Attached-mode spawns nest under the
-# work-tree owner automatically (explicit --relation unrelated suppresses this).
+# operator-origin and appears top-level. Attached-mode spawns are ALWAYS
+# children of the work-tree owner (relation flags are rejected there).
 # when config declares team:, spawn/retire also resolve souls and instances
 # defined in sibling repos of the team scope (unique match wins; the instance
 # homes with its owning repo, works in that repo, resolves that repo's config)
@@ -64,13 +64,18 @@ viewed as clusters of related agents, and the relation is how clusters form:
   spawning the developers of its feature.
 - **parent** (`--relation parent --relative-to <you>`) — the new instance
   oversees YOU: your recorded lineage is re-pointed so it becomes your parent.
-  Example: spawning a maintainer/reviewer of your own work — the reviewer sits
-  above you.
+  Example: spawning a maintainer of your own PR — the maintainer sits
+  above you. When it later retires, lineage is spliced automatically: you
+  return to your previous parent (or top-level).
 - **sibling** (`--relation sibling --relative-to <you>`) — a peer at your
   level, in your cluster. Example: enlisting a peer coordinator in another
   repo, or an architecture coordinator helping you.
 - **unrelated** (default, no flags) — no link. Example: work with no
   connection to yours.
+
+Exception: **attached** work mode implies child-of-owner — an attached agent
+shares its owner's work tree and is always that owner's child; relation flags
+are rejected there.
 
 This is judgment, not mandate: every workspace differs, and a soul's own
 explicit relation instructions (in its AGENTS.md or task briefing) take
