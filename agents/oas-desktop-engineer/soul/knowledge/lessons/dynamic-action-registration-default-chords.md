@@ -28,6 +28,11 @@ read `getBinding`, dispatch, conflict checks, and display stay consistent.
 
 # Gotchas
 
+- The two default mechanisms intentionally coexist: `DEFAULT_KEYMAP` is the
+  canonical table for shipped defaults, and `defaultChord` is the API for
+  dynamically registered actions. If both exist for an action, `DEFAULT_KEYMAP`
+  wins by construction; do not simplify one side away without coordinator
+  sign-off.
 - `registerAction` and unregister must fire the keymap-change notifier: a mount
   that supplies a default chord changes effective bindings, and an open
   shortcuts editor must rerender.
@@ -44,13 +49,16 @@ read `getBinding`, dispatch, conflict checks, and display stay consistent.
   fields, delete the fallback and its registry/context policing instead of
   preserving dormant compatibility in an exported resolver.
   See [Dormant compatibility paths in exported resolvers are liabilities, not safety](/lessons/dormant-compat-paths-exported-resolvers.md).
-- First-class registration defaults also make a view action window-dispatchable
-  in its active context, so the registered `run()` must guard that the event
-  started inside the promised surface.
+- First-class registration defaults can make a view action window-dispatchable
+  if the shell activates the action's context. Do not rely on the registered
+  `run()` to guard the surface: selection and `preventDefault` have already
+  happened. Put view actions in dispatch-ineligible contexts that the window
+  listener never activates, keep editor labels/order metadata for visibility,
+  and let the local view handler dispatch with `resolveViewKey`.
 
 # Related concepts
 
-- [First-class view defaults widen window-level dispatch](/lessons/first-class-view-defaults-window-dispatch-surface.md)
+- [First-class view defaults need dispatch-ineligible contexts](/lessons/first-class-view-defaults-window-dispatch-surface.md)
 - [Dormant compatibility paths in exported resolvers are liabilities, not safety](/lessons/dormant-compat-paths-exported-resolvers.md)
 - [View-local shortcuts resolve chords through the engine keymap](/decisions/view-local-shortcuts-engine-keymap.md)
 - [Real keybindings engine integration keeps defaults engine-owned](/lessons/real-keybindings-engine-integration.md)

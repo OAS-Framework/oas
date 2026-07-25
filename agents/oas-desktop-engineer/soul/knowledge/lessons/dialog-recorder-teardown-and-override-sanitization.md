@@ -40,5 +40,6 @@ listener inside `startRecording` with a locally scoped `stop()`. `close()` and
 
 # Related concepts
 
+- [Modal innerHTML rerenders must restore focus by stable key](/lessons/modal-rerender-focus-restoration.md)
 - [Keybinding engine terminal allowlist is action-id based, not chord based](/lessons/keybindings-terminal-allowlist-by-action-id.md)
 - [Regression tests must exercise the layer that had the bug](/lessons/regression-tests-bug-layer.md)
