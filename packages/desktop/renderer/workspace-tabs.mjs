@@ -23,3 +23,14 @@ export function fallbackTabForContext(entries, mode, ws) {
 export function terminalOpenOwnsWorkspace(capturedWs, currentWs) {
   return capturedWs === currentWs;
 }
+
+/** Pick the terminal tab to activate for `ws`: the remembered per-workspace
+ * active tab when it is still open IN THAT WORKSPACE, else the most recently
+ * opened terminal of the workspace, else null. `rememberedKey` may be stale
+ * (tab closed) or from another workspace — both fall back safely because the
+ * candidate set is already workspace-filtered. */
+export function restoreTerminalTab(entries, ws, rememberedKey) {
+  const terms = terminalTabsForWorkspace(entries, ws);
+  if (!terms.length) return null;
+  return terms.find(([, tab]) => tab.key === rememberedKey) || terms.at(-1);
+}
