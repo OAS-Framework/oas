@@ -711,10 +711,11 @@ function spawnCmd() {
   if (relation === "unrelated" && relativeTo) bail("E_BAD_ARGS", "--relation unrelated takes no --relative-to");
   if (parent && (relation || relativeTo)) bail("E_BAD_ARGS", "--parent is sugar for --relative-to <instance> --relation child — use one form, not both");
   if (parent) { relation = "child"; relativeTo = parent; }
-  // Attached agents are ALWAYS children of the work-tree owner (design
-  // decision) — relation flags contradict the mode. (The kernel enforces this
-  // too, including when attached comes from the soul's default work mode.)
-  if ((flag("work") === "attached") && (relation || relativeTo)) bail("E_BAD_ARGS", "attached agents are always children of the work-tree owner — drop --relation/--relative-to/--parent (or use a different --work mode)");
+  // Attached agents are ALWAYS children (design decision): the only relation
+  // flags allowed are the child form — required when the workDir is not an
+  // instance's own <home>/work (integration worktrees). The kernel verifies
+  // ownership canonically (including soul-default attached mode).
+  if ((flag("work") === "attached") && relation && relation !== "child") bail("E_BAD_ARGS", "attached agents are always children of the work-tree owner — only --parent <instance> (or --relation child) is valid with --work attached");
   // NOTE: explicit "unrelated" is passed through to the kernel.
   if (relativeTo && relation !== "unrelated") {
     // findInstanceHome also sees capability-defined agents' instance homes

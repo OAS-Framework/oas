@@ -63,9 +63,14 @@ fresh reviewer on the integrated diff:
 
 ```bash
 oas spawn reviewer --work attached --work-dir <integration-worktree> \
+  --parent "$OAS_INSTANCE" \
   --purpose "<feature-short-sha>" \
   --task "Review the merged feature diff origin/main..feature/<name>. Report to <your-instance> per your operating loop."
 ```
+
+(The integration worktree is yours, not an instance's `<home>/work`, so the
+owner cannot be inferred — `--parent "$OAS_INSTANCE"` names you explicitly;
+attached agents are always children of their owner.)
 
 Go idle; the verdict arrives by aweb mail. `NEEDS CHANGES` → route findings
 to the owning developer(s), re-merge, re-gate, re-review.
