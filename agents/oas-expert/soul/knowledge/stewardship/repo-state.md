@@ -3,7 +3,7 @@ type: Reference
 title: Repo state — the living picture of the OAS repo
 description: Always-current snapshot of what is on main, what is in flight (PRs, features, running instances), recent deliveries, and open threads. Every oas-expert instance updates the relevant subsection whenever it changes that reality (merge, release, spawn, retire, delivery).
 tags: [stewardship, repo-state, living]
-timestamp: 2026-07-24
+timestamp: 2026-07-25
 ---
 
 # Repo state — the living picture
@@ -15,6 +15,11 @@ entries first inside each section; prune entries that stop being true rather
 than letting the file grow stale.
 
 ## On main
+
+- **PR #25 merged 2026-07-25 as `8d7d2ee`**: release.yml bump-PR push ref
+  fully-qualified to `HEAD:refs/heads/${BRANCH}` (detached-HEAD safe) + a
+  regression guard in test/release-workflow.test.mjs. Fixes the recurring
+  bump-PR push failure; no retag/republish (v0.18.2 stays complete).
 
 - **RELEASED v0.18.2 (2026-07-25)** — first public OAS Desktop release.
   Tag `v0.18.2` on merge commit `7cc3b5b`. Published: `@oas-framework/oas@0.18.2`
@@ -59,6 +64,9 @@ than letting the file grow stale.
 ## Recent deliveries
 
 - (record PR #, one-line scope, verdict, merge/close date)
+- PR #25 release.yml fully-qualify bump-PR push ref (detached-HEAD safe) +
+  regression guard: MERGED 2026-07-25 (`8d7d2ee`); resolves the recurring
+  bump-PR push failure (see delivery-log).
 - PR #22 Linux executableName release-blocker fix + re-cut v0.18.2: MERGED
   2026-07-25 (`7cc3b5b`); drove the successful v0.18.2 publish (see delivery-log).
 - PR #21 OAS Desktop standalone Electron app + legacy-panel succession: MERGED
@@ -106,15 +114,13 @@ than letting the file grow stale.
   merge main, `npm test` run from THOSE roots can still prefix-kill live
   reviewer-* windows (owners notified via tui-dev thread).
 
-- CI bump-PR step fails every release and needs manual rescue. Two distinct
-  causes seen: (a) the known org-level GitHub Actions policy blocking
-  Actions-created PRs; (b) at v0.18.2, the step failed even earlier on an
-  ambiguous `git push origin HEAD:release-bump/vX.Y.Z` refspec — once the tag
-  `vX.Y.Z` exists, the partial destination can't resolve to a branch. Proposed
-  fix to the human: qualify the push as `HEAD:refs/heads/release-bump/vX.Y.Z`
-  in release.yml. Rescue procedure (bump root/pi/desktop manifests+locks, push
-  a proper branch ref, open + squash-merge the `release: vX.Y.Z` PR) is in the
-  git-tag-release skill; publish is already done by this step, so never retag.
+- CI bump-PR step: the ambiguous-refspec failure is now **RESOLVED on main**
+  by PR #25 (`8d7d2ee`) — release.yml pushes `HEAD:refs/heads/release-bump/vX.Y.Z`,
+  which works from the publish job's detached HEAD. The OTHER cause may still
+  bite: (a) org-level GitHub Actions policy blocking Actions-created PRs can
+  still require manual `gh pr create`/merge of the `release: vX.Y.Z` bump PR.
+  Publish is already done by this step, so never retag. Rescue procedure is in
+  the git-tag-release skill.
 - Published artifacts are now v0.18.2 (RESOLVED — was "predate PR #19"). The
   desktop installers + installed-CLI/no-CLI boundary that were mandatory
   release prerequisites are shipped.

@@ -24,6 +24,26 @@ decisions/ and referenced from here.
 
 ---
 
+## PR #25 — release.yml: fully-qualify the bump-PR push ref (detached-HEAD safe) (2026-07-25)
+- verdict: MERGED as merge commit `8d7d2ee` — all four gates PASS at exact head
+  `e52826518`. Post-release one-line automation repair: the version-bump branch
+  push in the publish job runs from a DETACHED HEAD (publish checks out
+  `ref: github.sha`), where `git push origin "HEAD:${BRANCH}"` cannot infer
+  `refs/heads/` and fails ("not a full refname") — the only red step of the
+  v0.18.2 release, after all publication succeeded. Fix qualifies the
+  destination to `HEAD:refs/heads/${BRANCH}` (+ explanatory comment). Direction:
+  minimal, correct layer, no new contract surface. Correctness: guard VERIFIED —
+  14/14 static release-workflow tests pass on the fix, and the new guard FAILS
+  (not ok 7) when the ambiguous `HEAD:${BRANCH}` form is reintroduced. Security:
+  push-destination refspec only — no trust-boundary/hook/order change. No
+  retag/republish; v0.18.2 stays terminally complete.
+- owner: cli-dev · coordinator: dev-coordinator-1
+- taught us: nothing new on the codebase — this is the landed form of the fix
+  the PR #22 delivery-log entry and repo-state open thread had already proposed
+  (`HEAD:refs/heads/${BRANCH}`). The refined root cause is detached-HEAD ref
+  inference (not only same-name-tag ambiguity); fully-qualifying the ref cures
+  both. Approval recorded as a PR comment (same-account block), then merged.
+
 ## PR #22 — Linux executableName release-blocker fix + re-cut v0.18.2 (2026-07-25)
 - verdict: MERGED as merge commit `7cc3b5b` — all four gates PASS at head
   `1a95e7e`. Fix VERIFIED on REAL green installer builds (build-installers
