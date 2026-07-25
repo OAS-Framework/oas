@@ -137,12 +137,16 @@ export function createKeybindingsEditor({ doc = document, isMac } = {}) {
 
       const conflictEl = el.querySelector(".kb-conflict");
       const existing = chordStr ? findConflict(chordStr, action.context, action.id, isMac) : null;
-      if (existing) conflictEl.textContent = `Also bound to “${existing.label}”`;
-      else if (chordStr && isPlainChord(chordStr)) {
+      // Both facts matter independently: a bare chord that ALSO conflicts
+      // must still disclose the editable-field suppression (review c5493b1).
+      const warnings = [];
+      if (existing) warnings.push(`Also bound to “${existing.label}”`);
+      if (chordStr && isPlainChord(chordStr)) {
         // review-mandated warning: bare-key bindings are suppressed while an
         // editable field has focus (matchEvent's editable-field guard).
-        conflictEl.textContent = "Bare key — won’t fire while typing in a text field";
+        warnings.push("Bare key — won’t fire while typing in a text field");
       }
+      conflictEl.textContent = warnings.join(" · ");
 
       chordBtn.addEventListener("click", () => startRecording(action, chordBtn, conflictEl));
       return el;

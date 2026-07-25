@@ -116,6 +116,12 @@ test("recording a bare key shows the editable-field warning on the row", (t) => 
   rowFor("Focus tree").querySelector(".kb-chord").click();
   doc.dispatchEvent(key(doc, "b", { metaKey: true }));
   assert.equal(rowFor("Focus tree").querySelector(".kb-conflict").textContent, "");
+  // a bare chord that ALSO conflicts shows BOTH messages (review c5493b1)
+  setBinding("app.palette", "B"); // global → conflicts with any context
+  setBinding("stage.hierarchy.focus", "B");
+  const both = rowFor("Focus tree").querySelector(".kb-conflict").textContent;
+  assert.match(both, /Command palette/, "conflict disclosed");
+  assert.match(both, /won’t fire while typing/, "editable-field suppression still disclosed");
   editor.close();
 });
 
