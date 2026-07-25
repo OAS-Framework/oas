@@ -19,6 +19,7 @@
    Keyboard: arrows walk the tree, Enter opens, f fits, Escape clears.
    Contract: mount(el, ctx) / unmount(); data from GET /api/panel only. */
 import { computeClusters, siblingEdges } from "./clusters.mjs";
+import { instanceId, resolveLinkId } from "../instance-tree.mjs";
 import {
   escapeHtml, apiJson, ensureTheme,
   currentWorkspace, setWorkspace, adoptWorkspace, onWorkspaceChange,
@@ -83,13 +84,22 @@ const NODE_W = 208, NODE_H = 58, GAP_X = 26, GAP_Y = 46, PAD = 40;
 const CL_PAD = 18, CL_HEAD = 30, CL_GAP = 44, ROW_MAX = 1500, SOLO_GAP_Y = 20;
 
 /* Tidy-tree layout for a forest: post-order, children centered under the
-   parent; leaves packed left-to-right. Returns nodes with x/y set. */
+   parent; leaves packed left-to-right. Returns nodes with x/y set.
+   IDENTITY: nodes key by instanceId, and parent NAMES resolve through the
+   shared resolveLinkId (same-root first, unique cross-root, ambiguous →
+   root) — duplicate names across agents roots stay distinct nodes. */
 export function layoutForest(instances) {
-  const byName = new Map(instances.map((i) => [i.instance, { inst: i, children: [] }]));
+  const byId = new Map(instances.map((i) => [instanceId(i), { inst: i, id: instanceId(i), children: [] }]));
+  const byName = new Map();
+  for (const i of instances) {
+    if (!byName.has(i.instance)) byName.set(i.instance, []);
+    byName.get(i.instance).push(i);
+  }
   const roots = [];
   const parentOf = new Map();
-  for (const n of byName.values()) {
-    const p = n.inst.parentInstance && byName.get(n.inst.parentInstance);
+  for (const n of byId.values()) {
+    const pid = n.inst.parentInstance ? resolveLinkId(n.inst, n.inst.parentInstance, byName) : null;
+    const p = pid && byId.get(pid);
     if (p && p !== n) { p.children.push(n); parentOf.set(n, p); }
     else roots.push(n);
   }
@@ -108,7 +118,7 @@ export function layoutForest(instances) {
     n.children.forEach(mark);
   };
   roots.forEach(mark);
-  for (const start of [...byName.values()].sort(rank)) {
+  for (const start of [...byId.values()].sort(rank)) {
     if (reachable.has(start)) continue;
 
     // Follow parent links from this node until the path repeats. `start` may
@@ -187,7 +197,7 @@ export function layoutClusters(instances) {
     const top = placed.length ? cy + rowH + CL_GAP : 0;
     const perRow = Math.max(1, Math.floor(ROW_MAX / (NODE_W + GAP_X)));
     const nodes = solo.map((c, i) => ({
-      inst: c.instances[0], children: [],
+      inst: c.instances[0], id: instanceId(c.instances[0]), children: [],
       x: (i % perRow) * (NODE_W + GAP_X),
       y: CL_HEAD + Math.floor(i / perRow) * (NODE_H + SOLO_GAP_Y),
     }));
@@ -366,7 +376,7 @@ function render(s) {
     group.append(svg);
     // final position = tidy layout + any user drag offset
     for (const n of block.nodes) {
-      const off = s.nodeOffsets.get(n.inst.instance) || { x: 0, y: 0 };
+      const off = s.nodeOffsets.get(n.id) || { x: 0, y: 0 };
       n.fx = n.x + off.x; n.fy = n.y + off.y;
       group.append(nodeEl(s, n, key));
     }
@@ -380,16 +390,16 @@ function render(s) {
     for (const n of block.nodes) {
       for (const c of n.children) {
         const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
-        p.dataset.child = c.inst.instance;
-        p.dataset.parent = n.inst.instance;
+        p.dataset.child = c.id;
+        p.dataset.parent = n.id;
         drawEdge(p, n, c);
-        addEdge(p, n.inst.instance, c.inst.instance);
+        addEdge(p, n.id, c.id);
       }
     }
     // sibling links: dashed peer edges, distinct by STYLE (never color alone)
-    const byName = new Map(block.nodes.map((n) => [n.inst.instance, n]));
+    const byId = new Map(block.nodes.map((n) => [n.id, n]));
     for (const { a, b } of block.sibs || []) {
-      const na = byName.get(a), nb = byName.get(b);
+      const na = byId.get(a), nb = byId.get(b);
       if (!na || !nb) continue;
       const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
       p.classList.add("sib");
@@ -427,20 +437,22 @@ function render(s) {
   canvas.append(stage);
   // first paint (or workspace switch): fit the forest to the visible screen
   if (!s.fitted) { s.fitted = true; fit(s); } else applyTransform(s);
-  if (s.sel && !list.some((i) => i.instance === s.sel)) s.sel = null;
+  if (s.sel && !list.some((i) => instanceId(i) === s.sel)) s.sel = null;
   paintSelection(s);
   // keep the popover across the 4s refresh if its instance still exists
-  if (prevPop && list.some((i) => i.instance === prevPop)) openPop(s, prevPop);
+  if (prevPop && list.some((i) => instanceId(i) === prevPop)) openPop(s, prevPop);
 }
 
 function nodeEl(s, n, wsName) {
   const i = n.inst;
+  const id = n.id ?? instanceId(i);
   const d = document.createElement("div");
   d.className = "hnode" + (i.running ? "" : " idle");
   d.style.left = `${n.fx}px`; d.style.top = `${n.fy}px`;
   d.setAttribute("role", "treeitem");
   d.setAttribute("aria-label", `${i.instance}, ${i.running ? "running" : "idle"}`);
   d.dataset.name = i.instance;
+  d.dataset.id = id;
   d.innerHTML = `
     <div class="hname"><span class="hdot ${i.running ? "on" : "off"}" aria-hidden="true"></span><span class="nm">${escapeHtml(i.instance)}</span></div>
     <div class="hmeta">${escapeHtml(i.agent || "")}${i.repoName ? " · " + escapeHtml(i.repoName) : ""}</div>`;
@@ -449,19 +461,28 @@ function nodeEl(s, n, wsName) {
   // follow live); under the threshold it stays a click/dblclick.
   d.addEventListener("mousedown", (e) => {
     e.stopPropagation();
-    const off = s.nodeOffsets.get(i.instance) || { x: 0, y: 0 };
-    s.drag = { name: i.instance, node: d, n, startX: e.clientX, startY: e.clientY, off: { ...off }, moved: false };
+    const off = s.nodeOffsets.get(id) || { x: 0, y: 0 };
+    s.drag = { name: id, node: d, n, startX: e.clientX, startY: e.clientY, off: { ...off }, moved: false };
   });
   d.addEventListener("click", (e) => {
     e.stopPropagation();
     if (s.dragConsumedClick) { s.dragConsumedClick = false; return; }
-    select(s, i.instance);
+    select(s, id);
   });
-  d.addEventListener("dblclick", (e) => { e.stopPropagation(); s.ctx.openTerminal(i.instance); });
-  d.addEventListener("mouseenter", () => litLineage(s, i.instance, true));
-  d.addEventListener("mouseleave", () => litLineage(s, i.instance, false));
-  s.nodeEls.set(i.instance, { el: d, node: n, ws: wsName });
+  d.addEventListener("dblclick", (e) => { e.stopPropagation(); openTerm(s, id); });
+  d.addEventListener("mouseenter", () => litLineage(s, id, true));
+  d.addEventListener("mouseleave", () => litLineage(s, id, false));
+  s.nodeEls.set(id, { el: d, node: n, ws: wsName });
   return d;
+}
+
+/* Open the selected node's terminal with FULL identity (home/agentsRoot),
+   so a duplicate name in another agents root can never hijack the open
+   (identity-aware resolution in the shell; review 46f3fdc). */
+function openTerm(s, id) {
+  const i = (s.panel.instances || []).find((x) => instanceId(x) === id);
+  if (!i) return;
+  s.ctx.openTerminal({ instance: i.instance, home: i.home, agentsRoot: i.agentsRoot });
 }
 
 /* Edge between a parent and child node, from their FINAL (fx/fy) positions. */
@@ -553,18 +574,31 @@ function fit(s) {
   applyTransform(s);
 }
 
-/* lineage highlight: ancestors + descendants of the hovered node */
-function litLineage(s, name, on) {
-  const byName = new Map((s.panel.instances || []).map((i) => [i.instance, i]));
-  const kin = new Set([name]);
-  let cur = byName.get(name);
-  while (cur && cur.parentInstance && byName.has(cur.parentInstance) && !kin.has(cur.parentInstance)) {
-    kin.add(cur.parentInstance); cur = byName.get(cur.parentInstance);
+/* lineage highlight: ancestors + descendants of the hovered node (by id;
+   parent names resolve through the shared resolver) */
+function litLineage(s, id, on) {
+  const list = s.panel.instances || [];
+  const byId = new Map(list.map((i) => [instanceId(i), i]));
+  const byName = new Map();
+  for (const i of list) {
+    if (!byName.has(i.instance)) byName.set(i.instance, []);
+    byName.get(i.instance).push(i);
   }
-  const grow = (nm) => {
-    for (const i of byName.values()) if (i.parentInstance === nm && !kin.has(i.instance)) { kin.add(i.instance); grow(i.instance); }
+  const parentIdOf = (i) => (i.parentInstance ? resolveLinkId(i, i.parentInstance, byName) : null);
+  const kin = new Set([id]);
+  let cur = byId.get(id);
+  while (cur) {
+    const pid = parentIdOf(cur);
+    if (!pid || kin.has(pid) || !byId.has(pid)) break;
+    kin.add(pid); cur = byId.get(pid);
+  }
+  const grow = (nid) => {
+    for (const i of list) {
+      const iid = instanceId(i);
+      if (parentIdOf(i) === nid && !kin.has(iid)) { kin.add(iid); grow(iid); }
+    }
   };
-  grow(name);
+  grow(id);
   for (const [nm, { el }] of s.nodeEls) el.classList.toggle("lit", on && kin.has(nm) && nm !== s.sel);
   for (const paths of (s.edgesByNode || new Map()).values()) {
     for (const p of paths) {
@@ -589,12 +623,12 @@ function closePop(s) {
   s.popFor = null;
 }
 
-function openPop(s, name) {
+function openPop(s, id) {
   closePop(s);
-  const entry = s.nodeEls.get(name);
-  const i = (s.panel.instances || []).find((x) => x.instance === name);
+  const entry = s.nodeEls.get(id);
+  const i = (s.panel.instances || []).find((x) => instanceId(x) === id);
   if (!entry || !i) return;
-  s.popFor = name;
+  s.popFor = id;
   const pop = document.createElement("div");
   pop.className = "hier-pop";
   pop.style.left = `${entry.node.fx ?? entry.node.x}px`;
@@ -610,7 +644,7 @@ function openPop(s, name) {
       <button class="act pterm"${i.running ? "" : " disabled"}>Terminal</button>
       <button class="act pbrain">Brain</button>
     </div>`;
-  pop.querySelector(".pterm").addEventListener("click", () => s.ctx.openTerminal(name));
+  pop.querySelector(".pterm").addEventListener("click", () => openTerm(s, id));
   pop.querySelector(".pbrain").addEventListener("click", () => s.ctx.openBrain?.(i.agent));
   if (!s.ctx.openBrain) pop.querySelector(".pbrain").style.display = "none";
   // append inside the node's group so the popover sits by its (dragged) box
@@ -637,27 +671,33 @@ function onKey(s, e) {
     const at = groups.findIndex((g) => g.ws === curWs);
     const next = groups[(at + (e.key === "]" ? 1 : -1) + groups.length) % groups.length]
       || groups[0];
-    select(s, next.first.inst.instance);
+    select(s, next.first.id);
     return;
   }
-  if (e.key === "Enter" && s.sel) { e.preventDefault(); s.ctx.openTerminal(s.sel); return; }
+  if (e.key === "Enter" && s.sel) { e.preventDefault(); openTerm(s, s.sel); return; }
   if (!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)) return;
   e.preventDefault();
-  if (!s.sel) { select(s, list[0].instance); return; }
+  if (!s.sel) { select(s, instanceId(list[0])); return; }
   const cur = s.nodeEls.get(s.sel);
   if (!cur) return;
-  const byName = new Map(list.map((i) => [i.instance, i]));
+  const byId = new Map(list.map((i) => [instanceId(i), i]));
+  const byName = new Map();
+  for (const i of list) {
+    if (!byName.has(i.instance)) byName.set(i.instance, []);
+    byName.get(i.instance).push(i);
+  }
   if (e.key === "ArrowUp") {
-    const p = byName.get(s.sel)?.parentInstance;
-    if (p && s.nodeEls.has(p)) select(s, p);
+    const me = byId.get(s.sel);
+    const pid = me?.parentInstance ? resolveLinkId(me, me.parentInstance, byName) : null;
+    if (pid && s.nodeEls.has(pid)) select(s, pid);
   } else if (e.key === "ArrowDown") {
     const kid = cur.node.children[0];
-    if (kid) select(s, kid.inst.instance);
+    if (kid) select(s, kid.id);
   } else {
     // peers: same row (y) within the SAME cluster group, ordered by x
     const sibs = [...s.nodeEls.values()].filter((x) => x.node.y === cur.node.y && x.ws === cur.ws).sort((a, b) => a.node.x - b.node.x);
-    const at = sibs.findIndex((x) => x.node.inst.instance === s.sel);
+    const at = sibs.findIndex((x) => x.node.id === s.sel);
     const next = sibs[at + (e.key === "ArrowRight" ? 1 : -1)];
-    if (next) select(s, next.node.inst.instance);
+    if (next) select(s, next.node.id);
   }
 }

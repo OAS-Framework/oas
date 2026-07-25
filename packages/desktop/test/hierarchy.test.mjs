@@ -245,3 +245,40 @@ test("cluster cards are anonymous: header carries counts only, never the derived
     g.window = prev.window; g.document = prev.document; g.localStorage = prev.localStorage;
   }
 });
+
+test("duplicate names across agents roots render as DISTINCT nodes; terminal opens carry identity", async () => {
+  const { JSDOM } = await import("jsdom");
+  const dom = new JSDOM(`<div id="root"></div>`, { pretendToBeVisual: true });
+  const g = globalThis;
+  const prev = { window: g.window, document: g.document, localStorage: g.localStorage };
+  g.window = dom.window; g.document = dom.window.document;
+  g.localStorage = { getItem: () => null, setItem: () => {} };
+  try {
+    const panel = { instances: [
+      { instance: "dev", agentsRoot: "/a/agents", home: "/a/agents/dev/i/dev", running: true },
+      { instance: "dev", agentsRoot: "/b/agents", home: "/b/agents/dev/i/dev", running: true },
+      { instance: "kid", agentsRoot: "/a/agents", home: "/a/agents/kid/i/kid", parentInstance: "dev", running: true },
+    ], workspaces: [], workspace: null };
+    const opened = [];
+    const ctx = { api: async () => ({ ok: true, status: 200, json: async () => panel }),
+                  openTerminal: (ref) => opened.push(ref) };
+    const el = dom.window.document.getElementById("root");
+    const un = hier.mount(el, ctx);
+    await new Promise((r) => setTimeout(r, 30));
+    const nodes = [...el.querySelectorAll(".hnode")];
+    assert.equal(nodes.length, 3, "duplicate-named instances are distinct nodes — none dropped");
+    assert.equal(new Set(nodes.map((n) => n.dataset.id)).size, 3, "node identity keys are unique");
+    // the OTHER-root dev is a singleton in the Independent strip, not merged
+    assert.equal(el.querySelectorAll(".hier-cluster .hnode").length, 2);
+    assert.equal(el.querySelectorAll(".hier-solo .hnode").length, 1);
+    // double-click opens with full identity (home/agentsRoot), not a bare name
+    const soloNode = el.querySelector(".hier-solo .hnode");
+    soloNode.dispatchEvent(new dom.window.Event("dblclick", { bubbles: true }));
+    assert.equal(opened.length, 1);
+    assert.equal(opened[0].home, "/b/agents/dev/i/dev", "terminal open addresses the exact instance");
+    assert.equal(opened[0].agentsRoot, "/b/agents");
+    un();
+  } finally {
+    g.window = prev.window; g.document = prev.document; g.localStorage = prev.localStorage;
+  }
+});
