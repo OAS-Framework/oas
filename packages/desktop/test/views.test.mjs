@@ -338,3 +338,74 @@ test("instances: live transcript selection blocks the background repaint (copyab
   sel.removeAllRanges(); sel.addRange(outside);
   assert.equal(selectionBlocksRepaint(box, doc), false, "selection elsewhere in the page → repaint allowed");
 });
+
+test("instances roster: sort choice is workspace-scoped — A→B→A round-trip, no leak", async () => {
+  const { JSDOM } = await import("jsdom");
+  const dom = new JSDOM("<!doctype html><body><div id=el></div>", { url: "http://127.0.0.1/" });
+  const g = globalThis;
+  const saved = { document: g.document, window: g.window, localStorage: g.localStorage };
+  g.document = dom.window.document; g.window = dom.window; g.localStorage = dom.window.localStorage;
+  try {
+    const view = await import("../renderer/views/instances.mjs");
+    const common = await import("../renderer/views/common.mjs");
+    const el = dom.window.document.getElementById("el");
+    const mkPanel = (ws) => ({
+      workspace: { id: ws }, workspaces: [],
+      instances: [
+        { instance: "idle-a", agent: "fam", repoName: "r", running: false, runtime: "pi", work: "worktree" },
+        { instance: "run-z", agent: "fam", repoName: "r", running: true, runtime: "pi", work: "worktree" },
+      ],
+    });
+    const ctx = {
+      api: (p) => {
+        const ws = (p.match(/[?&]ws=([^&]+)/) || [])[1] || "wsA";
+        return Promise.resolve(p.startsWith("/api/panel") ? mkPanel(decodeURIComponent(ws)) : {});
+      },
+      openFile: () => {}, openTerminal: () => {},
+    };
+    common.setWorkspace("wsA");
+    view.mount(el, ctx);
+    await new Promise((r) => setTimeout(r, 20));
+    const sortSel = el.querySelector(".sortsel");
+    const rowNames = () => [...el.querySelectorAll(".inst .iname")].map((n) => n.textContent.trim());
+    assert.equal(sortSel.value, "status", "wsA starts on the default sort");
+    // choose name sort IN wsA
+    sortSel.value = "name";
+    sortSel.dispatchEvent(new dom.window.Event("change"));
+    assert.deepEqual(rowNames(), ["idle-a", "run-z"], "wsA sorted by name");
+    // switch to wsB — the sort must NOT leak from wsA
+    common.setWorkspace("wsB");
+    await new Promise((r) => setTimeout(r, 20));
+    assert.equal(sortSel.value, "status", "wsB gets its own default, not wsA's choice");
+    assert.deepEqual(rowNames(), ["run-z", "idle-a"], "wsB renders status sort (running first)");
+    // and back to wsA — its persisted choice is restored
+    common.setWorkspace("wsA");
+    await new Promise((r) => setTimeout(r, 20));
+    assert.equal(sortSel.value, "name", "wsA restores its persisted sort on return");
+    assert.deepEqual(rowNames(), ["idle-a", "run-z"], "wsA rows re-sorted by its own choice");
+    // the persisted map survives a fresh read (savedSort is per-ws)
+    assert.equal(view.savedSort("wsA"), "name");
+    assert.equal(view.savedSort("wsB"), "status");
+    view.unmount();
+    common.setWorkspace(""); // restore shared state for other tests
+  } finally {
+    g.document = saved.document; g.window = saved.window; g.localStorage = saved.localStorage;
+  }
+});
+
+test("instances: savedSort tolerates legacy/corrupt persisted values", async () => {
+  const { JSDOM } = await import("jsdom");
+  const dom = new JSDOM("<!doctype html>", { url: "http://127.0.0.1/" });
+  const g = globalThis;
+  const saved = { localStorage: g.localStorage };
+  g.localStorage = dom.window.localStorage;
+  try {
+    const view = await import("../renderer/views/instances.mjs");
+    g.localStorage.setItem("oas.desktop.rosterSort", "name"); // legacy global string
+    assert.equal(view.savedSort("wsA"), "status", "legacy non-map value falls back to default");
+    g.localStorage.setItem("oas.desktop.rosterSort", JSON.stringify({ wsA: "bogus" }));
+    assert.equal(view.savedSort("wsA"), "status", "unknown sort id falls back to default");
+  } finally {
+    g.localStorage = saved.localStorage;
+  }
+});
