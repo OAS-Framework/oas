@@ -25,6 +25,7 @@ function setup(t) {
     registerAction({ id: "app.palette", label: "Command palette", context: "global", run: () => {} }),
     registerAction({ id: "tabs.close", label: "Close tab", context: "tabs", run: () => {} }),
     registerAction({ id: "stage.hierarchy.focus", label: "Focus tree", context: "stage:hierarchy", run: () => {} }),
+    registerAction({ id: "hier.fit", label: "Fit to screen", context: "stage:hierarchy", run: () => {}, defaultChord: "F" }),
   ];
   t.after(() => { for (const off of offs) off(); resetAllBindings(); dom.window.close(); });
   return { dom, doc, editor: createKeybindingsEditor({ doc, isMac: true }) };
@@ -45,7 +46,7 @@ test("editor renders an ARIA dialog listing every action with effective chords",
   assert.ok(dialog);
   assert.equal(dialog.getAttribute("aria-modal"), "true");
   const rows = [...doc.querySelectorAll(".kb-row")];
-  assert.equal(rows.length, 3);
+  assert.equal(rows.length, 4);
   const labels = rows.map((r) => r.querySelector(".kb-label").textContent);
   assert.ok(labels.includes("Command palette"));
   const paletteRow = rows.find((r) => r.querySelector(".kb-label").textContent === "Command palette");
@@ -139,6 +140,32 @@ test("per-row reset and reset-all restore defaults", (t) => {
   assert.equal(rowFor("Command palette").querySelector(".kb-reset").hidden, true, "default row hides reset");
   doc.querySelector(".kb-reset-all").click();
   assert.equal(getBinding("tabs.close"), "Mod+W");
+  editor.close();
+});
+
+test("registration defaultChord displays honestly and Backspace-unbind disables dispatch", async (t) => {
+  const { doc, editor } = setup(t);
+  const { matchEvent } = await import("../renderer/keybindings.mjs");
+  const { setActiveContexts } = await import("../renderer/keybindings.mjs");
+  setActiveContexts(new Set(["stage:hierarchy"]));
+  t.after(() => setActiveContexts(new Set()));
+  editor.open();
+  const rowFor = (label) => [...doc.querySelectorAll(".kb-row")]
+    .find((r) => r.querySelector(".kb-label").textContent === label);
+  const row = rowFor("Fit to screen");
+  assert.equal(row.querySelector(".kb-chord").textContent, "F", "registration default shown, not 'unbound'");
+  assert.equal(row.querySelector(".kb-reset").hidden, true, "registration default counts as default (no reset)");
+  // Backspace-unbind actually disables dispatch
+  row.querySelector(".kb-chord").click();
+  doc.dispatchEvent(key(doc, "Backspace"));
+  assert.equal(getBinding("hier.fit"), null);
+  assert.equal(rowFor("Fit to screen").querySelector(".kb-chord").textContent, "unbound");
+  const fakeEvent = { key: "f", metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, preventDefault() {} };
+  assert.equal(matchEvent(fakeEvent, { isMac: true, insideTerminal: false, editableTarget: false }), null,
+    "unbound registration default no longer dispatches");
+  // per-row reset restores the registration default
+  rowFor("Fit to screen").querySelector(".kb-reset").click();
+  assert.equal(getBinding("hier.fit"), "F");
   editor.close();
 });
 
