@@ -373,3 +373,117 @@ test("Soul roster: relation + reference instance pass through POST /api/spawn; u
     if (oldWindow === undefined) delete globalThis.window; else globalThis.window = oldWindow;
   }
 });
+
+test("Spawn modal: every option always visible; runtime/model pass through; defaults omitted", async () => {
+  const dom = new JSDOM("<!doctype html><html><head></head><body><div id=host></div></body></html>", { url: "http://localhost" });
+  const oldDocument = globalThis.document;
+  const oldWindow = globalThis.window;
+  const oldSetInterval = globalThis.setInterval;
+  globalThis.document = dom.window.document;
+  globalThis.window = dom.window;
+  globalThis.setInterval = () => ({ fake: true });
+  const common = await import("../renderer/views/common.mjs");
+  const spawn = await import("../renderer/views/spawn.mjs");
+  await seedCliAvailable();
+  const previousWs = common.currentWorkspace();
+  const agent = { name: "dev", agentsRoot: "/a", description: "d", runtime: "pi", model: "opus", work: "worktree", repo: true, repoName: "r" };
+  const posts = [];
+  const ctx = {
+    api: (pathname, opts = {}) => {
+      if (pathname === "/api/cli" || pathname === "/api/cli/reprobe") return Promise.resolve(CLI_OK);
+      if (opts.method === "POST") {
+        posts.push(JSON.parse(opts.body));
+        return Promise.resolve({ ok: true, status: 200, json: async () => ({ instance: "dev-1", launched: false }) });
+      }
+      return Promise.resolve({ ok: true, status: 200, json: async () => pathname.startsWith("/api/agents")
+        ? { agents: [agent] }
+        : { instances: [{ instance: "dev-1" }], workspace: { id: "w" }, workspaces: [] } });
+    },
+    openTerminal: () => {},
+  };
+  try {
+    common.setWorkspace("w");
+    spawn.mount(dom.window.document.getElementById("host"), ctx);
+    await tick(); await tick();
+    const doc = dom.window.document;
+    doc.querySelector(".spawn-act").click();
+    // the human requirement: ALL options visible in the modal, none hidden
+    for (const cls of ["fpurpose", "ftask", "frelation", "frelto", "fruntime", "fmodel"]) {
+      const el = doc.querySelector(`.spawn-dialog .${cls}`);
+      assert.ok(el, `${cls} control present in the modal`);
+    }
+    // defaults: empty runtime/model are OMITTED from the wire (agent default)
+    doc.querySelector(".fspawn").click();
+    await tick(); await tick(); await tick();
+    assert.equal(posts.length, 1);
+    assert.equal(posts[0].runtime, undefined, "default runtime not sent");
+    assert.equal(posts[0].model, undefined, "default model not sent");
+    // explicit overrides pass through
+    if (!doc.querySelector(".spawn-dialog")) doc.querySelector(".spawn-act").click();
+    doc.querySelector(".fruntime").value = "claude";
+    doc.querySelector(".fmodel").value = "sonnet";
+    doc.querySelector(".fspawn").click();
+    await tick(); await tick(); await tick();
+    assert.equal(posts.length, 2);
+    assert.equal(posts[1].runtime, "claude");
+    assert.equal(posts[1].model, "sonnet");
+  } finally {
+    spawn.unmount();
+    common.setWorkspace(previousWs);
+    globalThis.setInterval = oldSetInterval;
+    dom.window.close();
+    if (oldDocument === undefined) delete globalThis.document; else globalThis.document = oldDocument;
+    if (oldWindow === undefined) delete globalThis.window; else globalThis.window = oldWindow;
+  }
+});
+
+test("Spawn modal: pre-relations CLI shows relation controls DISABLED with the required version named — never hidden", async () => {
+  const dom = new JSDOM("<!doctype html><html><head></head><body><div id=host></div></body></html>", { url: "http://localhost" });
+  const oldDocument = globalThis.document;
+  const oldWindow = globalThis.window;
+  const oldSetInterval = globalThis.setInterval;
+  globalThis.document = dom.window.document;
+  globalThis.window = dom.window;
+  globalThis.setInterval = () => ({ fake: true });
+  const common = await import("../renderer/views/common.mjs");
+  const spawn = await import("../renderer/views/spawn.mjs");
+  const cliStatusMod2 = await import("../renderer/views/cli-status.mjs");
+  // verified CLI, but PROVEN relations-incapable (relations:false from the probe)
+  const CLI_OLD = { ok: true, bin: "/seed/oas", version: "0.18.0", source: "path",
+    required: { desktopApi: 1, range: ">=0.18.0 <0.19.0" }, relations: false, relationsMin: "0.18.3", probedAt: 1, tried: [] };
+  await cliStatusMod2.refreshCli({ api: async () => ({ ok: true, status: 200, json: async () => CLI_OLD }) });
+  const previousWs = common.currentWorkspace();
+  const agent = { name: "dev", agentsRoot: "/a", description: "", runtime: "pi", work: "workspace", repo: true, repoName: "r" };
+  const ctx = {
+    api: (pathname, opts = {}) => {
+      if (pathname === "/api/cli" || pathname === "/api/cli/reprobe") return Promise.resolve({ ok: true, status: 200, json: async () => CLI_OLD });
+      if (opts.method === "POST") return Promise.resolve({ ok: true, status: 200, json: async () => ({ instance: "x" }) });
+      return Promise.resolve({ ok: true, status: 200, json: async () => pathname.startsWith("/api/agents")
+        ? { agents: [agent] }
+        : { instances: [], workspace: { id: "w" }, workspaces: [] } });
+    },
+    openTerminal: () => {},
+  };
+  try {
+    common.setWorkspace("w");
+    spawn.mount(dom.window.document.getElementById("host"), ctx);
+    await tick(); await tick();
+    const doc = dom.window.document;
+    doc.querySelector(".spawn-act").click();
+    const rel = doc.querySelector(".spawn-dialog .frelation");
+    assert.ok(rel, "relation selector still RENDERED on a pre-relations CLI");
+    assert.equal(rel.disabled, true, "…but disabled");
+    assert.ok(doc.querySelector(".spawn-dialog .frelto"), "reference picker still rendered");
+    const note = doc.querySelector(".spawn-dialog .frelnote");
+    assert.ok(note, "explanatory note present");
+    assert.match(note.textContent, /oas >= 0\.18\.3/, "note names the required version");
+  } finally {
+    spawn.unmount();
+    await seedCliAvailable(); // restore shared CLI state for later suites
+    common.setWorkspace(previousWs);
+    globalThis.setInterval = oldSetInterval;
+    dom.window.close();
+    if (oldDocument === undefined) delete globalThis.document; else globalThis.document = oldDocument;
+    if (oldWindow === undefined) delete globalThis.window; else globalThis.window = oldWindow;
+  }
+});

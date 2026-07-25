@@ -12,6 +12,10 @@ import {
 } from "./common.mjs";
 import { cliAvailable, cliKnownUnavailable, cliStatus, refreshCli, onCliChange, cliCard, cliRelationsAvailable } from "./cli-status.mjs";
 
+/** Required-version label for the disabled relation note — from the probe
+ * payload when the backend provides it, else the pinned desktop default. */
+function relationsMinLabel() { return cliStatus()?.relationsMin || "0.18.3"; }
+
 const CSS = `
 .souls { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--bg); }
 .souls-bar { display: flex; align-items: center; gap: 10px; height: var(--bar-h, 48px); flex: none; padding: 0 14px;
@@ -239,11 +243,12 @@ function openSpawnModal(s, a, opener) {
   const refOptions = (s.panelInstances || [])
     .map((i) => `<option value="${escapeHtml(i.instance)}">${escapeHtml(i.instance)}${i.running ? "" : " (idle)"}</option>`)
     .join("");
-  // Relation controls render whenever the verified CLI supports spawn-time
-  // relations; on an older v1 CLI they are VISIBLE but disabled with an
-  // explanatory note (the change request wants the options in sight, and
-  // silent absence hides why). The server still fails closed
-  // (cli-no-relations) — render state is UX, not the guard.
+  // ALL options are ALWAYS VISIBLE (human requirement): purpose, task,
+  // relation + reference instance, runtime and model overrides. The CLI
+  // capability gate never HIDES the relation controls — on a pre-relations
+  // CLI they render disabled with the required version named. The server
+  // still fails closed (cli-no-relations) — render state is UX, not the
+  // guard.
   const relations = cliRelationsAvailable();
   modal.innerHTML = `
     <section class="spawn-dialog" role="dialog" aria-modal="true" aria-labelledby="${titleId}">
@@ -251,6 +256,10 @@ function openSpawnModal(s, a, opener) {
         <div>
           <h2 id="${titleId}">Spawn ${escapeHtml(a.name)}</h2>
           ${a.description ? `<div class="sdesc">${escapeHtml(a.description)}</div>` : ""}
+          <div class="schips" style="margin-top:6px">
+            <span class="chip">${escapeHtml(a.work)}</span>
+            ${a.repo ? `<span class="chip">${escapeHtml(a.repoName)}</span>` : ""}
+          </div>
         </div>
         <button class="close-act fcancel-x" type="button" aria-label="Close spawn dialog">×</button>
       </div>
@@ -271,7 +280,15 @@ function openSpawnModal(s, a, opener) {
             <option value="">— select an instance —</option>
             ${refOptions}
           </select></label>
-        ${relations ? "" : `<div class="frelnote">Relations need a newer oas CLI — the installed version spawns unrelated instances only.</div>`}
+        ${relations ? "" : `<div class="frelnote">Relations require oas &gt;= ${escapeHtml(relationsMinLabel())} — the installed CLI spawns unrelated instances only.</div>`}
+        <label>Runtime (optional — defaults to the agent's definition: ${escapeHtml(a.runtime || "pi")})
+          <select class="field fruntime">
+            <option value="" selected>agent default (${escapeHtml(a.runtime || "pi")})</option>
+            <option value="pi">pi</option>
+            <option value="claude">claude</option>
+          </select></label>
+        <label>Model (optional — defaults to the agent's definition${a.model ? `: ${escapeHtml(a.model)}` : ""})
+          <input class="field fmodel" placeholder="${escapeHtml(a.model || "runtime default")}" autocomplete="off"></label>
         <div class="frow">
           <button class="act fspawn">Spawn</button>
           <button class="act fcancel">Cancel</button>
@@ -310,11 +327,15 @@ function openSpawnModal(s, a, opener) {
     task: () => f.querySelector(".ftask").value,
     relation: () => f.querySelector(".frelation").value,
     relativeTo: () => f.querySelector(".frelto").value,
+    runtime: () => f.querySelector(".fruntime").value,
+    model: () => f.querySelector(".fmodel").value,
     clear: () => {
       f.querySelector(".fpurpose").value = ""; f.querySelector(".ftask").value = "";
       f.querySelector(".frelation").value = "unrelated";
       f.querySelector(".frelto").value = "";
       f.querySelector(".frelto").disabled = true;
+      f.querySelector(".fruntime").value = "";
+      f.querySelector(".fmodel").value = "";
     },
   }));
 
@@ -402,6 +423,8 @@ export async function doSpawn(s, ui) {
       purpose: ui.purpose() || undefined,
       relation: relation !== "unrelated" ? relation : undefined,
       relativeTo: relation !== "unrelated" ? relativeTo : undefined,
+      runtime: (ui.runtime ? ui.runtime() : "") || undefined,
+      model: (ui.model ? ui.model() : "") || undefined,
     });
     if (myGen !== workspaceGeneration()) {
       // Workspace switched while the spawn was in flight: never auto-open.
