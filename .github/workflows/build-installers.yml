@@ -36,10 +36,13 @@ jobs:
         include:
           - os: macos-14          # macOS arm64: DMG + ZIP
             arch: arm64
-          - os: macos-13          # macOS x64: DMG + ZIP
+            builder_args: --arm64
+          - os: macos-14          # macOS x64 cross-build: DMG + ZIP (no sunset macos-13 dependency)
             arch: x64
+            builder_args: --x64
           - os: ubuntu-latest     # Linux x64: AppImage + DEB
             arch: x64
+            builder_args: --x64
     runs-on: ${{ matrix.os }}
     env:
       # Unsigned/not notarized — disable certificate discovery (same as the
@@ -61,9 +64,16 @@ jobs:
           npm ci
           npm --prefix packages/desktop ci
 
+      # macos-14 is arm64. Install Rosetta before the x64 cross-build smoke so
+      # ELECTRON_RUN_AS_NODE executes the packaged x64 Electron and loads the
+      # real x64 node-pty ABI (a wrong-arch native module must fail here).
+      - name: Install Rosetta (macOS x64 cross-build only)
+        if: runner.os == 'macOS' && matrix.arch == 'x64'
+        run: sudo softwareupdate --install-rosetta --agree-to-license
+
       - name: Build unsigned installers
         working-directory: packages/desktop
-        run: npm run dist
+        run: npm run dist -- ${{ matrix.builder_args }}
 
       # Installed-artifact smoke, BUILD-VERIFY mode: inventory (artifact names
       # + plausible sizes) + node-pty under the packaged Electron ABI. The

@@ -10,7 +10,8 @@
     "test": "node --test test/*.test.mjs",
     "rebuild": "electron-rebuild -f -w node-pty",
     "postinstall": "node build-vendor.mjs",
-    "dist": "electron-builder --config electron-builder.config.cjs && node scripts/clean-dist.mjs",
+    "dist": "electron-builder --config electron-builder.config.cjs",
+    "postdist": "node scripts/clean-dist.mjs",
     "dist:smoke": "node scripts/dist-smoke.mjs"
   },
   "dependencies": {

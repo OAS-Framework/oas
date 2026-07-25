@@ -142,13 +142,16 @@ jobs:
         include:
           - os: macos-14          # macOS arm64: DMG + ZIP
             arch: arm64
-          - os: macos-13          # macOS x64: DMG + ZIP
+            builder_args: --arm64
+          - os: macos-14          # macOS x64 cross-build: DMG + ZIP (no sunset macos-13 dependency)
             arch: x64
+            builder_args: --x64
           - os: ubuntu-latest     # Linux x64: AppImage + DEB
             arch: x64
+            builder_args: --x64
     runs-on: ${{ matrix.os }}
     env:
-      # 0.18.0 ships unsigned/not notarized — disable certificate discovery.
+      # Desktop installers ship unsigned/not notarized — disable certificate discovery.
       CSC_IDENTITY_AUTO_DISCOVERY: "false"
     steps:
       - uses: actions/checkout@v4
@@ -163,15 +166,29 @@ jobs:
         working-directory: packages/desktop
         run: npm version "${GITHUB_REF_NAME#v}" --no-git-tag-version
 
+      # macos-14 is arm64. The x64 leg cross-builds on it to avoid the
+      # sunset/deprecating macos-13 runner; Rosetta executes the packaged x64
+      # Electron + node-pty ABI probe and catches a wrong-arch native module.
+      - name: Install Rosetta (macOS x64 cross-build only)
+        if: runner.os == 'macOS' && matrix.arch == 'x64'
+        run: sudo softwareupdate --install-rosetta --agree-to-license
+
       - name: Build Desktop distributables
         working-directory: packages/desktop
         run: |
           npm ci
           npm test
-          npm run dist
+          npm run dist -- ${{ matrix.builder_args }}
 
-      - name: Installed-artifact smoke
+      # Release and build-only CI run the SAME proven smoke: artifact
+      # inventory + spawn-helper mode + node-pty under the packaged Electron
+      # ABI. GUI launch is operator/maintainer-owned post-publish acceptance;
+      # headless CI has no reliable interactive windowserver for unsigned apps.
+      - name: Installed-artifact smoke (build-verify)
         working-directory: packages/desktop
+        env:
+          OAS_SMOKE_SKIP_LAUNCH: "1"
+          OAS_SMOKE_BUILD_VERIFY: "1"
         run: npm run dist:smoke --if-present
 
       - uses: actions/upload-artifact@v4
