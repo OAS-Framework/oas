@@ -24,6 +24,23 @@ decisions/ and referenced from here.
 
 ---
 
+## PR #29 (round 2) — Desktop UX fixes re-review (2026-07-25)
+- verdict: RETURNED at exact head `23e3c71` for mergeability only. The round-1
+  correctness ask is fully fixed by `9c7c5c6`: sort persistence is a
+  canonical-workspace-ID map, resynced on explicit switch and silent adoption,
+  with safe legacy/corrupt fallbacks and behavioral A→B→A coverage. Fresh full
+  gate PASS: 379 tests pass + one intentional node-pty ABI skip; check/validate/
+  pack pass; Desktop soul OKF strict 71/0/0. Direction/security remain PASS.
+  Mergeability FAIL: PR #30 advanced `origin/main` after the branch's earlier
+  main merge; GitHub reports DIRTY/CONFLICTING and `git merge-tree` reproduces
+  the conflict in `agents/oas-desktop-engineer/soul/knowledge/log.md`. Author
+  must merge latest main, union the append-only log, and return green exact-head
+  PR + installer checks.
+- owner: dev-coordinator-parallel-2 · coordinator: dev-coordinator-parallel-2
+- taught us: same-soul feature and harvest PRs conflict even when product code
+  is independent; final handoff must follow all parallel knowledge harvests and
+  bind to current main immediately before merge.
+
 ## PR #30 — post-v0.18.3 corrected-installer knowledge harvest (2026-07-25)
 - verdict: MERGED as merge commit `935d142` at exact head `a220a306`. Product
   direction, correctness, security, and mergeability PASS. Scope is 13 files,

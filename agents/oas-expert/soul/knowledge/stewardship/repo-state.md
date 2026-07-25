@@ -85,23 +85,24 @@ than letting the file grow stale.
 
 ## In flight
 
-- **PR #29 RETURNED at `fb1f1bc` (2026-07-25)** — Desktop UX fixes (spawn
-  probe retry; Shift+Enter/copyable transcript; repo→family roster + Instances
-  stage; workspace tab restore). Direction/security and branch-local full gate
-  pass. Fix required: the promised per-workspace roster sort currently uses one
-  global localStorage key; add workspace-scoped restore/switch coverage. Branch
-  also must merge current main (10 main-only v0.18.3 signing/release commits at
-  verdict) and return with exact-head PR + installer checks green. Owner:
-  dev-coordinator-parallel-2; maintainer oas-expert-pr29 remains alive.
+- **PR #29 ROUND-2 RETURN at `23e3c71` (2026-07-25)** — Desktop UX fixes
+  (spawn probe retry; Shift+Enter/copyable transcript; repo→family roster +
+  Instances stage; workspace tab restore). The workspace-scoped sort finding is
+  resolved and fresh full gate passes (379 pass, one ABI skip; check/validate/
+  pack; Desktop OKF strict). Mergeability alone fails: PR #30 advanced main and
+  GitHub reports CONFLICTING in the Desktop soul's append-only knowledge log.
+  Owner must merge latest main, union both log histories, and return an exact
+  head with PR + installer checks green. Owner: dev-coordinator-parallel-2;
+  maintainer oas-expert-pr29 remains alive.
 
 ## Recent deliveries
 
 - (record PR #, one-line scope, verdict, merge/close date)
 - PR #30 post-v0.18.3 cli-dev/Desktop knowledge and skill harvest: MERGED
   2026-07-25 (`935d142`); strict OKF passed all 8 bundles (see delivery-log).
-- PR #29 Desktop UX fixes: RETURNED 2026-07-25 at `fb1f1bc` for global-vs-
-  per-workspace roster sort persistence and branch staleness; re-review pending
-  (see delivery-log).
+- PR #29 Desktop UX fixes: ROUND-2 RETURNED 2026-07-25 at `23e3c71`;
+  correctness is fixed/full gate green, but PR #30 made the branch conflicting
+  in Desktop knowledge/log; re-review pending (see delivery-log).
 - PR #28 release: v0.18.3 manifest bump (manual bump-PR rescue for the release
   run's org-policy-blocked create step): MERGED 2026-07-25 (`9a6eae8`).
 - PR #27 corrected macOS installers (complete ad-hoc signatures + strict
