@@ -115,8 +115,14 @@ than letting the file grow stale.
 
 ## In flight
 
-- (nothing currently recorded) — PR #32 reached terminal MERGED outcome; its
-  remote feature branch is deleted.
+- **PR #33 RETURNED 2026-07-25 at `605607a` (mergeability only)** — Desktop
+  Shift+Enter whole-chord suppression and Option/Shift local terminal selection.
+  Direction, correctness, and security pass; fresh 382-test local gate, human
+  live verification, required CI, and all three installer checks are green.
+  The branch is based on `d3b0e69` and does not contain current main `41272b6`
+  (seven PR #32/main commits absent; `shell.mjs` changed on both sides). Owner
+  must merge current main, preserve both shell changes, rerun the full gate,
+  and hand back a settled green exact head.
 
 ## Recent deliveries
 
@@ -168,12 +174,16 @@ than letting the file grow stale.
 
 ## Open threads
 
-- **Release PR #32 corrective source in a new patch**: a coordinator HOLD
-  arrived after v0.18.4 had already published. The human identified that PR #29
-  added an Instances navigation tab plus an extra sidebar outside the requested
-  scope; grouping belongs in the existing roster sidebar instead. PR #32 now
-  removes that stage on main (`97f66c9`). Do not move, delete, or republish the
-  immutable v0.18.4 artifacts; cut a new patch version containing the fix.
+- **Release PR #32 corrective source plus PR #33 terminal fixes in a new patch**:
+  a coordinator HOLD arrived after v0.18.4 had already published. The human
+  identified that PR #29 added an Instances navigation tab plus an extra
+  sidebar outside the requested scope; grouping belongs in the existing roster
+  sidebar instead. PR #32 now removes that stage on main (`97f66c9`). The human
+  also found that v0.18.4's Shift+Enter handling still sent via xterm's keypress
+  phase and terminal tabs could not form a local selection while tmux mouse mode
+  was active; PR #33 fixes both but is currently RETURNED for main freshness.
+  Do not move, delete, or republish immutable v0.18.4 artifacts; after PR #33
+  reaches main, cut a new patch version containing both corrections.
 
 - aweb channel awakening drops (2 consecutive repros 2026-07-23): verdict
   mail from short-lived reviewer identities delivered and marked READ
