@@ -1,6 +1,7 @@
 # Knowledge Log
 
 ## 2026-07-25
+* **Creation**: promoted [verify the committed tree matches the commit message before pushing](/lessons/verify-committed-tree-before-push.md) from the oas-desktop-engineer-agent-relations notes.
 * **Creation**: promoted [build option lists from data with createElement, never innerHTML attributes](/lessons/dom-construction-not-innerhtml-attributes.md) from the oas-desktop-engineer-agent-relations notes.
 * **Update**: linked [no dynamic selectors from data](/lessons/no-dynamic-selectors-from-data.md) and [sanitize markdown before innerHTML](/lessons/sanitize-marked-markdown-before-innerhtml.md) to the DOM construction lesson.
 * **Creation**: promoted [graph code over roster instances must key by composite identity](/lessons/cluster-composite-identity.md) from the oas-desktop-engineer-agent-relations notes.
