@@ -83,18 +83,27 @@ const CSS = `
 const NODE_W = 208, NODE_H = 58, GAP_X = 26, GAP_Y = 46, PAD = 40;
 const CL_PAD = 18, CL_HEAD = 30, CL_GAP = 44, ROW_MAX = 1500, SOLO_GAP_Y = 20;
 
-/* Tidy-tree layout for a forest: post-order, children centered under the
-   parent; leaves packed left-to-right. Returns nodes with x/y set.
-   IDENTITY: nodes key by instanceId, and parent NAMES resolve through the
-   shared resolveLinkId (same-root first, unique cross-root, ambiguous →
-   root) — duplicate names across agents roots stay distinct nodes. */
-export function layoutForest(instances) {
-  const byId = new Map(instances.map((i) => [instanceId(i), { inst: i, id: instanceId(i), children: [] }]));
+/* Name index over a roster: name -> instance[] (resolveLinkId's shape). */
+function nameIndex(instances) {
   const byName = new Map();
   for (const i of instances) {
     if (!byName.has(i.instance)) byName.set(i.instance, []);
     byName.get(i.instance).push(i);
   }
+  return byName;
+}
+
+/* Tidy-tree layout for a forest: post-order, children centered under the
+   parent; leaves packed left-to-right. Returns nodes with x/y set.
+   IDENTITY: nodes key by instanceId, and parent NAMES resolve through the
+   shared resolveLinkId — duplicate names across agents roots stay distinct
+   nodes. rosterByName is the FULL-roster name index: resolution scope must
+   not shrink to the cluster, or a globally-ambiguous name could falsely
+   become "unique" post-clustering and reintroduce a dropped edge (review
+   3ab2a40). Callers without a wider roster may omit it. */
+export function layoutForest(instances, rosterByName) {
+  const byId = new Map(instances.map((i) => [instanceId(i), { inst: i, id: instanceId(i), children: [] }]));
+  const byName = rosterByName || nameIndex(instances);
   const roots = [];
   const parentOf = new Map();
   for (const n of byId.values()) {
@@ -104,7 +113,8 @@ export function layoutForest(instances) {
     else roots.push(n);
   }
   const rank = (a, b) => (a.inst.running === b.inst.running
-    ? a.inst.instance.localeCompare(b.inst.instance) : a.inst.running ? -1 : 1);
+    ? (a.inst.instance.localeCompare(b.inst.instance) || a.id.localeCompare(b.id))
+    : a.inst.running ? -1 : 1);
 
   // A malformed parentInstance cycle has no natural root and used to vanish
   // entirely. Mark normal root-reachable nodes, then promote one deterministic
@@ -175,19 +185,22 @@ let state = null;
    tests. */
 export function layoutClusters(instances) {
   const clusters = computeClusters(instances);
+  // FULL-roster name index: all relation resolution inside clusters (forest
+  // parents, sibling edges) must use global scope — see layoutForest's note.
+  const rosterByName = nameIndex((instances || []).filter((i) => i && i.instance));
   const multi = clusters.filter((c) => c.size > 1);
   const solo = clusters.filter((c) => c.size === 1);
 
   const placed = [];
   let cx = 0, cy = 0, rowH = 0;
   for (const c of multi) {
-    const lay = layoutForest(c.instances);
+    const lay = layoutForest(c.instances, rosterByName);
     for (const n of lay.nodes) { n.x += CL_PAD; n.y += CL_HEAD + CL_PAD; }
     const w = lay.width + CL_PAD * 2;
     const h = lay.height + CL_HEAD + CL_PAD * 2;
     if (cx > 0 && cx + w > ROW_MAX) { cx = 0; cy += rowH + CL_GAP; rowH = 0; }
     placed.push({ cluster: c, nodes: lay.nodes, x: cx, y: cy, w, h,
-                  sibs: siblingEdges(c) });
+                  sibs: siblingEdges(c, rosterByName) });
     cx += w + CL_GAP;
     rowH = Math.max(rowH, h);
   }

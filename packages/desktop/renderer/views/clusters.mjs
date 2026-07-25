@@ -91,13 +91,20 @@ export function computeClusters(instances) {
 
 /** Sibling edge list within one cluster: unique unordered pairs of member
     instanceIds, both resolved into the cluster, deduped regardless of
-    declaration direction. Returns [{ a, b }] with a < b (ids). */
-export function siblingEdges(cluster) {
+    declaration direction. rosterByName (name -> instance[]) SHOULD be the
+    FULL roster's index — resolving against only the cluster's members can
+    make a globally-ambiguous name falsely unique and reintroduce a dropped
+    edge (review 3ab2a40); defaults to cluster scope only for callers with
+    no wider roster. Returns [{ a, b }] with a < b (ids). */
+export function siblingEdges(cluster, rosterByName) {
   const memberIds = new Set(cluster.instances.map((i) => instanceId(i)));
-  const byName = new Map();
-  for (const i of cluster.instances) {
-    if (!byName.has(i.instance)) byName.set(i.instance, []);
-    byName.get(i.instance).push(i);
+  let byName = rosterByName;
+  if (!byName) {
+    byName = new Map();
+    for (const i of cluster.instances) {
+      if (!byName.has(i.instance)) byName.set(i.instance, []);
+      byName.get(i.instance).push(i);
+    }
   }
   const seen = new Set();
   const edges = [];

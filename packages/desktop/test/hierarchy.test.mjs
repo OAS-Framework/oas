@@ -282,3 +282,43 @@ test("duplicate names across agents roots render as DISTINCT nodes; terminal ope
     g.window = prev.window; g.document = prev.document; g.localStorage = prev.localStorage;
   }
 });
+
+test("relation resolution keeps FULL-roster scope after clustering: globally-ambiguous edge never reintroduced", () => {
+  // /c/kid joins /a/dev's component via an unambiguous sibling link, but
+  // kid.parentInstance="dev" is globally AMBIGUOUS (/a/dev vs /b/dev):
+  // clustering drops it — the per-cluster forest must NOT resurrect it.
+  const roster = [
+    { instance: "dev", agentsRoot: "/a", home: "/a/dev", running: true },
+    { instance: "dev", agentsRoot: "/b", home: "/b/dev", running: true },
+    { instance: "kid", agentsRoot: "/c", home: "/c/kid", parentInstance: "dev",
+      siblingInstance: "uniq", running: true },
+    // uniq shares /a with its parent "dev" — same-root resolution validly
+    // pulls /a/dev into kid's component, making "dev" unique WITHIN the
+    // cluster while staying ambiguous in the full roster.
+    { instance: "uniq", agentsRoot: "/a", home: "/a/uniq", parentInstance: "dev", running: true },
+  ];
+  const { placed } = hier.layoutClusters(roster);
+  const cl = placed.find((pc) => pc.nodes.some((n) => n.inst.home === "/c/kid"));
+  assert.ok(cl.nodes.some((n) => n.inst.home === "/a/dev"),
+    "fixture: /a/dev must share kid's cluster for the test to bite");
+  const kid = cl.nodes.find((n) => n.inst.home === "/c/kid");
+  const parentOfKid = cl.nodes.find((n) => n.children.includes(kid));
+  assert.equal(parentOfKid, undefined,
+    "ambiguous parent stays dropped inside the cluster forest — kid renders as a root");
+});
+
+test("layout determinism with duplicate names: identity tie-break keeps coordinates stable across roster order", () => {
+  const roster = [
+    { instance: "root", home: "/r/root", running: true },
+    { instance: "dev", agentsRoot: "/a", home: "/a/dev", parentInstance: "root", running: true },
+    { instance: "dev", agentsRoot: "/b", home: "/b/dev", parentInstance: "root", running: true },
+  ];
+  const posOf = (lay, home) => {
+    const n = lay.nodes.find((x) => x.inst.home === home);
+    return `${n.x}:${n.y}`;
+  };
+  const l1 = hier.layoutForest(roster);
+  const l2 = hier.layoutForest([...roster].reverse());
+  assert.equal(posOf(l1, "/a/dev"), posOf(l2, "/a/dev"), "same-named children never swap slots");
+  assert.equal(posOf(l1, "/b/dev"), posOf(l2, "/b/dev"));
+});
