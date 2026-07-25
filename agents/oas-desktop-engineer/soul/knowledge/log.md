@@ -1,6 +1,8 @@
 # Knowledge Log
 
 ## 2026-07-25
+* **Creation**: promoted [string-coerce workspace metadata before roster grouping and sorting](/lessons/roster-grouping-string-coerce-metadata.md) from the oas-desktop-engineer-roster-grouping notes.
+* **Update**: linked [keep roster family grouping helpers inside instance-tree](/lessons/roster-family-grouping-helpers.md) to the string-coercion lesson for workspace-controlled instance metadata.
 * **Creation**: promoted [keep roster family grouping helpers inside instance-tree](/lessons/roster-family-grouping-helpers.md) from the oas-desktop-engineer-roster-grouping notes.
 
 ## 2026-07-24
