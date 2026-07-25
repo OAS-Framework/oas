@@ -1461,12 +1461,17 @@ test("rollback detects a still-registered canonical worktree through a symlinked
   write(join(realRoot, "dev", "soul", "soul.yaml"), `name: dev\nkind: persistent\nrepo: ${repo}\nwork: checkout\nruntime: pi\n`);
   write(join(realRoot, "dev", "soul", "AGENTS.md"), "# dev\n");
   mkdirSync(join(realRoot, "dev", "instances"), { recursive: true });
+  // Compensation hook can remove one target's worktree directory BEFORE Git
+  // verification, reproducing the canonical-path-loss race from review.
+  const vanishHook = `import {rmSync} from 'node:fs'; if (process.env.OAS_EVENT === 'retire' && process.env.OAS_INSTANCE === 'dev-sym-missing') rmSync(process.env.OAS_HOME + '/work', {recursive:true, force:true});`;
+  capability(repo, "vanish", { capability: "acme.vanish", hooks: { retire: "hook.mjs" } }, { "hook.mjs": vanishHook });
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.vanish:\n      global: true\n");
   const linkedRoot = join(base, "agents-link"); symlinkSync(realRoot, linkedRoot);
 
-  // Git wrapper delegates normally, but can force ONLY worktree-remove to fail.
+  // Git wrapper delegates normally, but can force selected cleanup/probe operations to fail.
   const bin = join(base, "bin"); mkdirSync(bin, { recursive: true });
   const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
-  write(join(bin, "git"), `#!/bin/sh\nif [ "$GIT_FAKE_FAIL_REMOVE" = "1" ] && [ "$3" = "worktree" ] && [ "$4" = "remove" ]; then echo forced-remove-failure >&2; exit 7; fi\nif [ "$GIT_FAKE_FAIL_LIST" = "1" ] && [ "$3" = "worktree" ] && [ "$4" = "list" ]; then echo forced-list-failure >&2; exit 8; fi\nif [ "$GIT_FAKE_FAIL_REVP" = "1" ] && [ "$3" = "rev-parse" ] && [ "$4" = "--verify" ]; then echo forced-rev-parse-failure >&2; exit 9; fi\nexec ${realGit} "$@"\n`);
+  write(join(bin, "git"), `#!/bin/sh\nif [ "$GIT_FAKE_FAIL_REMOVE" = "1" ] && [ "$3" = "worktree" ] && [ "$4" = "remove" ]; then echo forced-remove-failure >&2; exit 7; fi\nif [ "$GIT_FAKE_FAIL_PRUNE" = "1" ] && [ "$3" = "worktree" ] && [ "$4" = "prune" ]; then echo forced-prune-failure >&2; exit 6; fi\nif [ "$GIT_FAKE_FAIL_LIST" = "1" ] && [ "$3" = "worktree" ] && [ "$4" = "list" ]; then echo forced-list-failure >&2; exit 8; fi\nif [ "$GIT_FAKE_FAIL_REVP" = "1" ] && [ "$3" = "rev-parse" ] && [ "$4" = "--verify" ]; then echo forced-rev-parse-failure >&2; exit 9; fi\nexec ${realGit} "$@"\n`);
   for (const t of ["pi", "claude"]) write(join(bin, t), "#!/bin/sh\nexit 0\n");
   execFileSync("chmod", ["-R", "+x", bin]);
   const oldPath = process.env.PATH;
@@ -1496,6 +1501,31 @@ test("rollback detects a still-registered canonical worktree through a symlinked
     execFileSync(realGit, ["-C", repo, "worktree", "prune"]);
     try { execFileSync(realGit, ["-C", repo, "branch", "-D", branch], { stdio: "ignore" }); } catch { /* cleanup */ }
 
+    // Canonical path was captured immediately after add. The compensation hook
+    // now REMOVES the directory before rollback; remove and prune are forced to
+    // fail, while list succeeds and still returns Git's canonical registration.
+    // Re-realpath-at-rollback would fail/fall back lexical and miss this record.
+    const missingAnchor = spawnInstance(linkedRoot, agentDef, { instance: "dev-missing-anchor", launch: false });
+    const tmpMissing = `${join(missingAnchor.home, "instance.json")}.tmp-dev-sym-missing`;
+    mkdirSync(tmpMissing); write(join(tmpMissing, "blocker"), "x");
+    const missingBranch = "agents/dev-sym-missing";
+    process.env.GIT_FAKE_FAIL_REMOVE = "1";
+    process.env.GIT_FAKE_FAIL_PRUNE = "1";
+    try {
+      assert.throws(
+        () => spawnInstance(linkedRoot, agentDef, { instance: "dev-sym-missing", relation: "parent", relativeTo: missingAnchor.instance, work: "worktree", branch: missingBranch, launch: false }),
+        (err) => /rollback INCOMPLETE/.test(err.message)
+          && /git worktree .*dev-sym-missing\/work: still registered/.test(err.message)
+          && !err.message.includes(linkedRoot + "/dev/instances/dev-sym-missing/work"),
+        "captured canonical path detects stale registration after the directory vanished");
+    } finally {
+      delete process.env.GIT_FAKE_FAIL_REMOVE;
+      delete process.env.GIT_FAKE_FAIL_PRUNE;
+      rmSync(tmpMissing, { recursive: true, force: true });
+      execFileSync(realGit, ["-C", repo, "worktree", "prune"]);
+      try { execFileSync(realGit, ["-C", repo, "branch", "-D", missingBranch], { stdio: "ignore" }); } catch { /* cleanup */ }
+    }
+
     // Probe failure is distinct from confirmed absence: let removal/deletion
     // succeed, but force BOTH verification commands to fail. Rollback must
     // report could-not-verify for each instead of treating failed probes as
@@ -1522,6 +1552,7 @@ test("rollback detects a still-registered canonical worktree through a symlinked
     }
   } finally {
     delete process.env.GIT_FAKE_FAIL_REMOVE;
+    delete process.env.GIT_FAKE_FAIL_PRUNE;
     delete process.env.GIT_FAKE_FAIL_LIST;
     delete process.env.GIT_FAKE_FAIL_REVP;
     process.env.PATH = oldPath;
