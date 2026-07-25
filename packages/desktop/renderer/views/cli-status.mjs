@@ -28,6 +28,12 @@ export function cliStatus() { return cli; }
  * binary, unclassifiable) shows the actionable Choose/Retry/docs/install
  * card so users always have a recovery path. */
 export function cliAvailable() { return !!cli?.ok; }
+/** Spawn-time relations capability. Follows the shared degradation rule:
+ * unknown (older backend that predates the `relations` field, or test
+ * stubs) is treated as CAPABLE — the server independently fails closed
+ * (cli-no-relations) if the real CLI cannot do related spawns. Only a
+ * PROVEN relations:false hides the relation UI. */
+export function cliRelationsAvailable() { return !!cli?.ok && cli.relations !== false; }
 export function cliKnownUnavailable() { return (!!cli && !cli.ok) || settledUnknown; }
 export function onCliChange(fn) { listeners.add(fn); return () => listeners.delete(fn); }
 /** Test seam: return to the pristine probe-pending state. */

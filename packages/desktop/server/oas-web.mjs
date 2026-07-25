@@ -8,7 +8,7 @@
  * process; the desktop renderer is its only client):
  *   GET  /api/panel                 roster JSON (instances, git, task, tmux state)
  *   GET  /api/agents                available agents (souls) per workspace root
- *   POST /api/spawn                 { agent, agentsRoot, task?, purpose? } → spawn an instance
+ *   POST /api/spawn                 { agent, agentsRoot, task?, purpose?, relation?, relativeTo? } → spawn an instance
  *                                   (mutations require the installed `oas` CLI; see cliUnavailable)
  *   GET  /api/session/<instance>?lines=n   ANSI pane capture of the live session
  *   POST /api/keys/<instance>       { data } → raw key bytes into the session (no Enter)
@@ -105,20 +105,35 @@ function panelData(wsId) {
     team: ws?.team || null,
     generatedAt: new Date().toISOString(),
     running: instances.filter((i) => i.running).length,
-    instances: instances.map((i) => ({
-      instance: i.instance, agent: i.agent, description: i.description,
-      repo: i.repo, work: i.work, branch: i.branch || null, runtime: i.runtime || "pi",
-      model: i.model || null, running: i.running, createdAt: i.createdAt,
-      home: i.home, agentsRoot: i.agentsRoot,
-      workspace: dirname(i.agentsRoot), repoName: (i.repo || dirname(i.agentsRoot)).split("/").pop(),
-      parentInstance: i.parentInstance || null,
-      siblingInstance: i.siblingInstance || null,
-      relation: i.relation || null,
-      tmux: i.tmux, git: i.git, task: i.task, next: i.next,
-      team: i.team || null,
-    })),
+    instances: instances.map(projectPanelInstance),
   };
 }
+
+/* OASWEB_PANELPROJ_BEGIN — the /api/panel per-instance contract projection.
+   Extracted by packages/desktop/test/panel-projection.test.mjs via block
+   markers so a dropped/typo'd field fails a real assertion (review
+   2092e0f): the renderer's cluster grouping and ux-designer's overview
+   consume exactly these fields. */
+function projectPanelInstance(i) {
+  return {
+    instance: i.instance, agent: i.agent, description: i.description,
+    repo: i.repo, work: i.work, branch: i.branch || null, runtime: i.runtime || "pi",
+    model: i.model || null, running: i.running, createdAt: i.createdAt,
+    home: i.home, agentsRoot: i.agentsRoot,
+    workspace: dirname(i.agentsRoot), repoName: (i.repo || dirname(i.agentsRoot)).split("/").pop(),
+    parentInstance: i.parentInstance || null,
+    // Agent relations (kernel contract, final): siblingInstance links a
+    // declared sibling to a ROOT anchor; relation/relativeTo record what
+    // was declared at spawn. Forwarded for cluster grouping and the
+    // cluster-first overview (ux-designer reads /api/panel).
+    siblingInstance: i.siblingInstance || null,
+    relation: i.relation || null,
+    relativeTo: i.relativeTo || null,
+    tmux: i.tmux, git: i.git, task: i.task, next: i.next,
+    team: i.team || null,
+  };
+}
+/* OASWEB_PANELPROJ_END */
 
 /** Available agents (souls) of a workspace — what `oas spawn <agent>` could
  * start. Same read-only seams as the reader: listAgents per agents root, plus
@@ -157,7 +172,7 @@ function agentsData(wsId) {
  * Default is NO TASK: the instance comes up awaiting instruction.
  * Validation errors THROW (→ 409); domain/CLI results RESOLVE with the
  * envelope so stable error codes reach the UI. */
-async function spawnAgent({ agent, agentsRoot, task, purpose }) {
+async function spawnAgent({ agent, agentsRoot, task, purpose, relation, relativeTo }) {
   const name = String(agent || "");
   const root = resolve(String(agentsRoot || ""));
   // agentsRoot must be one of the workspace roots this server was started for —
@@ -174,11 +189,21 @@ async function spawnAgent({ agent, agentsRoot, task, purpose }) {
     err.code = "cli-unavailable";
     throw err;
   }
+  // Relation flags are a NEWER v1 surface: older v1 CLIs ignore unknown
+  // spawn options and report success, silently creating an UNRELATED
+  // instance. Fail closed instead of degrading silently (review f921f7d).
+  const relErr = locator.relationSupportError(cliState, { relation, relativeTo });
+  if (relErr) throw relErr;
+  // Spawn-time relations: pass through to the CLI adapter, which owns the
+  // argv allowlist and pair validation (relation ⇔ relativeTo) — invalid
+  // values resolve as stable E_BAD_ARGS envelopes, never reach the CLI.
   const env = await adapter.cliSpawn(cliState.bin, {
     agent: name,
     workspaceDir: dirname(root),          // the workspace context owning this agents root
     task: task ? String(task) : "",
     purpose: purpose ? String(purpose) : undefined,
+    relation: relation ? String(relation) : undefined,
+    relativeTo: relativeTo ? String(relativeTo) : undefined,
   });
   if (!env.ok) {
     const err = new Error(env.error.message || "spawn failed");
@@ -242,6 +267,9 @@ function cliStatus() {
     version: cliState.version || null,
     source: cliState.source || null,
     required: { desktopApi: locator.DESKTOP_API, range: ">=0.18.0 <0.19.0" },
+    // Capability flag for the spawn form: relation UI is hidden/disabled
+    // when the accepted CLI predates spawn-time relations.
+    relations: !!cliState.ok && locator.supportsRelations(cliState.version),
     probedAt: cliState.probedAt || null,
     tried: cliState.tried || [],
   };

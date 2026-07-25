@@ -24,6 +24,35 @@ import { delimiter, isAbsolute, join } from "node:path";
 export const DESKTOP_API = 1;
 export const ACCEPT_RANGE = { min: [0, 18, 0], maxExclusive: [0, 19, 0] };
 export const PROBE_NAME = "@oas-framework/oas";
+// Spawn-time agent relations (--relation/--relative-to) shipped mid-v1.
+// Older v1 CLIs IGNORE unknown spawn options and still succeed, so sending
+// relation flags to them would silently spawn an UNRELATED instance while
+// the desktop reports success. Related spawns therefore require the first
+// release containing relation support; plain spawns keep the full v1 range.
+export const RELATIONS_MIN = [0, 18, 3];
+
+/** Whether an ACCEPTED v1 CLI version also supports spawn-time relations. */
+export function supportsRelations(version) {
+  const v = parseSemver(version);
+  return !!v && !v.prerelease && cmp(v.nums, RELATIONS_MIN) >= 0;
+}
+
+/** Fail-closed gate for RELATED spawns (invariant-bearing, importable so the
+ * regression exercises this exact layer): returns an Error to THROW when a
+ * relation/anchor was requested but the accepted CLI predates relation
+ * support, else null. */
+export function relationSupportError(cliState, { relation, relativeTo } = {}) {
+  // "unrelated" (or empty) is the DEFAULT, not a related spawn — the adapter
+  // normalizes it to absence (spawnArgv) and forwards no flags, so it must
+  // keep working across the full accepted v1 range (review 9425d6a). A
+  // supplied relativeTo still gates: the adapter rejects the mismatched pair.
+  const rel = relation === "unrelated" || relation === "" ? undefined : relation;
+  if (!rel && !relativeTo) return null;
+  if (cliState?.ok && supportsRelations(cliState.version)) return null;
+  const err = new Error(`spawn-time relations require oas >= ${RELATIONS_MIN.join(".")} — installed ${cliState?.version || "none"} would silently spawn an unrelated instance`);
+  err.code = "cli-no-relations";
+  return err;
+}
 
 // ---- acceptance --------------------------------------------------------
 

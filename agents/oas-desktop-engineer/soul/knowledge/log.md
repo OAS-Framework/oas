@@ -1,5 +1,12 @@
 # Knowledge Log
 
+## 2026-07-25
+* **Creation**: promoted [new CLI mutation flags need a capability gate](/lessons/new-mutation-flags-capability-gate.md) from the oas-desktop-engineer-agent-relations notes.
+* **Creation**: promoted [final kernel contract for spawn-time agent relations](/references/agent-relations-kernel-contract.md) from the oas-desktop-engineer-agent-relations notes.
+* **Update**: updated [desktop cluster grouping sibling-link extractor seam](/decisions/desktop-cluster-grouping-sibling-seam.md) to consume the final `siblingInstance`, `relation`, and `relativeTo` kernel contract.
+* **Creation**: promoted [desktop cluster grouping sibling-link extractor seam](/decisions/desktop-cluster-grouping-sibling-seam.md) from the oas-desktop-engineer-agent-relations notes.
+* **Creation**: promoted [no-CLI desktop server tests must hide the real oas CLI](/lessons/no-cli-desktop-server-tests-real-oas-cli.md) from the oas-desktop-engineer-agent-relations notes.
+
 ## 2026-07-24
 * **Creation**: promoted [bounded OS resources spawned per user action need a hard cap in the owning process](/lessons/terminal-resource-cap-in-owning-process.md) from the oas-desktop-engineer-desktop-dist notes.
 * **Update**: linked [desktop terminal direct attach](/decisions/desktop-terminal-direct-attach.md) to the main-process terminal resource cap lesson.

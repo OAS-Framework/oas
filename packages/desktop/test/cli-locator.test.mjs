@@ -185,3 +185,40 @@ test("discover: symlinked duplicates canonicalize and probe once", async () => {
 test(`DESKTOP_API is ${1} (bump requires a contract revision)`, () => {
   assert.equal(DESKTOP_API, 1);
 });
+
+/* ── spawn-time relations capability gate (review f921f7d) ── */
+
+test("supportsRelations: older accepted v1 CLIs are NOT relation-capable", async () => {
+  const { supportsRelations, RELATIONS_MIN } = await import("../cli-locator.mjs");
+  const min = RELATIONS_MIN.join(".");
+  assert.equal(supportsRelations("0.18.0"), false, "pre-relations v1 release");
+  assert.equal(supportsRelations("0.18.2"), false, "pre-relations v1 release");
+  assert.equal(supportsRelations(min), true, "first relation-capable release");
+  assert.equal(supportsRelations("0.18.9"), true);
+  assert.equal(supportsRelations(`${min}-rc.1`), false, "prereleases never qualify");
+  assert.equal(supportsRelations("garbage"), false);
+  assert.equal(supportsRelations(undefined), false);
+});
+
+test("relationSupportError: related spawns fail closed on old v1 CLIs, plain spawns unaffected", async () => {
+  const { relationSupportError, RELATIONS_MIN } = await import("../cli-locator.mjs");
+  const oldCli = { ok: true, version: "0.18.0" };
+  const newCli = { ok: true, version: RELATIONS_MIN.join(".") };
+  // an older v1 CLI ignores unknown spawn options and reports success —
+  // sending relation flags to it would silently create an UNRELATED instance
+  const err = relationSupportError(oldCli, { relation: "child", relativeTo: "coord-1" });
+  assert.ok(err instanceof Error, "related spawn on an old v1 CLI must throw, not degrade silently");
+  assert.equal(err.code, "cli-no-relations", "stable code for the spawn form");
+  assert.ok(relationSupportError(oldCli, { relativeTo: "coord-1" }), "anchor alone also gates");
+  assert.equal(relationSupportError(oldCli, {}), null, "plain spawns keep working on the full v1 range");
+  // explicit "unrelated" is the DEFAULT, not a related spawn: the adapter
+  // normalizes it to absence and forwards no flags, so it must not be gated
+  // on old v1 CLIs (review 9425d6a)
+  assert.equal(relationSupportError(oldCli, { relation: "unrelated" }), null,
+    "explicit unrelated is a plain spawn on any accepted v1 CLI");
+  assert.equal(relationSupportError(oldCli, { relation: "" }), null, "empty relation is a plain spawn");
+  assert.ok(relationSupportError(oldCli, { relation: "unrelated", relativeTo: "x" }),
+    "a supplied anchor still gates even with relation=unrelated (adapter rejects the pair)");
+  assert.equal(relationSupportError(newCli, { relation: "sibling", relativeTo: "x" }), null,
+    "relation-capable CLI passes");
+});
