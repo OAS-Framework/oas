@@ -1130,6 +1130,48 @@ test("retire splice is identity-safe: a same-named instance in another repo keep
   } finally { process.env.PATH = oldPath; }
 });
 
+test("attached ownership is path-first: a same-named local instance cannot shadow the tree's true owner", () => {
+  const base = temp();
+  const ws = join(base, "ws"); mkdirSync(ws, { recursive: true });
+  write(join(ws, "oas-config.yaml"), "team:\n  name: t\n");
+  const mkMember = (repoName) => {
+    const repo = join(ws, repoName); gitRepo(repo);
+    write(join(repo, "oas-config.yaml"), "capabilities:\n  additive: {}\n");
+    const root = join(repo, "agents");
+    write(join(root, "dev", "soul", "soul.yaml"), `name: dev\nkind: persistent\nrepo: ${repo}\nwork: checkout\nruntime: pi\n`);
+    write(join(root, "dev", "soul", "AGENTS.md"), "# dev\n");
+    mkdirSync(join(root, "dev", "instances"), { recursive: true });
+    return { repo, root };
+  };
+  const a = mkMember("repo-a");
+  const b = mkMember("repo-b");
+  const oldPath = process.env.PATH;
+  process.env.PATH = fakeRuntimes(base);
+  try {
+    // Same instance name in both repos; the trees differ.
+    const bossA = spawnInstance(a.root, findAgent(a.root, "dev"), { instance: "dev-boss", launch: false });
+    spawnInstance(b.root, findAgent(b.root, "dev"), { instance: "dev-boss", launch: false });
+    // Spawning ATTACHED from repo B onto repo A's dev-boss/work: the path-first
+    // match finds A's boss, but from B's root the NAME "dev-boss" resolves to
+    // B's (local-first) — recording it would link the child to the wrong
+    // instance. Reject as ambiguous, both with and without an explicit parent.
+    assert.throws(
+      () => spawnInstance(b.root, findAgent(b.root, "dev"), { instance: "dev-att-x", work: "attached", workDir: join(a.root, "dev", "instances", bossA.instance, "work"), launch: false }),
+      /ambiguous/,
+      "ownership inference rejects the shadowed owner");
+    assert.throws(
+      () => spawnInstance(b.root, findAgent(b.root, "dev"), { instance: "dev-att-y", work: "attached", workDir: join(a.root, "dev", "instances", bossA.instance, "work"), parent: "dev-boss", launch: false }),
+      /ambiguous/,
+      "explicit --parent cannot bypass the shadow check — the tree IS an instance's work");
+    // No stray homes were scaffolded by the rejected spawns.
+    assert.equal(existsSync(join(b.root, "dev", "instances", "dev-att-x")), false);
+    assert.equal(existsSync(join(b.root, "dev", "instances", "dev-att-y")), false);
+    // Unambiguous case still works from the OWNING repo: A's boss tree, A's root.
+    const ok = spawnInstance(a.root, findAgent(a.root, "dev"), { instance: "dev-att-ok", work: "attached", workDir: join(a.root, "dev", "instances", bossA.instance, "work"), launch: false });
+    assert.equal(ok.parentInstance, bossA.instance, "owner resolved by path where the name is unambiguous");
+  } finally { process.env.PATH = oldPath; }
+});
+
 test("lineage is deployment-local: --parent from an unrelated deployment is rejected", () => {
   const base = temp();
   // Deployment A: the caller's instance lives here.
