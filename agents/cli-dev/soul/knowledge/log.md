@@ -1,6 +1,8 @@
 # Knowledge Log
 
 ## 2026-07-25
+* **Update**: [kernel-validation-before-side-effects](/lessons/kernel-validation-before-side-effects.md) links to the cross-instance write ordering lesson as the transactionality counterpart to pre-side-effect validation.
+* **Creation**: [cross-instance-writes-commit-last](/lessons/cross-instance-writes-commit-last.md) records that writes to another instance's metadata must wait until every remaining fallible step has succeeded, or be compensated on failure.
 * **Update**: [test-conventions](/playbooks/test-conventions.md) records direct-kernel coverage for raw spawn relation option combinations, matching CLI `E_BAD_ARGS` cases and no-home side-effect assertions.
 * **Update**: [kernel-validation-before-side-effects](/lessons/kernel-validation-before-side-effects.md) records that raw `spawnInstance` option combinations must be validated before relation sugar expansion or explicit-none normalization.
 * **Update**: [test-conventions](/playbooks/test-conventions.md) records that name-resolution tests need local-soul fixtures because overlapping discovery phases only double-count there.

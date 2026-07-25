@@ -42,5 +42,6 @@ mode can then auto-parent despite the explicit negation. Keep an
 `explicitUnrelated`-style fact through fallback/default handling, then record no
 lineage fields for the unrelated result.
 
-See also [spawn-relations-lineage-fields](/architecture/spawn-relations-lineage-fields.md)
+See also [spawn-relations-lineage-fields](/architecture/spawn-relations-lineage-fields.md),
+[cross-instance write ordering](/lessons/cross-instance-writes-commit-last.md),
 and [test-conventions](/playbooks/test-conventions.md).
