@@ -118,7 +118,9 @@ function renderRoster(s) {
   if (!visible.length) { el.innerHTML = '<div class="empty">Nothing matches the filter.</div>'; return; }
   // Roster grouped by agent CLUSTER (connected relations — spawn parentage
   // plus sibling links), not per repo: the repo is a small label on each
-  // instance card. Unrelated instances are single-node clusters (no header).
+  // instance card. Clusters render ANONYMOUSLY (human requirement — no
+  // derived cluster names; naming may return with a task-layer
+  // integration): multi-member clusters get a count-only header.
   for (const cluster of clusterInstances(visible)) {
     const items = cluster.instances;
     const g = document.createElement("div");
@@ -126,7 +128,7 @@ function renderRoster(s) {
       const runningN = items.filter((i) => i.running).length;
       const h = document.createElement("div");
       h.className = "ghead";
-      h.innerHTML = `◎ ${escapeHtml(cluster.key)} <span class="count">${runningN}/${items.length} running</span>`;
+      h.innerHTML = `◎ <span class="count">${runningN}/${items.length} running</span>`;
       g.appendChild(h);
     }
     {
