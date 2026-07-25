@@ -85,7 +85,7 @@ export function mount(el, ctx) {
     // Workspace switch owns the whole surface: invalidate any A spawn modal
     // immediately, remove its DOM before B loads, and clear A's agentsRoot.
     s.spawnOp++;
-    closeSpawnModal(s);
+    closeSpawnModal(s, { repaint: false }); // the switch replaces the grid below
     s.q("souls-grid").innerHTML = '<div class="loading-block"><span class="spinner"></span> Loading agents…</div>';
     // No force flag: if a newer B poll paints a B spawn modal before this
     // request resolves, the late switch refresh must respect that owner.
@@ -144,7 +144,9 @@ function renderGrid(s) {
   // it; the rebuild shows the card and disabled buttons; doSpawn
   // independently re-checks at submit time.
   const noCli = !cliAvailable(); // frozen contract: unknown does NOT render capable
-  if (noCli && s.sel) closeSpawnModal(s);
+  // repaint:false — this very renderGrid call is already painting the grid;
+  // a nested repaint from the close would render twice for nothing.
+  if (noCli && s.sel) closeSpawnModal(s, { repaint: false });
   grid.innerHTML = "";
   const list = s.souls.agents.filter((a) => matches(s, a));
   const spawnable = s.souls.agents.filter((a) => a.work !== "attached").length;
@@ -201,7 +203,7 @@ function soulCard(s, a) {
         : `Spawn ${a.name}`;
     spawn.addEventListener("click", () => {
       if (!cliAvailable()) return; // state may have flipped since render
-      openSpawnModal(s, a, spawn);
+      openSpawnModal(s, a);
     });
     actions.append(spawn);
   }
@@ -218,12 +220,25 @@ function soulCard(s, a) {
 /** Close (if open) the spawn modal and clear the selection. Safe to call
  * when no modal exists. Does NOT bump spawnOp — callers that must invalidate
  * an in-flight spawn (workspace switch) bump it themselves; a plain close
- * leaves the operation's status handling to the ownership tokens. */
-function closeSpawnModal(s, { restoreFocus = false } = {}) {
-  const opener = s.modalOpener;
-  s.sel = null; s.selAgent = null; s.modalOpener = null;
+ * leaves the operation's status handling to the ownership tokens.
+ * repaint (default true when a modal existed) re-renders the grid so the
+ * card's .open highlight clears immediately — not on the next poll.
+ * restoreFocus targets the CURRENTLY CONNECTED Spawn button of the agent
+ * whose modal closed: renderGrid replaces nodes, so the captured opener is
+ * usually detached by close time (review 41059e0) — the agent name is the
+ * stable identity, matched via dataset (never a dynamic selector). */
+function closeSpawnModal(s, { restoreFocus = false, repaint = true } = {}) {
+  const hadModal = !!s.modalEl;
+  const agentName = s.sel;
+  s.sel = null; s.selAgent = null;
   s.modalEl?.remove(); s.modalEl = null;
-  if (restoreFocus && opener?.isConnected) opener.focus();
+  if (!hadModal || !repaint || s.alive === false) return;
+  renderGrid(s); // clear the .open card highlight NOW
+  if (!restoreFocus || !agentName) return;
+  const button = [...(s.q("souls-grid").querySelectorAll?.("[data-agent]") || [])]
+    .find((card) => card.dataset.agent === agentName)
+    ?.querySelector(".spawn-act:not([disabled])");
+  button?.focus();
 }
 
 /** Spawn modal (human change request on the integrated feature branch):
@@ -231,9 +246,9 @@ function closeSpawnModal(s, { restoreFocus = false } = {}) {
  * options (relation + reference instance) directly visible, following the
  * app's ws-dialog pattern: role=dialog + aria-modal, labelled controls,
  * Tab focus trap, Esc/backdrop/× close, focus restored to the opener. */
-function openSpawnModal(s, a, opener) {
+function openSpawnModal(s, a) {
   closeSpawnModal(s); // one modal at a time; a new open supersedes the old
-  s.sel = a.name; s.selAgent = a; s.modalOpener = opener || null;
+  s.sel = a.name; s.selAgent = a;
   renderGrid(s); // highlight the selected card under the backdrop
 
   const doc = s.el.ownerDocument;
@@ -385,8 +400,7 @@ export async function doSpawn(s, ui) {
   // flip must not dispatch — the render-time disable alone cannot cover a
   // dialog that was already open. Mutations require a VERIFIED compatible CLI.
   if (!cliAvailable()) {
-    closeSpawnModal(s);
-    renderGrid(s); // repaints the degradation card + disabled buttons
+    closeSpawnModal(s); // also repaints the degradation card + disabled buttons
     return;
   }
   // Legacy field interface (shared regression tests + old callers): adapt

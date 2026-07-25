@@ -487,3 +487,67 @@ test("Spawn modal: pre-relations CLI shows relation controls DISABLED with the r
     if (oldWindow === undefined) delete globalThis.window; else globalThis.window = oldWindow;
   }
 });
+
+test("Spawn modal close restores focus to the LIVE Spawn button and clears the card highlight (review 41059e0)", async () => {
+  const dom = new JSDOM("<!doctype html><html><head></head><body><div id=host></div></body></html>", { url: "http://localhost" });
+  const oldDocument = globalThis.document;
+  const oldWindow = globalThis.window;
+  const oldSetInterval = globalThis.setInterval;
+  globalThis.document = dom.window.document;
+  globalThis.window = dom.window;
+  globalThis.setInterval = () => ({ fake: true });
+  const common = await import("../renderer/views/common.mjs");
+  const spawn = await import("../renderer/views/spawn.mjs");
+  await seedCliAvailable();
+  const previousWs = common.currentWorkspace();
+  const agent = { name: "dev", agentsRoot: "/a", description: "", runtime: "pi", work: "workspace", repo: true, repoName: "r" };
+  const ctx = {
+    api: (pathname, opts = {}) => {
+      if (pathname === "/api/cli" || pathname === "/api/cli/reprobe") return Promise.resolve(CLI_OK);
+      if (opts.method === "POST") return Promise.resolve({ ok: true, status: 200, json: async () => ({ instance: "x" }) });
+      return Promise.resolve({ ok: true, status: 200, json: async () => pathname.startsWith("/api/agents")
+        ? { agents: [agent] }
+        : { instances: [], workspace: { id: "w" }, workspaces: [] } });
+    },
+    openTerminal: () => {},
+  };
+  try {
+    common.setWorkspace("w");
+    spawn.mount(dom.window.document.getElementById("host"), ctx);
+    await tick(); await tick();
+    const doc = dom.window.document;
+    const closePaths = [
+      ["Escape", () => doc.querySelector(".spawn-dialog")
+        .dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }))],
+      ["Cancel", () => doc.querySelector(".spawn-dialog .fcancel").click()],
+      ["close-x", () => doc.querySelector(".spawn-dialog .fcancel-x").click()],
+      ["backdrop", () => {
+        const modal = doc.querySelector(".spawn-modal");
+        const e = new dom.window.MouseEvent("mousedown", { bubbles: true });
+        Object.defineProperty(e, "target", { value: modal });
+        modal.dispatchEvent(e);
+      }],
+    ];
+    for (const [name, closeIt] of closePaths) {
+      const opener = doc.querySelector(".spawn-act");
+      opener.click(); // open the modal — renderGrid replaces the button node
+      assert.ok(doc.querySelector(".spawn-dialog"), `${name}: modal open`);
+      assert.ok(doc.querySelector(".soul-card.open"), `${name}: card highlighted while open`);
+      closeIt();
+      assert.equal(doc.querySelector(".spawn-dialog"), null, `${name}: modal closed`);
+      assert.equal(doc.querySelector(".soul-card.open"), null,
+        `${name}: card highlight cleared immediately, not on the next poll`);
+      const live = doc.querySelector(".soul-card[data-agent] .spawn-act");
+      assert.equal(doc.activeElement, live,
+        `${name}: focus restored to the CURRENTLY CONNECTED Spawn button (opener node was replaced)`);
+      assert.notEqual(doc.activeElement, opener, `${name}: not the detached original node`);
+    }
+  } finally {
+    spawn.unmount();
+    common.setWorkspace(previousWs);
+    globalThis.setInterval = oldSetInterval;
+    dom.window.close();
+    if (oldDocument === undefined) delete globalThis.document; else globalThis.document = oldDocument;
+    if (oldWindow === undefined) delete globalThis.window; else globalThis.window = oldWindow;
+  }
+});
