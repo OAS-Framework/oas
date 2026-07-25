@@ -1,7 +1,7 @@
 ---
 type: Lesson
-title: First-class view defaults widen window-level dispatch
-description: Once a view-local action has an engine-owned default, window dispatch can run it from any non-editable target in the active context, so the registered run() must verify the event started inside the view surface.
+title: First-class view defaults need dispatch-ineligible contexts
+description: A run()-level surface guard fires after matchEvent selects an action and preventDefault runs, so view actions should register under never-activated contexts and dispatch locally with resolveViewKey.
 tags: [desktop, keybindings, views, dispatch]
 timestamp: 2026-07-25
 ---
@@ -9,23 +9,30 @@ timestamp: 2026-07-25
 # Lesson
 
 Registering view-local actions with engine-owned defaults (`defaultChord` or
-`DEFAULT_KEYMAP`) makes the shortcut visible, rebindable, and conflict-checked,
-but it also makes the action dispatch-eligible for the window-level
-`handleKeydown` path whenever that action's context is active.
+`DEFAULT_KEYMAP`) makes the shortcut visible, rebindable, and conflict-checked.
+If that action's context is active at the window-level `handleKeydown` listener,
+though, the action becomes dispatch-eligible from any matching non-editable
+target, not only from the view's own surface.
 
-That dispatch surface is wider than the view surface. A focused non-editable
-control outside the view body, such as a nav-rail button, can still originate a
-matching keydown; pressing `f` from a focused rail button ran `hier.fit` in review
-0e63834. Editor visibility and dispatch eligibility are coupled in the engine.
+A registered `run()` surface guard is too late in the pipeline. By the time
+`run()` declines an outside target, `matchEvent` has already selected the action
+and `handleKeydown` has already called `preventDefault`. The outside key is
+swallowed, and a no-op view match can shadow a colliding global action. In review
+afd2114, rebinding a view action to Space could kill native button activation
+outside the view.
 
-Guard the registered `run()` at the registration site. For hierarchy actions,
-check that `s.canvas.contains(e.target)`; for spawn actions, check the view root.
-If the event did not originate inside the promised surface, return without
-running the action.
+Make view actions dispatch-ineligible for the window listener instead. Register
+them under a context the shell never activates, such as `view:hierarchy` or
+`view:spawn`, so `matchEvent` skips them before selection. Keep those contexts in
+the shortcut editor's label/order maps so the actions remain editor-visible, and
+let `findConflict` continue to check the registered actions. The actual in-view
+side effect stays in the view's local key handler, which resolves chords with
+`resolveViewKey`/`getBinding` and runs only for the view surface.
 
-Do not move this guard into `matchEvent`. The binding still needs to participate
-in editor display, rebinding, and conflict detection; only the side effect of the
-registered action is surface-scoped.
+Regressions for this class should assert the event boundary, not just the final
+side effect: an outside event produces a null match, `handleKeydown` returns
+false, `preventDefault` is not called, a colliding global fallback can run, and
+in-surface local dispatch still works.
 
 # Fallback gotcha
 

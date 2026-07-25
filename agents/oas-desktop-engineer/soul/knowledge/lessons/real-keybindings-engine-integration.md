@@ -21,9 +21,10 @@ shape.
   resolver. Once an engine-owned source can represent a default, delete the
   view-local backup chord fields instead of keeping a second source of truth.
 - View-local actions such as `hier.*` and `spawn.*` register with their
-  `defaultChord` and stay editor-visible. Keep their single-key dispatch
-  view-scoped, because DOM-local focus semantics still decide which focused view
-  surface receives the shortcut.
+  `defaultChord` under dispatch-ineligible view contexts that the shell never
+  activates. Keep editor labels/order metadata so they stay visible and
+  conflict-checked, while single-key dispatch remains in the local view handler
+  with DOM-local focus semantics.
 - After the core addendum, `matchEvent` skips `defaultPrevented` events and
   rejects unmodified chords from editable targets. The shell listener should call
   bare `handleKeydown(e)`; do not keep `if (!e.defaultPrevented)` or

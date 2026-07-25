@@ -27,10 +27,12 @@ through `getBinding`: explicit user bindings win, explicit persisted `null`
 means unbound, static `DEFAULT_KEYMAP` entries cover app-lifetime actions, and
 registration defaults cover mount-time view-local actions.
 
-When a registered view action is also visible to the window-level engine listener
-for its active context, do not rely on the local handler to define the execution
-surface. The registered `run()` must verify that the event originated inside the
-view's promised surface; see [the window-dispatch surface lesson](/lessons/first-class-view-defaults-window-dispatch-surface.md).
+Keep registered view actions editor-visible without making them window-dispatchable:
+register them under a context the shell never activates, add the context to the
+editor's label/order metadata, and dispatch DOM-locally with
+`resolveViewKey`/`getBinding` inside the focused view. A registered `run()`
+surface guard is too late because `handleKeydown` has already matched and called
+`preventDefault`; see [the dispatch-ineligible context lesson](/lessons/first-class-view-defaults-window-dispatch-surface.md).
 
 Do not keep a parallel view fallback resolver that treats `null` as both
 "no default" and "explicit unbind". Registration defaults are part of the action
@@ -46,7 +48,7 @@ focus semantics rather than shortcuts.
 # Related concepts
 
 - [Dynamic action registrations carry their own default chords](/lessons/dynamic-action-registration-default-chords.md)
-- [First-class view defaults widen window-level dispatch](/lessons/first-class-view-defaults-window-dispatch-surface.md)
+- [First-class view defaults need dispatch-ineligible contexts](/lessons/first-class-view-defaults-window-dispatch-surface.md)
 - [View-default suppression must use context-aware conflict checks](/lessons/view-default-suppression-context-collision.md)
 - [Real keybindings engine integration keeps defaults engine-owned](/lessons/real-keybindings-engine-integration.md)
 - [Keybindings wiring used a transitional stub engine with a frozen coordinator contract](/decisions/keybindings-stub-coordinator-contract.md)
