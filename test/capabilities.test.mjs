@@ -1300,8 +1300,8 @@ test("parent-relation rollback after LAUNCH kills the window, compensates hooks,
     try {
       assert.throws(
         () => spawnInstance(root, agentDef, { instance: "dev-zomb2", relation: "parent", relativeTo: anchor.instance, tmuxSession: "oas-test-fake", launch: true }),
-        /failed to re-point anchor.*rolled back/s,
-        "original anchor-write error surfaces, not the temp-cleanup error");
+        /failed to re-point anchor.*rollback INCOMPLETE.*tmp-dev-zomb2/s,
+        "original anchor-write error surfaces, and the unremovable temp is reported for manual cleanup");
     } finally { rmSync(tmpDir, { recursive: true, force: true }); }
     assert.equal(readFileSync(anchorMetaPath, "utf8"), before, "anchor still byte-identical");
     const tmuxCalls2 = readFileSync(tmuxLog, "utf8");
@@ -1309,6 +1309,31 @@ test("parent-relation rollback after LAUNCH kills the window, compensates hooks,
     const events2 = readFileSync(hookLog, "utf8").trim().split("\n");
     assert.ok(events2.includes("retire:dev-zomb2"), "hooks compensated despite temp-cleanup failure");
     assert.equal(existsSync(join(root, "dev", "instances", "dev-zomb2")), false, "scaffold removed despite temp-cleanup failure");
+
+    // Home-removal failure must be REPORTED as incomplete with the failed
+    // path — never claimed as cleaned up. The retire hook (which compensation
+    // runs BEFORE home removal) plants a read-only subdir inside the home so
+    // rmSync(home) fails: the zombie home remains and the message says so.
+    const tmpDir3 = `${anchorMetaPath}.tmp-dev-zomb3`;
+    mkdirSync(tmpDir3); write(join(tmpDir3, "blocker"), "x"); // anchor write fails again
+    write(join(repo, ".agents", "capabilities", "owned", "comp", "hook.mjs"),
+      `import {appendFileSync, mkdirSync, writeFileSync, chmodSync} from 'node:fs';\n` +
+      `appendFileSync(${JSON.stringify(hookLog)}, process.env.OAS_EVENT + ':' + process.env.OAS_INSTANCE + '\\n');\n` +
+      `if (process.env.OAS_EVENT === 'retire' && process.env.OAS_INSTANCE === 'dev-zomb3') {\n` +
+      `  const d = process.env.OAS_HOME + '/locked'; mkdirSync(d); writeFileSync(d + '/pin', 'x'); chmodSync(d, 0o555);\n` +
+      `}\n`);
+    const zombHome = join(root, "dev", "instances", "dev-zomb3");
+    try {
+      assert.throws(
+        () => spawnInstance(root, agentDef, { instance: "dev-zomb3", relation: "parent", relativeTo: anchor.instance, tmuxSession: "oas-test-fake", launch: false }),
+        /failed to re-point anchor.*rollback INCOMPLETE.*instance home/s,
+        "unremovable home reported as incomplete with the failed path");
+      assert.ok(existsSync(zombHome), "zombie home really remains (message told the truth)");
+    } finally {
+      rmSync(tmpDir3, { recursive: true, force: true });
+      if (existsSync(join(zombHome, "locked"))) execFileSync("chmod", ["755", join(zombHome, "locked")]);
+      rmSync(zombHome, { recursive: true, force: true });
+    }
   } finally { process.env.PATH = oldPath; }
 });
 
