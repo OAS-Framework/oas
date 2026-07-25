@@ -47,19 +47,14 @@ test("an inactive-context binding does not suppress a view default (review 4a343
   // tabs.next rebound to "b": it can never fire on the hierarchy canvas
   // (context-ineligible in the engine), so suppressing hier.brain would
   // make the key entirely dead. Same-context and global bindings still win.
+  // (legacy-chord path: the view actions are engine-UNKNOWN here)
   const binding = (id) => (id === "tabs.next" ? "B" : null);
-  const registered = () => [
-    { id: "tabs.next", context: "tabs" },
-    { id: "hier.brain", context: "stage:hierarchy" },
-  ];
+  const registered = () => [{ id: "tabs.next", context: "tabs" }];
   assert.equal(resolveViewKey(ev("b"), actions, { isMac: false, binding, registered, context: "stage:hierarchy" }), "hier.brain",
     "foreign inactive context must not turn the view key dead");
   // same-context explicit binding still suppresses the default
   const sameCtx = (id) => (id === "hier.other" ? "B" : null);
-  const registered2 = () => [
-    { id: "hier.other", context: "stage:hierarchy" },
-    { id: "hier.brain", context: "stage:hierarchy" },
-  ];
+  const registered2 = () => [{ id: "hier.other", context: "stage:hierarchy" }];
   assert.equal(resolveViewKey(ev("b"), actions, { isMac: false, binding: sameCtx, registered: registered2, context: "stage:hierarchy" }), null,
     "same-context explicit binding still wins over the default");
   // without a context hint, behave conservatively (any explicit binding wins)
@@ -75,16 +70,14 @@ test("modifier chords from the engine match platform Mod folding", () => {
   assert.equal(resolveViewKey(ev("b"), actions, { isMac: false, binding, registered }), null);
 });
 
-test("an explicit engine unbind kills the key — no fallback to a stale local chord", () => {
-  // engine owns defaults now (DEFAULT_KEYMAP hier.*); getBinding returning
-  // null after Backspace-unbind must NOT resurrect any legacy chord field
+test("an explicit engine unbind kills the key — legacy chords never resurrect registered actions (review 0e63834 nit)", () => {
   const withLegacy = [{ id: "hier.brain", chord: "b" }];
-  const binding = () => null; // explicit unbind and no-default look identical — both must not fire when registered
+  const binding = () => null; // registered + null binding = unbound by choice
   const registered = () => [{ id: "hier.brain", context: "stage:hierarchy" }];
-  // legacy chord still honored ONLY because the id is in the passed actions;
-  // engine-registered actions rely on DEFAULT_KEYMAP, not the legacy field
-  assert.equal(resolveViewKey(ev("b"), withLegacy, { isMac: false, binding, registered }), "hier.brain");
-  const noLegacy = [{ id: "hier.brain" }];
-  assert.equal(resolveViewKey(ev("b"), noLegacy, { isMac: false, binding, registered }), null,
-    "without a legacy chord, an unbound action does not fire");
+  assert.equal(resolveViewKey(ev("b"), withLegacy, { isMac: false, binding, registered }), null,
+    "a REGISTERED action with a null effective binding is dead — the legacy chord must not fire");
+  // engine-unknown action (not registered): the legacy chord is the only
+  // source of truth and still works (test seam / gradual migration)
+  assert.equal(resolveViewKey(ev("b"), withLegacy, { isMac: false, binding, registered: () => [] }), "hier.brain",
+    "engine-unknown actions keep their legacy chord");
 });

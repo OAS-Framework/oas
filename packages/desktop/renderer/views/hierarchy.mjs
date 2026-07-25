@@ -219,7 +219,12 @@ export function mount(el, ctx) {
   // DEFAULT chords ride the registration (engine addendum 3: defaultChord)
   // so the shortcuts editor shows them honestly and Backspace/reset behave;
   // dispatch stays canvas-local via resolveViewKey (engine binding wins,
-  // explicit unbind kills the key). Disposed on unmount.
+  // explicit unbind kills the key). The registered run() is SURFACE-GUARDED
+  // (review 0e63834): window-level dispatch in the active stage context
+  // must not run view actions from unrelated targets (rail/sidebar) — only
+  // events originating inside this view's canvas execute. Disposed on unmount.
+  const insideView = (e) => !e || !e.target || (s.canvas?.contains ? s.canvas.contains(e.target) : true);
+  const guarded = (fn) => (e) => { if (insideView(e)) fn(e); };
   s.viewActions = [
     { id: "hier.fit", defaultChord: "F", label: "Hierarchy: fit to screen", run: () => fit(s) },
     { id: "hier.terminal", defaultChord: "T", label: "Hierarchy: open terminal of selection", run: () => { if (s.sel) s.ctx.openTerminal(s.sel); } },
@@ -230,7 +235,7 @@ export function mount(el, ctx) {
     { id: "hier.zoomOut", defaultChord: "-", label: "Hierarchy: zoom out", run: () => zoomBy(s, 1 / 1.2) },
   ];
   s.disposers = s.viewActions.map((a) => registerAction({
-    id: a.id, label: a.label, context: "stage:hierarchy", run: a.run, defaultChord: a.defaultChord,
+    id: a.id, label: a.label, context: "stage:hierarchy", run: guarded(a.run), defaultChord: a.defaultChord,
   }));
 
   s.unsubWs = onWorkspaceChange(() => { s.sel = null; s.fitted = false; s.nodeOffsets.clear(); refresh(s); });

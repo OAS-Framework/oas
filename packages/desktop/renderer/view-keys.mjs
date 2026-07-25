@@ -20,8 +20,10 @@ function chordsEqual(a, b, isMac) {
  * answers to is ENGINE-OWNED (DEFAULT_KEYMAP default, registration
  * defaultChord, user override, or explicit unbind via getBinding) —
  * view-local dispatch merely scopes WHERE the key fires (the focused
- * canvas/grid), never WHAT it is bound to. An optional legacy `chord` field
- * is honored only for actions the engine has no knowledge of at all.
+ * canvas/grid), never WHAT it is bound to. A legacy `chord` field is
+ * honored ONLY for actions the engine does not know at all (not registered
+ * — review 0e63834 nit: an explicitly unbound registered action must stay
+ * dead, never resurrect a legacy chord).
  * `context` names the view's engine context (e.g. "stage:hierarchy"): a
  * legacy default yields only to explicit bindings that could actually
  * collide per the engine's context rule — same context or global — never
@@ -29,12 +31,16 @@ function chordsEqual(a, b, isMac) {
 export function resolveViewKey(e, actions, { isMac = /mac/i.test(navigator.platform || ""), binding = getBinding, registered = listActions, context = null } = {}) {
   const evChord = chordFromEvent(e, isMac);
   if (!evChord) return null;
+  const known = new Set(registered().map((a) => a.id));
   const unbound = [];
   for (const a of actions) {
     const bound = parseChord(binding(a.id) || "");
     if (bound) {
       if (chordsEqual(bound, evChord, isMac)) return a.id;
-    } else if (a.chord) {
+    } else if (a.chord && !known.has(a.id)) {
+      // legacy fallback: engine-unknown actions only — a registered action
+      // whose effective binding is null is unbound BY CHOICE (explicit
+      // Backspace or no default) and must not fire
       unbound.push(a);
     }
   }

@@ -78,7 +78,13 @@ export function mount(el, ctx) {
     { id: "spawn.filter", defaultChord: "/", run: () => s.q("filter").focus() },
     { id: "spawn.brain", defaultChord: "B", run: () => brainOfFocusedCard(s) },
   ];
-  el.querySelector(".souls").addEventListener("keydown", (e) => {
+  // Surface guard (review 0e63834): the engine window listener may dispatch
+  // these in the active stage:spawn context from ANY non-editable target —
+  // restrict execution to events originating inside this view.
+  const viewRoot = el.querySelector(".souls");
+  const insideView = (e) => !e || !e.target || (viewRoot?.contains ? viewRoot.contains(e.target) : true);
+  const guarded = (fn) => (e) => { if (insideView(e)) fn(e); };
+  viewRoot.addEventListener("keydown", (e) => {
     // Esc cancels the open spawn form from anywhere inside it (incl. the
     // task textarea — cancel is safe; submit stays click/button-only there).
     if (e.key === "Escape" && s.sel) { e.preventDefault(); s.sel = null; s.selAgent = null; renderGrid(s); return; }
@@ -89,8 +95,8 @@ export function mount(el, ctx) {
     if (hit) { e.preventDefault(); s.viewActions.find((a) => a.id === hit)?.run(); }
   });
   s.disposers = [
-    registerAction({ id: "spawn.filter", label: "Soul roster: focus the filter", context: "stage:spawn", defaultChord: "/", run: () => s.q("filter").focus() }),
-    registerAction({ id: "spawn.brain", label: "Soul roster: open Brain of focused card", context: "stage:spawn", defaultChord: "B", run: () => brainOfFocusedCard(s) }),
+    registerAction({ id: "spawn.filter", label: "Soul roster: focus the filter", context: "stage:spawn", defaultChord: "/", run: guarded(() => s.q("filter").focus()) }),
+    registerAction({ id: "spawn.brain", label: "Soul roster: open Brain of focused card", context: "stage:spawn", defaultChord: "B", run: guarded(() => brainOfFocusedCard(s)) }),
   ];
   // CLI degradation: refresh once on mount and re-render the grid whenever
   // availability flips — spawn buttons disable consistently with the card.
