@@ -215,19 +215,19 @@ export function mount(el, ctx) {
   // keyboard: walk the tree, Enter opens terminal, f fits, Escape clears
   s.canvas.addEventListener("keydown", (e) => onKey(s, e));
 
-  // Register the canvas keys as actions (context stage:hierarchy) so they
-  // appear in the shortcuts editor and are truly REBINDABLE: onKey resolves
-  // each keydown through the engine keymap (view-keys.mjs) — a user override
-  // wins and the old default stops firing. Dispatch stays canvas-local so
-  // plain keys can never leak into inputs. Disposed on unmount.
+  // Register the canvas keys as actions (context stage:hierarchy). Their
+  // DEFAULT chords live in the engine's DEFAULT_KEYMAP (hier.*) so the
+  // shortcuts editor shows them honestly and Backspace/reset behave;
+  // dispatch stays canvas-local via resolveViewKey (engine binding wins,
+  // explicit unbind kills the key). Disposed on unmount.
   s.viewActions = [
-    { id: "hier.fit", chord: "f", label: "Hierarchy: fit to screen", run: () => fit(s) },
-    { id: "hier.terminal", chord: "t", label: "Hierarchy: open terminal of selection", run: () => { if (s.sel) s.ctx.openTerminal(s.sel); } },
-    { id: "hier.brain", chord: "b", label: "Hierarchy: open Brain of selection", run: () => openSelBrain(s) },
-    { id: "hier.spawn", chord: "s", label: "Hierarchy: open the Spawn view", run: () => s.ctx.openView?.("spawn") },
-    { id: "hier.popover", chord: "o", label: "Hierarchy: open the action popover", run: () => { if (s.sel) openPop(s, s.sel); } },
-    { id: "hier.zoomIn", chord: "=", label: "Hierarchy: zoom in", run: () => zoomBy(s, 1.2) },
-    { id: "hier.zoomOut", chord: "-", label: "Hierarchy: zoom out", run: () => zoomBy(s, 1 / 1.2) },
+    { id: "hier.fit", label: "Hierarchy: fit to screen", run: () => fit(s) },
+    { id: "hier.terminal", label: "Hierarchy: open terminal of selection", run: () => { if (s.sel) s.ctx.openTerminal(s.sel); } },
+    { id: "hier.brain", label: "Hierarchy: open Brain of selection", run: () => openSelBrain(s) },
+    { id: "hier.spawn", label: "Hierarchy: open the Spawn view", run: () => s.ctx.openView?.("spawn") },
+    { id: "hier.popover", label: "Hierarchy: open the action popover", run: () => { if (s.sel) openPop(s, s.sel); } },
+    { id: "hier.zoomIn", label: "Hierarchy: zoom in", run: () => zoomBy(s, 1.2) },
+    { id: "hier.zoomOut", label: "Hierarchy: zoom out", run: () => zoomBy(s, 1 / 1.2) },
   ];
   s.disposers = s.viewActions.map((a) => registerAction({
     id: a.id, label: a.label, context: "stage:hierarchy", run: a.run,
