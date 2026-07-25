@@ -209,3 +209,32 @@ test("layoutClusters: all-singleton roster yields only the Independent block", (
   assert.equal(soloBlock.nodes.length, 2);
   assert.equal(soloBlock.y, 0, "no cluster cards above — block starts at the top");
 });
+
+test("cluster cards are anonymous: header carries counts only, never the derived cluster name", async () => {
+  const { JSDOM } = await import("jsdom");
+  const dom = new JSDOM(`<div id="root"></div>`, { pretendToBeVisual: true });
+  const g = globalThis;
+  const prev = { window: g.window, document: g.document, localStorage: g.localStorage };
+  g.window = dom.window; g.document = dom.window.document;
+  g.localStorage = { getItem: () => null, setItem: () => {} };
+  try {
+    const panel = { instances: [
+      { instance: "named-root", running: true, parentInstance: null, siblingInstance: null },
+      { instance: "kid", running: false, parentInstance: "named-root", siblingInstance: null },
+      { instance: "solo", running: true, parentInstance: null, siblingInstance: null },
+    ], workspaces: [], workspace: null };
+    const ctx = { api: async () => ({ ok: true, status: 200, json: async () => panel }), openTerminal() {} };
+    const el = dom.window.document.getElementById("root");
+    const un = hier.mount(el, ctx);
+    await new Promise((r) => setTimeout(r, 30));
+    const head = el.querySelector(".hier-cluster .hier-chead");
+    assert.ok(head, "cluster card has a header");
+    assert.equal(head.textContent, "1/2 running", "counts only — no cluster name");
+    assert.ok(!head.textContent.includes("named-root"), "derived name never shown");
+    const soloHead = el.querySelector(".hier-solo .hier-chead");
+    assert.ok(soloHead.textContent.startsWith("Independent"), "strip keeps its category label");
+    un();
+  } finally {
+    g.window = prev.window; g.document = prev.document; g.localStorage = prev.localStorage;
+  }
+});
