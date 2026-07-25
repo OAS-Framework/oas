@@ -31,11 +31,16 @@ Do not keep a parallel view fallback resolver that treats `null` as both
 "no default" and "explicit unbind". Registration defaults are part of the action
 registration contract, as captured in [the dynamic registration default lesson](/lessons/dynamic-action-registration-default-chords.md).
 
+When a view resolver yields a local default to explicit bindings elsewhere, its
+anti-shadowing scan must use the engine's same-context/global collision rule;
+see [the context-aware suppression lesson](/lessons/view-default-suppression-context-collision.md).
+
 Structural keys such as Enter, Escape, and arrows stay hard-coded when they are
 focus semantics rather than shortcuts.
 
 # Related concepts
 
 - [Dynamic action registrations carry their own default chords](/lessons/dynamic-action-registration-default-chords.md)
+- [View-default suppression must use context-aware conflict checks](/lessons/view-default-suppression-context-collision.md)
 - [Real keybindings engine integration keeps defaults engine-owned](/lessons/real-keybindings-engine-integration.md)
 - [Keybindings wiring used a transitional stub engine with a frozen coordinator contract](/decisions/keybindings-stub-coordinator-contract.md)
