@@ -337,7 +337,8 @@ test("stale snapshot: if the roster never catches up, spawn reports instead of o
     common.setWorkspace("wsA");
     await doSpawn(s);
     assert.deepEqual(opened, [], "never call openTerminal with an instance the roster cannot resolve");
-    assert.match(fields.fstatus.textContent, /catching up/, "user is told where to find the instance");
+    assert.match(fields.fstatus.textContent, /catching up.*sidebar instance roster/,
+      "user is pointed at the permanent sidebar roster (the Instances stage is gone)");
     assert.equal(fields.fspawn.disabled, false, "button unlocks after the wait gives up");
   } finally {
     common.setWorkspace(prevWs);

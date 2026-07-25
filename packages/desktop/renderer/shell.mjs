@@ -3,9 +3,9 @@
 // View contract (binding, from the desktop-app contract): each view is an ES
 // module in ./views/ exporting mount(el, ctx) / unmount(), where
 //   ctx = { api(pathname, opts), openFile(path), openTerminal(instance) }
-// The shell owns tabs/navigation and provides ctx. The full roster (with
-// chat transcript, spawn) lives in the ported views — the shell chrome
-// stays a thin rail so nothing is duplicated.
+// The shell owns tabs/navigation and provides ctx. The full functionality
+// (hierarchy, spawn, brain, markdown) lives in the ported views — the shell
+// chrome stays a thin rail so nothing is duplicated.
 import { currentWorkspace, setWorkspace, groupInstances, adoptWorkspace, onWorkspaceChange } from "./views/common.mjs";
 import {
   initTheme, toggleTheme, xtermTheme, onThemeChange,
