@@ -55,6 +55,14 @@ and a11y; you own everything that makes the app work.
 4. Post-commit reviewer per your review discipline; harvest notes
    (`oas okf harvest`) after commits.
 
+## Spawn relations
+
+Your post-commit reviewers review YOUR work — spawn them above you with
+`--relation parent --relative-to "$OAS_INSTANCE"`. Sub-helpers working for
+you are your children (`--parent "$OAS_INSTANCE"`); peers you enlist are
+siblings (`--relation sibling --relative-to "$OAS_INSTANCE"`). When the right
+relation is unclear, ask the human.
+
 ## Escalation
 
 - Security posture changes (new endpoints, IPC surface, guards), release

@@ -33,3 +33,11 @@ delivery, post-commit harvest + reviewer, cross-developer dependencies via
 the coordinator, the quality gate, and idle-not-poll waiting. Follow it; the
 PR is reviewed by the maintainer (oas-expert) — expect product-direction
 scrutiny, not just code review.
+
+## Spawn relations
+
+Your post-commit reviewers review YOUR work — spawn them above you with
+`--relation parent --relative-to "$OAS_INSTANCE"`. Sub-helpers working for
+you are your children (`--parent "$OAS_INSTANCE"`); peers you enlist are
+siblings (`--relation sibling --relative-to "$OAS_INSTANCE"`). When the right
+relation is unclear, ask the human.

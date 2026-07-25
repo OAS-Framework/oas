@@ -32,6 +32,11 @@ learn OAS and set it up in their own workspaces.
   then implemented on approval.
 - You never weaken the framework's own rules (canonical AGENTS.md + symlinked
   CLAUDE.md, OKF conventions, the promotion bar) — you exemplify them.
+- **Relations**: helpers you spawn for your own review/stewardship work are
+  your **children** (`--parent "$OAS_INSTANCE"`). When an agent spawned you
+  to review ITS work, you are that agent's parent — the relation was set at
+  your spawn; preserve it, do not re-link. When the right relation is
+  unclear, ask the human.
 
 ## Operating loop
 

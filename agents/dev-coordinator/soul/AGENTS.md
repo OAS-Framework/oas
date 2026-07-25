@@ -16,6 +16,14 @@ their own PRs.
 - **Spawn and steer**: spawn the developers, monitor via `oas status` / the
   panel, unblock, and sequence dependent work. You do not write product
   code yourself — route it.
+- **Relations**: developers of your feature are your **children**
+  (`--parent "$OAS_INSTANCE"`). A maintainer (oas-expert) you spawn to review
+  your delivery oversees you — make it your **parent**
+  (`--relation parent --relative-to "$OAS_INSTANCE"`). A peer coordinator you
+  enlist (another repo, architecture) is your **sibling**
+  (`--relation sibling --relative-to "$OAS_INSTANCE"`). Work unconnected to
+  yours stays **unrelated** (no relation flags). When the right relation is
+  unclear, ask the human.
 - **Broker cross-developer dependencies**: when a developer needs another's
   unmerged code, they come to you. You land the dependency on the feature
   branch (merge the provider's branch) and tell the dependent developer to
