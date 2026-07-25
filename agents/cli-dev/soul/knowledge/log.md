@@ -1,6 +1,8 @@
 # Knowledge Log
 
 ## 2026-07-25
+* **Update**: [test-conventions](/playbooks/test-conventions.md) records direct-kernel coverage for raw spawn relation option combinations, matching CLI `E_BAD_ARGS` cases and no-home side-effect assertions.
+* **Update**: [kernel-validation-before-side-effects](/lessons/kernel-validation-before-side-effects.md) records that raw `spawnInstance` option combinations must be validated before relation sugar expansion or explicit-none normalization.
 * **Update**: [test-conventions](/playbooks/test-conventions.md) records that name-resolution tests need local-soul fixtures because overlapping discovery phases only double-count there.
 * **Update**: [lineage-edge-ambiguity-posture](/lessons/lineage-edge-ambiguity-posture.md) records canonical-home de-duplication before treating all-match enumeration results as intra-root duplicates.
 * **Creation**: [overlapping-instance-home-scans-dedupe](/lessons/overlapping-instance-home-scans-dedupe.md) records the `findInstanceHomes` lesson that overlapping `listAgents`/`localAgentBases` scans must dedupe local souls by canonical home.

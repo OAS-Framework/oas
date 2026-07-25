@@ -36,6 +36,11 @@ All kernel/CLI behavior tests live in `test/capabilities.test.mjs`
   after `spawnInstance` or the CLI rejects relation/anchor options, assert that
   no instance directory remains. See
   [kernel-validation-before-side-effects](/lessons/kernel-validation-before-side-effects.md).
+- Every CLI-level `E_BAD_ARGS` relation-matrix case needs a direct
+  `spawnInstance(..., { launch: false })` equivalent that passes the raw
+  programmatic shape (for example dangling `relativeTo`, `unrelated` plus
+  `relativeTo`, or `parent` plus `relation`) and asserts both the throw and no
+  created home; CLI validation does not prove the exported kernel boundary.
 - In `--json` CLI tests, spawn validation failures are stdout envelopes
   (`{ ok: false, error: { ... } }`), not stderr text. Parse stdout for stable
   error codes; reserve stderr assertions for non-JSON `die()` paths and JSON
