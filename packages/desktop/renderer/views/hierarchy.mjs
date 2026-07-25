@@ -37,7 +37,7 @@ const CSS = `
 .hier-canvas.panning { cursor: grabbing; }
 .hier-stage { position: absolute; left: 0; top: 0; transform-origin: 0 0; will-change: transform; }
 .hier-group { position: absolute; }
-.hier-group.hier-cluster { background: color-mix(in srgb, var(--surface) 55%, transparent);
+.hier-group.hier-cluster { background: color-mix(in srgb, var(--surface) 55%, var(--bg));
                            border: 1px solid var(--border); border-radius: 14px; }
 .hier-group.hier-solo .hnode { box-shadow: none; }
 .hier-chead { position: absolute; left: 12px; top: 7px; display: flex; align-items: baseline; gap: 8px;
@@ -225,7 +225,7 @@ export function mount(el, ctx) {
         <span style="flex:1"></span>
         <button class="act spawnbtn" title="Spawn a new agent instance">✚ Spawn</button>
       </div>
-      <div class="hier-canvas" tabindex="0" role="tree" aria-label="Agent hierarchy">
+      <div class="hier-canvas" tabindex="0" role="tree" aria-label="Active agents by cluster">
         <div class="hier-zoom">
           <button class="zout" title="Zoom out (⌘−)" aria-label="Zoom out">−</button>
           <button class="zfit" title="Fit to screen (f)" aria-label="Fit to screen">◲</button>
@@ -618,6 +618,23 @@ function onKey(s, e) {
   if (!list.length) return;
   if (e.key === "Escape") { s.sel = null; paintSelection(s); closePop(s); return; }
   if (e.key === "f") { e.preventDefault(); fit(s); return; }
+  // [ / ] hop between clusters (selects the hopped-to cluster's first node)
+  if (e.key === "[" || e.key === "]") {
+    e.preventDefault();
+    const groups = [];
+    for (const { node, ws } of s.nodeEls.values()) {
+      let g = groups.find((x) => x.ws === ws);
+      if (!g) { g = { ws, first: node }; groups.push(g); }
+      else if (node.y < g.first.y || (node.y === g.first.y && node.x < g.first.x)) g.first = node;
+    }
+    if (!groups.length) return;
+    const curWs = s.sel ? s.nodeEls.get(s.sel)?.ws : null;
+    const at = groups.findIndex((g) => g.ws === curWs);
+    const next = groups[(at + (e.key === "]" ? 1 : -1) + groups.length) % groups.length]
+      || groups[0];
+    select(s, next.first.inst.instance);
+    return;
+  }
   if (e.key === "Enter" && s.sel) { e.preventDefault(); s.ctx.openTerminal(s.sel); return; }
   if (!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)) return;
   e.preventDefault();
@@ -632,7 +649,7 @@ function onKey(s, e) {
     const kid = cur.node.children[0];
     if (kid) select(s, kid.inst.instance);
   } else {
-    // siblings: same row (y) within the SAME workspace group, ordered by x
+    // peers: same row (y) within the SAME cluster group, ordered by x
     const sibs = [...s.nodeEls.values()].filter((x) => x.node.y === cur.node.y && x.ws === cur.ws).sort((a, b) => a.node.x - b.node.x);
     const at = sibs.findIndex((x) => x.node.inst.instance === s.sel);
     const next = sibs[at + (e.key === "ArrowRight" ? 1 : -1)];
