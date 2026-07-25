@@ -24,7 +24,10 @@ than letting the file grow stale.
   only failure was the known org-policy block on Actions-created PRs after
   publication. Manifests were bumped to 0.18.4 through manual rescue PR #31
   (`fda7498`). The published kernel passed a clean create→spawn→inspect→retire
-  deployment probe and reported Desktop API v1 at version 0.18.4.
+  deployment probe and reported Desktop API v1 at version 0.18.4. A human
+  subsequently identified an out-of-scope Desktop navigation regression in
+  PR #29; v0.18.4 is immutable and a corrective patch is required (see open
+  threads).
 
 - **PR #29 merged 2026-07-25 as `b7203eb`** — Desktop UX fixes: spawn view
   retries an unsettled CLI probe with truthful pending UI; Shift+Enter inserts
@@ -151,6 +154,13 @@ than letting the file grow stale.
   closed PR's commits if wanted).
 
 ## Open threads
+
+- **v0.18.4 corrective Desktop patch required**: a coordinator HOLD arrived
+  after v0.18.4 had already published. The human identified that PR #29 added
+  an Instances navigation tab plus an extra sidebar outside the requested
+  scope; grouping belongs in the existing roster sidebar instead. Do not move,
+  delete, or republish the immutable v0.18.4 artifacts. A corrective PR is
+  forthcoming and must drive a new patch version after review.
 
 - aweb channel awakening drops (2 consecutive repros 2026-07-23): verdict
   mail from short-lived reviewer identities delivered and marked READ
