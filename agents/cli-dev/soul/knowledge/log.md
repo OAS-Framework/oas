@@ -1,6 +1,9 @@
 # Knowledge Log
 
 ## 2026-07-25
+* **Creation**: [team-agent-roots-nonexistent-roots](/lessons/team-agent-roots-nonexistent-roots.md) records that nonexistent `teamAgentRoots()` entries are anchors for `localAgentBases(root)` and must survive failed realpath normalization.
+* **Update**: [team-scope-and-cross-repo-spawn](/lessons/team-scope-and-cross-repo-spawn.md) clarifies that team roots are not existence-filtered because all-local member scopes may only have `local-agents/`.
+* **Update**: [spawn-relations-lineage-fields](/architecture/spawn-relations-lineage-fields.md) points retire-splice scanners at the nonexistent-roots fallback rule.
 * **Creation**: [path-first-resolution-round-trip](/lessons/path-first-resolution-round-trip.md) records the path-first, name round-trip rule for path-identified instances whose metadata stores names.
 * **Update**: [names-are-not-identity](/lessons/names-are-not-identity.md) distinguishes path-first owner matching from name-based identity and adds the symlinked checkout matching gotcha.
 * **Update**: [attached-spawns-child-of-work-owner](/decisions/attached-spawns-child-of-work-owner.md) records that explicit parent fallback cannot bypass a failed known-instance owner round trip.

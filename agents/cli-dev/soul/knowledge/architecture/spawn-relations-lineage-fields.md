@@ -73,8 +73,10 @@ not enough to identify the retiree: resolve it from the referrer's agents root
 using the same local-first, then team-scope precedence spawn uses, and splice
 only when that resolved home realpath-matches the retiree's home. Run the splice
 before deleting the retiree home, or this proof is impossible. Local-only scopes
-may lack an `agents/` directory, so guard realpath checks. See the broader
-[relation-policy lesson](/lessons/relation-policy-migration-and-retire-splice.md)
+may lack an `agents/` directory, so failed realpath checks must fall back to
+`resolve(root)` rather than dropping the root. See the
+[nonexistent roots lesson](/lessons/team-agent-roots-nonexistent-roots.md), the broader
+[relation-policy lesson](/lessons/relation-policy-migration-and-retire-splice.md),
 and [identity lesson](/lessons/names-are-not-identity.md).
 
 # Validation boundary
