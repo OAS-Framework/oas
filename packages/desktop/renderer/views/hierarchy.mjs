@@ -215,16 +215,15 @@ export function mount(el, ctx) {
   // keyboard: walk the tree, Enter opens terminal, f fits, Escape clears
   s.canvas.addEventListener("keydown", (e) => onKey(s, e));
 
-  // Register the canvas keys as actions (context stage:hierarchy). Their
-  // DEFAULT chords ride the registration (engine addendum 3: defaultChord)
-  // so the shortcuts editor shows them honestly and Backspace/reset behave;
-  // dispatch stays canvas-local via resolveViewKey (engine binding wins,
-  // explicit unbind kills the key). The registered run() is SURFACE-GUARDED
-  // (review 0e63834): window-level dispatch in the active stage context
-  // must not run view actions from unrelated targets (rail/sidebar) — only
-  // events originating inside this view's canvas execute. Disposed on unmount.
-  const insideView = (e) => !e || !e.target || (s.canvas?.contains ? s.canvas.contains(e.target) : true);
-  const guarded = (fn) => (e) => { if (insideView(e)) fn(e); };
+  // Register the canvas keys as actions. Their DEFAULT chords ride the
+  // registration (engine addendum 3: defaultChord) so the shortcuts editor
+  // shows them honestly and Backspace/reset behave. The context is a VIEW
+  // context the shell never activates (review afd2114): these actions are
+  // editor-visible and conflict-checked but window-dispatch-INELIGIBLE —
+  // matchEvent skips them before selecting/preventDefault, so an outside
+  // rail/sidebar keypress is not swallowed and colliding global actions
+  // still run. ALL dispatch is view-local (onKey → resolveViewKey against
+  // the engine's effective bindings). Disposed on unmount.
   s.viewActions = [
     { id: "hier.fit", defaultChord: "F", label: "Hierarchy: fit to screen", run: () => fit(s) },
     { id: "hier.terminal", defaultChord: "T", label: "Hierarchy: open terminal of selection", run: () => { if (s.sel) s.ctx.openTerminal(s.sel); } },
@@ -235,7 +234,7 @@ export function mount(el, ctx) {
     { id: "hier.zoomOut", defaultChord: "-", label: "Hierarchy: zoom out", run: () => zoomBy(s, 1 / 1.2) },
   ];
   s.disposers = s.viewActions.map((a) => registerAction({
-    id: a.id, label: a.label, context: "stage:hierarchy", run: guarded(a.run), defaultChord: a.defaultChord,
+    id: a.id, label: a.label, context: "view:hierarchy", run: a.run, defaultChord: a.defaultChord,
   }));
 
   s.unsubWs = onWorkspaceChange(() => { s.sel = null; s.fitted = false; s.nodeOffsets.clear(); refresh(s); });

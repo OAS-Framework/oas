@@ -37,9 +37,8 @@ test("hierarchy and spawn views register rebindable view-local actions and dispo
   for (const id of ["hier.fit", "hier.terminal", "hier.brain", "hier.spawn", "hier.popover", "hier.zoomIn", "hier.zoomOut"]) {
     assert.match(hier, new RegExp(`id: "${id.replace(".", "\\.")}", defaultChord:`), `hierarchy action ${id} declared`);
   }
-  assert.match(hier, /context: "stage:hierarchy"/, "hierarchy actions registered in their stage context");
-  assert.match(hier, /run: guarded\(a\.run\)/, "hierarchy engine registrations are surface-guarded (review 0e63834)");
-  assert.match(hier, /s\.canvas\?\.contains \? s\.canvas\.contains\(e\.target\)/, "guard scopes to the canvas");
+  assert.match(hier, /context: "view:hierarchy"/, "hierarchy actions use a never-activated view context (editor-visible, window-dispatch-ineligible — review afd2114)");
+  assert.match(hier, /run: guarded\(a\.run\)|context: "view:hierarchy"/, "outside keypresses cannot be swallowed");
   assert.match(hier, /s\.disposers = s\.viewActions\.map/, "hierarchy keeps action disposers");
   assert.match(hier, /\(s\.disposers \|\| \[\]\)\.forEach/, "hierarchy disposes actions on teardown");
   assert.match(hier, /resolveViewKey\(e, s\.viewActions\)/, "canvas keys resolve through the engine keymap (rebindable)");
@@ -48,7 +47,7 @@ test("hierarchy and spawn views register rebindable view-local actions and dispo
   for (const id of ["spawn.filter", "spawn.brain"]) {
     assert.match(spawn, new RegExp(`id: "${id.replace(".", "\\.")}"`), `spawn action ${id}`);
   }
-  assert.match(spawn, /run: guarded\(/, "spawn engine registrations are surface-guarded (review 0e63834)");
+  assert.match(spawn, /context: "view:spawn"/, "spawn actions use the never-activated view context");
   assert.match(spawn, /resolveViewKey\(/, "spawn keys resolve through the engine keymap");
   assert.match(spawn, /\(state\.disposers \|\| \[\]\)\.forEach/, "spawn disposes actions on unmount");
 });
