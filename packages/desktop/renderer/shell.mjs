@@ -210,16 +210,19 @@ function renderContextRoster(instances) {
     return;
   }
   // Sidebar groups by agent CLUSTER (connected relations), not per repo:
-  // the repo is the small label under each instance. Single-node clusters
-  // (unrelated instances) get no header row — headers only where a real
-  // group exists.
+  // the repo is the small label under each instance. Clusters render
+  // ANONYMOUSLY (human requirement — naming may return with a task-layer
+  // integration): multi-member clusters get an unlabelled separator only;
+  // single-node clusters get nothing.
   for (const cluster of clusterInstances(visible)) {
     const items = cluster.instances;
     if (items.length > 1) {
       const rh = document.createElement("div");
       rh.className = "ctx-repo ctx-cluster";
-      rh.textContent = `◎ ${cluster.key}`;
+      rh.textContent = "◎";
+      rh.setAttribute("role", "separator");
       rh.title = `Agent cluster of ${items.length} related instances`;
+      rh.setAttribute("aria-label", `Agent cluster of ${items.length} related instances`);
       listEl.append(rh);
     }
     {

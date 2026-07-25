@@ -313,12 +313,19 @@ test("Soul roster: relation + reference instance pass through POST /api/spawn; u
     await tick(); await tick();
     dom.window.document.querySelector(".spawn-act").click();
     const doc = dom.window.document;
-    // picker hidden while unrelated (the default)
+    // spawn opens a MODAL dialog (human change request): a11y contract
+    const dialog = doc.querySelector(".spawn-dialog");
+    assert.ok(dialog, "spawn opens a modal dialog");
+    assert.equal(dialog.getAttribute("role"), "dialog");
+    assert.equal(dialog.getAttribute("aria-modal"), "true");
+    assert.ok(dialog.getAttribute("aria-labelledby"), "dialog is labelled");
+    // relation options DIRECTLY VISIBLE; picker disabled until a relation is chosen
     const relSel = doc.querySelector(".frelation");
     assert.equal(relSel.value, "unrelated", "relation defaults to unrelated");
-    assert.equal(doc.querySelector(".frelto-label").style.display, "none", "reference picker hidden for unrelated");
-    // picker lists live workspace instances
+    assert.equal(relSel.disabled, false, "relation select enabled on a relation-capable CLI");
     const refSel = doc.querySelector(".frelto");
+    assert.ok(refSel, "reference picker is visible in the modal");
+    assert.equal(refSel.disabled, true, "reference picker disabled while unrelated");
     assert.ok([...refSel.options].some((o) => o.value === "coord-1"), "reference picker lists roster instances");
 
     // 1) unrelated spawn: no relation fields on the wire
@@ -328,13 +335,13 @@ test("Soul roster: relation + reference instance pass through POST /api/spawn; u
     assert.equal(posts[0].relation, undefined, "unrelated sends no relation");
     assert.equal(posts[0].relativeTo, undefined, "unrelated sends no relativeTo");
 
-    // 2) choosing a relation reveals the picker; missing reference fails BEFORE dispatch
-    doc.querySelector(".spawn-act")?.click(); // reopen if the grid rebuilt
-    const form = doc.querySelector(".soul-form");
+    // 2) choosing a relation ENABLES the picker; missing reference fails BEFORE dispatch
+    if (!doc.querySelector(".spawn-dialog")) doc.querySelector(".spawn-act").click(); // reopen if closed
+    const form = doc.querySelector(".spawn-dialog");
     const rel2 = form.querySelector(".frelation");
     rel2.value = "child";
     rel2.dispatchEvent(new dom.window.Event("change"));
-    assert.equal(form.querySelector(".frelto-label").style.display, "", "picker appears for a real relation");
+    assert.equal(form.querySelector(".frelto").disabled, false, "picker enables for a real relation");
     form.querySelector(".fspawn").click();
     await tick();
     assert.equal(posts.length, 1, "relation without a reference never dispatches");
@@ -347,8 +354,307 @@ test("Soul roster: relation + reference instance pass through POST /api/spawn; u
     assert.equal(posts.length, 2);
     assert.equal(posts[1].relation, "child");
     assert.equal(posts[1].relativeTo, "coord-1");
+
+    // 4) modal close paths: Escape closes and clears the selection
+    if (!doc.querySelector(".spawn-dialog")) doc.querySelector(".spawn-act").click();
+    const dlg2 = doc.querySelector(".spawn-dialog");
+    dlg2.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    assert.equal(doc.querySelector(".spawn-dialog"), null, "Escape closes the spawn modal");
+    // Cancel button closes too
+    doc.querySelector(".spawn-act").click();
+    doc.querySelector(".spawn-dialog .fcancel").click();
+    assert.equal(doc.querySelector(".spawn-dialog"), null, "Cancel closes the spawn modal");
   } finally {
     spawn.unmount();
+    common.setWorkspace(previousWs);
+    globalThis.setInterval = oldSetInterval;
+    dom.window.close();
+    if (oldDocument === undefined) delete globalThis.document; else globalThis.document = oldDocument;
+    if (oldWindow === undefined) delete globalThis.window; else globalThis.window = oldWindow;
+  }
+});
+
+test("Spawn modal: every option always visible; runtime/model pass through; defaults omitted", async () => {
+  const dom = new JSDOM("<!doctype html><html><head></head><body><div id=host></div></body></html>", { url: "http://localhost" });
+  const oldDocument = globalThis.document;
+  const oldWindow = globalThis.window;
+  const oldSetInterval = globalThis.setInterval;
+  globalThis.document = dom.window.document;
+  globalThis.window = dom.window;
+  globalThis.setInterval = () => ({ fake: true });
+  const common = await import("../renderer/views/common.mjs");
+  const spawn = await import("../renderer/views/spawn.mjs");
+  await seedCliAvailable();
+  const previousWs = common.currentWorkspace();
+  const agent = { name: "dev", agentsRoot: "/a", description: "d", runtime: "pi", model: "opus", work: "worktree", repo: true, repoName: "r" };
+  const posts = [];
+  const ctx = {
+    api: (pathname, opts = {}) => {
+      if (pathname === "/api/cli" || pathname === "/api/cli/reprobe") return Promise.resolve(CLI_OK);
+      if (opts.method === "POST") {
+        posts.push(JSON.parse(opts.body));
+        return Promise.resolve({ ok: true, status: 200, json: async () => ({ instance: "dev-1", launched: false }) });
+      }
+      return Promise.resolve({ ok: true, status: 200, json: async () => pathname.startsWith("/api/agents")
+        ? { agents: [agent] }
+        : { instances: [{ instance: "dev-1" }], workspace: { id: "w" }, workspaces: [] } });
+    },
+    openTerminal: () => {},
+  };
+  try {
+    common.setWorkspace("w");
+    spawn.mount(dom.window.document.getElementById("host"), ctx);
+    await tick(); await tick();
+    const doc = dom.window.document;
+    doc.querySelector(".spawn-act").click();
+    // the human requirement: ALL options visible in the modal, none hidden
+    for (const cls of ["fpurpose", "ftask", "frelation", "frelto", "fruntime", "fmodel"]) {
+      const el = doc.querySelector(`.spawn-dialog .${cls}`);
+      assert.ok(el, `${cls} control present in the modal`);
+    }
+    // defaults: empty runtime/model are OMITTED from the wire (agent default)
+    doc.querySelector(".fspawn").click();
+    await tick(); await tick(); await tick();
+    assert.equal(posts.length, 1);
+    assert.equal(posts[0].runtime, undefined, "default runtime not sent");
+    assert.equal(posts[0].model, undefined, "default model not sent");
+    // explicit overrides pass through
+    if (!doc.querySelector(".spawn-dialog")) doc.querySelector(".spawn-act").click();
+    doc.querySelector(".fruntime").value = "claude";
+    doc.querySelector(".fmodel").value = "sonnet";
+    doc.querySelector(".fspawn").click();
+    await tick(); await tick(); await tick();
+    assert.equal(posts.length, 2);
+    assert.equal(posts[1].runtime, "claude");
+    assert.equal(posts[1].model, "sonnet");
+  } finally {
+    spawn.unmount();
+    common.setWorkspace(previousWs);
+    globalThis.setInterval = oldSetInterval;
+    dom.window.close();
+    if (oldDocument === undefined) delete globalThis.document; else globalThis.document = oldDocument;
+    if (oldWindow === undefined) delete globalThis.window; else globalThis.window = oldWindow;
+  }
+});
+
+test("Spawn modal: pre-relations CLI gates the RELATED options + picker disabled with the required version named — 'unrelated' stays selectable, nothing hidden", async () => {
+  const dom = new JSDOM("<!doctype html><html><head></head><body><div id=host></div></body></html>", { url: "http://localhost" });
+  const oldDocument = globalThis.document;
+  const oldWindow = globalThis.window;
+  const oldSetInterval = globalThis.setInterval;
+  globalThis.document = dom.window.document;
+  globalThis.window = dom.window;
+  globalThis.setInterval = () => ({ fake: true });
+  const common = await import("../renderer/views/common.mjs");
+  const spawn = await import("../renderer/views/spawn.mjs");
+  const cliStatusMod2 = await import("../renderer/views/cli-status.mjs");
+  // verified CLI, but PROVEN relations-incapable (relations:false from the probe)
+  const CLI_OLD = { ok: true, bin: "/seed/oas", version: "0.18.0", source: "path",
+    required: { desktopApi: 1, range: ">=0.18.0 <0.19.0" }, relations: false, relationsMin: "0.18.3", probedAt: 1, tried: [] };
+  await cliStatusMod2.refreshCli({ api: async () => ({ ok: true, status: 200, json: async () => CLI_OLD }) });
+  const previousWs = common.currentWorkspace();
+  const agent = { name: "dev", agentsRoot: "/a", description: "", runtime: "pi", work: "workspace", repo: true, repoName: "r" };
+  const ctx = {
+    api: (pathname, opts = {}) => {
+      if (pathname === "/api/cli" || pathname === "/api/cli/reprobe") return Promise.resolve({ ok: true, status: 200, json: async () => CLI_OLD });
+      if (opts.method === "POST") return Promise.resolve({ ok: true, status: 200, json: async () => ({ instance: "x" }) });
+      return Promise.resolve({ ok: true, status: 200, json: async () => pathname.startsWith("/api/agents")
+        ? { agents: [agent] }
+        : { instances: [], workspace: { id: "w" }, workspaces: [] } });
+    },
+    openTerminal: () => {},
+  };
+  try {
+    common.setWorkspace("w");
+    spawn.mount(dom.window.document.getElementById("host"), ctx);
+    await tick(); await tick();
+    const doc = dom.window.document;
+    doc.querySelector(".spawn-act").click();
+    const rel = doc.querySelector(".spawn-dialog .frelation");
+    assert.ok(rel, "relation selector still RENDERED on a pre-relations CLI");
+    assert.equal(rel.disabled, false, "…select stays usable — 'unrelated' is the recovery path");
+    const disabledOpts = [...rel.querySelectorAll("option")].filter((o) => o.disabled).map((o) => o.value).sort();
+    assert.deepEqual(disabledOpts, ["child", "parent", "sibling"], "related options disabled, unrelated selectable");
+    assert.ok(doc.querySelector(".spawn-dialog .frelto"), "reference picker still rendered");
+    const note = doc.querySelector(".spawn-dialog .frelnote");
+    assert.ok(note, "explanatory note present");
+    assert.match(note.textContent, /oas >= 0\.18\.3/, "note names the required version");
+  } finally {
+    spawn.unmount();
+    await seedCliAvailable(); // restore shared CLI state for later suites
+    common.setWorkspace(previousWs);
+    globalThis.setInterval = oldSetInterval;
+    dom.window.close();
+    if (oldDocument === undefined) delete globalThis.document; else globalThis.document = oldDocument;
+    if (oldWindow === undefined) delete globalThis.window; else globalThis.window = oldWindow;
+  }
+});
+
+test("Spawn modal close restores focus to the LIVE Spawn button and clears the card highlight (review 41059e0)", async () => {
+  const dom = new JSDOM("<!doctype html><html><head></head><body><div id=host></div></body></html>", { url: "http://localhost" });
+  const oldDocument = globalThis.document;
+  const oldWindow = globalThis.window;
+  const oldSetInterval = globalThis.setInterval;
+  globalThis.document = dom.window.document;
+  globalThis.window = dom.window;
+  globalThis.setInterval = () => ({ fake: true });
+  const common = await import("../renderer/views/common.mjs");
+  const spawn = await import("../renderer/views/spawn.mjs");
+  await seedCliAvailable();
+  const previousWs = common.currentWorkspace();
+  const agent = { name: "dev", agentsRoot: "/a", description: "", runtime: "pi", work: "workspace", repo: true, repoName: "r" };
+  const ctx = {
+    api: (pathname, opts = {}) => {
+      if (pathname === "/api/cli" || pathname === "/api/cli/reprobe") return Promise.resolve(CLI_OK);
+      if (opts.method === "POST") return Promise.resolve({ ok: true, status: 200, json: async () => ({ instance: "x" }) });
+      return Promise.resolve({ ok: true, status: 200, json: async () => pathname.startsWith("/api/agents")
+        ? { agents: [agent] }
+        : { instances: [], workspace: { id: "w" }, workspaces: [] } });
+    },
+    openTerminal: () => {},
+  };
+  try {
+    common.setWorkspace("w");
+    spawn.mount(dom.window.document.getElementById("host"), ctx);
+    await tick(); await tick();
+    const doc = dom.window.document;
+    const closePaths = [
+      ["Escape", () => doc.querySelector(".spawn-dialog")
+        .dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }))],
+      ["Cancel", () => doc.querySelector(".spawn-dialog .fcancel").click()],
+      ["close-x", () => doc.querySelector(".spawn-dialog .fcancel-x").click()],
+      ["backdrop", () => {
+        const modal = doc.querySelector(".spawn-modal");
+        const e = new dom.window.MouseEvent("mousedown", { bubbles: true });
+        Object.defineProperty(e, "target", { value: modal });
+        modal.dispatchEvent(e);
+      }],
+    ];
+    for (const [name, closeIt] of closePaths) {
+      const opener = doc.querySelector(".spawn-act");
+      opener.click(); // open the modal — renderGrid replaces the button node
+      assert.ok(doc.querySelector(".spawn-dialog"), `${name}: modal open`);
+      assert.ok(doc.querySelector(".soul-card.open"), `${name}: card highlighted while open`);
+      closeIt();
+      assert.equal(doc.querySelector(".spawn-dialog"), null, `${name}: modal closed`);
+      assert.equal(doc.querySelector(".soul-card.open"), null,
+        `${name}: card highlight cleared immediately, not on the next poll`);
+      const live = doc.querySelector(".soul-card[data-agent] .spawn-act");
+      assert.equal(doc.activeElement, live,
+        `${name}: focus restored to the CURRENTLY CONNECTED Spawn button (opener node was replaced)`);
+      assert.notEqual(doc.activeElement, opener, `${name}: not the detached original node`);
+    }
+  } finally {
+    spawn.unmount();
+    common.setWorkspace(previousWs);
+    globalThis.setInterval = oldSetInterval;
+    dom.window.close();
+    if (oldDocument === undefined) delete globalThis.document; else globalThis.document = oldDocument;
+    if (oldWindow === undefined) delete globalThis.window; else globalThis.window = oldWindow;
+  }
+});
+
+test("Spawn modal tracks CLI capability LIVE: relations flip disables/enables controls without wiping typed fields (review 5526b70)", async () => {
+  const dom = new JSDOM("<!doctype html><html><head></head><body><div id=host></div></body></html>", { url: "http://localhost" });
+  const oldDocument = globalThis.document;
+  const oldWindow = globalThis.window;
+  const oldSetInterval = globalThis.setInterval;
+  globalThis.document = dom.window.document;
+  globalThis.window = dom.window;
+  globalThis.setInterval = () => ({ fake: true });
+  const common = await import("../renderer/views/common.mjs");
+  const spawn = await import("../renderer/views/spawn.mjs");
+  const cliMod = await import("../renderer/views/cli-status.mjs");
+  const status = (relations) => ({ ok: true, bin: "/seed/oas", version: relations ? "0.18.3" : "0.18.0",
+    source: "path", required: { desktopApi: 1, range: ">=0.18.0 <0.19.0" }, relations, relationsMin: "0.18.3", probedAt: 1, tried: [] });
+  const seed = (relations) => cliMod.refreshCli({ api: async () => ({ ok: true, status: 200, json: async () => status(relations) }) });
+  await seed(true);
+  const previousWs = common.currentWorkspace();
+  const agent = { name: "dev", agentsRoot: "/a", description: "", runtime: "pi", work: "workspace", repo: true, repoName: "r" };
+  const posts = [];
+  const ctx = {
+    api: (pathname, opts = {}) => {
+      if (pathname === "/api/cli" || pathname === "/api/cli/reprobe") return Promise.resolve({ ok: true, status: 200, json: async () => status(true) });
+      if (opts.method === "POST") { posts.push(JSON.parse(opts.body)); return Promise.resolve({ ok: true, status: 200, json: async () => ({ instance: "x" }) }); }
+      return Promise.resolve({ ok: true, status: 200, json: async () => pathname.startsWith("/api/agents")
+        ? { agents: [agent] }
+        : { instances: [{ instance: "coord-1", running: true }, { instance: "x" }], workspace: { id: "w" }, workspaces: [] } });
+    },
+    openTerminal: () => {},
+  };
+  try {
+    common.setWorkspace("w");
+    spawn.mount(dom.window.document.getElementById("host"), ctx);
+    await tick(); await tick();
+    const doc = dom.window.document;
+    doc.querySelector(".spawn-act").click();
+    // relation-capable at open: enabled controls, no note; user types + picks
+    const rel = doc.querySelector(".frelation"), ref = doc.querySelector(".frelto");
+    assert.equal(rel.disabled, false);
+    assert.equal(doc.querySelector(".frelnote").hidden, true, "no note while capable");
+    doc.querySelector(".ftask").value = "typed task text";
+    rel.value = "child";
+    rel.dispatchEvent(new dom.window.Event("change"));
+    ref.value = "coord-1";
+    // DOWNGRADE lands while the modal is open (app-focus re-probe)
+    await seed(false);
+    assert.equal(rel.disabled, false, "select stays usable after downgrade — recovery via 'unrelated'");
+    assert.ok([...rel.querySelectorAll("option")].filter((o) => o.value !== "unrelated").every((o) => o.disabled),
+      "related options disabled in the OPEN modal");
+    assert.equal([...rel.querySelectorAll("option")].find((o) => o.value === "unrelated").disabled, false,
+      "'unrelated' stays enabled — the advertised recovery is actually available");
+    assert.equal(ref.disabled, true, "downgrade disables the reference picker");
+    const note = doc.querySelector(".frelnote");
+    assert.equal(note.hidden, false, "version note appears live");
+    assert.match(note.textContent, /oas >= 0\.18\.3/, "note names the required version");
+    assert.equal(doc.querySelector(".ftask").value, "typed task text", "typed fields survive the resync");
+    assert.equal(rel.value, "child", "chosen relation value preserved (visible, disabled)");
+    // submitting the RETAINED related spawn on the downgraded CLI must fail
+    // IN THE FORM — no POST, fields preserved (review f35c1dc)
+    doc.querySelector(".fspawn").click();
+    await tick(); await tick();
+    assert.equal(posts.length, 0, "no POST dispatched for a related spawn on a relations-incapable CLI");
+    assert.match(doc.querySelector(".fstatus").textContent, /cannot spawn related instances/,
+      "form explains the failure and the way out");
+    assert.equal(doc.querySelector(".ftask").value, "typed task text", "typed task still preserved after the blocked submit");
+    assert.equal(rel.value, "child", "relation choice still preserved");
+    // no-reference downgrade: capability error must precede the pairing
+    // error (never advise picking a DISABLED reference — review 8b26317)
+    ref.value = "";
+    doc.querySelector(".fspawn").click();
+    await tick(); await tick();
+    assert.equal(posts.length, 0, "still no POST");
+    assert.match(doc.querySelector(".fstatus").textContent, /cannot spawn related instances/,
+      "capability failure reported, not the pairing failure against a disabled picker");
+    // the advertised recovery WORKS: switch to unrelated and spawn on the old CLI
+    rel.value = "unrelated";
+    rel.dispatchEvent(new dom.window.Event("change"));
+    doc.querySelector(".fspawn").click();
+    await tick(); await tick(); await tick();
+    assert.equal(posts.length, 1, "unrelated spawn dispatches on the relations-incapable CLI");
+    assert.equal(posts[0].relation, undefined, "no relation on the wire");
+    assert.equal(posts[0].task, "typed task text", "the preserved task spawns");
+    // restore the related choice for the upgrade leg
+    await seed(true);
+    rel.value = "child";
+    rel.dispatchEvent(new dom.window.Event("change"));
+    ref.value = "coord-1";
+    await seed(false); await seed(true);
+    // UPGRADE flips it back: controls re-enable, note clears, values intact
+    assert.equal(rel.disabled, false, "upgrade re-enables the selector");
+    assert.ok([...rel.querySelectorAll("option")].every((o) => !o.disabled), "all options re-enabled");
+    assert.equal(ref.disabled, false, "picker re-enables (a real relation is selected)");
+    assert.equal(doc.querySelector(".frelnote").hidden, true, "note clears");
+    assert.equal(ref.value, "coord-1", "picked reference preserved");
+    // after the upgrade the same retained values DO dispatch
+    doc.querySelector(".fspawn").click();
+    await tick(); await tick(); await tick();
+    assert.equal(posts.length, 2, "upgrade lets the related spawn through");
+    assert.equal(posts[1].relation, "child");
+    assert.equal(posts[1].relativeTo, "coord-1");
+  } finally {
+    spawn.unmount();
+    await seedCliAvailable(); // restore shared CLI state for later suites
     common.setWorkspace(previousWs);
     globalThis.setInterval = oldSetInterval;
     dom.window.close();

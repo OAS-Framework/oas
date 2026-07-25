@@ -172,7 +172,7 @@ function agentsData(wsId) {
  * Default is NO TASK: the instance comes up awaiting instruction.
  * Validation errors THROW (→ 409); domain/CLI results RESOLVE with the
  * envelope so stable error codes reach the UI. */
-async function spawnAgent({ agent, agentsRoot, task, purpose, relation, relativeTo }) {
+async function spawnAgent({ agent, agentsRoot, task, purpose, relation, relativeTo, runtime, model }) {
   const name = String(agent || "");
   const root = resolve(String(agentsRoot || ""));
   // agentsRoot must be one of the workspace roots this server was started for —
@@ -204,6 +204,10 @@ async function spawnAgent({ agent, agentsRoot, task, purpose, relation, relative
     purpose: purpose ? String(purpose) : undefined,
     relation: relation ? String(relation) : undefined,
     relativeTo: relativeTo ? String(relativeTo) : undefined,
+    // Runtime/model overrides (spawn-modal options): adapter-allowlisted and
+    // shape-validated there; empty means "agent definition default".
+    runtime: runtime ? String(runtime) : undefined,
+    model: model ? String(model) : undefined,
   });
   if (!env.ok) {
     const err = new Error(env.error.message || "spawn failed");
@@ -267,9 +271,11 @@ function cliStatus() {
     version: cliState.version || null,
     source: cliState.source || null,
     required: { desktopApi: locator.DESKTOP_API, range: ">=0.18.0 <0.19.0" },
-    // Capability flag for the spawn form: relation UI is hidden/disabled
-    // when the accepted CLI predates spawn-time relations.
+    // Capability flag for the spawn form: relation UI renders DISABLED
+    // (never hidden) with the required version when the accepted CLI
+    // predates spawn-time relations.
     relations: !!cliState.ok && locator.supportsRelations(cliState.version),
+    relationsMin: locator.RELATIONS_MIN.join("."),
     probedAt: cliState.probedAt || null,
     tried: cliState.tried || [],
   };

@@ -118,15 +118,24 @@ function renderRoster(s) {
   if (!visible.length) { el.innerHTML = '<div class="empty">Nothing matches the filter.</div>'; return; }
   // Roster grouped by agent CLUSTER (connected relations — spawn parentage
   // plus sibling links), not per repo: the repo is a small label on each
-  // instance card. Unrelated instances are single-node clusters (no header).
+  // instance card. Clusters render ANONYMOUSLY (human requirement — no
+  // derived cluster names; naming may return with a task-layer
+  // integration): multi-member clusters get a count-only header, but keep
+  // ACCESSIBLE group semantics (review 2df15ae) — a labelled role=group
+  // wrapper so AT users hear where a related-instance group starts without
+  // any visible derived name.
   for (const cluster of clusterInstances(visible)) {
     const items = cluster.instances;
     const g = document.createElement("div");
     if (items.length > 1) {
       const runningN = items.filter((i) => i.running).length;
+      const label = `Agent cluster of ${items.length} related instances, ${runningN} running`;
+      g.setAttribute("role", "group");
+      g.setAttribute("aria-label", label);
       const h = document.createElement("div");
       h.className = "ghead";
-      h.innerHTML = `◎ ${escapeHtml(cluster.key)} <span class="count">${runningN}/${items.length} running</span>`;
+      h.setAttribute("aria-hidden", "true"); // decorative — the group label carries the semantics
+      h.innerHTML = `◎ <span class="count">${runningN}/${items.length} running</span>`;
       g.appendChild(h);
     }
     {
