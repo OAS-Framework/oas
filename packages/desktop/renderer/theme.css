@@ -118,11 +118,19 @@
 .oas-view .filterbar.bar { height: var(--bar-h); flex: none; align-items: center; padding: 0 12px;
                            border-bottom: 1px solid var(--border); }
 .oas-view .filterbar input { flex: 1; min-width: 0; }
+.oas-view .filterbar .sortsel { flex: none; width: auto; max-width: 44%; }
 .oas-view .groups { flex: 1; overflow-y: auto; padding: 0 8px 12px; }
+/* group headers are collapsible buttons — inherit the label look, full row hit area */
+.oas-view button.ghead, .oas-view button.rhead { display: flex; width: 100%; align-items: center;
+                   background: none; border: none; cursor: pointer; font-family: inherit; text-align: left; }
+.oas-view button.ghead:disabled, .oas-view button.rhead:disabled { cursor: default; }
+.oas-view .ghead .tri, .oas-view .rhead .tri { flex: none; width: 12px; color: var(--muted); }
+.oas-view .ghead .glabel, .oas-view .rhead .glabel { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oas-view .rhead .count { margin-left: auto; color: var(--faint); font-weight: 500; }
 .oas-view .ghead { display: flex; align-items: center; gap: 8px; padding: 8px 8px 4px; user-select: none;
                    color: var(--muted); font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacing: .06em; }
 .oas-view .ghead .count { margin-left: auto; font-weight: 500; color: var(--faint); text-transform: none; letter-spacing: 0; }
-.oas-view .rhead { color: var(--faint); font-size: 11.5px; padding: 5px 8px 2px; font-weight: 600; }
+.oas-view .rhead { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 11.5px; padding: 5px 8px 2px 14px; font-weight: 600; user-select: none; }
 .oas-view .inst { padding: 8px 10px 8px 12px; border-radius: 8px; cursor: pointer; margin: 1px 0;
                   border: 1px solid transparent; position: relative; }
 .oas-view .inst:hover { background: var(--surface-2); }
