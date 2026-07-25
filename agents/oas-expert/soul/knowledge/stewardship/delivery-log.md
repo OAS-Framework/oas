@@ -24,6 +24,27 @@ decisions/ and referenced from here.
 
 ---
 
+## PR #33 (round 3) — Desktop Shift+Enter send leak and terminal copy selection (2026-07-25)
+- verdict: MERGED as merge commit `595159e` at exact head `d75fa3a` after two
+  RETURNs. All four gates PASS. The feature suppresses every xterm event in a
+  Shift+Enter chord while writing one `\n` on keydown, and enables xterm's
+  modifier-forced local selection for terminal copy (Option on macOS, Shift on
+  non-macOS). It preserves PR #32's Instances-stage removal and carries accurate
+  Desktop knowledge. Fresh final affected gate passed 30/30 merged-head tests,
+  check/check:pi, strict OKF for all 8 bundles, and diff-check; the earlier full
+  scratch gate passed 382 tests plus validate/pack/smoke; human live verification
+  and all four exact-head CI/installer checks passed. Approval was recorded as a
+  PR comment (shared account), expected-head merge succeeded, and the remote
+  branch was deleted.
+- owner: oas-desktop-engineer-session-copy-newline · coordinator:
+  dev-coordinator-parallel-2
+- taught us: xterm custom key handlers span keydown, keypress, and keyup, so a
+  replacement chord must suppress all phases and emit once. Also, a handback can
+  be truthfully fresh yet immediately superseded by the maintainer's own
+  previously launched harvest; settle reviewer-driven commits before the final
+  handoff. The next patch release must combine PR #32 and PR #33 without
+  modifying immutable v0.18.4 artifacts.
+
 ## PR #33 (round 2) — Desktop Shift+Enter send leak and terminal copy selection (2026-07-25)
 - verdict: RETURNED at exact head `0a9c6df` for one knowledge-correctness fix
   plus mergeability. The branch correctly merged main twice, preserved PR #32's

@@ -15,6 +15,15 @@ than letting the file grow stale.
 
 ## On main
 
+- **PR #33 merged 2026-07-25 as `595159e`** — fixes both remaining v0.18.4
+  terminal field failures: Shift+Enter suppresses xterm keydown/keypress/keyup
+  while writing one newline, and modifier-forced local xterm selection enables
+  terminal copy with tmux mouse mode (Option on macOS, Shift on non-macOS).
+  Final exact head `d75fa3a`; human live verification, local full/affected
+  gates, strict OKF, required CI, and all three installer checks passed after
+  two maintainer RETURNs. Source is on main but not yet released; ship it with
+  PR #32 in a new patch while leaving v0.18.4 immutable.
+
 - **PR #32 merged 2026-07-25 as `97f66c9`** — corrective rollback for the
   out-of-scope PR #29 Instances rail destination and second roster sidebar.
   The shell again exposes only Active overview and Soul roster as stages; the
@@ -115,21 +124,15 @@ than letting the file grow stale.
 
 ## In flight
 
-- **PR #33 RETURNED round 2 on 2026-07-25 at `0a9c6df`** — Desktop Shift+Enter
-  whole-chord suppression and modifier-forced local terminal selection. The
-  branch correctly resolved round 1, preserving PR #32 and the terminal fix;
-  targeted merged-head tests (30/30), Desktop strict OKF, owner's repeated full
-  gates, and all four exact-head checks pass. Round 2 found two inaccurate
-  implementation/knowledge claims: the updated lesson still names removed
-  `shiftEnterByte(ev)` instead of `shiftEnterAction(ev)`, and a product comment
-  says Shift+drag works everywhere although shipped xterm uses Option on macOS
-  and Shift on non-macOS. Reviewer-driven harvest `71b4aa1` also advanced main
-  after handback. Owner must correct both claims, merge final current main,
-  rerun, and hand back a settled green exact SHA.
+- (nothing currently recorded) — PR #33 reached terminal MERGED outcome; its
+  remote feature branch is deleted.
 
 ## Recent deliveries
 
 - (record PR #, one-line scope, verdict, merge/close date)
+- PR #33 Desktop Shift+Enter whole-chord suppression + modifier-forced terminal
+  copy selection: MERGED 2026-07-25 as `595159e` after two RETURNs; awaits the
+  next patch release with PR #32 (see delivery-log).
 - PR #32 Desktop Instances-stage scope rollback: MERGED 2026-07-25 as
   `97f66c9` after one correctness+mergeability RETURN; corrective source is on
   main and awaits a new patch release (see delivery-log).
@@ -184,10 +187,9 @@ than letting the file grow stale.
   sidebar instead. PR #32 now removes that stage on main (`97f66c9`). The human
   also found that v0.18.4's Shift+Enter handling still sent via xterm's keypress
   phase and terminal tabs could not form a local selection while tmux mouse mode
-  was active; PR #33 fixes both but is currently RETURNED for two stale claims
-  plus final main freshness. Do not move, delete, or republish immutable v0.18.4
-  artifacts; after PR #33
-  reaches main, cut a new patch version containing both corrections.
+  was active. PR #33 now fixes both on main (`595159e`). Do not move, delete, or
+  republish immutable v0.18.4 artifacts; cut a new patch version containing both
+  PR #32 and PR #33 corrections.
 
 - aweb channel awakening drops (2 consecutive repros 2026-07-23): verdict
   mail from short-lived reviewer identities delivered and marked READ
