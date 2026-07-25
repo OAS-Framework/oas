@@ -52,7 +52,7 @@ jobs:
       CSC_IDENTITY_AUTO_DISCOVERY: "false"
       # electron-builder SKIPS mac signing on pull_request builds
       # (builder-util isPullRequest() sees GITHUB_BASE_REF) unless this is
-      # set — without it the PR legs ship the exact unsigned/partial-adhoc
+      # set — without it the PR legs ship the exact absent/partial-signature
       # defect this workflow gates against and the codesign phase fails.
       # Safe here: no signing secrets exist in this repo and the identity is
       # the deterministic ad-hoc "-" — there is nothing for a fork PR to
