@@ -64,6 +64,8 @@ test("siblingLinksOf: kernel contract — siblingInstance string; self/absent/no
   assert.deepEqual(siblingLinksOf({ instance: "a", siblingInstance: "b" }), ["b"]);
   assert.deepEqual(siblingLinksOf({ instance: "a", siblingInstance: "a" }), []);
   assert.deepEqual(siblingLinksOf({ instance: "a", siblingInstance: 7 }), []);
+  assert.deepEqual(siblingLinksOf({ instance: "a", siblingInstance: null }), [],
+    "collect payload uses string|null — null means no sibling link");
   assert.deepEqual(siblingLinksOf({ instance: "a" }), []);
 });
 
