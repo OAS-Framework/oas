@@ -22,6 +22,7 @@ import { ensureServerOnPort, serverCompatible } from "./server-compat.mjs";
 import { createServerHost, createServerAdapter } from "./server-host.mjs";
 import { validateWorkspace, workspaceSuggestions, parseRecents, pushRecent, decideAdd, createGenerations, createAddExecutor } from "./workspace-registry.mjs";
 import { resolveDeployment, teamAgentRoots } from "./server/deployment.mjs";
+import { appMenuTemplate } from "./app-menu.mjs";
 
 const require = createRequire(import.meta.url);
 const pty = require("node-pty");
@@ -426,18 +427,14 @@ ipcMain.on("term:close", (e, id) => {
 });
 
 // ---- window -------------------------------------------------------------
-// Application menu: without an Edit role menu, Cmd+C/V/X/A are dead in the
-// renderer on macOS — transcript text could be selected but never copied.
-// Role-based menus only; no custom accelerators or click handlers.
+// Application menu policy lives in app-menu.mjs (pure, unit-tested):
+// role menu on macOS only (Cmd accelerators cannot collide with terminal
+// Ctrl chords); NO menu elsewhere — role menus on Linux/Windows register
+// Ctrl accelerators that steal xterm's terminal control keys (review
+// befe75b important 1), and Chromium handles clipboard shortcuts natively.
 function installAppMenu() {
-  const template = [
-    ...(process.platform === "darwin" ? [{ role: "appMenu" }] : []),
-    { role: "fileMenu" },
-    { role: "editMenu" },
-    { role: "viewMenu" },
-    { role: "windowMenu" },
-  ];
-  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+  const template = appMenuTemplate(process.platform);
+  Menu.setApplicationMenu(template ? Menu.buildFromTemplate(template) : null);
 }
 
 async function createWindow() {
