@@ -8,11 +8,6 @@ No frameworks, no dependencies; data comes from the bundled backend HTTP API.
 
 ## Views (`views/`)
 
-- **instances.mjs** — roster + instance detail: pi-style chat transcript
-  (`GET /api/chat/<instance>`), task/state/git/workspace summary, interrupt.
-  The live
-  terminal is NOT here — the "Open terminal" action calls
-  `ctx.openTerminal(instance)` (the shell's terminal view owns interaction).
 - **spawn.mjs** — available agents (`GET /api/agents`) with spawn-from-app
   (`POST /api/spawn`), purpose/task fields. Panel defaults hold: empty task
   spawns an instance awaiting instructions; attached-mode agents are not

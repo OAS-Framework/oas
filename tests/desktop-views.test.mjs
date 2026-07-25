@@ -22,7 +22,7 @@ const RENDERER = join(ROOT, "packages", "desktop", "renderer");
 }
 
 test("views ship as .mjs with mount/unmount (shell imports ./views/<name>.mjs)", () => {
-  for (const name of ["instances", "spawn"]) {
+  for (const name of ["hierarchy", "spawn"]) {
     const f = join(RENDERER, "views", `${name}.mjs`);
     assert.ok(existsSync(f), `${name}.mjs missing`);
     const src = readFileSync(f, "utf8");
