@@ -3,7 +3,13 @@
 ## 2026-07-25
 * **Creation**: promoted [string-coerce workspace metadata before roster grouping and sorting](/lessons/roster-grouping-string-coerce-metadata.md) from the oas-desktop-engineer-roster-grouping notes.
 * **Update**: linked [keep roster family grouping helpers inside instance-tree](/lessons/roster-family-grouping-helpers.md) to the string-coercion lesson for workspace-controlled instance metadata.
+* **Update**: merged the spawn-button pending probe note into [CLI degradation state must distinguish pending, compatible, and unavailable](/lessons/degradation-state-unknown-capable.md): pending CLI probes stay card-less and disabled but retry from the roster poll until settled, with a checking tooltip instead of a missing-card hint.
+* **Update**: merged the desktop-server test CLI-on-PATH note into [CLI locator tests need hermetic PATH and absolute fixtures](/lessons/fake-cli-fixtures-hostile-path.md): no-CLI degradation tests must strip env, PATH, npm-on-PATH, and login-shell locator sources.
 * **Creation**: promoted [keep roster family grouping helpers inside instance-tree](/lessons/roster-family-grouping-helpers.md) from the oas-desktop-engineer-roster-grouping notes.
+* **Creation**: promoted [Polling innerHTML repaints destroy text selection](/lessons/polling-innerhtml-repaints-destroy-selection.md) from the oas-desktop-engineer-chat-input-copy notes.
+* **Update**: linked [Periodic repaints must not rebuild DOM under open forms](/lessons/poll-repaint-wipes-form-input.md) to the transcript-selection repaint barrier.
+* **Creation**: promoted [Shift+Enter through xterm/tmux must be translated to pi's Ctrl+J newline alias](/lessons/shift-enter-newline-via-ctrl-j-alias.md) from the oas-desktop-engineer-chat-input-copy notes.
+* **Update**: linked [Desktop terminal is a direct tmux attach via node-pty](/decisions/desktop-terminal-direct-attach.md) to the Shift+Enter xterm translation lesson.
 
 ## 2026-07-24
 * **Creation**: promoted [bounded OS resources spawned per user action need a hard cap in the owning process](/lessons/terminal-resource-cap-in-owning-process.md) from the oas-desktop-engineer-desktop-dist notes.

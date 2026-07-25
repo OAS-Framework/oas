@@ -23,8 +23,8 @@ import {
   captureTreeRenderState, configureDisclosure, rosterResponseOwns,
 } from "./instance-tree.mjs";
 import {
-  terminalTabsForWorkspace, tabVisibleInContext, canActivateTab,
-  fallbackTabForContext, terminalOpenOwnsWorkspace,
+  tabVisibleInContext, canActivateTab,
+  fallbackTabForContext, terminalOpenOwnsWorkspace, restoreTerminalTab,
 } from "./workspace-tabs.mjs";
 
 const desk = window.oasDesktop;
@@ -285,8 +285,12 @@ function renderContextRoster(instances) {
 function showTerminalContext() {
   setSidebarMode("instances");
   refreshContextRoster();
-  const openTerms = terminalTabsForWorkspace(tabs, currentWorkspace());
-  if (openTerms.length) { activateTab(openTerms.at(-1)[0]); return; }
+  // Per-workspace active-tab memory: switching back to a workspace restores
+  // the terminal that was active there (stale/foreign keys fall back to the
+  // most recently opened terminal of the workspace).
+  const ws = currentWorkspace();
+  const restored = restoreTerminalTab(tabs, ws, wsActiveTerminal.get(ws));
+  if (restored) { activateTab(restored[0]); return; }
   // With the tree permanently visible there is no standalone Instances stage.
   // Closing/switching away from the last terminal restores the prior surface.
   setSidebarMode(stage?.name === "spawn" ? "souls" : "overview");
@@ -300,6 +304,7 @@ const tabhost = document.getElementById("tabhost");
 const tabs = new Map(); // id -> { tabEl, triggerEl, closeEl, paneEl, title, key, onClose, onShow }
 let nextTabId = 1;
 let activeTab = null;
+const wsActiveTerminal = new Map(); // workspace id -> last-active terminal tab key
 const brainIntents = createIntentGate();
 
 /** key: optional dedup key — activating an existing tab instead of opening a
@@ -344,6 +349,9 @@ function activateTab(id) {
   // the mutation boundary before its pane can become active/receive input.
   if (!canActivateTab(current, currentWorkspace())) return false;
   activeTab = id;
+  if (current?.kind === "terminal" && current.workspace) {
+    wsActiveTerminal.set(current.workspace, current.key);
+  }
   if (current?.kind === "terminal") {
     setSidebarMode("instances");
     setNavActive(null);

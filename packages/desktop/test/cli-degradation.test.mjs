@@ -315,6 +315,74 @@ test("doSpawn gate isolation: selection still set + CLI unavailable → no dispa
   }
 });
 
+test("spawn view: an UNSETTLED probe explains itself (no dead button pointing at a missing card) and the poll keeps retrying /api/cli until it settles", async () => {
+  const doc = dom();
+  globalThis.document = doc;
+  // Capture the view's poll tick so the retry runs without real 8s waits.
+  const realSetInterval = globalThis.setInterval;
+  const ticks = [];
+  globalThis.setInterval = (fn) => { ticks.push(fn); return realSetInterval(() => {}, 1 << 30); };
+  try {
+    const sp = await import("../renderer/views/spawn.mjs");
+    const agents = [{ name: "dev", description: "d", kind: "persistent", work: "worktree", runtime: "pi", repo: "/r", repoName: "r", agentsRoot: "/ws/agents", workspace: "/ws" }];
+    // /api/cli fails at TRANSPORT level first (backend booting — e.g. the
+    // request raced server startup), then recovers. The probe stays
+    // UNSETTLED (null, card-less) until a response arrives.
+    const state = { cliDown: true, cliFetches: 0 };
+    const ctx = {
+      api: async (pathname) => {
+        if (pathname === "/api/cli") {
+          state.cliFetches++;
+          if (state.cliDown) throw new Error("fetch failed: ECONNREFUSED"); // no .status → transport
+          return { ok: true, status: 200, json: async () => payload(true) };
+        }
+        return {
+          ok: true, status: 200,
+          json: async () => {
+            if (pathname.startsWith("/api/agents")) return { workspace: { id: "/ws", name: "ws" }, agents };
+            if (pathname.startsWith("/api/panel")) return { workspace: { id: "/ws", name: "ws" }, workspaces: [{ id: "/ws", name: "ws" }], instances: [] };
+            return {};
+          },
+        };
+      },
+      openTerminal: () => {}, openBrain: () => {},
+    };
+    cs.resetCliStateForTests();
+    const el = doc.createElement("div"); doc.body.append(el);
+    sp.mount(el, ctx);
+    await new Promise((r) => setTimeout(r, 20));
+    // Unsettled: disabled + card-less — the tooltip must NOT reference a
+    // card that is not there; it says the probe is still checking.
+    const btn = el.querySelector(".spawn-act");
+    assert.ok(btn, "spawn button renders");
+    assert.equal(btn.disabled, true, "unsettled probe disables spawn (fail-closed)");
+    assert.equal(el.querySelector(".cli-card"), null, "pending is card-less by design");
+    assert.match(btn.title, /[Cc]hecking/, "tooltip explains the probe is pending");
+    assert.doesNotMatch(btn.title, /card above/, "tooltip must not point at a missing card");
+    // The poll retries the CLI probe while unsettled…
+    const before = state.cliFetches;
+    for (const t of ticks) t();
+    await new Promise((r) => setTimeout(r, 20));
+    assert.ok(state.cliFetches > before, "poll re-fetches /api/cli while the probe is unsettled");
+    // …and once the backend answers, spawn enables without any user action.
+    state.cliDown = false;
+    for (const t of ticks) t();
+    await new Promise((r) => setTimeout(r, 20));
+    const btn2 = el.querySelector(".spawn-act");
+    assert.ok(btn2 && !btn2.disabled, "spawn enables once the probe settles ok");
+    assert.match(btn2.title, /Spawn dev/, "tooltip returns to the spawn affordance");
+    // settled state: the retry stops (no more /api/cli fetches from the tick)
+    const settled = state.cliFetches;
+    for (const t of ticks) t();
+    await new Promise((r) => setTimeout(r, 20));
+    assert.equal(state.cliFetches, settled, "no further CLI re-probes once settled");
+    sp.unmount();
+  } finally {
+    globalThis.setInterval = realSetInterval;
+    delete globalThis.document;
+  }
+});
+
 test("spawn view: no compatible CLI disables every spawn button and shows ONE card; reads stay rendered", async () => {
   const doc = dom();
   globalThis.document = doc; // spawn.mjs builds DOM via the global document

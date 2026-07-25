@@ -158,6 +158,7 @@
 
 /* ── pi-style transcript ── */
 .oas-view .chat { flex: 1; overflow-y: auto; padding: 22px 0 30px;
+                  user-select: text; -webkit-user-select: text;
                   background: var(--term-bg); color: var(--term-fg);
                   font: 13px/1.55 "SF Mono", ui-monospace, SFMono-Regular, Menlo, monospace; }
 .oas-view .chat ::selection { background: var(--term-sel); color: var(--term-sel-fg); }

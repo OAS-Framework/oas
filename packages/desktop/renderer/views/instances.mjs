@@ -312,9 +312,26 @@ function turnHtml(s, t, idx) {
   return `<div class="turn ai">${inner}</div>`;
 }
 
+/* ── transcript copy support ──
+   The chat re-renders by innerHTML replacement on a 1.5s (or 400ms fast)
+   poll; any repaint destroys an in-progress mouse selection, which made the
+   transcript effectively uncopyable. A background repaint must therefore
+   yield to a live selection inside the box — the skipped frame retries on
+   the next tick once the user has copied or clicked away. Pure; exported
+   for tests. */
+export function selectionBlocksRepaint(box, doc = box.ownerDocument) {
+  const sel = doc.defaultView?.getSelection?.() || doc.getSelection?.();
+  if (!sel || sel.isCollapsed || sel.rangeCount === 0) return false;
+  const range = sel.getRangeAt(0);
+  return box.contains(range.commonAncestorContainer);
+}
+
 function renderChat(s, d, scroll) {
   const box = s.q("chat");
   if (!d) return;
+  // A live selection in the transcript wins over a background repaint —
+  // clear the signature so the skipped update paints on a later tick.
+  if (!scroll && selectionBlocksRepaint(box)) { s.lastChatSig = ""; return; }
   if (!d.available) { box.innerHTML = '<div class="empty"><span class="big">⎀</span>No session transcript found for this instance.</div>'; return; }
   const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 120;
   let html = d.turns.map((t, i) => turnHtml(s, t, i)).join("") || "";
