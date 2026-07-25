@@ -1,8 +1,8 @@
 ---
 type: Lesson
 title: Cross-instance mutations need late atomic commits and compensation
-description: Spawn-style operations need late atomic cross-instance metadata writes and rollback that compensates launched windows, scaffolded files, and external capability state.
-tags: [kernel, spawn, transactionality, lineage, ordering, compensation]
+description: Spawn-style operations need late atomic cross-instance metadata writes, rollback that compensates launched/scaffolded side effects, and truthful diagnostics for incomplete cleanup.
+tags: [kernel, spawn, transactionality, lineage, ordering, compensation, diagnostics]
 timestamp: 2026-07-25
 ---
 
@@ -47,6 +47,15 @@ the write a compensated transaction. A rollback-completeness review (fixed in
   part of best-effort compensation, not a reason to skip later cleanup or mask
   the original failure; keep rethrowing the original error after the rollback
   chain finishes.
+- Rollback diagnostics are an operator contract. Collect each cleanup failure
+  with the affected path and reason; use full-success wording only when every
+  step actually succeeded. If any cleanup or verification failed, keep the
+  original error primary but report a `rollback INCOMPLETE — clean up manually:`
+  message that names the remaining items instead of a fixed success string.
+- Verify cleanup effects when the step API can hide failure: after best-effort
+  tmux kill, check `tmuxWindows(session)` no longer contains the launched
+  window; after `rmSync(home, { recursive: true, force: true })`, check
+  `existsSync(home)` before telling an operator the scaffold was removed.
 - Rollback must remove launched/scaffolded side effects: kill the launched
   window by exact-match tmux target, remove the worktree/branch and scaffolded
   home, then rethrow with the rollback named. The invariant is all-or-nothing:

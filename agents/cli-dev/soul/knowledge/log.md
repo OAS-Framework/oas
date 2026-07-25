@@ -1,6 +1,8 @@
 # Knowledge Log
 
 ## 2026-07-25
+* **Update**: [cross-instance-writes-commit-last](/lessons/cross-instance-writes-commit-last.md) records truthful rollback diagnostics: collect cleanup failures, verify effects, and report incomplete cleanup without masking the original error.
+* **Update**: [test-conventions](/playbooks/test-conventions.md) records the read-only-retire-hook recipe for forcing scaffold-home removal failure and asserting the incomplete-rollback diagnostic plus remaining home.
 * **Update**: [cross-instance-writes-commit-last](/lessons/cross-instance-writes-commit-last.md) records that rollback cleanup steps must each be independently guarded so one cleanup failure cannot skip later compensation or mask the original error.
 * **Update**: [test-conventions](/playbooks/test-conventions.md) records the temp-path directory recipe for proving rollback continues after a cleanup step itself throws.
 * **Update**: [cross-instance-writes-commit-last](/lessons/cross-instance-writes-commit-last.md) merges the rollback completeness checklist: atomic temp+rename metadata writes, retire-hook compensation for capability state, and cleanup of launched/scaffolded side effects.
