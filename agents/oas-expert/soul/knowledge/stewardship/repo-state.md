@@ -115,14 +115,17 @@ than letting the file grow stale.
 
 ## In flight
 
-- **PR #33 RETURNED 2026-07-25 at `605607a` (mergeability only)** — Desktop
-  Shift+Enter whole-chord suppression and Option/Shift local terminal selection.
-  Direction, correctness, and security pass; fresh 382-test local gate, human
-  live verification, required CI, and all three installer checks are green.
-  The branch is based on `d3b0e69` and does not contain current main `41272b6`
-  (seven PR #32/main commits absent; `shell.mjs` changed on both sides). Owner
-  must merge current main, preserve both shell changes, rerun the full gate,
-  and hand back a settled green exact head.
+- **PR #33 RETURNED round 2 on 2026-07-25 at `0a9c6df`** — Desktop Shift+Enter
+  whole-chord suppression and modifier-forced local terminal selection. The
+  branch correctly resolved round 1, preserving PR #32 and the terminal fix;
+  targeted merged-head tests (30/30), Desktop strict OKF, owner's repeated full
+  gates, and all four exact-head checks pass. Round 2 found two inaccurate
+  implementation/knowledge claims: the updated lesson still names removed
+  `shiftEnterByte(ev)` instead of `shiftEnterAction(ev)`, and a product comment
+  says Shift+drag works everywhere although shipped xterm uses Option on macOS
+  and Shift on non-macOS. Reviewer-driven harvest `71b4aa1` also advanced main
+  after handback. Owner must correct both claims, merge final current main,
+  rerun, and hand back a settled green exact SHA.
 
 ## Recent deliveries
 
@@ -181,8 +184,9 @@ than letting the file grow stale.
   sidebar instead. PR #32 now removes that stage on main (`97f66c9`). The human
   also found that v0.18.4's Shift+Enter handling still sent via xterm's keypress
   phase and terminal tabs could not form a local selection while tmux mouse mode
-  was active; PR #33 fixes both but is currently RETURNED for main freshness.
-  Do not move, delete, or republish immutable v0.18.4 artifacts; after PR #33
+  was active; PR #33 fixes both but is currently RETURNED for two stale claims
+  plus final main freshness. Do not move, delete, or republish immutable v0.18.4
+  artifacts; after PR #33
   reaches main, cut a new patch version containing both corrections.
 
 - aweb channel awakening drops (2 consecutive repros 2026-07-23): verdict
