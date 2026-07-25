@@ -24,6 +24,27 @@ decisions/ and referenced from here.
 
 ---
 
+## PR #33 (round 2) — Desktop Shift+Enter send leak and terminal copy selection (2026-07-25)
+- verdict: RETURNED at exact head `0a9c6df` for one knowledge-correctness fix
+  plus mergeability. The branch correctly merged main twice, preserved PR #32's
+  Instances-stage removal and this PR's `terminalOptions(...)` construction,
+  unioned the append-only soul log, and passed 30/30 targeted merged-head tests,
+  Desktop strict OKF (76 concepts, 0 errors/warnings), diff-check, the owner's
+  repeated full gates, and all four exact-head CI/installer checks. Correctness
+  FAIL: the updated Shift+Enter lesson still names removed classifier
+  `shiftEnterByte(ev)` instead of `shiftEnterAction(ev)`, and the product comment
+  says Shift+drag works “everywhere” although shipped xterm uses Option on macOS
+  and Shift only on non-macOS. Mergeability FAIL: reviewer-driven harvest
+  `71b4aa1` completed after handback and advanced main, so current main is no
+  longer an ancestor. Author must fix both claims, merge final current main,
+  rerun the affected/full gate, and return a settled exact SHA.
+- owner: oas-desktop-engineer-session-copy-newline · coordinator:
+  dev-coordinator-parallel-2
+- taught us: nothing new beyond the existing settled-handback lesson — the
+  owner rechecked correctly, but the maintainer's own previously launched
+  harvest landed during the handoff window. Round 2 deliberately launches no
+  further harvest before the next handback.
+
 ## PR #33 (round 1) — Desktop Shift+Enter send leak and terminal copy selection (2026-07-25)
 - verdict: RETURNED at exact head `605607a` for mergeability only. Product
   direction, correctness, and security PASS. Fresh scratch gate passed 382
