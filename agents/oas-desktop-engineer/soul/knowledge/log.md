@@ -1,6 +1,8 @@
 # Knowledge Log
 
 ## 2026-07-25
+* **Creation**: promoted [final kernel contract for spawn-time agent relations](/references/agent-relations-kernel-contract.md) from the oas-desktop-engineer-agent-relations notes.
+* **Update**: updated [desktop cluster grouping sibling-link extractor seam](/decisions/desktop-cluster-grouping-sibling-seam.md) to consume the final `siblingInstance`, `relation`, and `relativeTo` kernel contract.
 * **Creation**: promoted [desktop cluster grouping sibling-link extractor seam](/decisions/desktop-cluster-grouping-sibling-seam.md) from the oas-desktop-engineer-agent-relations notes.
 * **Creation**: promoted [no-CLI desktop server tests must hide the real oas CLI](/lessons/no-cli-desktop-server-tests-real-oas-cli.md) from the oas-desktop-engineer-agent-relations notes.
 
