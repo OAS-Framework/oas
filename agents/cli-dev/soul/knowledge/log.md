@@ -1,6 +1,11 @@
 # Knowledge Log
 
 ## 2026-07-25
+* **Creation**: [release-bump-pr-org-policy-block](/lessons/release-bump-pr-org-policy-block.md) records the v0.18.3 org-policy block on Actions-created PRs and the publication-first manual rescue path.
+* **Update**: skills/aweb-trust-mismatch — adds the read-only diagnostic and independent-confirmation protocol for aweb `identity_mismatch` messages with green doctors.
+* **Creation**: [aweb-identity-mismatch-recipient-cache](/lessons/aweb-identity-mismatch-recipient-cache.md) records that persistent `identity_mismatch` with all-green sender and recipient doctors is a recipient-side cache or verification defect, not automatic compromise.
+* **Creation**: [desktop-server-global-cli-spawn-test](/lessons/desktop-server-global-cli-spawn-test.md) records the local desktop-server spawn test false failure when a compatible global `oas` CLI is installed.
+* **Update**: [release-workflow-static-tests](/lessons/release-workflow-static-tests.md) records mac installer verifier run-block extraction and the exact historical `unsigned` wording carve-out.
 * **Creation**: [exact-tag-detached-head-refspec](/lessons/exact-tag-detached-head-refspec.md) records that exact-tag release checkout leaves detached HEAD, so version-bump pushes need fully-qualified `HEAD:refs/heads/...` destinations and static regression coverage.
 
 ## 2026-07-24
