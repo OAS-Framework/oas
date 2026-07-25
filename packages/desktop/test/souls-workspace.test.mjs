@@ -736,3 +736,87 @@ test("Spawn modal: relation + instance form ONE grouped fieldset with plain-lang
     if (oldWindow === undefined) delete globalThis.window; else globalThis.window = oldWindow;
   }
 });
+
+test("Spawn modal: picker sends the anchor's agents root; E_RELATIVE_AMBIGUOUS surfaces with guidance", async () => {
+  const dom = new JSDOM("<!doctype html><html><head></head><body><div id=host></div></body></html>", { url: "http://localhost" });
+  const oldDocument = globalThis.document;
+  const oldWindow = globalThis.window;
+  const oldSetInterval = globalThis.setInterval;
+  globalThis.document = dom.window.document;
+  globalThis.window = dom.window;
+  globalThis.setInterval = () => ({ fake: true });
+  const common = await import("../renderer/views/common.mjs");
+  const spawn = await import("../renderer/views/spawn.mjs");
+  await seedCliAvailable();
+  const previousWs = common.currentWorkspace();
+  const agent = { name: "dev", agentsRoot: "/a", description: "", runtime: "pi", work: "workspace", repo: true, repoName: "r" };
+  // duplicate name "dev-1" across two roots — picker must disambiguate
+  const roster = [
+    { instance: "dev-1", agentsRoot: "/ws1/agents", running: true },
+    { instance: "dev-1", agentsRoot: "/ws2/agents", running: false },
+    { instance: "solo", agentsRoot: "/ws1/agents", running: true },
+  ];
+  const posts = [];
+  let failNext = null;
+  const ctx = {
+    api: (pathname, opts = {}) => {
+      if (pathname === "/api/cli" || pathname === "/api/cli/reprobe") return Promise.resolve(CLI_OK);
+      if (opts.method === "POST") {
+        posts.push(JSON.parse(opts.body));
+        if (failNext) { const body = failNext; failNext = null;
+          return Promise.resolve({ ok: false, status: 409, json: async () => body }); }
+        return Promise.resolve({ ok: true, status: 200, json: async () => ({ instance: "x" }) });
+      }
+      return Promise.resolve({ ok: true, status: 200, json: async () => pathname.startsWith("/api/agents")
+        ? { agents: [agent] }
+        : { instances: roster, workspace: { id: "w" }, workspaces: [] } });
+    },
+    openTerminal: () => {},
+  };
+  try {
+    common.setWorkspace("w");
+    spawn.mount(dom.window.document.getElementById("host"), ctx);
+    await tick(); await tick();
+    const doc = dom.window.document;
+    doc.querySelector(".spawn-act").click();
+    const ref = doc.querySelector(".frelto");
+    // duplicate-name options carry distinct data-root and a visible root tag
+    const dupOpts = [...ref.options].filter((o) => o.value === "dev-1");
+    assert.equal(dupOpts.length, 2, "both same-named instances are listed");
+    assert.notEqual(dupOpts[0].dataset.root, dupOpts[1].dataset.root, "options carry distinct roots");
+    assert.ok(dupOpts.every((o) => /\[.+\]/.test(o.textContent)), "duplicates show a distinguishing root tag");
+    const soloOpt = [...ref.options].find((o) => o.value === "solo");
+    assert.ok(!/\[.+\]/.test(soloOpt.textContent), "unique names stay untagged");
+    // a related spawn sends the selected option's root as relativeRoot
+    const rel = doc.querySelector(".frelation");
+    rel.value = "child";
+    rel.dispatchEvent(new dom.window.Event("change"));
+    dupOpts[1].selected = true; // the /ws2 twin
+    doc.querySelector(".fspawn").click();
+    await tick(); await tick(); await tick();
+    assert.equal(posts.length, 1);
+    assert.equal(posts[0].relativeTo, "dev-1");
+    assert.equal(posts[0].relativeRoot, "/ws2/agents", "the anchor's agents root travels with the name");
+    // kernel ambiguity error surfaces with actionable guidance (fresh modal —
+    // the first spawn's roster wait still owns the old form's button)
+    doc.querySelector(".spawn-dialog .fcancel").click();
+    doc.querySelector(".spawn-act").click();
+    const form = doc.querySelector(".spawn-dialog");
+    const rel2 = form.querySelector(".frelation");
+    rel2.value = "child";
+    rel2.dispatchEvent(new dom.window.Event("change"));
+    form.querySelector(".frelto").value = "dev-1";
+    failNext = { error: "relation \"child\": instance name \"dev-1\" is ambiguous", code: "E_RELATIVE_AMBIGUOUS" };
+    form.querySelector(".fspawn").click();
+    await tick(); await tick(); await tick();
+    assert.match(form.querySelector(".fstatus").textContent, /several instances share the name "dev-1"/,
+      "ambiguity error explains the fix, not just the failure");
+  } finally {
+    spawn.unmount();
+    common.setWorkspace(previousWs);
+    globalThis.setInterval = oldSetInterval;
+    dom.window.close();
+    if (oldDocument === undefined) delete globalThis.document; else globalThis.document = oldDocument;
+    if (oldWindow === undefined) delete globalThis.window; else globalThis.window = oldWindow;
+  }
+});

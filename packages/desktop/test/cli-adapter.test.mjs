@@ -203,3 +203,19 @@ test("cliSpawn: relation pair reaches the CLI argv; bad pairs resolve E_BAD_ARGS
   assert.equal(bad.error.code, "E_BAD_ARGS");
   assert.equal(seen, null, "invalid relation pair never reaches the CLI");
 });
+
+test("spawnArgv: relativeRoot rides with the relation pair as --relative-root; alone it is rejected", () => {
+  const argv = spawnArgv("dev", "/ws", "/t/TASK.md",
+    { relation: "child", relativeTo: "coord-1", relativeRoot: "/ws1/agents" });
+  const at = argv.indexOf("--relative-root");
+  assert.ok(at > 0, "--relative-root forwarded");
+  assert.equal(argv[at + 1], "/ws1/agents");
+  // pair without root still valid (root is optional on the wire)
+  assert.ok(!spawnArgv("dev", "/ws", "/t/TASK.md", { relation: "child", relativeTo: "x" }).includes("--relative-root"));
+  // root alone is meaningless — rejected like an unpaired relative-to
+  assert.throws(() => spawnArgv("dev", "/ws", "/t/TASK.md", { relativeRoot: "/ws1/agents" }),
+    /--relative-root requires/, "root without the relation pair rejected");
+  // option-shaped root rejected
+  assert.throws(() => spawnArgv("dev", "/ws", "/t/TASK.md",
+    { relation: "child", relativeTo: "x", relativeRoot: "--evil" }), /invalid/);
+});

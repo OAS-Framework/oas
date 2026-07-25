@@ -304,8 +304,19 @@ function openSpawnModal(s, a) {
   const modal = doc.createElement("div");
   modal.className = "spawn-modal";
   const titleId = "spawn-dialog-title";
+  // Picker options carry BOTH halves of the anchor identity: the visible
+  // value is the instance name (what the user reads), data-root is the
+  // agents root it homes in — always sent as --relative-root so cross-root
+  // name shadowing can never make the spawn ambiguous (kernel contract:
+  // E_RELATIVE_AMBIGUOUS). Duplicate names get a distinguishing root label.
+  const nameCounts = new Map();
+  for (const i of s.panelInstances || []) nameCounts.set(i.instance, (nameCounts.get(i.instance) || 0) + 1);
   const refOptions = (s.panelInstances || [])
-    .map((i) => `<option value="${escapeHtml(i.instance)}">${escapeHtml(i.instance)}${i.running ? "" : " (idle)"}</option>`)
+    .map((i) => {
+      const dup = (nameCounts.get(i.instance) || 0) > 1 && i.agentsRoot;
+      const rootTag = dup ? ` [${String(i.agentsRoot).split("/").filter(Boolean).slice(-2, -1)[0] || i.agentsRoot}]` : "";
+      return `<option value="${escapeHtml(i.instance)}" data-root="${escapeHtml(i.agentsRoot || "")}">${escapeHtml(i.instance)}${rootTag}${i.running ? "" : " (idle)"}</option>`;
+    })
     .join("");
   // ALL options are ALWAYS VISIBLE (human requirement): purpose, task,
   // relation + reference instance, runtime and model overrides. The CLI
@@ -438,6 +449,7 @@ function openSpawnModal(s, a) {
     task: () => f.querySelector(".ftask").value,
     relation: () => f.querySelector(".frelation").value,
     relativeTo: () => f.querySelector(".frelto").value,
+    relativeRoot: () => f.querySelector(".frelto").selectedOptions?.[0]?.dataset?.root || "",
     runtime: () => f.querySelector(".fruntime").value,
     model: () => f.querySelector(".fmodel").value,
     clear: () => {
@@ -546,6 +558,9 @@ export async function doSpawn(s, ui) {
       purpose: ui.purpose() || undefined,
       relation: relation !== "unrelated" ? relation : undefined,
       relativeTo: relation !== "unrelated" ? relativeTo : undefined,
+      // anchor root: ALWAYS sent with a related spawn when the picker knows
+      // it — disambiguates cross-root name shadowing (E_RELATIVE_AMBIGUOUS)
+      relativeRoot: relation !== "unrelated" ? ((ui.relativeRoot ? ui.relativeRoot() : "") || undefined) : undefined,
       runtime: (ui.runtime ? ui.runtime() : "") || undefined,
       model: (ui.model ? ui.model() : "") || undefined,
     });
@@ -567,7 +582,14 @@ export async function doSpawn(s, ui) {
     ui.status.textContent = `Spawned ${d.instance}${d.launched ? " — session running" : ""}. Opening terminal…`;
     s.ctx.openTerminal(d.instance);
   } catch (e) {
-    if (owns()) { ui.status.classList?.add("err"); ui.status.textContent = `Spawn failed: ${e.message || e}`; }
+    if (owns()) {
+      ui.status.classList?.add("err");
+      // Ambiguous anchor (kernel E_RELATIVE_AMBIGUOUS): same-named instances
+      // across roots — tell the user how to resolve, not just that it failed.
+      ui.status.textContent = e.code === "E_RELATIVE_AMBIGUOUS"
+        ? `Spawn failed: several instances share the name "${relativeTo}" — pick the entry showing its workspace tag so the spawn targets the right one.`
+        : `Spawn failed: ${e.message || e}`;
+    }
   } finally {
     if (owns()) { ui.btn.disabled = false; ui.btn.textContent = "Spawn"; }
   }

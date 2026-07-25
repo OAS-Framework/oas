@@ -172,7 +172,7 @@ function agentsData(wsId) {
  * Default is NO TASK: the instance comes up awaiting instruction.
  * Validation errors THROW (→ 409); domain/CLI results RESOLVE with the
  * envelope so stable error codes reach the UI. */
-async function spawnAgent({ agent, agentsRoot, task, purpose, relation, relativeTo, runtime, model }) {
+async function spawnAgent({ agent, agentsRoot, task, purpose, relation, relativeTo, relativeRoot, runtime, model }) {
   const name = String(agent || "");
   const root = resolve(String(agentsRoot || ""));
   // agentsRoot must be one of the workspace roots this server was started for —
@@ -204,6 +204,10 @@ async function spawnAgent({ agent, agentsRoot, task, purpose, relation, relative
     purpose: purpose ? String(purpose) : undefined,
     relation: relation ? String(relation) : undefined,
     relativeTo: relativeTo ? String(relativeTo) : undefined,
+    // Anchor disambiguation: the renderer picker knows each instance's
+    // agentsRoot; sending the pair makes related spawns unambiguous under
+    // cross-root name shadowing (kernel E_RELATIVE_AMBIGUOUS otherwise).
+    relativeRoot: relativeRoot ? String(relativeRoot) : undefined,
     // Runtime/model overrides (spawn-modal options): adapter-allowlisted and
     // shape-validated there; empty means "agent definition default".
     runtime: runtime ? String(runtime) : undefined,
