@@ -1,5 +1,8 @@
 # Knowledge Log
 
+## 2026-07-25
+* **Update**: [Repo state](/stewardship/repo-state.md) records the v0.18.4 Desktop UX release, published package/installer verification, clean deployment probe, and PR #31 manifest-bump rescue; the [delivery log](/stewardship/delivery-log.md) records PR #31's terminal outcome.
+
 ## 2026-07-24
 * **Harvest**: merged pending note `desktop-publication-release-contract.md` into the existing [First public OAS Desktop release contract](/decisions/desktop-public-release-contract.md); no concept change was needed because the accepted decision already carries the durable release contract.
 * **Creation**: [First public OAS Desktop release contract](/decisions/desktop-public-release-contract.md) — synchronized v0.18.0 root/pi npm and Desktop GitHub publication, explicit unsigned macOS/Linux matrix under current credentials, Desktop API v1 JSON mutations, observation-only no-CLI behavior, installed-artifact parity, one-tag sequencing, dormant-surface pruning, and cli-dev/Desktop ownership.

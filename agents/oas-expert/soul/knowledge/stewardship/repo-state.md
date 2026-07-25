@@ -15,14 +15,24 @@ than letting the file grow stale.
 
 ## On main
 
+- **RELEASED v0.18.4 (2026-07-25)** — Desktop UX fixes from PR #29. Tag
+  `v0.18.4` on `a84443a` (PR #29 merge plus release notes). Published
+  `@oas-framework/oas@0.18.4` + `@oas-framework/pi@0.18.4` and GitHub Release
+  v0.18.4 with all six Desktop installers (mac arm64/x64 DMG+ZIP, Linux x64
+  AppImage+DEB), SHA256SUMS.txt, and build provenance. Build/test and all three
+  installer build+smoke legs passed in release run `30158015741`; the run's
+  only failure was the known org-policy block on Actions-created PRs after
+  publication. Manifests were bumped to 0.18.4 through manual rescue PR #31
+  (`fda7498`). The published kernel passed a clean create→spawn→inspect→retire
+  deployment probe and reported Desktop API v1 at version 0.18.4.
+
 - **PR #29 merged 2026-07-25 as `b7203eb`** — Desktop UX fixes: spawn view
   retries an unsettled CLI probe with truthful pending UI; Shift+Enter inserts
   a newline and transcripts are copyable without Linux/Windows Ctrl-chord
   regressions; Instances is a first-class nav/palette stage with repo→family
   grouping, collapsible headers, and workspace-scoped sorting; active terminal
   tabs restore per workspace. Final exact head `9736852`; all PR and three-leg
-  installer checks green. Release version intentionally deferred to the next
-  coordinated release cut.
+  installer checks green. Released in v0.18.4.
 
 - **PR #30 merged 2026-07-25 as `935d142`**: post-v0.18.3 knowledge-only
   harvest from cli-dev and oas-desktop-engineer. Promotes the corrected macOS
@@ -86,11 +96,9 @@ than letting the file grow stale.
 - Earlier oas.web and Control Pane deliveries remain in the delivery log and
   donor-soul knowledge as migration history; their product surfaces are no
   longer present on main.
-- Framework source is now **0.18.2** on npm (root/pi) with the first public
-  Desktop installers on GitHub Release v0.18.2. Capabilities at: oas.review
-  1.1.6, oas.okf **1.4.0**, oas.aweb 1.5.1, oas.jira 1.0.0. (Superseded the
-  earlier "source remains 0.17.6 / published artifacts predate the desktop
-  gate" state.)
+- Framework source and Desktop artifacts are now **0.18.4** (root/pi npm plus
+  GitHub Release installers). Capabilities at: oas.review 1.1.6, oas.okf
+  **1.4.0**, oas.aweb 1.5.1, oas.jira 1.0.0.
 
 ## In flight
 
@@ -100,11 +108,13 @@ than letting the file grow stale.
 ## Recent deliveries
 
 - (record PR #, one-line scope, verdict, merge/close date)
+- PR #31 release: v0.18.4 manifest bump (manual bump-PR rescue after complete
+  publication): MERGED 2026-07-25 (`fda7498`; see delivery-log).
 - PR #30 post-v0.18.3 cli-dev/Desktop knowledge and skill harvest: MERGED
   2026-07-25 (`935d142`); strict OKF passed all 8 bundles (see delivery-log).
 - PR #29 Desktop UX fixes: MERGED 2026-07-25 as `b7203eb` after one
-  correctness+staleness RETURN and one mergeability-only RETURN; release cut
-  remains coordinated/deferred (see delivery-log).
+  correctness+staleness RETURN and one mergeability-only RETURN; released in
+  v0.18.4 (see delivery-log).
 - PR #28 release: v0.18.3 manifest bump (manual bump-PR rescue for the release
   run's org-policy-blocked create step): MERGED 2026-07-25 (`9a6eae8`).
 - PR #27 corrected macOS installers (complete ad-hoc signatures + strict
@@ -169,11 +179,12 @@ than letting the file grow stale.
   conclusion=failure run whose ONLY failed step is the bump-PR create; npm +
   GitHub Release already succeeded (never retag). Rescue each time: create +
   squash-merge the `release-bump/vX.Y.Z` branch manually (done for v0.18.3 as
-  PR #28). Needs an org admin to relax the Actions-PR policy to fully automate.
+  PR #28 and v0.18.4 as PR #31). Needs an org admin to relax the Actions-PR
+  policy to fully automate.
   Rescue procedure is in the git-tag-release skill.
-- Published artifacts are now v0.18.3 (RESOLVED — was v0.18.2). The corrected
-  macOS installers ship complete ad-hoc signatures passing strict deep codesign;
-  v0.18.2 assets remain untouched.
+- Published artifacts are now v0.18.4. The macOS installers retain complete
+  ad-hoc signatures passing strict deep codesign; earlier release assets remain
+  untouched.
 - webpanel-dev instance worktrees still hold deleted branches locally
   (webpanel-dev-1: feature/panel-refinements, fix/panel-key-routing,
   perf/fast-attach, debug/typing-live; webpanel-dev-spawn-from-panel:

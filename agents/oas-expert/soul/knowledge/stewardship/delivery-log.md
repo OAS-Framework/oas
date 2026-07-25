@@ -24,6 +24,18 @@ decisions/ and referenced from here.
 
 ---
 
+## PR #31 — v0.18.4 manifest bump rescue (2026-07-25)
+- verdict: MERGED as squash commit `fda7498`. The tag-driven v0.18.4 release
+  completed build/test, all three Desktop installer build+smoke legs, both npm
+  publishes, provenance, and the GitHub Release before the known org policy
+  blocked Actions from creating the bump PR. The workflow-created branch
+  `release-bump/v0.18.4` contained exactly the five expected root/pi/Desktop
+  manifest and lockfile changes (0.18.3→0.18.4); manual PR #31 restored the
+  protected-main bump flow and deleted the branch.
+- owner: oas-expert-release-desktop-ux · coordinator: dev-coordinator-parallel-2
+- taught us: nothing new — this is the documented org-policy rescue path, and
+  the fully qualified detached-HEAD push continued to work correctly.
+
 ## PR #29 (round 3) — Desktop UX fixes final merge (2026-07-25)
 - verdict: MERGED as merge commit `b7203eb` at exact head `9736852`. All four
   gates PASS. The final branch contains current main `5aa596f`, preserves both
