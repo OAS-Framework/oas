@@ -1,6 +1,7 @@
 # Knowledge Log
 
 ## 2026-07-25
+* **Update**: merged the property-assignment attribute breakout note into [assign workspace data to DOM properties, never interpolate it into attributes](/lessons/dom-construction-not-innerhtml-attributes.md): workspace-controlled attribute values must be set through DOM properties, dataset, or createElement, and template audits should catch `${escapeHtml(` inside attribute positions.
 * **Creation**: promoted [verify the committed tree matches the commit message before pushing](/lessons/verify-committed-tree-before-push.md) from the oas-desktop-engineer-agent-relations notes.
 * **Creation**: promoted [build option lists from data with createElement, never innerHTML attributes](/lessons/dom-construction-not-innerhtml-attributes.md) from the oas-desktop-engineer-agent-relations notes.
 * **Update**: linked [no dynamic selectors from data](/lessons/no-dynamic-selectors-from-data.md) and [sanitize markdown before innerHTML](/lessons/sanitize-marked-markdown-before-innerhtml.md) to the DOM construction lesson.
