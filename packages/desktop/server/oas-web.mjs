@@ -173,18 +173,27 @@ function agentsData(wsId) {
  * Validation errors THROW (→ 409); domain/CLI results RESOLVE with the
  * envelope so stable error codes reach the UI. */
 /* OASWEB_SPAWNERR_BEGIN — /api/spawn error shaping. Extracted by
-   packages/desktop/test/panel-projection.test.mjs via block markers.
+   packages/desktop/test/panel-projection.test.mjs via block markers; the
+   HTTP boundary itself is covered by test/desktop-cli-integration.test.mjs.
    Stable code for the degradation UI: cli-unavailable means "install or
    choose a compatible oas CLI", not "bad request". The 300-char cap guards
    against unbounded upstream text, but E_RELATIVE_AMBIGUOUS messages
-   legitimately carry two absolute instance homes (case-d inherited edges)
-   and the renderer surfaces them VERBATIM — a blanket cap would eat the
-   actionable tail (review f1e3211). Kernel envelope errors are bounded by
-   the CLI JSON contract; this code gets a larger, still-bounded cap. */
+   legitimately carry multiple absolute instance homes (case-d inherited
+   edges) and the renderer surfaces them VERBATIM — any fixed cap can eat
+   the actionable tail for deeply nested paths (reviews f1e3211, 835a05f).
+   This code's message passes through UNSLICED: it originates from the CLI
+   JSON envelope, which the adapter already bounds (maxBuffer 4 MiB — the
+   real upstream bound), and the renderer assigns it via textContent. */
 function spawnErrorPayload(e) {
   const status = e.code === "cli-unavailable" ? 503 : 409;
-  const cap = e.code === "E_RELATIVE_AMBIGUOUS" ? 2000 : 300;
-  return { status, body: { error: String(e.message || e).slice(0, cap), ...(e.code ? { code: e.code } : {}) } };
+  const message = String(e.message || e);
+  return {
+    status,
+    body: {
+      error: e.code === "E_RELATIVE_AMBIGUOUS" ? message : message.slice(0, 300),
+      ...(e.code ? { code: e.code } : {}),
+    },
+  };
 }
 /* OASWEB_SPAWNERR_END */
 

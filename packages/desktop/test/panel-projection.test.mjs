@@ -52,7 +52,7 @@ function spawnError() {
   return new Function(m[1] + "\nreturn spawnErrorPayload;")();
 }
 
-test("/api/spawn errors: E_RELATIVE_AMBIGUOUS keeps a long case-(d) message intact; others stay tightly capped", () => {
+test("/api/spawn errors: E_RELATIVE_AMBIGUOUS passes through UNSLICED; others stay tightly capped", () => {
   const shape = spawnError();
   // realistic case-(d) inherited-edge message: two absolute homes, ambiguous
   // name differs from any picked anchor, >300 chars end to end
@@ -71,9 +71,11 @@ test("/api/spawn errors: E_RELATIVE_AMBIGUOUS keeps a long case-(d) message inta
   // other codes keep the tight cap (unbounded upstream text guard)
   const noisy = Object.assign(new Error("x".repeat(1000)), { code: "E_SPAWN_FAILED" });
   assert.equal(shape(noisy).body.error.length, 300, "non-ambiguity errors stay capped at 300");
-  // even the ambiguity cap is BOUNDED
+  // NO fixed cap for this code: even paths past any arbitrary threshold
+  // survive (the adapter's 4 MiB envelope bound is the real upstream guard;
+  // review 835a05f)
   const huge = Object.assign(new Error("y".repeat(5000)), { code: "E_RELATIVE_AMBIGUOUS" });
-  assert.equal(shape(huge).body.error.length, 2000, "ambiguity messages are bounded too");
+  assert.equal(shape(huge).body.error.length, 5000, "deeply nested multi-home diagnostics are never sliced");
   // degradation code maps to 503
   assert.equal(shape(Object.assign(new Error("no cli"), { code: "cli-unavailable" })).status, 503);
 });

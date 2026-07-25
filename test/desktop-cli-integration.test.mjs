@@ -35,6 +35,20 @@ if (argv[0] === "version" && argv.includes("--json")) {
   const tf = argv[argv.indexOf("--task-file") + 1];
   const task = readFileSync(tf, "utf8");
   if (agent === "boom") { process.stdout.write(JSON.stringify({ schemaVersion: 1, ok: false, error: { code: "E_SPAWN_FAILED", message: "boom" } })); process.exit(1); }
+  // purpose "ambig": a LONG case-(d) E_RELATIVE_AMBIGUOUS envelope (two
+  // deeply nested absolute homes, >2500 chars) — the endpoint must pass it
+  // through UNSLICED (review 835a05f); purpose "noisy": an oversized
+  // NON-ambiguity error that must stay capped at 300.
+  if (argv[argv.indexOf("--purpose") + 1] === "ambig") {
+    const home = (p) => "/Users/someone/" + Array.from({ length: 40 }, (_, k) => p + "-deeply-nested-workspace-segment-" + k).join("/") + "/agents/dev-coordinator/instances/dev-coordinator-parallel";
+    const msg = 'relation "sibling": inherited lineage edge "dev-coordinator-parallel" is ambiguous \u2014 it matches ' + home("aa") + " and " + home("bb") + "; qualify with --relative-root or rename one instance";
+    process.stdout.write(JSON.stringify({ schemaVersion: 1, ok: false, error: { code: "E_RELATIVE_AMBIGUOUS", message: msg } }));
+    process.exit(1);
+  }
+  if (argv[argv.indexOf("--purpose") + 1] === "noisy") {
+    process.stdout.write(JSON.stringify({ schemaVersion: 1, ok: false, error: { code: "E_SPAWN_FAILED", message: "x".repeat(1000) } }));
+    process.exit(1);
+  }
   process.stdout.write(JSON.stringify({ schemaVersion: 1, ok: true, result: {
     instance: agent + "-t1", agent, home: "/tmp/h", work: "worktree", branch: "b",
     launched: true, warnings: [], tmux: { session: "pi-agents", window: agent + "-t1" },
@@ -242,4 +256,35 @@ test("desktop server: hostile instance.json cannot steer the harvest cwd (review
     assert.equal(harvestCall.cwd, instHome, "cwd pinned to the enumerated directory");
     assert.notEqual(harvestCall.cwd, steerTarget, "steered cwd never used");
   } finally { proc2.kill(); }
+});
+
+test("desktop server HTTP boundary: long E_RELATIVE_AMBIGUOUS envelope reaches the client UNSLICED; other codes stay capped (review 835a05f)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "oas-cliambig-"));
+  const { bin } = fakeCli(dir);
+  const { proc, port } = await startServer({ OAS_DESKTOP_OAS_BIN: bin, PATH: "/nonexistent", SHELL: "/bin/false" });
+  try {
+    await fetch(`http://127.0.0.1:${port}/api/cli/reprobe`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+    const ad = await (await fetch(`http://127.0.0.1:${port}/api/agents`)).json();
+    const agent = ad.agents[0];
+    const post = (purpose) => fetch(`http://127.0.0.1:${port}/api/spawn`, { method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ agent: agent.name, agentsRoot: agent.agentsRoot, purpose }) });
+    // case-(d) ambiguity: the fake CLI's envelope carries two deeply nested
+    // homes (>2500 chars); the ACTUAL response body must be complete —
+    // reverting the endpoint to an inline slice would fail here
+    const ra = await post("ambig");
+    assert.equal(ra.status, 409);
+    const ba = await ra.json();
+    assert.equal(ba.code, "E_RELATIVE_AMBIGUOUS");
+    assert.ok(ba.error.length > 2500, `full diagnostics reach the client (${ba.error.length} chars)`);
+    assert.match(ba.error, /qualify with --relative-root or rename one instance$/,
+      "the actionable tail (second home + remedy) survives the HTTP boundary");
+    assert.ok(ba.error.includes("/aa-deeply") && ba.error.includes("/bb-deeply"), "BOTH homes present");
+    // a different code with oversized text remains capped at the boundary
+    const rn = await post("noisy");
+    assert.equal(rn.status, 409);
+    const bn = await rn.json();
+    assert.equal(bn.code, "E_SPAWN_FAILED");
+    assert.equal(bn.error.length, 300, "non-ambiguity errors stay capped at 300 over HTTP");
+  } finally { proc.kill(); }
 });
