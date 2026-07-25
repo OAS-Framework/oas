@@ -35,15 +35,18 @@ test("shell registers global + tabs actions covered by the engine's DEFAULT_KEYM
 test("hierarchy and spawn views register rebindable view-local actions and dispose them", () => {
   const hier = read("renderer/views/hierarchy.mjs");
   for (const id of ["hier.fit", "hier.terminal", "hier.brain", "hier.spawn", "hier.popover", "hier.zoomIn", "hier.zoomOut"]) {
-    assert.match(hier, new RegExp(`id: "${id.replace(".", "\\.")}", label:.*context: "stage:hierarchy"`), `hierarchy action ${id}`);
+    assert.match(hier, new RegExp(`id: "${id.replace(".", "\\.")}", chord:`), `hierarchy action ${id} carries a view default`);
   }
-  assert.match(hier, /s\.disposers = \[/, "hierarchy keeps action disposers");
+  assert.match(hier, /context: "stage:hierarchy"/, "hierarchy actions registered in their stage context");
+  assert.match(hier, /s\.disposers = s\.viewActions\.map/, "hierarchy keeps action disposers");
   assert.match(hier, /\(s\.disposers \|\| \[\]\)\.forEach/, "hierarchy disposes actions on teardown");
+  assert.match(hier, /resolveViewKey\(e, s\.viewActions\)/, "canvas keys resolve through the engine keymap (rebindable)");
 
   const spawn = read("renderer/views/spawn.mjs");
   for (const id of ["spawn.filter", "spawn.brain"]) {
     assert.match(spawn, new RegExp(`id: "${id.replace(".", "\\.")}", label:.*context: "stage:spawn"`), `spawn action ${id}`);
   }
+  assert.match(spawn, /resolveViewKey\(/, "spawn keys resolve through the engine keymap");
   assert.match(spawn, /\(state\.disposers \|\| \[\]\)\.forEach/, "spawn disposes actions on unmount");
 });
 
@@ -55,10 +58,10 @@ test("palette rows and data-action tooltips carry live chord labels", () => {
   assert.match(palette, /typeof c\.detail === "function" \? c\.detail\(\)/, "palette re-evaluates chord details per render");
 });
 
-test("hierarchy canvas keys cover the completed set (b/t/s/o/+/-)", () => {
+test("hierarchy view defaults cover the completed key set (engine-resolved)", () => {
   const hier = read("renderer/views/hierarchy.mjs");
-  assert.match(hier, /e\.key === "Enter" \|\| e\.key === "t"/, "t is a terminal synonym of Enter");
-  for (const k of ['e.key === "b"', 'e.key === "s"', 'e.key === "o"', 'e.key === "+"', 'e.key === "-"']) {
-    assert.ok(hier.includes(k), `canvas handles ${k}`);
+  for (const pair of ['chord: "f"', 'chord: "t"', 'chord: "b"', 'chord: "s"', 'chord: "o"', 'chord: "="', 'chord: "-"']) {
+    assert.ok(hier.includes(pair), `hierarchy default ${pair}`);
   }
+  assert.match(hier, /e\.key === "Enter" && s\.sel/, "Enter opens the selection's terminal (structural, not rebindable)");
 });

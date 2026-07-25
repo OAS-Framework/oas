@@ -100,7 +100,10 @@ async function showStage(name) {
   stageHost.innerHTML = "";
   stageHost.append(el);
   stage = { name, life, el };
-  updateActiveContexts(false);
+  // Re-derive contexts from the CURRENT layer state: the user may have
+  // activated a tab while this stage was loading — a late mount completion
+  // must not replace the live "tabs" context with a hidden stage context.
+  updateActiveContexts();
   try { await life.mounted(el, ctx); }
   catch (e) { el.innerHTML = `<div class="placeholder"><h2>${v?.title || name}</h2><div>mount failed: ${e.message}</div></div>`; }
 }
@@ -306,9 +309,12 @@ function renderContextRoster(instances) {
     }
   }
   restoreTreeState();
-  // roving tabindex: exactly one row enters the tab order
-  const first = listEl.querySelector(".ctx-inst:not([disabled])");
-  if (first) first.tabIndex = 0;
+  // roving tabindex: exactly one row enters the tab order — the focused row
+  // when it survived the rebuild, else the first enabled one
+  const rowsAfter = [...listEl.querySelectorAll(".ctx-inst")];
+  const focusedRow = rowsAfter.find((r) => r === listEl.ownerDocument.activeElement);
+  const tabbable = focusedRow || rowsAfter.find((r) => !r.disabled);
+  if (tabbable) tabbable.tabIndex = 0;
 }
 
 /* Keyboard walk over the rendered roster rows. Disabled (idle) rows stay
@@ -330,7 +336,7 @@ function onRosterRowKey(e) {
   const focusInstance = (inst) => {
     const target = [...listEl.querySelectorAll(".ctx-inst")]
       .find((r) => r.dataset.treeInstance === inst && !r.disabled);
-    target?.focus();
+    if (target) setRovingRow(listEl, target);
     return !!target;
   };
   if (action.type === "expand" || action.type === "collapse") {
@@ -352,8 +358,17 @@ function onRosterRowKey(e) {
   const step = action.to ? (to > at ? -1 : 1) : (to > at ? 1 : -1);
   let cursor = to;
   while (cursor >= 0 && cursor < rows.length && cursor !== at && rows[cursor].disabled) cursor += step;
-  if (cursor >= 0 && cursor < rows.length && cursor !== at && !rows[cursor].disabled) rows[cursor].focus();
+  if (cursor >= 0 && cursor < rows.length && cursor !== at && !rows[cursor].disabled) setRovingRow(listEl, rows[cursor]);
 }
+
+/* Move focus AND the single tab-order slot to `row` (roving tabindex). */
+function setRovingRow(listEl, row) {
+  for (const r of listEl.querySelectorAll('.ctx-inst[tabindex="0"]')) r.tabIndex = -1;
+  row.tabIndex = 0;
+  row.focus();
+}
+
+function showTerminalContext() {
   setSidebarMode("instances");
   refreshContextRoster();
   // Per-workspace active-tab memory: switching back to a workspace restores
@@ -655,7 +670,7 @@ const isMac = navigator.platform.includes("Mac");
 const chordDetail = (id) => () => {
   const b = getBinding(id);
   return b ? formatChord(b, isMac) : "";
-};──
+};
 const palette = createPalette({
   loadInstances: async () => {
     const ws = currentWorkspace();

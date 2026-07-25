@@ -10,6 +10,7 @@ import {
   setWorkspace, onWorkspaceChange, renderWorkspaceSelect, wsQuery, workspaceGeneration,
 } from "./common.mjs";
 import { registerAction } from "../keybindings.mjs";
+import { resolveViewKey } from "../view-keys.mjs";
 import { cliAvailable, cliKnownUnavailable, cliStatus, refreshCli, onCliChange, cliCard } from "./cli-status.mjs";
 
 /** True while the CLI probe has never SETTLED (no response classified yet).
@@ -68,18 +69,24 @@ export function mount(el, ctx) {
   s.q("filter").addEventListener("input", (e) => { s.filterText = e.target.value; renderGrid(s); });
   // Keyboard operability (task: keybindings wiring): `/` focuses the filter,
   // arrows rove the card grid, Enter opens the focused card's spawn form,
-  // b opens its brain, Esc cancels an open form. Registered as rebindable
-  // stage:spawn actions; dispatch is view-local on the grid (roving focus).
+  // b opens its brain, Esc cancels an open form. spawn.filter/spawn.brain
+  // are registered stage:spawn actions; their keys resolve through the
+  // engine keymap (view-keys.mjs) so editor rebinds take effect, while
+  // dispatch stays view-local and editable-guarded.
   s.q("souls-grid").addEventListener("keydown", (e) => onGridKey(s, e));
+  s.viewActions = [
+    { id: "spawn.filter", chord: "/", run: () => s.q("filter").focus() },
+    { id: "spawn.brain", chord: "b", run: () => brainOfFocusedCard(s) },
+  ];
   el.querySelector(".souls").addEventListener("keydown", (e) => {
     // Esc cancels the open spawn form from anywhere inside it (incl. the
     // task textarea — cancel is safe; submit stays click/button-only there).
     if (e.key === "Escape" && s.sel) { e.preventDefault(); s.sel = null; s.selAgent = null; renderGrid(s); return; }
-    // view-local single keys (never stolen from editable fields)
+    // view-local keys (never stolen from editable fields), engine-resolved
     const editable = e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.isContentEditable;
-    if (editable) return;
-    if (e.key === "/") { e.preventDefault(); s.q("filter").focus(); }
-    else if (e.key === "b" && !e.target.closest?.(".soul-card")) { e.preventDefault(); brainOfFocusedCard(s); }
+    if (editable || e.target.closest?.(".soul-card")) return; // card keys are onGridKey's
+    const hit = resolveViewKey(e, s.viewActions);
+    if (hit) { e.preventDefault(); s.viewActions.find((a) => a.id === hit)?.run(); }
   });
   s.disposers = [
     registerAction({ id: "spawn.filter", label: "Soul roster: focus the filter (/)", context: "stage:spawn", run: () => s.q("filter").focus() }),
@@ -171,6 +178,8 @@ function renderGrid(s) {
   if (noCli && s.sel) s.sel = null, s.selAgent = null;
   if (s.sel && [...(grid.querySelectorAll?.(".soul-card") || [])]
         .some((card) => card.dataset?.agent === s.sel && card.querySelector(".soul-form"))) return;
+  // capture the focused card's identity before the rebuild wipes the DOM
+  const focusedAgent = s.el?.ownerDocument?.activeElement?.closest?.(".soul-card")?.dataset?.agent || null;
   grid.innerHTML = "";
   const list = s.souls.agents.filter((a) => matches(s, a));
   const spawnable = s.souls.agents.filter((a) => a.work !== "attached").length;
@@ -211,6 +220,15 @@ function renderGrid(s) {
     }
     grid.append(soulCard(s, a));
   }
+  // Roving tabindex across the rebuilt grid: keep the previously focused
+  // card's identity tabbable (and focused) when it survives the repaint,
+  // else the first card enters the tab order.
+  const rebuilt = [...grid.querySelectorAll(".soul-card")];
+  if (rebuilt.length) {
+    const focused = focusedAgent && rebuilt.find((c) => c.dataset.agent === focusedAgent);
+    (focused || rebuilt[0]).tabIndex = 0;
+    if (focused) focused.focus({ preventScroll: true });
+  }
 }
 
 /* ── grid keyboard: roving focus over cards ──────────────────────── */
@@ -236,17 +254,29 @@ function onGridKey(s, e) {
   const at = cur ? cards.indexOf(cur) : -1;
   if (["ArrowRight", "ArrowDown"].includes(e.key)) {
     e.preventDefault();
-    cards[Math.min(cards.length - 1, at + 1)]?.focus();
+    focusCard(s, cards, Math.min(cards.length - 1, at + 1));
   } else if (["ArrowLeft", "ArrowUp"].includes(e.key)) {
     e.preventDefault();
-    cards[Math.max(0, at - 1)]?.focus();
+    focusCard(s, cards, Math.max(0, at - 1));
   } else if (e.key === "Enter" && cur && e.target === cur) {
     e.preventDefault();
     cur.querySelector(".spawn-act:not([disabled])")?.click();
-  } else if (e.key === "b" && cur && e.target === cur) {
-    e.preventDefault();
-    cur.querySelector(".brain-act:not([disabled])")?.click();
+  } else if (cur && e.target === cur) {
+    // engine-resolved view keys on the focused card (default b = brain)
+    const hit = resolveViewKey(e, [{ id: "spawn.brain", chord: "b" }]);
+    if (hit === "spawn.brain") {
+      e.preventDefault();
+      cur.querySelector(".brain-act:not([disabled])")?.click();
+    }
   }
+}
+
+/* Roving tabindex: exactly one card in the tab order — the focused one. */
+function focusCard(s, cards, index) {
+  const target = cards[index];
+  if (!target) return;
+  for (const c of cards) c.tabIndex = c === target ? 0 : -1;
+  target.focus();
 }
 
 function soulCard(s, a) {
@@ -256,7 +286,7 @@ function soulCard(s, a) {
   const card = document.createElement("div");
   card.className = "soul-card" + (attached ? " attached" : "") + (open ? " open" : "");
   card.dataset.agent = a.name;
-  card.tabIndex = 0; // roving entry; arrows move between cards
+  card.tabIndex = -1; // roving tabindex — renderGrid elects the tabbable card
   card.setAttribute("role", "group");
   card.setAttribute("aria-label", a.name);
   card.innerHTML = `
