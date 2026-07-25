@@ -91,3 +91,31 @@ test("spawn grid: typing '/' or 'b' inside the filter input stays text entry", a
   }
   dom.window.close();
 });
+
+test("surface guard: window-level dispatch of spawn actions is inert outside the view (review 0e63834)", async () => {
+  const dom = new JSDOM('<!doctype html><html><body><div id=host></div><button id=rail>rail button</button></body></html>', { url: "http://localhost" });
+  const oldDoc = globalThis.document, oldWin = globalThis.window;
+  try {
+    const { spawn, opened } = await mountSpawn(dom);
+    const doc = dom.window.document;
+    const kb = await import("../renderer/keybindings.mjs");
+    kb.setActiveContexts(new Set(["stage:spawn"]));
+    const cards = [...doc.querySelectorAll(".soul-card")];
+    // engine window dispatch from INSIDE the view (focused card): runs once
+    cards[0].focus();
+    const inside = { key: "b", metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, target: cards[0], preventDefault() {} };
+    // simulate the window listener path directly (grid handler not involved: no bubbling here)
+    assert.equal(kb.handleKeydown(inside, { isMac: false }), true, "engine matches spawn.brain in context");
+    assert.deepEqual(opened, ["alpha"], "guarded run executes for an in-view target");
+    // engine window dispatch from OUTSIDE the view (rail button): matches but must be inert
+    const rail = doc.getElementById("rail");
+    const outside = { key: "b", metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, target: rail, preventDefault() {} };
+    kb.handleKeydown(outside, { isMac: false });
+    assert.deepEqual(opened, ["alpha"], "no brain opened from a rail/sidebar target (surface guard)");
+    kb.setActiveContexts(new Set());
+    spawn.unmount();
+  } finally {
+    globalThis.document = oldDoc; globalThis.window = oldWin;
+  }
+  dom.window.close();
+});
