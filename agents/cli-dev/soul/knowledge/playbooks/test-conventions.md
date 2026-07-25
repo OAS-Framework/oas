@@ -50,13 +50,22 @@ All kernel/CLI behavior tests live in `test/capabilities.test.mjs`
   directory at the deterministic temp path so a naive temp unlink with
   `rmSync(..., { force: true })` fails, then assert the original error still
   surfaces and the later window, hook, scaffold, and anchor rollback assertions
-  still pass. For a genuinely unremovable scaffold home, have a compensated
-  retire hook create a read-only subdirectory (`mkdir` + `chmod 555`) inside
-  the home before removal; then assert the incomplete-rollback diagnostic names
-  the remaining home and that the home still exists. Restore modes in cleanup
-  before deleting the temp tree. If the test replaces PATH wholesale, include
-  symlinks for tools the kernel/hooks still shell out to (`git`, `node`,
-  `chmod`, `sh`). See
+  still pass. To prove tmux cleanup is effect-based rather than
+  exit-code-based, use a stateful fake tmux: `new-window` appends to a window
+  list file, `kill-window` filters the list, `list-windows` cats it, and an
+  env-controlled stubborn branch returns success while leaving one launched name
+  present. For a genuinely unremovable scaffold home, have a compensated retire
+  hook create a read-only subdirectory (`mkdir` + `chmod 555`) inside the home
+  before removal; then assert the incomplete-rollback diagnostic names the
+  remaining home and that the home still exists. For git worktree cleanup
+  truthfulness, have a compensated retire hook pin the worktree (read-only
+  subdir plus `chmod 555` on `work/`) before removal, then assert the diagnostic
+  names the remaining worktree/branch and the test verifies `git worktree list
+  --porcelain` plus `rev-parse --verify --quiet refs/heads/<branch>` effects.
+  Restore modes in cleanup before deleting the temp tree. If the test replaces
+  PATH wholesale, include symlinks for tools the kernel/hooks and shims still
+  shell out to (`git`, `node`, `chmod`, `sh`, `grep`, `sed`, `mv`, `cat`,
+  `printf`). See
   [cross-instance writes](/lessons/cross-instance-writes-commit-last.md).
 - Every CLI-level `E_BAD_ARGS` relation-matrix case needs a direct
   `spawnInstance(..., { launch: false })` equivalent that passes the raw

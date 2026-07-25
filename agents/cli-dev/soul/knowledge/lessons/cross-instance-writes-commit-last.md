@@ -52,10 +52,23 @@ the write a compensated transaction. A rollback-completeness review (fixed in
   step actually succeeded. If any cleanup or verification failed, keep the
   original error primary but report a `rollback INCOMPLETE — clean up manually:`
   message that names the remaining items instead of a fixed success string.
-- Verify cleanup effects when the step API can hide failure: after best-effort
-  tmux kill, check `tmuxWindows(session)` no longer contains the launched
-  window; after `rmSync(home, { recursive: true, force: true })`, check
-  `existsSync(home)` before telling an operator the scaffold was removed.
+- Compensation cannot infer swallowed hook failures from try/catch. Helpers that
+  keep going on error, such as `runLifecycleHooks`, must return structured
+  failure records alongside warnings (for example
+  `results.failures: [{ capability, event, message }]`) so rollback logic can
+  detect and report them; warning prose alone is advisory.
+- Verify cleanup effects when the step API can hide failure. `shTry` returns
+  trimmed stdout, so `""` is the normal success value for silent commands and
+  `undefined` only means the shell command threw; do the effect check
+  unconditionally after the attempted cleanup. After best-effort tmux kill,
+  check `tmuxWindows(session)` no longer contains the launched window; after
+  `rmSync(home, { recursive: true, force: true })`, check `existsSync(home)`
+  before telling an operator the scaffold was removed.
+- Git cleanup needs effect verification too: after best-effort worktree remove,
+  prune, and branch delete, assert `git worktree list --porcelain` no longer
+  contains the tree and `git rev-parse --verify --quiet refs/heads/<branch>`
+  fails. The exit codes are discarded by `shTry`, and partial failure can strand
+  git metadata.
 - Rollback must remove launched/scaffolded side effects: kill the launched
   window by exact-match tmux target, remove the worktree/branch and scaffolded
   home, then rethrow with the rollback named. The invariant is all-or-nothing:
