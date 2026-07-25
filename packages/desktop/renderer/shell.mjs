@@ -544,7 +544,7 @@ async function openTerminalTabInner(instance, ws, key) {
 // Two first-class navigation surfaces: hierarchy and soul roster. Instances
 // live permanently below them; selecting one opens its terminal artifact.
 const NAV = [
-  { name: "hierarchy", label: "Active overview", icon: "⌘", title: "Active overview" },
+  { name: "hierarchy", label: "Active", icon: "⌘", title: "Active — live cluster overview" },
   { name: "spawn", label: "Soul roster", icon: "✦", title: "Soul roster" },
 ];
 const navEl = document.getElementById("nav");
@@ -580,7 +580,7 @@ const palette = createPalette({
   },
   openTerminal: (name) => openTerminalTab(name),
   commands: [
-    { label: "View: Active overview", run: () => showStage("hierarchy") },
+    { label: "View: Active", run: () => showStage("hierarchy") },
     { label: "View: Soul roster", run: () => showStage("spawn") },
     { label: "Theme: toggle light/dark", run: () => toggleTheme() },
     { label: "Terminal: increase font size", run: () => setTerminalFontSize(terminalTypography().fontSize + 1) },
