@@ -586,8 +586,9 @@ const palette = createPalette({
   },
   openTerminal: (name) => openTerminalTab(name),
   commands: [
-    { label: "View: Active overview", run: () => showStage("hierarchy") },
-    { label: "View: Soul roster", run: () => showStage("spawn") },
+    // View commands derive from the nav manifest so a new rail destination
+    // can never be palette-invisible (review 8441961 nit).
+    ...NAV.map((v) => ({ label: `View: ${v.label}`, run: () => showStage(v.name) })),
     { label: "Theme: toggle light/dark", run: () => toggleTheme() },
     { label: "Terminal: increase font size", run: () => setTerminalFontSize(terminalTypography().fontSize + 1) },
     { label: "Terminal: decrease font size", run: () => setTerminalFontSize(terminalTypography().fontSize - 1) },

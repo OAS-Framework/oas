@@ -52,3 +52,10 @@ test("shell.mjs consumes the manifest: rail built from shell-nav NAV, openView r
   assert.ok(!/openView[^\n]*ctx-filter/.test(src),
     'openView("instances") no longer degrades to focusing the sidebar filter');
 });
+
+test("palette view commands derive from NAV — no hard-coded destination list to drift", () => {
+  const src = readFileSync(join(PKG, "renderer", "shell.mjs"), "utf8");
+  assert.match(src, /NAV\.map\(\(v\) => \(\{ label: `View: \$\{v\.label\}`, run: \(\) => showStage\(v\.name\) \}\)\)/,
+    "palette view commands are generated from the nav manifest");
+  assert.ok(!/label:\s*"View: /.test(src), "no hard-coded View: palette entries remain");
+});
