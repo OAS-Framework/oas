@@ -18,11 +18,15 @@ const CONTEXT_LABELS = {
   roster: "Instance roster",
   "stage:hierarchy": "Active overview",
   "stage:spawn": "Soul roster",
+  // view-local contexts: never activated for window dispatch — the actions
+  // dispatch inside their view surface but stay editor-visible here.
+  "view:hierarchy": "Active overview",
+  "view:spawn": "Soul roster",
 };
 
 /** Group registered actions by context, stable order, for rendering. */
 export function groupActions(actions = listActions()) {
-  const order = ["global", "tabs", "roster", "stage:hierarchy", "stage:spawn"];
+  const order = ["global", "tabs", "roster", "stage:hierarchy", "view:hierarchy", "stage:spawn", "view:spawn"];
   const groups = new Map();
   for (const a of actions) {
     if (!groups.has(a.context)) groups.set(a.context, []);

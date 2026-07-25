@@ -92,26 +92,40 @@ test("spawn grid: typing '/' or 'b' inside the filter input stays text entry", a
   dom.window.close();
 });
 
-test("surface guard: window-level dispatch of spawn actions is inert outside the view (review 0e63834)", async () => {
+test("window dispatch ineligibility: view actions never match at window level; globals win (review afd2114)", async () => {
   const dom = new JSDOM('<!doctype html><html><body><div id=host></div><button id=rail>rail button</button></body></html>', { url: "http://localhost" });
   const oldDoc = globalThis.document, oldWin = globalThis.window;
   try {
     const { spawn, opened } = await mountSpawn(dom);
     const doc = dom.window.document;
     const kb = await import("../renderer/keybindings.mjs");
-    kb.setActiveContexts(new Set(["stage:spawn"]));
-    const cards = [...doc.querySelectorAll(".soul-card")];
-    // engine window dispatch from INSIDE the view (focused card): runs once
-    cards[0].focus();
-    const inside = { key: "b", metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, target: cards[0], preventDefault() {} };
-    // simulate the window listener path directly (grid handler not involved: no bubbling here)
-    assert.equal(kb.handleKeydown(inside, { isMac: false }), true, "engine matches spawn.brain in context");
-    assert.deepEqual(opened, ["alpha"], "guarded run executes for an in-view target");
-    // engine window dispatch from OUTSIDE the view (rail button): matches but must be inert
+    kb.setActiveContexts(new Set(["stage:spawn"])); // the shell's spawn-stage context set
+    const ev = (target) => {
+      const e = { key: "b", metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, target, prevented: 0, preventDefault() { this.prevented++; } };
+      return e;
+    };
+    // OUTSIDE the view (rail button): view actions are dispatch-ineligible
+    // (context view:spawn never active) — no match, no preventDefault, so
+    // native activation (e.g. Space/keys on the button) is untouched.
     const rail = doc.getElementById("rail");
-    const outside = { key: "b", metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, target: rail, preventDefault() {} };
-    kb.handleKeydown(outside, { isMac: false });
-    assert.deepEqual(opened, ["alpha"], "no brain opened from a rail/sidebar target (surface guard)");
+    const outside = ev(rail);
+    assert.equal(kb.matchEvent(outside, { isMac: false }), null, "no window-level match for a view action");
+    assert.equal(kb.handleKeydown(outside, { isMac: false }), false, "handleKeydown returns false");
+    assert.equal(outside.prevented, 0, "outside event is NOT swallowed (no preventDefault)");
+    assert.deepEqual(opened, [], "no brain opened from a rail target");
+    // a colliding GLOBAL action wins at window level (view action cannot shadow it)
+    const offGlobal = kb.registerAction({ id: "test.global", label: "g", context: "global", run: () => opened.push("global"), defaultChord: "B" });
+    const outside2 = ev(rail);
+    assert.equal(kb.handleKeydown(outside2, { isMac: false }), true, "global fallback dispatches");
+    assert.deepEqual(opened, ["global"], "the global action ran, not the view action");
+    offGlobal();
+    // INSIDE the view, dispatch is the LOCAL handler's job (grid keydown →
+    // resolveViewKey), which still answers the engine's effective binding:
+    const cards = [...doc.querySelectorAll(".soul-card")];
+    cards[1].focus();
+    const local = new doc.defaultView.KeyboardEvent("keydown", { key: "b", bubbles: true, cancelable: true });
+    cards[1].dispatchEvent(local);
+    assert.deepEqual(opened, ["global", "beta"], "local dispatch runs the view action inside its surface");
     kb.setActiveContexts(new Set());
     spawn.unmount();
   } finally {

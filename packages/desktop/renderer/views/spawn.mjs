@@ -78,12 +78,7 @@ export function mount(el, ctx) {
     { id: "spawn.filter", defaultChord: "/", run: () => s.q("filter").focus() },
     { id: "spawn.brain", defaultChord: "B", run: () => brainOfFocusedCard(s) },
   ];
-  // Surface guard (review 0e63834): the engine window listener may dispatch
-  // these in the active stage:spawn context from ANY non-editable target —
-  // restrict execution to events originating inside this view.
   const viewRoot = el.querySelector(".souls");
-  const insideView = (e) => !e || !e.target || (viewRoot?.contains ? viewRoot.contains(e.target) : true);
-  const guarded = (fn) => (e) => { if (insideView(e)) fn(e); };
   viewRoot.addEventListener("keydown", (e) => {
     // Esc cancels the open spawn form from anywhere inside it (incl. the
     // task textarea — cancel is safe; submit stays click/button-only there).
@@ -94,9 +89,13 @@ export function mount(el, ctx) {
     const hit = resolveViewKey(e, s.viewActions);
     if (hit) { e.preventDefault(); s.viewActions.find((a) => a.id === hit)?.run(); }
   });
+  // Context "view:spawn" is never activated by the shell (review afd2114):
+  // editor-visible + conflict-checked, but window-dispatch-ineligible —
+  // matchEvent skips these before preventDefault, so outside keypresses
+  // are not swallowed and colliding globals still run; dispatch is local.
   s.disposers = [
-    registerAction({ id: "spawn.filter", label: "Soul roster: focus the filter", context: "stage:spawn", defaultChord: "/", run: guarded(() => s.q("filter").focus()) }),
-    registerAction({ id: "spawn.brain", label: "Soul roster: open Brain of focused card", context: "stage:spawn", defaultChord: "B", run: guarded(() => brainOfFocusedCard(s)) }),
+    registerAction({ id: "spawn.filter", label: "Soul roster: focus the filter", context: "view:spawn", defaultChord: "/", run: () => s.q("filter").focus() }),
+    registerAction({ id: "spawn.brain", label: "Soul roster: open Brain of focused card", context: "view:spawn", defaultChord: "B", run: () => brainOfFocusedCard(s) }),
   ];
   // CLI degradation: refresh once on mount and re-render the grid whenever
   // availability flips — spawn buttons disable consistently with the card.
