@@ -24,6 +24,25 @@ decisions/ and referenced from here.
 
 ---
 
+## PR #33 (round 1) — Desktop Shift+Enter send leak and terminal copy selection (2026-07-25)
+- verdict: RETURNED at exact head `605607a` for mergeability only. Product
+  direction, correctness, and security PASS. Fresh scratch gate passed 382
+  tests (381 pass, one intentional node-pty ABI skip), check/check:pi,
+  validate/strict OKF/pack/smoke; human live verification passed; all four
+  exact-head PR/installer checks are green. Mergeability FAIL: the branch is
+  based on `d3b0e69` and does not contain current main `41272b6`, missing seven
+  PR #32/main commits. Both sides changed `packages/desktop/renderer/shell.mjs`;
+  GitHub currently auto-merges it cleanly, but the author must merge current
+  main, preserve both changes, rerun the full gate, and return a settled green
+  exact head.
+- owner: oas-desktop-engineer-session-copy-newline · coordinator:
+  dev-coordinator-parallel-2
+- taught us: xterm's custom key callback spans keydown, keypress, and keyup; a
+  modifier override that suppresses only keydown can still leak a default
+  keypress byte. Behavioral regressions must drive the whole physical chord,
+  not just the first DOM event. The pending next patch should combine this fix
+  with PR #32's already-landed correction; immutable v0.18.4 stays untouched.
+
 ## PR #32 — remove the out-of-scope Desktop Instances stage (2026-07-25)
 - verdict: MERGED as merge commit `97f66c9` at exact head `69641c9` after one
   RETURN. Direction and security passed throughout. Round 1 returned because a
@@ -41,8 +60,10 @@ decisions/ and referenced from here.
 - taught us: a surface-removal inventory must cover user-visible fallback and
   recovery copy, not only imports, nav entries, modules, and CSS. A broad
   “operation failed truthfully” assertion can stay green while directing users
-  to a destination the same PR deleted. Corrective source is on main but needs
-  a new patch release; v0.18.4 artifacts remain immutable.
+  to a destination the same PR deleted. See [Surface removal inventories must
+  include user-facing recovery copy](/lessons/surface-removal-inventory-user-guidance.md).
+  Corrective source is on main but needs a new patch release; v0.18.4 artifacts
+  remain immutable.
 
 ## PR #31 — v0.18.4 manifest bump rescue (2026-07-25)
 - verdict: MERGED as squash commit `fda7498`. The tag-driven v0.18.4 release

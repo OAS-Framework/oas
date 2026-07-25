@@ -1,6 +1,8 @@
 # Knowledge Log
 
 ## 2026-07-25
+* **Update**: skills/pr-review — added the surface-removal inventory gotcha: user-visible fallback and recovery copy must move with a removed UI surface, and tests should pin the replacement destination instead of only asserting generic failure.
+* **Creation**: [Surface removal inventories must include user-facing recovery copy](/lessons/surface-removal-inventory-user-guidance.md) — removing a UI surface requires finding user-visible fallback and recovery copy, not only imports, navigation entries, modules, and CSS.
 * **Update**: [Repo state](/stewardship/repo-state.md) records the post-publication human finding that PR #29's added Instances navigation/sidebar was out of scope and v0.18.4 now requires an immutable-version corrective patch.
 * **Update**: [Repo state](/stewardship/repo-state.md) records the v0.18.4 Desktop UX release, published package/installer verification, clean deployment probe, and PR #31 manifest-bump rescue; the [delivery log](/stewardship/delivery-log.md) records PR #31's terminal outcome.
 
