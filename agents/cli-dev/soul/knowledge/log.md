@@ -1,6 +1,9 @@
 # Knowledge Log
 
 ## 2026-07-25
+* **Creation**: [relation-policy-migration-and-retire-splice](/lessons/relation-policy-migration-and-retire-splice.md) records that relation policy changes must migrate all agent-facing spawn recipes and define retire-time repair for mutated lineage.
+* **Update**: [spawn-relations-lineage-fields](/architecture/spawn-relations-lineage-fields.md) records retireInstance splice repair and its `relinked[]` reporting for links pointing at a retiree.
+* **Update**: [spawn-lineage-explicit-only](/decisions/spawn-lineage-explicit-only.md) broadens the recipe migration rule from spawn semantics to relation policy changes.
 * **Update**: [test-conventions](/playbooks/test-conventions.md) records that CLI-layer regressions need CLI-surface tests, and that briefly reintroducing the original bug can prove the test has teeth.
 * **Creation**: [kernel-validation-before-side-effects](/lessons/kernel-validation-before-side-effects.md) records that rejectable `spawnInstance` relation and anchor options must validate before mkdir/hooks, and that explicit unrelated must survive normalization until fallback handling.
 * **Update**: [spawn-relations-lineage-fields](/architecture/spawn-relations-lineage-fields.md) clarifies explicit unrelated normalization and kernel-side pre-scaffold anchor validation.

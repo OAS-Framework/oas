@@ -1,7 +1,7 @@
 ---
 type: Concept
 title: Spawn relations map to sparse lineage fields
-description: oas spawn relations use parentInstance for ordinary child and non-root sibling cases, siblingInstance only for root-sibling edges, and parent relation re-points the anchor through a slot-inheriting new parent.
+description: oas spawn relations use parentInstance for ordinary child and non-root sibling cases, siblingInstance only for root-sibling edges, parent relation re-points the anchor through a slot-inheriting new parent, and retireInstance splices links that point at a retiree.
 tags: [spawn, lineage, relations, kernel, cli]
 timestamp: 2026-07-25
 ---
@@ -31,6 +31,20 @@ sugar for the child relation.
   survive as an `explicitUnrelated`-style fact until defaults and fallbacks have
   run, so attached-mode auto-parenting does not treat explicit negation as an
   omitted relation.
+
+# Retirement repair
+
+Relations that write cross-instance links must specify what happens when either
+side retires. `retireInstance` splices a retiree out of the graph: instances
+whose `parentInstance` or `siblingInstance` names the retiree inherit the
+retiree's own links; if the retiree had no links they become roots, and dangling
+sibling links are dropped. The result includes `relinked[]` so callers can
+report which instances were repaired.
+
+This repair is required for parent relation: an ephemeral parent retiring should
+hand anchored instances back to the displaced parent instead of leaving
+`parentInstance` pointing at a missing instance. See the broader
+[relation-policy lesson](/lessons/relation-policy-migration-and-retire-splice.md).
 
 # Validation boundary
 

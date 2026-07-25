@@ -36,10 +36,10 @@ in the target deployment would create a dangling parent: target hierarchy
 surfaces cannot resolve instances outside their deployment. The correct
 top-level fallback avoids misattribution-shaped metadata.
 
-When changing spawn semantics again, migrate every agent-facing spawn recipe,
-not just kernel docs. Grep Markdown for `oas spawn` across soul skills,
-injections, and documentation so live agents do not keep following stale
-recipes.
+When changing spawn semantics or relation policy again, migrate every
+agent-facing spawn recipe in the same change, not just kernel docs. Grep
+Markdown for `oas spawn` across soul skills, injections, and documentation so
+live agents do not keep following stale recipes.
 
 # Why not "env only when alive"
 
