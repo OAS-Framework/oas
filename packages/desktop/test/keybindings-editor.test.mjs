@@ -98,6 +98,27 @@ test("conflict warning appears when a recorded chord collides", (t) => {
   editor.close();
 });
 
+test("recording a bare key shows the editable-field warning on the row", (t) => {
+  const { doc, editor } = setup(t);
+  editor.open();
+  const rowFor = (label) => [...doc.querySelectorAll(".kb-row")]
+    .find((r) => r.querySelector(".kb-label").textContent === label);
+  rowFor("Focus tree").querySelector(".kb-chord").click();
+  doc.dispatchEvent(key(doc, "b"));
+  assert.equal(getBinding("stage.hierarchy.focus"), "B");
+  assert.match(rowFor("Focus tree").querySelector(".kb-conflict").textContent,
+    /won’t fire while typing/, "bare-key binding warns about the editable-field guard");
+  // shift-only is still a bare key
+  rowFor("Focus tree").querySelector(".kb-chord").click();
+  doc.dispatchEvent(key(doc, "b", { shiftKey: true }));
+  assert.match(rowFor("Focus tree").querySelector(".kb-conflict").textContent, /won’t fire while typing/);
+  // a modified chord clears the warning
+  rowFor("Focus tree").querySelector(".kb-chord").click();
+  doc.dispatchEvent(key(doc, "b", { metaKey: true }));
+  assert.equal(rowFor("Focus tree").querySelector(".kb-conflict").textContent, "");
+  editor.close();
+});
+
 test("per-row reset and reset-all restore defaults", (t) => {
   const { doc, editor } = setup(t);
   setBinding("app.palette", "Mod+P");

@@ -9,7 +9,7 @@
 import {
   listActions, getBinding, setBinding, resetBinding, resetAllBindings,
   onKeymapChange, findConflict, formatChord, chordFromEvent, chordToString,
-  DEFAULT_KEYMAP,
+  isPlainChord, DEFAULT_KEYMAP,
 } from "./keybindings.mjs";
 
 const CONTEXT_LABELS = {
@@ -138,6 +138,11 @@ export function createKeybindingsEditor({ doc = document, isMac } = {}) {
       const conflictEl = el.querySelector(".kb-conflict");
       const existing = chordStr ? findConflict(chordStr, action.context, action.id, isMac) : null;
       if (existing) conflictEl.textContent = `Also bound to “${existing.label}”`;
+      else if (chordStr && isPlainChord(chordStr)) {
+        // review-mandated warning: bare-key bindings are suppressed while an
+        // editable field has focus (matchEvent's editable-field guard).
+        conflictEl.textContent = "Bare key — won’t fire while typing in a text field";
+      }
 
       chordBtn.addEventListener("click", () => startRecording(action, chordBtn, conflictEl));
       return el;

@@ -292,6 +292,14 @@ function resolveForCompare(chord, isMac) {
   return { ...chord, mod: chord.mod || chord.ctrl, ctrl: false };
 }
 
+/** True for a chord with no ctrl/alt/mod modifiers (shift-only counts as
+ * plain — typing produces shifted characters). Such bindings are guarded off
+ * editable fields by matchEvent; the editor warns when recording one. */
+export function isPlainChord(chord) {
+  const c = typeof chord === "string" ? parseChord(chord) : chord;
+  return !!c && !c.mod && !c.ctrl && !c.alt;
+}
+
 // ---------------------------------------------------------------- dispatch
 
 /** Match a keydown to an eligible action id, or null. Honors context scoping
@@ -308,7 +316,7 @@ export function matchEvent(e, opts = {}) {
   // Unmodified (or shift-only) chords belong to editable fields when one has
   // focus — a plain "b" binding must not fire while typing (addendum b).
   const editable = opts.editableTarget ?? isEditableTarget(e.target);
-  const plainKey = !evChord.mod && !evChord.ctrl && !evChord.alt;
+  const plainKey = isPlainChord(evChord);
   if (plainKey && editable) return null;
 
   let globalHit = null;
