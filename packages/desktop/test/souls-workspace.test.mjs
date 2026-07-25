@@ -472,7 +472,9 @@ test("Spawn modal: pre-relations CLI shows relation controls DISABLED with the r
     doc.querySelector(".spawn-act").click();
     const rel = doc.querySelector(".spawn-dialog .frelation");
     assert.ok(rel, "relation selector still RENDERED on a pre-relations CLI");
-    assert.equal(rel.disabled, true, "…but disabled");
+    assert.equal(rel.disabled, false, "…select stays usable — 'unrelated' is the recovery path");
+    const disabledOpts = [...rel.querySelectorAll("option")].filter((o) => o.disabled).map((o) => o.value).sort();
+    assert.deepEqual(disabledOpts, ["child", "parent", "sibling"], "related options disabled, unrelated selectable");
     assert.ok(doc.querySelector(".spawn-dialog .frelto"), "reference picker still rendered");
     const note = doc.querySelector(".spawn-dialog .frelnote");
     assert.ok(note, "explanatory note present");
@@ -576,7 +578,7 @@ test("Spawn modal tracks CLI capability LIVE: relations flip disables/enables co
       if (opts.method === "POST") { posts.push(JSON.parse(opts.body)); return Promise.resolve({ ok: true, status: 200, json: async () => ({ instance: "x" }) }); }
       return Promise.resolve({ ok: true, status: 200, json: async () => pathname.startsWith("/api/agents")
         ? { agents: [agent] }
-        : { instances: [{ instance: "coord-1", running: true }], workspace: { id: "w" }, workspaces: [] } });
+        : { instances: [{ instance: "coord-1", running: true }, { instance: "x" }], workspace: { id: "w" }, workspaces: [] } });
     },
     openTerminal: () => {},
   };
@@ -596,7 +598,11 @@ test("Spawn modal tracks CLI capability LIVE: relations flip disables/enables co
     ref.value = "coord-1";
     // DOWNGRADE lands while the modal is open (app-focus re-probe)
     await seed(false);
-    assert.equal(rel.disabled, true, "downgrade disables the relation selector in the OPEN modal");
+    assert.equal(rel.disabled, false, "select stays usable after downgrade — recovery via 'unrelated'");
+    assert.ok([...rel.querySelectorAll("option")].filter((o) => o.value !== "unrelated").every((o) => o.disabled),
+      "related options disabled in the OPEN modal");
+    assert.equal([...rel.querySelectorAll("option")].find((o) => o.value === "unrelated").disabled, false,
+      "'unrelated' stays enabled — the advertised recovery is actually available");
     assert.equal(ref.disabled, true, "downgrade disables the reference picker");
     const note = doc.querySelector(".frelnote");
     assert.equal(note.hidden, false, "version note appears live");
@@ -612,18 +618,40 @@ test("Spawn modal tracks CLI capability LIVE: relations flip disables/enables co
       "form explains the failure and the way out");
     assert.equal(doc.querySelector(".ftask").value, "typed task text", "typed task still preserved after the blocked submit");
     assert.equal(rel.value, "child", "relation choice still preserved");
-    // UPGRADE flips it back: controls re-enable, note clears, values intact
+    // no-reference downgrade: capability error must precede the pairing
+    // error (never advise picking a DISABLED reference — review 8b26317)
+    ref.value = "";
+    doc.querySelector(".fspawn").click();
+    await tick(); await tick();
+    assert.equal(posts.length, 0, "still no POST");
+    assert.match(doc.querySelector(".fstatus").textContent, /cannot spawn related instances/,
+      "capability failure reported, not the pairing failure against a disabled picker");
+    // the advertised recovery WORKS: switch to unrelated and spawn on the old CLI
+    rel.value = "unrelated";
+    rel.dispatchEvent(new dom.window.Event("change"));
+    doc.querySelector(".fspawn").click();
+    await tick(); await tick(); await tick();
+    assert.equal(posts.length, 1, "unrelated spawn dispatches on the relations-incapable CLI");
+    assert.equal(posts[0].relation, undefined, "no relation on the wire");
+    assert.equal(posts[0].task, "typed task text", "the preserved task spawns");
+    // restore the related choice for the upgrade leg
     await seed(true);
+    rel.value = "child";
+    rel.dispatchEvent(new dom.window.Event("change"));
+    ref.value = "coord-1";
+    await seed(false); await seed(true);
+    // UPGRADE flips it back: controls re-enable, note clears, values intact
     assert.equal(rel.disabled, false, "upgrade re-enables the selector");
+    assert.ok([...rel.querySelectorAll("option")].every((o) => !o.disabled), "all options re-enabled");
     assert.equal(ref.disabled, false, "picker re-enables (a real relation is selected)");
     assert.equal(doc.querySelector(".frelnote").hidden, true, "note clears");
     assert.equal(ref.value, "coord-1", "picked reference preserved");
     // after the upgrade the same retained values DO dispatch
     doc.querySelector(".fspawn").click();
     await tick(); await tick(); await tick();
-    assert.equal(posts.length, 1, "upgrade lets the preserved related spawn through");
-    assert.equal(posts[0].relation, "child");
-    assert.equal(posts[0].relativeTo, "coord-1");
+    assert.equal(posts.length, 2, "upgrade lets the related spawn through");
+    assert.equal(posts[1].relation, "child");
+    assert.equal(posts[1].relativeTo, "coord-1");
   } finally {
     spawn.unmount();
     await seedCliAvailable(); // restore shared CLI state for later suites

@@ -326,16 +326,22 @@ function openSpawnModal(s, a) {
   // open AND on every CLI change while the modal is open (review 5526b70):
   // capability can flip under an open dialog (app-focus re-probe after a
   // CLI up/downgrade). Only disabled/note state changes — typed and chosen
-  // values are preserved (a selected relation re-enables after an upgrade;
-  // a downgrade disables the controls but keeps the user's choice visible).
+  // values are preserved (a selected relation stays visible after a
+  // downgrade; an upgrade re-enables everything with values intact).
+  // The SELECT itself stays enabled on an incapable CLI with only the
+  // RELATED options disabled (review 8b26317): "unrelated" must remain a
+  // reachable recovery so the typed task can still spawn on the old CLI.
   const syncRelationControls = () => {
     const relations = cliRelationsAvailable();
     const rel = f.querySelector(".frelation"), ref = f.querySelector(".frelto");
     const note = f.querySelector(".frelnote");
-    rel.disabled = !relations;
+    rel.disabled = false; // the select stays usable — gating is per-OPTION
+    for (const opt of rel.querySelectorAll("option")) {
+      if (opt.value !== "unrelated") opt.disabled = !relations;
+    }
     ref.disabled = !relations || rel.value === "unrelated";
     note.hidden = relations;
-    note.textContent = relations ? "" : `Relations require oas >= ${relationsMinLabel()} — the installed CLI spawns unrelated instances only.`;
+    note.textContent = relations ? "" : `Relations require oas >= ${relationsMinLabel()} — the installed CLI spawns unrelated instances only. Set the relation to "unrelated" to spawn now.`;
   };
   s.syncModalRelations = syncRelationControls;
   syncRelationControls();
@@ -442,25 +448,26 @@ export async function doSpawn(s, ui) {
   const myGen = workspaceGeneration();       // capture at dispatch
   const myOp = ++s.spawnOp;                  // this spawn owns the form until superseded
   const owns = () => myOp === s.spawnOp && s.alive !== false;
-  // Relation pairing is validated BEFORE dispatch: a chosen relation needs a
-  // reference instance (the server would 409 anyway — fail it in the form).
   const relation = ui.relation ? String(ui.relation() || "unrelated") : "unrelated";
   const relativeTo = ui.relativeTo ? String(ui.relativeTo() || "") : "";
+  // Submit-time capability guard FIRST (reviews f35c1dc + 8b26317): a
+  // downgrade while the modal was open preserves the chosen relation, and
+  // doSpawn reads values programmatically — without this check the retained
+  // related spawn would dispatch into the server's cli-no-relations
+  // rejection. Capability precedes pairing so a no-reference downgrade
+  // never advises picking a DISABLED reference. Recovery is real: the
+  // relation select keeps "unrelated" enabled (related options disabled),
+  // so the typed task can still spawn on the old CLI.
+  if (relation !== "unrelated" && !cliRelationsAvailable()) {
+    ui.status.classList?.add("err");
+    ui.status.textContent = `Spawn failed: the installed oas CLI cannot spawn related instances — set the relation to "unrelated" to spawn now, or upgrade the CLI.`;
+    return;
+  }
+  // Relation pairing is validated BEFORE dispatch: a chosen relation needs a
+  // reference instance (the server would 409 anyway — fail it in the form).
   if (relation !== "unrelated" && !relativeTo) {
     ui.status.classList?.add("err");
     ui.status.textContent = `Spawn failed: the "${relation}" relation needs a reference instance.`;
-    return;
-  }
-  // Submit-time capability guard (review f35c1dc): a downgrade while the
-  // modal was open disables the relation CONTROLS but preserves their
-  // values — doSpawn reads them programmatically, so without this check the
-  // retained related spawn would dispatch and bounce off the server's
-  // cli-no-relations rejection. Fail in the form, keep every field: the
-  // user can switch the relation to "unrelated" to spawn with the old CLI,
-  // or upgrade and submit unchanged.
-  if (relation !== "unrelated" && !cliRelationsAvailable()) {
-    ui.status.classList?.add("err");
-    ui.status.textContent = `Spawn failed: the installed oas CLI cannot spawn related instances — set the relation to "unrelated" or upgrade the CLI.`;
     return;
   }
   ui.btn.disabled = true; ui.btn.textContent = "Spawning…";
