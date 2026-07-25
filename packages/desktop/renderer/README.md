@@ -29,7 +29,10 @@ light, WCAG AA); views style themselves against tokens only, scoped under
 ## Keybindings (shell-level)
 
 - **keybindings.mjs** — the keymap engine: action registry
-  (`registerAction`/`setActiveContexts`), `DEFAULT_KEYMAP`, user overrides
+  (`registerAction`/`setActiveContexts`; a registration may carry a
+  `defaultChord` that folds into the effective keymap like a
+  `DEFAULT_KEYMAP` entry — override wins, explicit unbind kills it),
+  `DEFAULT_KEYMAP`, user overrides
   persisted under `localStorage["oas-desktop-keymap"]`, chord
   parse/format/match, and dispatch (`matchEvent`/`handleKeydown`). The engine
   skips already-consumed (`defaultPrevented`) events, and unmodified/

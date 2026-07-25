@@ -1,7 +1,7 @@
 ---
 type: Lesson
 title: Real keybindings engine integration keeps defaults engine-owned
-description: When keybindings-core replaced the wiring stub, wiring had to adopt DEFAULT_KEYMAP action ids, leave view-local actions unbound, guard defaultPrevented at the shell listener, and accept the action-id terminal allowlist where Ctrl+K opens the palette in xterm.
+description: When keybindings-core replaced the wiring stub, wiring had to adopt DEFAULT_KEYMAP action ids, keep dynamic view defaults on registrations, guard defaultPrevented at the shell listener, and accept the action-id terminal allowlist where Ctrl+K opens the palette in xterm.
 tags: [desktop, keybindings, merge, integration]
 timestamp: 2026-07-25
 ---
@@ -16,12 +16,13 @@ shape.
 - Wiring action ids must match the engine's `DEFAULT_KEYMAP` canon:
   `app.themeToggle`, `sidebar.focusFilter`, `terminal.font*`, and
   `app.shortcuts = Mod+,`.
-- Defaults live only in `DEFAULT_KEYMAP`; do not pass per-registration `chord:`
-  values as a second source of defaults.
-- View-local actions such as `hier.*` and `spawn.*` register unbound but
-  editor-visible. Keep their single-key dispatch view-scoped, because the engine
-  has no editable-field guard that would make unmodified single keys safe as
-  global defaults.
+- Shell-level app defaults live in `DEFAULT_KEYMAP`; dynamic view-local defaults
+  belong on `registerAction({ defaultChord })`, not in the static table and not
+  in a parallel view fallback resolver.
+- View-local actions such as `hier.*` and `spawn.*` register with their
+  `defaultChord` and stay editor-visible. Keep their single-key dispatch
+  view-scoped, because the engine has no editable-field guard that would make
+  unmodified single keys safe as global defaults.
 - The real engine's `handleKeydown` does not skip `defaultPrevented` events.
   The shell listener must guard `if (!e.defaultPrevented)` before calling it when
   a view-local handler has already claimed a key event.
@@ -35,5 +36,6 @@ shape.
 
 - [Keybindings wiring used a transitional stub engine with a frozen coordinator contract](/decisions/keybindings-stub-coordinator-contract.md)
 - [View-local shortcuts resolve chords through the engine keymap](/decisions/view-local-shortcuts-engine-keymap.md)
+- [Dynamic action registrations carry their own default chords](/lessons/dynamic-action-registration-default-chords.md)
 - [Window-level engine dispatch needs an editable-target guard](/lessons/window-engine-dispatch-editable-guard.md)
 - [Keybinding engine terminal allowlist is action-id based, not chord based](/lessons/keybindings-terminal-allowlist-by-action-id.md)
