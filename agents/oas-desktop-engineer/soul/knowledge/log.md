@@ -2,6 +2,9 @@
 
 ## 2026-07-25
 * **Creation**: promoted [Key dispatch engines own consumed-event and editable-field guards](/lessons/keybinding-dispatch-guards-in-engine.md) from the oas-desktop-engineer-keybindings-core notes.
+* **Creation**: promoted [Renderer entry modules can ship unparseable behind a green suite](/lessons/renderer-entry-syntax-green-tests.md) from the oas-desktop-engineer-keybindings-wiring notes.
+* **Creation**: promoted [View-local shortcuts resolve chords through the engine keymap](/decisions/view-local-shortcuts-engine-keymap.md) from the oas-desktop-engineer-keybindings-wiring notes.
+* **Update**: linked [Real keybindings engine integration keeps defaults engine-owned](/lessons/real-keybindings-engine-integration.md) to the view-local shortcut resolution decision.
 * **Creation**: promoted [Real keybindings engine integration keeps defaults engine-owned](/lessons/real-keybindings-engine-integration.md) from the oas-desktop-engineer-keybindings-wiring notes.
 * **Update**: marked [keybindings wiring used a transitional stub engine with a frozen coordinator contract](/decisions/keybindings-stub-coordinator-contract.md) as historical after the real-engine integration and linked [the terminal allowlist lesson](/lessons/keybindings-terminal-allowlist-by-action-id.md) to the integration lesson.
 * **Creation**: promoted [keybindings wiring uses a transitional stub engine with a frozen coordinator contract](/decisions/keybindings-stub-coordinator-contract.md) from the oas-desktop-engineer-keybindings-wiring notes.
