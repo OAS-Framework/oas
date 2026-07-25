@@ -1185,6 +1185,27 @@ test("retire splices lineage: orphans inherit the retiree's links (parent-relati
     retireInstance(root, rev2.instance, { keepDir: false });
     assert.equal(metaOf(solo.instance).parentInstance, undefined, "root anchor is a root again after its reviewer retires");
     // Sibling-link splice: root sibling link to a retiring instance is dropped.
+    // parent-relation anchor rewrite is committed only AFTER a successful
+    // launch: force a launch failure (PATH without tmux) and assert the
+    // anchor's lineage is untouched — no edge to a zombie spawn.
+    const rev4 = (() => {
+      const restore = process.env.PATH;
+      // pi/claude/git available, tmux NOT: which() must fail on tmux only.
+      const noTmux = join(base, "bin-notmux"); mkdirSync(noTmux, { recursive: true });
+      for (const t of ["pi", "claude"]) write(join(noTmux, t), "#!/bin/sh\nexit 0\n");
+      execFileSync("chmod", ["-R", "+x", noTmux]);
+      const gitPath = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+      symlinkSync(gitPath, join(noTmux, "git"));
+      process.env.PATH = noTmux;
+      try {
+        assert.throws(
+          () => spawnInstance(root, agentDef, { instance: "dev-rev4", relation: "parent", relativeTo: solo.instance, launch: true }),
+          /tmux not installed/,
+          "launch failure surfaces");
+      } finally { process.env.PATH = restore; }
+    })();
+    void rev4;
+    assert.equal(metaOf(solo.instance).parentInstance, undefined, "anchor NOT re-pointed by the failed launch");
     const peer = spawnInstance(root, agentDef, { instance: "dev-peer", relation: "sibling", relativeTo: solo.instance, launch: false });
     assert.equal(metaOf(peer.instance).siblingInstance, solo.instance);
     // Mixed edge types: reviewer R as parent over root-sibling peer absorbs
