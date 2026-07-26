@@ -108,15 +108,16 @@ capabilities:
 ```
 
 External packages must be acquired/locked before activation; executable
-commands/hooks need explicit trust:
+commands/hooks need explicit trust. **Load the `oas-packages` skill for the
+supply-chain operations** (install/update/remove, locks and restore, trust,
+requirements) — the config step here is only the activation:
 
 ```bash
-oas install <git-url> --dir /path/to/workspace
-oas trust vendor.code-review --dir /path/to/workspace
 oas use vendor.code-review --type developers --dir /path/to/workspace
 ```
 
-Acquisition never means activation and never silently updates a lock.
+Acquisition never means activation and never silently updates a lock. Never
+hand-edit `oas-lock.json` or installed stores — the CLI owns them.
 
 ## 5. Verify
 
@@ -144,5 +145,7 @@ instructions and materializes only kernel + soul + active capability skills in
 that instance. Do not put deployment-specific package prose into the soul.
 
 Create/spawn only when asked. Suggest a team shape, then let the user decide.
-For operations load the `oas` skill; for custom layer/package work use
-`integration-authoring`; for deep architecture or bugs use `oas-support`.
+For operations load the `oas` skill; for local deployment policy and profile
+adoption use `oas-config`; for package acquisition/locks/trust use
+`oas-packages`; for custom layer/package work use `integration-authoring`;
+for deep architecture or bugs use `oas-support`.
