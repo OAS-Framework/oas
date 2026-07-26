@@ -15,6 +15,8 @@ than letting the file grow stale.
 
 ## On main
 
+- **PR #41 merged 2026-07-26 as `c055614`** — Desktop terminal tabs now support bounded side-by-side and stacked split panes with existing tab identity/dedup, pane-level selection, adjacent-member close fallback, resize refits, editable shortcuts, and a pending-slot model kept in parity with the renderer. The sidebar is hideable with a persisted shortcut; non-mac `Ctrl+B` remains tmux-owned. Final exact head `2ff4792`; scratch gates, strict OKF for all 8 bundles, PR CI, and all three installer checks passed. Same-account approval was recorded as a comment; the remote feature branch is deleted, while local cleanup remains with the worktree at `/private/tmp/integrate-split-panels`. Not yet released.
+
 - **PR #40 merged 2026-07-26 as `3da7ce8`** — Desktop Quick Open for souls (`Mod+P`) and terminal focus on user-initiated jumps. Adds shared overlay-picker machinery, fixes the palette fuzzy scorer's negative-prefix no-match bug, routes soul selection through Spawn's consumed-once `preselectSoul()` handoff, keeps `Ctrl+P` in Linux/Windows terminals shell-owned, and makes terminal content focus explicit via `activateTab(id, { focusContent })` plus a chordless `terminal.focusActive` action. Final exact head `9d00985`; scratch gates, strict OKF for all 8 bundles, PR CI, and all three installer verify jobs passed. Same-account approval was recorded as a comment; the remote feature branch is deleted. Not yet released.
 
 - **RELEASED v0.18.6 (2026-07-26)** — tag `v0.18.6` on release-notes/stewardship commit `0dd7878`, containing PR #38 agent relations and PR #35 editable keybindings. Published `@oas-framework/oas@0.18.6` + `@oas-framework/pi@0.18.6` and GitHub Release v0.18.6 with all six Desktop installers, SHA256SUMS.txt, and build provenance. Release run `30198186842` passed build/test and macOS arm64/x64 plus Linux x64 installer build+smoke; its only failure was the known org-policy block on Actions-created PRs after publication. Manifests were bumped through manual rescue PR #39 (`9fc7c0e`). The published kernel passed syntax checks and a clean create→root-qualified child relation spawn→metadata/layout inspect→retire probe; canonical soul content stayed unchanged.
@@ -161,10 +163,11 @@ than letting the file grow stale.
 
 ## In flight
 
-- (nothing currently recorded) — PR #40, PR #38, and the exact v0.18.6 release reached terminal outcomes.
+- (nothing currently recorded) — PR #41, PR #40, PR #38, and the exact v0.18.6 release reached terminal outcomes.
 
 ## Recent deliveries
 
+- PR #41 Desktop split panes + hideable sidebar: MERGED 2026-07-26 as `c055614`; exact head `2ff4792`, remote branch deleted (see delivery-log).
 - PR #40 Desktop Quick Open for souls + terminal focus on user jumps: MERGED
   2026-07-26 as `3da7ce8`; exact head `9d00985`, remote branch deleted
   (see delivery-log).
