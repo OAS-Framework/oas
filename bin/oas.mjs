@@ -468,7 +468,14 @@ function install() {
     // trusted at acquisition; third-party git/path installs need explicit `oas trust`.
     trustedExecutables: !!r.marketplace,
   };
-  const lockFile = writeCapabilityLock(dir, r.manifest.capability, lock);
+  let lockFile;
+  try { lockFile = writeCapabilityLock(dir, r.manifest.capability, lock); }
+  catch (e) {
+    // Refused lock write (e.g. legacy-lock: v2 scope rejects NEW residue) must
+    // not strand the acquired artifact — compensate before failing.
+    rmSync(r.dest, { recursive: true, force: true });
+    die(e.message);
+  }
   console.log(`Acquired ${r.manifest.capability} → ${shortPath(r.dest)}`);
   console.log(`Locked ${r.manifest.version || r.commit || "exact artifact"} (${r.integrity}) in ${shortPath(lockFile)}; not activated.`);
   if (r.marketplace) console.log("Marketplace package: executables trusted at acquisition.");
@@ -773,9 +780,11 @@ function init() {
     if (!manifest && market[selected]) {
       try {
         const r = acquireCapability(dir, selected);
-        writeCapabilityLock(dir, r.manifest.capability, {
-          source: r.source, version: r.manifest.version || null, integrity: r.integrity, trustedExecutables: true,
-        });
+        try {
+          writeCapabilityLock(dir, r.manifest.capability, {
+            source: r.source, version: r.manifest.version || null, integrity: r.integrity, trustedExecutables: true,
+          });
+        } catch (e) { rmSync(r.dest, { recursive: true, force: true }); throw e; }
         console.log(`Acquired ${r.manifest.capability}@${r.manifest.version} from the marketplace → ${shortPath(r.dest)}`);
         // Discovery needs the config file (written below); trust the acquisition result here.
         manifest = { ...r.manifest, _origin: `installed:${dir}` };
