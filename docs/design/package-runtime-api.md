@@ -194,3 +194,24 @@ Semantics:
 - Per-capability npm closures (§2) degenerate to the package root: a root
   `package.json` + `package-lock.json` pair is the capability's closure (it is
   detected once, not twice).
+
+## 6. Legacy residue in v2 locks (pending maintainer ruling; default = retain)
+
+A `lockfileVersion: 2` file MAY carry an optional legacy `capabilities` map —
+v1 entries `oas migrate` could not yet map to packages (typically marketplace
+capabilities whose official package is unpublished during the interim).
+Rules:
+
+- Only the explicit migration command flips a lock to v2; residue is created
+  there and only there. `writePackageLock` still refuses pure-v1 files
+  (`legacy-lock`); `writeCapabilityLock` may update residue entries without
+  downgrading the version.
+- Legacy restore/trust semantics keep working for residue entries unchanged.
+- **Doctor flags residue** as pending migration at every scope that has it
+  (NOTE line naming the capabilities), so the state is visible until the
+  official packages publish and a re-run of `oas migrate` clears it.
+- If the maintainer rules STRICT instead: the residue branch is dropped from
+  `docs/oas-lock.schema.json` (the optional `capabilities` property on the v2
+  branch), `applyLegacyLockMigration` refuses to flip a scope while any entry
+  is unmappable, and this section is replaced accordingly. The delta is
+  isolated to those three places.
