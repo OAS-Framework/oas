@@ -244,3 +244,76 @@ test("preselectSoul for a soul not in this workspace's roster is a silent no-op"
   spawn.preselectSoul({ name: "not-here" });
   assert.equal(doc.querySelector(".spawn-dialog"), null);
 });
+
+test("preselect during a workspace switch is not consumed against the stale roster (review 6d5e183)", async (t) => {
+  const dom = new JSDOM("<!doctype html><body><div id=host></div>", { url: "http://localhost" });
+  const oldDoc = globalThis.document, oldWin = globalThis.window;
+  globalThis.document = dom.window.document;
+  globalThis.window = dom.window;
+  const common = await import("../renderer/views/common.mjs");
+  const cliStatus = await import("../renderer/views/cli-status.mjs");
+  const spawn = await import("../renderer/views/spawn.mjs");
+  await cliStatus.refreshCli({ api: async () => ({ ok: true, status: 200, json: async () => CLI_OK }) });
+  let releaseB; // workspace B's agents fetch hangs until released
+  const ctx = {
+    api: async (pathname) => {
+      if (pathname.startsWith("/api/cli")) return { ok: true, status: 200, json: async () => CLI_OK };
+      const ws = pathname.includes("ws=wsB") ? "wsB" : "wsA";
+      if (pathname.startsWith("/api/agents")) {
+        if (ws === "wsB") return { ok: true, status: 200, json: () => new Promise((ok) => { releaseB = () => ok({ agents: [{ name: "b-soul", work: "worktree", agentsRoot: "/b" }] }); }) };
+        return { ok: true, status: 200, json: async () => ({ agents: [{ name: "a-soul", work: "worktree", agentsRoot: "/a" }, { name: "b-soul", work: "attached", agentsRoot: "/a" }] }) };
+      }
+      if (pathname.startsWith("/api/panel")) return { ok: true, status: 200, json: async () => ({ instances: [], workspace: { id: ws }, workspaces: [{ id: "wsA", name: "A" }, { id: "wsB", name: "B" }] }) };
+      throw new Error(`unexpected ${pathname}`);
+    },
+    openTerminal: () => {},
+  };
+  const prevWs = common.currentWorkspace();
+  t.after(() => {
+    spawn.unmount();
+    common.setWorkspace(prevWs || "");
+    globalThis.document = oldDoc; globalThis.window = oldWin;
+    dom.window.close();
+  });
+  common.setWorkspace("wsA");
+  spawn.mount(dom.window.document.getElementById("host"), ctx);
+  await tick(); await tick();
+  assert.match(dom.window.document.body.textContent, /a-soul/, "wsA roster painted");
+  // switch to B; B's roster fetch hangs — s.souls still holds wsA's agents
+  common.setWorkspace("wsB");
+  await tick(); // let the switch's refresh reach the hanging wsB agents fetch
+  assert.ok(releaseB, "wsB roster fetch is hanging");
+  // Quick Open (in wsB) picks b-soul — same NAME exists in wsA's stale
+  // roster as an attached soul: consuming against the stale roster would
+  // focus the WRONG (wsA) card and lose the preselect for wsB's spawnable one
+  spawn.preselectSoul({ name: "b-soul", agentsRoot: "/b" });
+  assert.equal(dom.window.document.querySelector(".spawn-dialog"), null, "not consumed against the stale roster");
+  releaseB();
+  await tick(); await tick();
+  const dialog = dom.window.document.querySelector(".spawn-dialog");
+  assert.ok(dialog, "preselect consumed by wsB's own roster paint");
+  assert.match(dialog.textContent, /Spawn b-soul/);
+});
+
+test("preselect of an attached soul hidden by an active filter clears the filter and focuses the card", async (t) => {
+  const { dom, doc, spawn } = await mountSpawn(t);
+  const filter = doc.querySelector(".filter");
+  filter.value = "ux"; // excludes "reviewer"
+  filter.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+  assert.equal([...doc.querySelectorAll(".soul-card")].some((c) => c.dataset.agent === "reviewer"), false, "filter hides the card");
+  spawn.preselectSoul({ name: "reviewer", agentsRoot: "/r1" });
+  assert.equal(doc.querySelector(".spawn-dialog"), null, "attached soul never opens a modal");
+  assert.equal(filter.value, "", "filter cleared to reveal the card");
+  assert.equal(doc.activeElement?.dataset?.agent, "reviewer", "revealed card focused");
+});
+
+test("preselect with the CLI unavailable and a hiding filter reveals + focuses the card", async (t) => {
+  const { dom, doc, spawn } = await mountSpawn(t, { cliOk: false });
+  const filter = doc.querySelector(".filter");
+  filter.value = "reviewer"; // excludes "ux-designer"
+  filter.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+  spawn.preselectSoul({ name: "ux-designer" });
+  assert.equal(doc.querySelector(".spawn-dialog"), null, "no modal without a verified CLI");
+  assert.equal(filter.value, "", "filter cleared");
+  assert.equal(doc.activeElement?.dataset?.agent, "ux-designer");
+});

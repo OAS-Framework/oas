@@ -85,17 +85,29 @@ let state = null;
    opens the SPAWN MODAL directly, anything else (attached-only, CLI
    pending/unavailable, name not in this workspace's roster) just focuses
    the soul's card so the card itself explains the state. Consumed-once:
-   a stale preselect must never pop a modal minutes later. */
+   a stale preselect must never pop a modal minutes later. The pending value
+   carries the workspace generation it was minted under: a preselect from a
+   NEWER workspace must not be consumed against a stale still-painted roster
+   (refresh stamps s.rosterGen when its paint commits), and a preselect that
+   predates a workspace switch is dropped, not applied. */
 let pendingPreselect = null;
 
 export function preselectSoul(ref) {
-  pendingPreselect = ref && ref.name ? { name: String(ref.name), agentsRoot: ref.agentsRoot } : null;
+  pendingPreselect = ref && ref.name
+    ? { name: String(ref.name), agentsRoot: ref.agentsRoot, gen: workspaceGeneration() }
+    : null;
   // already mounted with a loaded roster: apply on the spot
   if (state && state.alive && state.souls.agents.length) applyPreselect(state);
 }
 
 function applyPreselect(s) {
   if (!pendingPreselect) return;
+  // stale preselect: the workspace switched after Quick Open picked — drop
+  if (pendingPreselect.gen !== workspaceGeneration()) { pendingPreselect = null; return; }
+  // stale roster: s.souls still holds a previous workspace's agents while
+  // the current refresh is pending — do NOT consume; the refresh that
+  // paints the current workspace's roster calls back here (review 6d5e183)
+  if (s.rosterGen !== workspaceGeneration()) return;
   const ref = pendingPreselect;
   pendingPreselect = null; // consumed-once, match or not
   const a = s.souls.agents.find((x) => x.name === ref.name
@@ -103,15 +115,26 @@ function applyPreselect(s) {
   if (!a) return;
   if (a.work !== "attached" && cliAvailable()) { openSpawnModal(s, a); return; }
   // degraded / attached: focus the card — its disabled button + tooltip
-  // (and the degradation card above the grid) carry the explanation
-  const card = [...(s.q("souls-grid").querySelectorAll?.("[data-agent]") || [])]
+  // (and the degradation card above the grid) carry the explanation. An
+  // active filter may exclude the selected soul's card: reveal it by
+  // clearing the filter before focusing (review 6d5e183 — a consumed
+  // preselect must never be a silent no-op for a soul that exists).
+  let card = [...(s.q("souls-grid").querySelectorAll?.("[data-agent]") || [])]
     .find((c) => c.dataset.agent === a.name);
+  if (!card && s.filterText) {
+    s.filterText = "";
+    const filterEl = s.q("filter");
+    if (filterEl) filterEl.value = "";
+    renderGrid(s);
+    card = [...(s.q("souls-grid").querySelectorAll?.("[data-agent]") || [])]
+      .find((c) => c.dataset.agent === a.name);
+  }
   if (card) { card.tabIndex = 0; card.focus?.({ preventScroll: true }); }
 }
 
 export function mount(el, ctx) {
   ensureTheme(el.ownerDocument);
-  const s = state = { el, ctx, souls: { agents: [] }, panelInstances: [], filterText: "", sel: null, timers: [], unsubWs: null, alive: true, spawnOp: 0 };
+  const s = state = { el, ctx, souls: { agents: [] }, panelInstances: [], filterText: "", sel: null, timers: [], unsubWs: null, alive: true, spawnOp: 0, rosterGen: null };
   el.innerHTML = `
     <div class="oas-view" style="display:block">
       <style>${CSS}</style>
@@ -219,6 +242,7 @@ export async function refresh(s) {
   // agent list over B's after a switch
   if (!s.alive || myGen !== workspaceGeneration()) return;
   s.souls = souls;
+  s.rosterGen = myGen; // this roster belongs to the current workspace generation
   s.panelInstances = panel.instances || []; // reference-instance picker source
   renderWorkspaceSelect(s.q("wssel"), panel.workspaces, panel.workspace?.id || "");
   renderGrid(s);
