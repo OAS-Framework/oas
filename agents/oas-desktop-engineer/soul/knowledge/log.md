@@ -1,6 +1,7 @@
 # Knowledge Log
 
 ## 2026-07-26
+* **Update**: merged the split-strip alignment correction into [Split tab-strip alignment moves real tab elements into per-pane groups](/lessons/split-tab-strip-real-tab-groups.md): the pane-group flex track must be a dedicated full-width row containing only one flex child per pane, with controls and non-member tabs outside so they cannot skew alignment.
 * **Creation**: promoted [Split tab-strip alignment moves real tab elements into per-pane groups](/lessons/split-tab-strip-real-tab-groups.md) from the oas-desktop-engineer-split-ui notes.
 * **Creation**: promoted [Mouse affordances dispatch registered actions through a context-gated runAction](/lessons/run-action-context-gated-buttons.md) from the oas-desktop-engineer-split-ui notes.
 * **Creation**: promoted [Maintainer handback loops race the maintainer's own stewardship commits](/lessons/maintainer-handback-stewardship-race.md) from the oas-desktop-engineer-spawn-modal-fix notes.
