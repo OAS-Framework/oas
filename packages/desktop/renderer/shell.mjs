@@ -14,6 +14,7 @@ import {
   terminalTypography, setTerminalFontSize, setTerminalFontFamily, onTerminalTypographyChange,
 } from "./theme.mjs";
 import { createPalette } from "./palette.mjs";
+import { createQuickOpen } from "./quick-open.mjs";
 import {
   registerAction, setActiveContexts, getBinding, onKeymapChange, formatChord, handleKeydown, matchEvent,
 } from "./keybindings.mjs";
@@ -723,6 +724,7 @@ const palette = createPalette({
     // View commands derive from the nav manifest so a new rail destination
     // can never be palette-invisible (review 8441961 nit).
     ...NAV.map((v) => ({ label: `View: ${v.label}`, detail: chordDetail(`stage.${v.name}`), run: () => showStage(v.name) })),
+    { label: "Souls: quick open…", detail: chordDetail("app.quickOpenSouls"), run: () => quickOpen.open() },
     { label: "Theme: toggle light/dark", detail: chordDetail("app.themeToggle"), run: () => toggleTheme() },
     { label: "Shortcuts: edit keyboard shortcuts…", detail: chordDetail("app.shortcuts"), run: () => openShortcutsEditor() },
     { label: "Workspace: switch…", detail: chordDetail("app.workspaces"), run: () => workspaceLabel.openMenu() },
@@ -736,6 +738,25 @@ const palette = createPalette({
     } },
     { label: "Terminal: reset typography", detail: chordDetail("terminal.fontReset"), run: () => { setTerminalFontFamily(""); setTerminalFontSize(13); } },
   ],
+});
+
+// ── Quick Open for souls (Mod+P): find a soul, land in its spawn form ──
+// Selection hands off to the Spawn view's OWN form flow (preselectSoul —
+// consumed by the view's next roster paint), so CLI degradation and the
+// attached-only rule render exactly as the Spawn view always renders them.
+// Terminal policy (documented): app.quickOpenSouls is NOT terminal-
+// allowlisted — ⌘P fires inside xterm on macOS by the ⌘-chord policy, but
+// Ctrl+P inside xterm on Linux/Windows belongs to the shell's history.
+const quickOpen = createQuickOpen({
+  loadSouls: async () => {
+    const ws = currentWorkspace();
+    return api(`/api/agents${ws ? `?ws=${encodeURIComponent(ws)}` : ""}`);
+  },
+  onPick: async (soul) => {
+    const { preselectSoul } = await import("./views/spawn.mjs");
+    preselectSoul(soul);
+    showStage("spawn");
+  },
 });
 
 // ── shortcuts editor (rail-footer button + palette + Mod+,) ────────────
@@ -762,6 +783,7 @@ function cycleTab(delta) {
 // Default chords live in the engine's DEFAULT_KEYMAP (keybindings.mjs);
 // user overrides persist in localStorage via the shortcuts editor.
 registerAction({ id: "app.palette", label: "Open the command palette", context: "global", run: () => palette.toggle() });
+registerAction({ id: "app.quickOpenSouls", label: "Quick open a soul to spawn", context: "global", run: () => quickOpen.toggle() });
 registerAction({ id: "app.shortcuts", label: "Edit keyboard shortcuts", context: "global", run: () => openShortcutsEditor() });
 // stage-switch actions derive from the nav manifest (same rule as the
 // palette): a new rail destination can never be shortcut-invisible.

@@ -77,6 +77,38 @@ const CSS = `
 
 let state = null;
 
+/* ── Quick Open handoff (renderer/quick-open.mjs) ──────────────────
+   Selecting a soul in Quick Open must land the user IN this view's spawn
+   flow — the one form, with its CLI-degradation semantics intact. The
+   shell calls preselectSoul() before/around switching the stage; the next
+   successful roster paint consumes it: a spawnable soul on a verified CLI
+   opens the SPAWN MODAL directly, anything else (attached-only, CLI
+   pending/unavailable, name not in this workspace's roster) just focuses
+   the soul's card so the card itself explains the state. Consumed-once:
+   a stale preselect must never pop a modal minutes later. */
+let pendingPreselect = null;
+
+export function preselectSoul(ref) {
+  pendingPreselect = ref && ref.name ? { name: String(ref.name), agentsRoot: ref.agentsRoot } : null;
+  // already mounted with a loaded roster: apply on the spot
+  if (state && state.alive && state.souls.agents.length) applyPreselect(state);
+}
+
+function applyPreselect(s) {
+  if (!pendingPreselect) return;
+  const ref = pendingPreselect;
+  pendingPreselect = null; // consumed-once, match or not
+  const a = s.souls.agents.find((x) => x.name === ref.name
+    && (!ref.agentsRoot || !x.agentsRoot || x.agentsRoot === ref.agentsRoot));
+  if (!a) return;
+  if (a.work !== "attached" && cliAvailable()) { openSpawnModal(s, a); return; }
+  // degraded / attached: focus the card — its disabled button + tooltip
+  // (and the degradation card above the grid) carry the explanation
+  const card = [...(s.q("souls-grid").querySelectorAll?.("[data-agent]") || [])]
+    .find((c) => c.dataset.agent === a.name);
+  if (card) { card.tabIndex = 0; card.focus?.({ preventScroll: true }); }
+}
+
 export function mount(el, ctx) {
   ensureTheme(el.ownerDocument);
   const s = state = { el, ctx, souls: { agents: [] }, panelInstances: [], filterText: "", sel: null, timers: [], unsubWs: null, alive: true, spawnOp: 0 };
@@ -190,6 +222,7 @@ export async function refresh(s) {
   s.panelInstances = panel.instances || []; // reference-instance picker source
   renderWorkspaceSelect(s.q("wssel"), panel.workspaces, panel.workspace?.id || "");
   renderGrid(s);
+  applyPreselect(s); // Quick Open handoff — after the roster is painted
 }
 
 function matches(s, a) {

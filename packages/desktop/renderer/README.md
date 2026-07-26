@@ -41,7 +41,22 @@ light, WCAG AA); views style themselves against tokens only, scoped under
   policy: inside `.xterm`, on macOS only ⌘-resolved chords fire; on
   Linux/Windows only `TERMINAL_ALLOWLIST` action ids (palette, tab
   next/prev/close) may fire — all other Ctrl chords belong to the attached
-  program.
+  program. `app.quickOpenSouls` (Mod+P) is deliberately NOT allowlisted:
+  ⌘P fires inside xterm on macOS via the ⌘-chord policy, but Ctrl+P inside
+  xterm on Linux/Windows is the shell's history navigation and reaches the
+  pty.
+- **overlay-picker.mjs** — the shared overlay + fuzzy machinery behind the
+  command palette and Quick Open: one input over a listbox
+  (arrows/Enter/Esc, aria option pattern), the house subsequence scorer
+  (`subsequenceScore`; `null` = no match — prefix bonuses make real scores
+  negative), and the stale-load generation guard.
+- **quick-open.mjs** — Quick Open for souls (`Mod+P`, also “Souls: quick
+  open…” in the palette): fuzzy-find a soul from the Spawn view's data
+  source and hand off to the Spawn view's own form flow —
+  `views/spawn.mjs` `preselectSoul()` opens the spawn modal for a
+  spawnable soul on a verified CLI, and otherwise (attached-only, CLI
+  pending/unavailable) focuses the soul's card so the existing degradation
+  UI explains the state. No second spawn form exists.
 - **keybindings-editor.mjs** — the shortcuts editor dialog (`Mod+,`):
   actions grouped by context, click-to-record (Esc cancels, Backspace
   unbinds), conflict warnings via `findConflict`, per-row reset + reset-all.

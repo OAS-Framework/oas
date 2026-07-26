@@ -140,6 +140,7 @@ function isEditableTarget(target) {
 
 export const DEFAULT_KEYMAP = Object.freeze({
   "app.palette": "Mod+K",
+  "app.quickOpenSouls": "Mod+P",
   "app.shortcuts": "Mod+,",
   "app.themeToggle": "Mod+Shift+T",
   "stage.hierarchy": "Mod+1",
@@ -156,6 +157,9 @@ export const DEFAULT_KEYMAP = Object.freeze({
 // Action ids allowed to fire inside .xterm on Linux/Windows, where their
 // chords would otherwise belong to the attached program. Allowlisting by
 // action id (not chord) keeps the policy stable across user rebinds.
+// app.quickOpenSouls is deliberately ABSENT: Ctrl+P inside a terminal is
+// shell history navigation — it must reach the pty (⌘P on macOS still
+// fires inside xterm via the ⌘-chord policy above).
 export const TERMINAL_ALLOWLIST = Object.freeze([
   "app.palette", "tabs.next", "tabs.prev", "tabs.close",
 ]);
