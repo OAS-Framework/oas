@@ -25,9 +25,11 @@ function walk(dir, accept = () => true) {
 const ajv = new Ajv2020({ allErrors: true, strict: false, allowUnionTypes: true });
 const manifestSchemaPath = join(root, "docs", "capability-manifest.schema.json");
 const configSchemaPath = join(root, "docs", "oas-config.schema.json");
+const packageSchemaPath = join(root, "docs", "oas-package.schema.json");
+const lockSchemaPath = join(root, "docs", "oas-lock.schema.json");
 const manifestSchema = json(manifestSchemaPath);
 const configSchema = json(configSchemaPath);
-for (const [path, schema] of [[manifestSchemaPath, manifestSchema], [configSchemaPath, configSchema]]) {
+for (const [path, schema] of [[manifestSchemaPath, manifestSchema], [configSchemaPath, configSchema], [packageSchemaPath, json(packageSchemaPath)], [lockSchemaPath, json(lockSchemaPath)]]) {
   if (!ajv.validateSchema(schema)) fail(`${relative(root, path)} is not a valid JSON Schema: ${ajv.errorsText()}`);
 }
 const validateManifest = ajv.compile(manifestSchema);
@@ -109,4 +111,4 @@ if (failures.length) {
   console.error(`Project validation failed (${failures.length}):\n- ${failures.join("\n- ")}`);
   process.exit(1);
 }
-console.log(`Project validation passed: 2 schemas, ${manifests} clean-contract manifests, ${examples} config examples, ${links} local links across ${publicMarkdown.length} public Markdown files.`);
+console.log(`Project validation passed: 4 schemas, ${manifests} clean-contract manifests, ${examples} config examples, ${links} local links across ${publicMarkdown.length} public Markdown files.`);

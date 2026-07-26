@@ -174,7 +174,57 @@ Doctor reports active/acquired packages, target provenance, settings, skills,
 hooks, trust, instruction sources, and final composed text. It cannot infer
 semantic contradictions between two prose injections; review the output.
 
-## Acquisition, lock, restore, and trust
+## Distribution packages
+
+A **distribution package** is the install/update/review unit above
+capabilities: one Git repository (or local directory) with an
+`oas-package.json` root manifest that explicitly enumerates one or more
+capabilities and reference config profiles (schema:
+`docs/oas-package.schema.json`; contract:
+`docs/design/package-engine-contract.md`). A capability remains the
+targeting/activation unit — every capability a package exports stays
+independently addressable by ID with `from: installed`.
+
+```bash
+oas install git:github.com/org/repo@v1.0.0 --dir /path/to/scope   # git shorthand
+oas install https://host/org/repo.git@v1.0.0                       # raw git URL
+oas install ../my-package                                          # local path
+oas install oas.okf                                                # official catalog id
+oas install                     # bare: exact restore of this chain's locks
+oas list                        # installed packages, exported capabilities, scopes
+oas update <package>            # transactional re-resolve + diff + trust reset
+oas remove <package>            # refuses while config/dependents reference it
+oas migrate [--dry-run]         # map v1 capability locks to package locks
+```
+
+Installed package roots land in the owning scope's
+`.agents/packages/installed/<package>/` (gitignored like the capability
+store) and `oas-lock.json` becomes `lockfileVersion: 2`: a `packages` map with
+exact source, commit, tree integrity, exported capability list, dependency
+closure, and per-capability approvals (schema: `docs/oas-lock.schema.json`).
+Dependencies are pinned (official selector, tag/commit, or local path — no
+semver solver); cycles and two sources claiming one package identity at a
+scope are errors with provenance. Acquisition **activates nothing**; an
+unpinned git source resolves once and never advances on restore.
+
+Trust binds to the capability inside the package at the package's exact
+integrity: `oas trust <capability>` approves only that capability's
+commands/hooks; `oas trust <package> --all-capabilities` is the explicit bulk
+path and prints the full executable surface first. Any package integrity
+change (including `oas update`) invalidates every approval.
+Skill/instruction/config-only capabilities need lock integrity but no
+executable approval, and official-catalog identity grants **no** executable
+trust. A package may carry a checked-in `package-lock.json` for JS runtime
+dependencies; OAS materializes it with `npm ci --ignore-scripts` only — npm
+lifecycle scripts never run at acquisition, and capability code/hook paths
+must resolve inside the locked package root.
+
+`oas migrate` maps a scope's v1 marketplace/git/path capability locks to
+package locks, preserving `from: installed` activation. Entries with no
+published package yet remain as legacy residue in the v2 lock (doctor flags
+them); executable approvals are never carried over.
+
+## Acquisition, lock, restore, and trust (single capabilities)
 
 ```bash
 oas install oas.jira --dir /path/to/repo             # official marketplace by id (trusted at acquisition)

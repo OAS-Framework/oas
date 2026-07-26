@@ -171,6 +171,12 @@ Notes for consumers:
 - **Workstream 3** consumes `parsePackageSource` + the `opts.catalog`
   injection point, and the acquire → lock → trust → activate → spawn probe
   fixture as its per-repo CI probe.
+- `readPackageLocks` returns `{ packages, legacy }`; a lockfileVersion 2 file
+  may retain unmappable v1 capability entries as **migration residue** under
+  `capabilities` (surfaced through `legacy`). `oas migrate` flips the version,
+  converts what the catalog can map, and keeps the rest as residue so legacy
+  restore/trust continue working; doctor flags residue as pending migration.
+  `writePackageLock` still refuses pure-v1 files (`legacy-lock`).
 - Capability discovery (`discoverManifests` today) gains an
   `installed-package` origin: it indexes only the `oas.json` files enumerated
   by visible packages' manifests and annotates each with
@@ -196,6 +202,7 @@ lifecycle commands):
 | `retired-capability` | a package exports / config references a capability the kernel has retired (existing retirement registry) |
 | `legacy-lock` | operation requires lockfileVersion 2 but the scope has a v1 lock — run the migration command |
 | `unknown-capability` | trust/approval target is not exported by any visible installed package |
+| `remove-blocked` | `oas remove` target is still referenced by config or by a dependent locked package (provenance: the blockers) |
 
 ## 5. Invariants (restated from the Decision — binding)
 

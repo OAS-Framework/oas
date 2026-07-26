@@ -85,6 +85,19 @@
             },
             "additionalProperties": false
           }
+        },
+        "capabilities": {
+          "description": "OPTIONAL legacy v1 capability-lock residue retained during staged migration (entries `oas migrate` could not yet map to packages). Same entry shape as lockfileVersion 1; doctor flags them as pending migration.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "required": [
+              "source",
+              "version",
+              "integrity"
+            ],
+            "additionalProperties": true
+          }
         }
       },
       "additionalProperties": false
