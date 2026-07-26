@@ -108,16 +108,22 @@ capabilities:
 ```
 
 External packages must be acquired/locked before activation; executable
-commands/hooks need explicit trust. **Load the `oas-packages` skill for the
-supply-chain operations** (install/update/remove, locks and restore, trust,
-requirements) — the config step here is only the activation:
+commands/hooks need explicit trust. The minimal first-time sequence — this
+skill is the only one available before the first spawn, so it carries the
+bootstrap commands directly:
 
 ```bash
+oas install <git-url|path> --dir /path/to/workspace   # acquire + exact-lock; inactive
+oas trust vendor.code-review --dir /path/to/workspace # approve executable surfaces
 oas use vendor.code-review --type developers --dir /path/to/workspace
 ```
 
 Acquisition never means activation and never silently updates a lock. Never
-hand-edit `oas-lock.json` or installed stores — the CLI owns them.
+hand-edit `oas-lock.json` or installed stores — the CLI owns them. For
+anything beyond this bootstrap (updates, removal, lock restore/migration,
+requirements, package diagnosis), spawned instances load the `oas-packages`
+skill — it is part of the kernel baseline inside instances, not available
+in this pre-workspace context.
 
 ## 5. Verify
 
@@ -146,6 +152,7 @@ that instance. Do not put deployment-specific package prose into the soul.
 
 Create/spawn only when asked. Suggest a team shape, then let the user decide.
 For operations load the `oas` skill; for local deployment policy and profile
-adoption use `oas-config`; for package acquisition/locks/trust use
-`oas-packages`; for custom layer/package work use `integration-authoring`;
-for deep architecture or bugs use `oas-support`.
+adoption use `oas-config`; for package acquisition/locks/trust beyond the
+bootstrap above use `oas-packages` (available inside spawned instances); for
+custom layer/package work use `integration-authoring`; for deep architecture
+or bugs use `oas-support`.
