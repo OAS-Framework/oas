@@ -520,3 +520,28 @@ test("visibleClusters: clusters computed on the FULL roster, projected to visibl
   assert.equal(projected2[0].instances[0].instance, "kid");
   assert.equal(projected2[0].instances[0].depth, 1, "depth from the FULL-roster tree is preserved");
 });
+
+test("rosterParentId: ArrowLeft parent focus is identity-aware — composite row ids resolve, duplicate parents refuse (review 96b037b)", async () => {
+  const m = await import("../renderer/instance-tree.mjs");
+  const parentA = { instance: "coord", agentsRoot: "/A/agents", home: "/A/agents/c/instances/coord" };
+  const parentB = { instance: "coord", agentsRoot: "/B/agents", home: "/B/agents/c/instances/coord" };
+  const child = { instance: "kid", agentsRoot: "/A/agents", home: "/A/agents/k/instances/kid", parentInstance: "coord" };
+  // rows carry instanceId (home when present) — the pre-fix bare-name lookup
+  // (i.instance === id) never matched an identity-bearing row: ArrowLeft dead
+  const roster1 = [parentA, child];
+  assert.equal(m.rosterParentId(roster1, m.instanceId(child)), m.instanceId(parentA),
+    "composite row id finds its row and resolves the unique parent");
+  assert.equal(m.rosterParentId(roster1, child.instance), null,
+    "a bare name is NOT a row id when the row has identity — no accidental match");
+  // duplicate parent names across roots: same-root candidate wins exactly
+  const roster2 = [parentA, parentB, child];
+  assert.equal(m.rosterParentId(roster2, m.instanceId(child)), m.instanceId(parentA),
+    "same-root parent wins over the cross-root twin — focus can never land on /B's coord");
+  // intra-root duplicates: inherently ambiguous — no focus jump at all
+  const dupA2 = { instance: "coord", agentsRoot: "/A/agents", home: "/A/agents/c2/instances/coord" };
+  assert.equal(m.rosterParentId([parentA, dupA2, child], m.instanceId(child)), null,
+    "ambiguous parent -> null: ArrowLeft is a no-op, never an arbitrary pick");
+  // parentless / unknown rows
+  assert.equal(m.rosterParentId(roster1, m.instanceId(parentA)), null, "root row has no parent");
+  assert.equal(m.rosterParentId(roster1, "ghost"), null, "unknown id is a no-op");
+});

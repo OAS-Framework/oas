@@ -110,9 +110,13 @@ export function mount(el, ctx) {
     // Esc cancels the open spawn form from anywhere inside it (incl. the
     // task textarea — cancel is safe; submit stays click/button-only there).
     if (e.key === "Escape" && s.sel) { e.preventDefault(); s.sel = null; s.selAgent = null; renderGrid(s); return; }
-    // view-local keys (never stolen from editable fields), engine-resolved
+    // view-local keys (never stolen from editable fields), engine-resolved.
+    // The MODAL owns all its keys (selects/buttons are interactive controls
+    // outside any .soul-card — review 96b037b): '/' from the relation
+    // selector must not focus the filter behind the open dialog, and 'B'
+    // must not open a card's Brain underneath it.
     const editable = e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.isContentEditable;
-    if (editable || e.target.closest?.(".soul-card")) return; // card keys are onGridKey's
+    if (editable || e.target.closest?.(".soul-card") || e.target.closest?.(".spawn-modal")) return; // card keys are onGridKey's
     const hit = resolveViewKey(e, s.viewActions);
     if (hit) { e.preventDefault(); s.viewActions.find((a) => a.id === hit)?.run(); }
   });

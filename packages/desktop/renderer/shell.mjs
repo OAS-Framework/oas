@@ -29,7 +29,7 @@ import { NAV, stageSidebarMode, loadStageView } from "./shell-nav.mjs";
 import {
   collapseKey, hasInstanceChildren, instanceRepoLabel, treeGuideSegments, filterInstanceTree, instanceVisibleInTree,
   captureTreeRenderState, configureDisclosure, rosterResponseOwns, clusterSeparator,
-  instanceId, terminalKey, resolveTerminalOpen, visibleClusters,
+  instanceId, rosterParentId, terminalKey, resolveTerminalOpen, visibleClusters,
 } from "./instance-tree.mjs";
 import {
   tabVisibleInContext, canActivateTab,
@@ -340,24 +340,27 @@ function onRosterRowKey(e) {
   const listEl = contextRosterEl.querySelector(".ctx-list");
   const rows = [...listEl.querySelectorAll(".ctx-inst")];
   const at = rows.indexOf(btn);
-  const name = btn.dataset.treeInstance;
+  const id = btn.dataset.treeInstance; // instanceId(i) — composite identity
   const ws = contextWorkspace || currentWorkspace();
-  const focusInstance = (inst) => {
+  const focusInstance = (targetId) => {
     const target = [...listEl.querySelectorAll(".ctx-inst")]
-      .find((r) => r.dataset.treeInstance === inst && !r.disabled);
+      .find((r) => r.dataset.treeInstance === targetId && !r.disabled);
     if (target) setRovingRow(listEl, target);
     return !!target;
   };
   if (action.type === "expand" || action.type === "collapse") {
-    const key = collapseKey(ws, name);
+    const key = collapseKey(ws, id);
     if (action.type === "expand") collapsedInstances.delete(key); else collapsedInstances.add(key);
     renderContextRoster(contextInstances);
-    focusInstance(name);
+    focusInstance(id);
     return;
   }
   if (action.type === "parent") {
-    const parent = contextInstances.find((i) => i.instance === name)?.parentInstance;
-    if (parent) focusInstance(parent);
+    // rows carry instanceId, so resolve the CURRENT item and its parent by
+    // IDENTITY — a bare-name lookup never matches identity-bearing rows
+    // (ArrowLeft dead) and is unsafe for duplicate names (review 96b037b)
+    const pid = rosterParentId(contextInstances, id);
+    if (pid) focusInstance(pid);
     return;
   }
   const to = moveTarget(action, at, rows.length);

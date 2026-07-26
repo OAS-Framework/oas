@@ -133,3 +133,36 @@ test("window dispatch ineligibility: view actions never match at window level; g
   }
   dom.window.close();
 });
+
+test("spawn MODAL controls are excluded from view-key dispatch: '/' and 'B' from a modal select/button stay with the dialog (review 96b037b)", async () => {
+  const dom = new JSDOM('<!doctype html><html><body><div id=host></div></body></html>', { url: "http://localhost" });
+  const savedDoc = globalThis.document, savedWin = globalThis.window;
+  try {
+    const { spawn, opened } = await mountSpawn(dom);
+    const doc = dom.window.document;
+    // open the modal from the first card
+    doc.querySelector(".spawn-act").click();
+    const modal = doc.querySelector(".spawn-modal");
+    assert.ok(modal, "modal open");
+    const filter = doc.querySelector(".filter");
+    // '/' from the relation SELECT (interactive control outside any
+    // .soul-card): must NOT be consumed nor focus the filter behind the
+    // still-open dialog
+    const rel = modal.querySelector(".frelation");
+    rel.focus();
+    const eSlash = key(doc, rel, "/");
+    assert.equal(eSlash.defaultPrevented, false, "'/' not swallowed from a modal select");
+    assert.notEqual(doc.activeElement, filter, "filter behind the modal never steals focus");
+    assert.ok(doc.querySelector(".spawn-modal"), "modal still open");
+    // 'B' from a modal BUTTON: must not open a card's Brain underneath
+    const cancel = modal.querySelector(".fcancel");
+    cancel.focus();
+    const eB = key(doc, cancel, "B");
+    assert.equal(eB.defaultPrevented, false, "'B' not swallowed from a modal button");
+    assert.deepEqual(opened, [], "no Brain opened from under the open modal");
+    spawn.unmount();
+  } finally {
+    globalThis.document = savedDoc; globalThis.window = savedWin;
+    dom.window.close();
+  }
+});

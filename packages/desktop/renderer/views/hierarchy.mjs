@@ -690,9 +690,12 @@ function openPop(s, id) {
   (entry.el.parentElement || s.canvas.querySelector(".hier-stage"))?.append(pop);
 }
 
-/* Brain of the current selection (popover parity for the keyboard). */
+/* Brain of the current selection (popover parity for the keyboard).
+   s.sel is a composite instanceId — matching bare x.instance made the
+   Brain key consume-and-do-nothing for every identity-bearing node
+   (review 96b037b). */
 function openSelBrain(s) {
-  const i = (s.panel.instances || []).find((x) => x.instance === s.sel);
+  const i = (s.panel.instances || []).find((x) => instanceId(x) === s.sel);
   if (i) s.ctx.openBrain?.(i.agent);
 }
 
