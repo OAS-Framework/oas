@@ -1,7 +1,7 @@
 ---
 type: Lesson
 title: Split panes as flex-cell reprojection of existing tab panes
-description: Desktop split panes were implemented by toggling member tab panes into flex cells of #tabhost with a pure split-layout model, so tab identity/dedup and each tab's ResizeObserver-driven FitAddon refit stayed untouched.
+description: Desktop split panes reproject existing tab panes as flex cells of #tabhost; keep the split model bounded to renderer-visible slots and choose split-adjacent fallbacks before removing an active member.
 tags: [desktop, renderer, splits, terminal]
 timestamp: 2026-07-26
 ---
@@ -28,6 +28,21 @@ Why this preserved the earned invariants for free:
 - **Cleanup**: `removeSplitTab` collapses to `null` (single pane) below two
   panes; workspace switch nulls the split because members are
   workspace-scoped terminal tabs.
+
+# Model-DOM parity and close fallback gotchas
+
+Merged-state review 156cbc7 found two split-specific defects that the split
+model must continue to guard against:
+
+- The renderer owns one `splitEmptyEl` placeholder, so the model must not accrue
+  `pending > 1` invisible slots. A second split request while a placeholder is
+  already pending should only re-orient that pending slot to what the DOM can
+  display, not accumulate hidden state up to the cap.
+- When closing the active split member, choose an adjacent surviving member
+  (`adjacentSplitMember`, next then previous) before `removeSplitTab` forgets
+  the closed member. Only then use the generic `fallbackTabForContext` fallback.
+  The regression must include an unrelated newer tab, or recency fallback can
+  hide the split by activating that unrelated terminal.
 
 # Selection wiring gotcha
 
