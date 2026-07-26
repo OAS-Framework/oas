@@ -1,6 +1,10 @@
 # Knowledge Log
 
 ## 2026-07-26
+* **Creation**: [api-swap-regression-fix-mechanisms](/lessons/api-swap-regression-fix-mechanisms.md) records that seam replacements must preserve reviewer-proven fix mechanisms, rerun the original regression against the replacement path, and fetch provider manifests when validation rules depend on manifest content.
+* **Update**: [reconciliation-truthfulness-fixes](/lessons/reconciliation-truthfulness-fixes.md) points exact-level restore dedupe at the API-swap regression lesson so seam teardown cannot silently drop the fix mechanism.
+* **Update**: [package-profile-validation-config-shape](/lessons/package-profile-validation-config-shape.md) records that dependency-supplied capability ids still require provider-manifest lookup for layer-agreement validation.
+* **Creation**: [package-engine-corrected-head-remerge-map](/references/package-engine-corrected-head-remerge-map.md) records the frozen-branch map for absorbing the corrected package-engine head after 054f7ba, including invalid-lock throws, dependency containment, depsIntegrity validation, canonical CLI env, residue fixes, and JSON-envelope updates.
 * **Creation**: [gate2-seam-teardown-execution](/lessons/gate2-seam-teardown-execution.md) records gate-2 package-engine seam teardown execution lessons: inventory-shaped merge conflicts, ownership-split test conflicts, explicit engine report enum mapping, fixture ratchets, and upstream engine gaps surfaced during consumption.
 * **Creation**: [deps-integrity-trust-binding](/lessons/deps-integrity-trust-binding.md) records the reviewer-caught node_modules trust bypass and the depsIntegrity fix pattern for package approval, restore, and staging materialization.
 * **Update**: [package-engine-implementation-gotchas](/lessons/package-engine-implementation-gotchas.md) corrects package trust carry-over to require depsIntegrity and records contract-signature regression testing against the frozen doc.

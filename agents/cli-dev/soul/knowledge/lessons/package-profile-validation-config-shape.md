@@ -18,7 +18,11 @@ This keeps one source of truth for config-key, entry-key, and renamed-key rules.
 Profile-only rules stay in the package module: capabilities supplied by the
 package and dependency closure, layer agreement with the package's own
 capability `oas.json`, agent-type syntax, injection-override and setup path
-containment, and rejection of `from: path:` in profiles.
+containment, and rejection of `from: path:` in profiles. When a dependency
+supplies a capability by id, validation must still fetch the provider manifest
+before enforcing layer agreement; identifier-only validation let a profile bind
+a dependency-supplied capability to the wrong exclusive layer and still
+snapshot.
 
 A failing profile returns error strings and the CLI refuses to write the
 snapshot. Profile validation therefore happens before side effects, matching the

@@ -18,7 +18,11 @@ same as failing the command.
    restore per descendant, and hides ancestor failures in the descendant report.
    Use exact-level restore (`restoreCapabilities(startDir, { levels })`) plus a
    `restoredLevels` set so the boundary keeps chain semantics while descendants
-   restore only their own not-yet-processed level. A follow-up review caught the
+   restore only their own not-yet-processed level. If a later package-engine seam
+   replacement lacks that exact-level option, the consumer must preserve the fix
+   another way instead of reverting to filter-after-side-effect; see the
+   [API-swap regression lesson](/lessons/api-swap-regression-fix-mechanisms.md).
+   A follow-up review caught the
    inverse coverage gap: package-lock verification added only inside the
    boundary/recursive loop missed the ordinary non-team `restore(dir)` chain and
    the boundary's ancestor lock levels. Keep per-level checks extracted (for
