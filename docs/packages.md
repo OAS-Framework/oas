@@ -164,9 +164,14 @@ When no safe recipe matches the host, OAS prints the documented install URL.
 
 ## Phase note
 
-Until the package engine lands, `oas init --package` and `oas config diff`
-resolve package ids through lock v2 `packages:` entries and the installed
-package store (`<scope>/.agents/packages/installed/<slug>/`) written by the
-engine; local paths and git URLs work standalone. Acquiring packages
-(`oas install <source>` for multi-capability packages), lock v2 writing,
-update/remove, and per-capability trust are the engine workstream.
+The package engine's interface is frozen (see the workstream-1 contract:
+`docs/design/package-engine-contract.md` and the `oas-package.schema.json` /
+`oas-lock.schema.json` schemas on its branch). Until the engine lands here,
+`oas init --package` and `oas config diff` resolve package ids through lock
+v2 `packages:` entries and the installed package store
+(`<scope>/.agents/packages/installed/<slug>/`); local paths and git URLs work
+standalone. The team-boundary reconciliation described above wraps the
+engine's `restorePackages` (current-chain exact restore) as its per-scope
+primitive. Acquiring packages (`oas install <source>` for multi-capability
+packages), lock v2 writing, update/remove, and per-capability trust are the
+engine workstream.

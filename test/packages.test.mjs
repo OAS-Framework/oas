@@ -55,7 +55,8 @@ function installFixturePackage(scope, pkgDir, { id = "example.engineering", capa
   const parsed = existsSync(lockFile) ? JSON.parse(readFileSync(lockFile, "utf8")) : { lockfileVersion: 2, packages: {} };
   parsed.lockfileVersion = 2; parsed.packages ||= {};
   parsed.packages[id] = {
-    source: `path:${pkgDir}`, version: "1.0.0", commit: "0123456789abcdef", integrity: "sha256-fixture",
+    source: `path:${pkgDir}`, version: "1.0.0", commit: "local",
+    integrity: `sha256-${"0".repeat(64)}`,
     capabilities, dependencies, trustedCapabilities: [],
   };
   writeFileSync(lockFile, JSON.stringify(parsed, null, 2) + "\n");
@@ -71,20 +72,28 @@ test("package manifest loads, validates, and rejects escapes and bad shapes", ()
   assert.equal(m.package, "example.engineering");
   assert.deepEqual(packageCapabilityIds(m).sort(), ["example.delivery", "example.review"]);
 
-  // absolute / .. paths rejected
+  // absolute / .. paths rejected (contract error codes)
   write(join(base, "bad1", "oas-package.json"), JSON.stringify({ package: "bad.pkg", version: "1", description: "x", capabilities: ["../escape"] }));
-  assert.throws(() => loadPackageManifest(join(base, "bad1")), /must stay inside the package/);
+  assert.throws(() => loadPackageManifest(join(base, "bad1")), (e) => e.code === "path-escape" && /must stay inside the package/.test(e.message));
   write(join(base, "bad2", "oas-package.json"), JSON.stringify({ package: "bad.pkg", version: "1", description: "x", configs: { a: { path: "/etc/passwd" } } }));
-  assert.throws(() => loadPackageManifest(join(base, "bad2")), /must stay inside the package/);
+  assert.throws(() => loadPackageManifest(join(base, "bad2")), (e) => e.code === "path-escape");
   // multiple defaults rejected
   write(join(base, "bad3", "oas-package.json"), JSON.stringify({ package: "bad.pkg", version: "1", description: "x", configs: { a: { path: "a.yaml", default: true }, b: { path: "b.yaml", default: true } } }));
-  assert.throws(() => loadPackageManifest(join(base, "bad3")), /multiple default/);
+  assert.throws(() => loadPackageManifest(join(base, "bad3")), (e) => e.code === "invalid-package-manifest" && /multiple default/.test(e.message));
   // symlink escape caught after resolution
   const pkg2 = join(base, "pkg2");
   write(join(pkg2, "oas-package.json"), JSON.stringify({ package: "sneaky.pkg", version: "1", description: "x", configs: { a: { path: "link/oas-config.yaml" } } }));
   write(join(base, "outside", "oas-config.yaml"), "name: outside\n");
   symlinkSync(join(base, "outside"), join(pkg2, "link"));
-  assert.throws(() => loadPackageManifest(pkg2), /escapes the package after symlink resolution/);
+  assert.throws(() => loadPackageManifest(pkg2), (e) => e.code === "path-escape" && /escapes the package after symlink resolution/.test(e.message));
+  // invalid package id charset (contract: ^[a-z0-9][a-z0-9._-]*$)
+  write(join(base, "bad4", "oas-package.json"), JSON.stringify({ package: "Bad_Pkg", version: "1", description: "x" }));
+  assert.throws(() => loadPackageManifest(join(base, "bad4")), (e) => e.code === "invalid-package-manifest");
+});
+
+test("packageSlug: slug equals the identity for the contract charset", () => {
+  assert.equal(packageSlug("example.engineering"), "example.engineering");
+  assert.equal(packageSlug("oas.okf"), "oas.okf");
 });
 
 // ---------- profile selection ----------
@@ -289,22 +298,26 @@ test("diffConfigTexts produces a minimal line diff", () => {
 
 // ---------- lock v2 reading ----------
 
-test("lock v2 packages map is read scope-wise and supplies capability provenance", () => {
+test("lock v2 packages map is read scope-wise (contract envelope) and supplies capability provenance", () => {
   const base = temp();
   const pkg = fixturePackage(join(base, "pkg"));
   const ws = join(base, "ws");
   write(join(ws, "oas-config.yaml"), "name: ws\n");
   installFixturePackage(ws, pkg);
   const locks = readPackageLocks(ws);
-  assert.ok(locks["example.engineering"]);
-  assert.equal(locks["example.engineering"].version, "1.0.0");
+  assert.ok(locks.packages["example.engineering"]);
+  assert.equal(locks.packages["example.engineering"].version, "1.0.0");
+  assert.deepEqual(locks.legacy, []);
   const supplied = lockedPackageCapabilities(ws);
   assert.deepEqual(supplied.get("example.review"), ["example.engineering"]);
-  // v1 lock files without packages: are tolerated
+  // v1 lock files without packages: are tolerated and surfaced as legacy, untouched
   const ws2 = join(base, "ws2");
   write(join(ws2, "oas-config.yaml"), "name: ws2\n");
-  write(join(ws2, "oas-lock.json"), JSON.stringify({ lockfileVersion: 1, capabilities: {} }));
-  assert.deepEqual(readPackageLocks(ws2), {});
+  write(join(ws2, "oas-lock.json"), JSON.stringify({ lockfileVersion: 1, capabilities: { "old.cap": { source: "marketplace:old.cap@1.0.0", version: "1.0.0", integrity: `sha256-${"0".repeat(64)}` } } }));
+  const r2 = readPackageLocks(ws2);
+  assert.deepEqual(r2.packages, {});
+  assert.equal(r2.legacy.length, 1);
+  assert.ok(r2.legacy[0].capabilities["old.cap"]);
 });
 
 test("resolvePackageSource resolves installed package ids and local paths; unknown ids get a pointed error", () => {
@@ -315,10 +328,10 @@ test("resolvePackageSource resolves installed package ids and local paths; unkno
   installFixturePackage(ws, pkg);
   const byId = resolvePackageSource("example.engineering", ws);
   assert.equal(byId.manifest.package, "example.engineering");
-  assert.equal(byId.commit, "0123456789abcdef");
+  assert.equal(byId.commit, "local");
   const byPath = resolvePackageSource(pkg, ws);
   assert.equal(byPath.manifest.package, "example.engineering");
-  assert.throws(() => resolvePackageSource("no.such.pkg", ws), /not a locked package id/);
+  assert.throws(() => resolvePackageSource("no.such.pkg", ws), (e) => e.code === "invalid-source" && /not a locked package id/.test(e.message));
 });
 
 // ---------- workspace scope discovery (bounded scans) ----------

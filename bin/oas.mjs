@@ -215,7 +215,7 @@ function doctor(dir) {
   if (existsSync(LEGACY_HOME_CAPABILITIES_DIR)) console.log(`  WARNING: legacy ~/.oas/capabilities exists and is no longer discovered — reinstall its packages at a config scope and remove it`);
 
   // Distribution packages: profile provenance, available-but-unapplied profiles, missing host commands.
-  const pkgLocks = readPackageLocks(ctx);
+  const pkgLocks = readPackageLocks(ctx).packages;
   if (Object.keys(pkgLocks).length) {
     console.log("\nDistribution packages:");
     for (const [id, lock] of Object.entries(pkgLocks)) {
@@ -592,7 +592,7 @@ function flagAll(name) {
 
 /** Capability ids supplied by a package's dependency closure, read from visible locks (phase 1). */
 function dependencyClosureCapabilities(manifest, dir) {
-  const locks = readPackageLocks(dir);
+  const locks = readPackageLocks(dir).packages;
   const out = [];
   const seen = new Set();
   const visit = (deps) => {
@@ -632,7 +632,7 @@ function initPackage(src, dir, file) {
     writeFileSync(file, text);
     console.log(`Created ${shortPath(file)} (${levelOf(dir)} level) from package profile ${manifest.package}:${profile.name}`);
     console.log("The snapshot is an ordinary scoped config — edit it, retarget or disable any capability; package updates never rewrite it.");
-    if (!readPackageLocks(dir)[manifest.package]) console.log(`NOTE: package ${manifest.package} is not locked at this scope yet — acquire it with \`oas install ${src}\` so its capabilities restore.`);
+    if (!readPackageLocks(dir).packages[manifest.package]) console.log(`NOTE: package ${manifest.package} is not locked at this scope yet — acquire it with \`oas install ${src}\` so its capabilities restore.`);
   } finally { if (tmp) rmSync(tmp, { recursive: true, force: true }); }
   offerTmuxMouseScrolling();
 }
