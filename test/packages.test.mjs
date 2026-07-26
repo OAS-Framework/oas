@@ -2432,3 +2432,70 @@ test("doctor human+JSON diagnose malformed v1 entries, including config-less loc
   }
   rmSync(base, { recursive: true, force: true });
 });
+
+// ---------- reviewer-fe42de8 findings ----------
+
+test("capability and package restore preflight the COMPLETE visible lock chain before mutation (reviewer-fe42de8)", () => {
+  const base = temp();
+
+  // Legacy capability restore: valid outer lock, malformed lock-only inner scope.
+  const outerCap = join(base, "outer-cap"); mkdirSync(outerCap, { recursive: true });
+  const innerCap = join(outerCap, "inner"); mkdirSync(innerCap);
+  const capSrc = join(base, "cap-src");
+  write(join(capSrc, "oas.json"), JSON.stringify({ capability: "good.cap", version: "1.0.0", description: "d" }));
+  writeFileSync(join(outerCap, OAS_LOCK_FILE), JSON.stringify({ lockfileVersion: 2, packages: {}, capabilities: {
+    "good.cap": { source: `path:${capSrc}`, version: "1.0.0", integrity: capabilityIntegrity(capSrc) },
+  } }));
+  writeFileSync(join(innerCap, OAS_LOCK_FILE), JSON.stringify({ lockfileVersion: 2, packages: {}, capabilities: { "bad.cap": null } }));
+  assert.throws(() => restoreCapabilities(innerCap), (e) => e.code === "invalid-lock" && /bad\.cap/.test(e.message));
+  assert.ok(!existsSync(join(outerCap, ".agents", "capabilities", "installed")), "outer capability was not restored before inner validation");
+
+  // Package restore: same visible-chain ordering, with a valid local package source.
+  const outerPkg = join(base, "outer-pkg"); mkdirSync(outerPkg);
+  const innerPkg = join(outerPkg, "inner"); mkdirSync(innerPkg);
+  const psrc = pkgSource(join(base, "pkg-src"), { package: "good.pkg" });
+  writeFileSync(join(outerPkg, OAS_LOCK_FILE), JSON.stringify({ lockfileVersion: 2, packages: {
+    "good.pkg": { source: `path:${psrc}`, version: "1.0.0", commit: "local", integrity: packageIntegrity(psrc), capabilities: [] },
+  } }));
+  writeFileSync(join(innerPkg, OAS_LOCK_FILE), JSON.stringify({ lockfileVersion: 2, packages: null }));
+  assert.throws(() => restorePackages(innerPkg), (e) => e.code === "invalid-lock" && /packages/.test(e.message));
+  assert.ok(!existsSync(join(installedPackagesDir(outerPkg), "good.pkg")), "outer package was not restored before inner validation");
+
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("apply migration validates v2 before no-residue fast path (reviewer-fe42de8)", () => {
+  const base = temp();
+  const malformed = [
+    { lockfileVersion: 2, packages: {}, capabilities: null },
+    { lockfileVersion: 2, packages: {}, capabilities: [] },
+    { lockfileVersion: 2, packages: {}, capabilities: false },
+    { lockfileVersion: 2, packages: {}, capabilities: "" },
+    { lockfileVersion: 2, capabilities: {} },
+    { lockfileVersion: 2, packages: null, capabilities: {} },
+  ];
+  for (const [i, doc] of malformed.entries()) {
+    const s = join(base, `s${i}`); mkdirSync(s);
+    const file = join(s, OAS_LOCK_FILE); const bytes = JSON.stringify(doc);
+    writeFileSync(file, bytes);
+    assert.throws(() => applyLegacyLockMigration(s), (e) => e.code === "invalid-lock", JSON.stringify(doc));
+    assert.equal(readFileSync(file, "utf8"), bytes, "invalid v2 fast path never mutates");
+  }
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("malformed retired v1 entry keeps actionable retirement priority in dry-run and apply (reviewer-fe42de8)", () => {
+  const base = temp(); const s = join(base, "scope"); mkdirSync(s);
+  const file = join(s, OAS_LOCK_FILE);
+  writeFileSync(file, JSON.stringify({ lockfileVersion: 1, capabilities: { "oas.web": null } }));
+  const dry = migrateLegacyLock(s);
+  assert.equal(dry.plan[0].action, "manual");
+  assert.match(dry.warnings.join("\n"), /oas\.web: retired.*OAS Desktop app/s);
+  const applied = applyLegacyLockMigration(s);
+  assert.deepEqual(applied.residue, ["oas.web"]);
+  assert.match(applied.warnings.join("\n"), /oas\.web: retired.*OAS Desktop app/s);
+  const final = JSON.parse(readFileSync(file, "utf8"));
+  assert.equal(final.lockfileVersion, 2);
+  assert.equal(final.capabilities["oas.web"], null, "retired residue retained for explicit deletion guidance");
+  rmSync(base, { recursive: true, force: true });
+});
