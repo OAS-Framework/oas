@@ -87,24 +87,17 @@ tracking package updates, deliberately. Overrides are **not allowed** on
 `from: owned`/`path:` capabilities: the scope owns the package source, so
 edit `.agents/capabilities/owned/<id>/injects/` directly.
 
-## Acquire, trust, activate
+## Activate
 
-These are separate steps. **Acquisition, locks, restore, and trust are the
-package supply chain — load the `oas-packages` skill for those operations**
-(`oas install`, `oas trust`, lock/migration mechanics, workspace restore,
-requirements/package diagnosis). This skill covers the config side:
-activation and targeting of already-acquired capabilities.
+Acquisition, trust, and package lifecycle → the **oas-packages** skill. The
+config side is activation and targeting of already-acquired capabilities
+(acquired or catalog availability never implies activation):
 
 ```bash
 oas use <capability> --global [--dir <level>]
 oas use <capability> --type <agent-type> [--disable]
 oas use <capability> --soul <name> [--settings k=v [k2=v2 ...]]
 ```
-
-Key invariants (full detail: the oas-packages skill): OAS never silently pulls; approval
-is tied to exact integrity; acquired or marketplace availability never
-implies activation. Never hand-edit `oas-lock.json` or the installed stores
-— the CLI owns them.
 
 `oas init` creates config and activates only explicit defaults.
 

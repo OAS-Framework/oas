@@ -646,10 +646,24 @@ const pkgRow = (r) => ({
  * level(resolved) → rows. */
 function partitionedPackageRestore(deepestDir) {
   const byLevel = new Map();
-  for (const r of restorePackages(deepestDir)) {
-    const key = resolve(r.level);
+  const add = (level, row) => {
+    const key = resolve(level);
     if (!byLevel.has(key)) byLevel.set(key, []);
-    byLevel.get(key).push(pkgRow(r));
+    byLevel.get(key).push(row);
+  };
+  for (const r of restorePackages(deepestDir)) add(r.level, pkgRow(r));
+  // EMPTY v1 lock files surface too (maintainer ruling): the engine's restore
+  // report only rows NON-empty v1 files. Walk the raw lock chain (a lock-only
+  // scope has no config, so configChain-based reads cannot see it) and emit a
+  // LEGACY row for each empty v1 file so reconciliation shows the pending
+  // lock-format migration.
+  for (const level of lockLevelsUp(deepestDir)) {
+    try {
+      const parsed = JSON.parse(readFileSync(join(level, OAS_LOCK_FILE), "utf8"));
+      if (parsed.lockfileVersion !== 2 && !Object.keys(parsed.capabilities || {}).length) {
+        add(level, { id: null, level, package: true, status: "legacy", reason: `empty lockfileVersion ${parsed.lockfileVersion ?? 1} file — pending lock-format migration: oas migrate --dir ${level}` });
+      }
+    } catch { /* malformed locks raise via restorePackages above */ }
   }
   return byLevel;
 }

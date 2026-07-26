@@ -303,16 +303,45 @@ test("lock v2 packages map is read scope-wise (contract envelope) and supplies c
   assert.deepEqual({ ...r2.packages }, {});
   assert.equal(r2.legacy.length, 1);
   assert.ok(r2.legacy[0].capabilities["old.cap"]);
-  // an EMPTY v1 lock: the ENGINE's readPackageLocks surfaces legacy entries
-  // only when the capabilities map is non-empty. NOTE for the maintainer
-  // package: this differs from the earlier WS2 reader (reviewer-0b4d132 had
-  // required surfacing empty v1 files); the engine semantics now govern —
-  // flagged to the coordinator with the teardown.
+  // an EMPTY v1 lock SURFACES as legacy with provenance (maintainer ruling,
+  // upholding the original reviewer-0b4d132 requirement — implemented
+  // engine-side in the corrected head)
   const ws3 = join(base, "ws3");
   write(join(ws3, "oas-config.yaml"), "name: ws3\n");
   write(join(ws3, "oas-lock.json"), JSON.stringify({ lockfileVersion: 1, capabilities: {} }));
   const r3 = readPackageLocks(ws3);
   assert.deepEqual({ ...r3.packages }, {});
+  assert.equal(r3.legacy.length, 1, "empty v1 lock must not disappear from the envelope");
+  assert.deepEqual(r3.legacy[0].capabilities, {});
+  assert.equal(r3.legacy[0].level, ws3);
+  assert.equal(r3.legacy[0].lockfileVersion, 1);
+});
+
+test("empty v1 locks: reconcile LEGACY rows, doctor pending-format-migration (distinct from residue), lock-only-scope discovery", () => {
+  const base = temp();
+  const ws = join(base, "ws");
+  write(join(ws, "oas-config.yaml"), "name: ws\nteam:\n  name: t\n");
+  // a lock-only descendant scope (NO oas-config.yaml) carrying an EMPTY v1 lock
+  const member = join(ws, "member");
+  write(join(member, "oas-lock.json"), JSON.stringify({ lockfileVersion: 1, capabilities: {} }));
+  // (a) discovery includes lock-owning scopes without config entries
+  assert.deepEqual(discoverWorkspaceScopes(ws), [member], "lock-only scopes are discovered");
+  // (b) reconciliation surfaces the empty v1 file as a LEGACY row, exit 0
+  const r = cli(["install", "--no-requirements", "--dir", ws], { cwd: ws });
+  assert.equal(r.status, 0, r.stdout);
+  assert.match(r.stdout, /LEGACY\s+.*member\/oas-lock\.json/);
+  // (c) doctor: pending lock-format migration line, DISTINCT from residue
+  const d = cli(["doctor", member], { cwd: ws });
+  assert.equal(d.status, 0, d.stderr);
+  assert.match(d.stdout, /empty lockfileVersion 1 file — pending lock-format migration/);
+  assert.doesNotMatch(d.stdout, /migration residue/);
+  // (d) doctor --json: legacyLockFiles entry (empty: true), migrationResidue stays empty
+  const dj = JSON.parse(cli(["doctor", member, "--json"], { cwd: ws }).stdout);
+  const lf = dj.legacyLockFiles.find((l) => l.level === member);
+  assert.ok(lf, JSON.stringify(dj.legacyLockFiles));
+  assert.equal(lf.empty, true);
+  assert.equal(lf.status, "pending-format-migration");
+  assert.deepEqual(dj.migrationResidue, [], "empty v1 is never capability residue");
 });
 
 test("discoverWorkspaceScopes: deterministic path order with pruning of stores, vendor dirs, instances, and nested team boundaries", () => {
@@ -1335,7 +1364,8 @@ test("oas.dev end-to-end at a NON-GIT multi-repo team root: targeting, overrides
   // … but config diff REPORTS the drift (read-only, against the INSTALLED locked copy).
   const drift = cli(["config", "diff", "--json", "--dir", ws], { cwd: ws });
   assert.equal(drift.status, 0, drift.stdout);
-  // The installed locked copy has not drifted (snapshots + locks pin exactly); local edits (from: owned + oas use) show as local drift.
+  // The installed locked copy has not drifted (snapshots + locks pin exactly);
+  // the `oas use` retargeting edit above shows as local drift.
   assert.ok(JSON.parse(drift.stdout).result.differingLines > 0, "diff reports local drift, read-only");
 });
 
