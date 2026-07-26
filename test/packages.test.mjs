@@ -1351,7 +1351,7 @@ test("oas.dev consumer fixture: fresh non-Git source → profile snapshot + comp
   assert.equal(JSON.parse(r4.stdout).result.differingLines, 0);
 });
 
-test("oas.dev end-to-end at a NON-GIT multi-repo team root: targeting, overrides, portability, snapshot semantics, nested reconciliation", () => {
+test("oas.dev end-to-end at a NON-GIT multi-repo team root: overrides, portability, snapshot semantics, nested reconciliation (targeting PROVISIONAL pending engine capability indexing)", () => {
   const base = temp();
   const { root } = oasDevFixture(base);
   // Non-Git multi-repo workspace root — first-class: NO .git anywhere at the boundary.
@@ -1375,12 +1375,15 @@ test("oas.dev end-to-end at a NON-GIT multi-repo team root: targeting, overrides
   // (2) Closure locked; (3) exported capability independently targetable after adoption.
   const locks = JSON.parse(readFileSync(join(ws, "oas-lock.json"), "utf8")).packages;
   assert.deepEqual(Object.keys(locks).sort(), ["oas.dev", "oasdev.knowledge-pkg"]);
-  // SEAM (WS1 capability indexing): discovery of capability oas.json files
-  // THROUGH installed package roots is the engine's `installed-package` origin
-  // (frozen contract §3 notes). Until it merges, materialize the exported
-  // capabilities in the owned/ store as the stand-in and point the snapshot at
-  // it — the config-side semantics under test (targeting, overrides, snapshot)
-  // are identical. Gate-2 teardown replaces this block with nothing.
+  // PROVISIONAL COVERAGE (reviewer-d5dadab): acceptance point 3 is NOT fully
+  // satisfied on this branch. Capability discovery THROUGH installed package
+  // roots is the engine's `installed-package` origin (frozen contract §3) and
+  // has not merged; the owned-store materialization below is a stand-in that
+  // exercises the config-side semantics (targeting/overrides/snapshot) but
+  // BYPASSES the installed-package boundary — a broken installed-package
+  // integration would not fail this test. The gate-2 teardown replaces this
+  // block with targeting of the capability discovered from the restored
+  // package, which is when point 3 becomes real acceptance coverage.
   for (const [folder, id, layer] of [["review", "oas.review", undefined], ["knowledge", "oasdev.knowledge", "knowledge"]]) {
     write(join(ws, ".agents", "capabilities", "owned", folder, "oas.json"), JSON.stringify({ capability: id, version: "1.0.0", description: "x", ...(layer ? { layer } : {}) }));
   }
