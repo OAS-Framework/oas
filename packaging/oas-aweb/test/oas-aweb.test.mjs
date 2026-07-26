@@ -7,7 +7,8 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
-const HOOK = join(ROOT, "bin", "oas-aweb.mjs");
+const CAPABILITY = join(ROOT, "capabilities", "oas-aweb");
+const HOOK = join(CAPABILITY, "bin", "oas-aweb.mjs");
 
 function tempDir(t) {
   const dir = mkdtempSync(join(tmpdir(), "oas-aweb-test-"));
@@ -40,16 +41,16 @@ function run(args = [], env = {}, cwd = ROOT) {
 }
 
 test("all declared skills resolve from package-owned node_modules", () => {
-  const manifest = JSON.parse(readFileSync(join(ROOT, "oas.json"), "utf8"));
+  const manifest = JSON.parse(readFileSync(join(CAPABILITY, "oas.json"), "utf8"));
   assert.equal(manifest.skills.length, 3);
   for (const skill of manifest.skills) {
     assert.match(skill, /^node_modules\/@awebai\/pi\/skills\//);
-    assert.equal(existsSync(join(ROOT, skill, "SKILL.md")), true, `${skill} was not materialized`);
+    assert.equal(existsSync(join(CAPABILITY, skill, "SKILL.md")), true, `${skill} was not materialized`);
   }
 });
 
 test("checked lock pins the aweb skill dependency", () => {
-  const lock = JSON.parse(readFileSync(join(ROOT, "package-lock.json"), "utf8"));
+  const lock = JSON.parse(readFileSync(join(CAPABILITY, "package-lock.json"), "utf8"));
   assert.equal(lock.lockfileVersion, 3);
   assert.equal(lock.packages[""].dependencies["@awebai/pi"], "^0.2.1");
   assert.ok(lock.packages["node_modules/@awebai/pi"].integrity);

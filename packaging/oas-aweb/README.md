@@ -14,15 +14,15 @@ Messaging is deliberately separate from durable task tracking. The selected task
 
 Install the `aw` CLI and initialize an aweb workspace at the deployment's team scope. `oas aweb setup` reports the next onboarding step without authenticating or creating a team silently.
 
-The package owns its JavaScript runtime closure with checked `package-lock.json`. Materialize it exactly, without lifecycle scripts:
+The inner capability directory owns its JavaScript runtime closure with checked `capabilities/oas-aweb/package-lock.json`. Materialize it exactly, without lifecycle scripts:
 
 ```bash
-npm ci --ignore-scripts
+npm ci --ignore-scripts --prefix capabilities/oas-aweb
 ```
 
-This creates package-local `node_modules/@awebai/pi/skills/...`, which satisfies all three skill paths in `oas.json`. OAS package acquisition must use the same script-free materialization contract.
+This creates `capabilities/oas-aweb/node_modules/@awebai/pi/skills/...` beside the inner manifest, satisfying all three escape-free skill paths in `oas.json`. OAS package acquisition must use the same script-free materialization contract.
 
-The frozen schema permits this flat dependency layout. The final OAS compatibility floor still awaits the lock-v2/materialization release decision; see [`SCHEMA-STATUS.md`](SCHEMA-STATUS.md).
+This nested placement is the staging ruling while WS1 amends the closure contract; revalidate it before publication. The final OAS compatibility floor also awaits the lock-v2/materialization release decision. See [`SCHEMA-STATUS.md`](SCHEMA-STATUS.md).
 
 ## Acquire and activate
 
@@ -59,7 +59,7 @@ capabilities:
 ## Development
 
 ```bash
-npm ci --ignore-scripts
+npm ci --ignore-scripts --prefix capabilities/oas-aweb
 npm test
 ```
 

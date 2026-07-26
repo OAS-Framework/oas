@@ -6,6 +6,6 @@
     "oas": ">=0.6.2"
   },
   "capabilities": [
-    "."
+    "capabilities/oas-aweb"
   ]
 }

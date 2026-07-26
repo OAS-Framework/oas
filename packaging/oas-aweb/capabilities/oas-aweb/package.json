@@ -5,10 +5,8 @@
   "license": "MIT",
   "type": "module",
   "private": true,
-  "scripts": {
-    "materialize": "npm ci --ignore-scripts --prefix capabilities/oas-aweb",
-    "validate": "node scripts/validate-manifests.mjs",
-    "test": "npm run validate && node --test"
+  "dependencies": {
+    "@awebai/pi": "^0.2.1"
   },
   "repository": {
     "type": "git",
