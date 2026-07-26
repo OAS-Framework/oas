@@ -1236,6 +1236,44 @@ test("acquisition truthfulness: path locks record commit local; stale installed 
   assert.equal(JSON.parse(r3.stdout).error.code, "integrity-drift");
 });
 
+test("init --package always acquires local sources: a same-ID lock from a different source cannot bypass acquisition", () => {
+  const base = temp();
+  // v1 of the package, adopted normally.
+  const v1 = fixturePackage(join(base, "v1"), { id: "same.pkg", configs: { d: { path: "configs/default/oas-config.yaml", default: true } } });
+  const ws = join(base, "ws"); mkdirSync(ws, { recursive: true });
+  assert.equal(cli(["init", "--package", v1, "--json", "--dir", ws]).status, 0);
+  // Remove only the generated config; lock + installed artifact remain at v1 content.
+  rmSync(join(ws, "oas-config.yaml"));
+  // v2 of the package at a DIFFERENT source path with different content.
+  const v2 = fixturePackage(join(base, "v2"), { id: "same.pkg", configs: { d: { path: "configs/default/oas-config.yaml", default: true } }, extraFiles: { "EXTRA.md": "v2 content\n" } });
+  const r = cli(["init", "--package", v2, "--json", "--dir", ws]);
+  // Pre-fix: succeeded and published a v2 provenance snapshot over the v1 lock/artifact.
+  assert.equal(r.status, 1, `same-ID different-source init must not bypass acquisition:\n${r.stdout}`);
+  assert.equal(JSON.parse(r.stdout).error.code, "integrity-drift");
+  assert.equal(existsSync(join(ws, "oas-config.yaml")), false, "no snapshot published on refused acquisition");
+  // Identical re-init (same source) still works — exact-integrity reuse is a no-op re-lock.
+  const again = cli(["init", "--package", v1, "--json", "--dir", ws]);
+  assert.equal(again.status, 0, again.stdout);
+});
+
+test("an explicit command: null requirement is malformed, not absent — fail-closed policy applies", () => {
+  const base = temp();
+  const ws = join(base, "ws");
+  write(join(ws, ".agents", "capabilities", "owned", "nully", "oas.json"), JSON.stringify({
+    capability: "nully.cap", version: "1.0.0", description: "x",
+    requires: [{ command: null, why: "null command" }],
+  }));
+  write(join(ws, "oas-config.yaml"), "name: ws\nteam:\n  name: t\ncapabilities:\n  additive:\n    nully.cap:\n      from: owned\n      global: true\n");
+  const missing = aggregateMissingRequirements([ws]);
+  assert.equal(missing.length, 1, JSON.stringify(missing));
+  assert.ok(missing[0].invalid, "null command is a typed invalid record");
+  const r = cli(["install", "--json", "--no-requirements", "--dir", ws], { cwd: ws });
+  assert.equal(r.status, 1, r.stdout);
+  const env = JSON.parse(r.stdout);
+  assert.equal(env.error.code, "E_RECONCILE_FAILED");
+  assert.equal(env.error.details.requirements[0].code, "E_REQUIREMENT_POLICY");
+});
+
 // ---------- oas.dev consumer fixture (primary WS2 acceptance case) ----------
 
 /** The oas.dev-shaped consumer package per the founder-approved requirement: a

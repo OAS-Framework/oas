@@ -848,9 +848,12 @@ function initPackage(src, dir, file) {
     // Gate 1: adoption must leave the root + dependency closure exact-locked.
     // Acquisition runs BEFORE the config snapshot is published — a failed
     // acquire/lock must not leave a config behind (E_CONFIG_EXISTS trap).
-    const locks0 = { ...readPackageLocks(dir).packages, ...readPackageLocksAt(dir) };
+    // Local-path sources ALWAYS run acquirePackage: a same-ID lock from a
+    // DIFFERENT source must not pass as proof of acquisition — acquirePackage's
+    // exact-integrity reuse rejects drift, and re-acquiring an identical
+    // source is a no-op re-lock.
     const isLocalSource = !tmp && (src.startsWith(".") || src.startsWith("/") || src.startsWith("~") || src.startsWith("path:"));
-    if (!locks0[manifest.package] && isLocalSource) {
+    if (isLocalSource) {
       try {
         const acq = acquirePackage(dir, src);
         note(`Acquired + locked package closure: ${acq.installed.map((p) => `${p.package}@${p.version}`).join(", ")} → ${shortPath(acq.lockFile)}`);
