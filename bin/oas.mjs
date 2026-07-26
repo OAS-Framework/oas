@@ -140,15 +140,22 @@ function doctorJson(dir) {
     ...(() => {
       // Doctor JSON catches the typed fail-closed error and diagnoses (finding 3).
       try {
-        return { migrationResidue: readPackageLocks(ctx).legacy.filter((l) => l.lockfileVersion === 2).flatMap((l) =>
-          Object.entries(l.capabilities).map(([id, lock]) => {
-            const violation = residueEntryViolation(lock);
-            return violation
-              ? { id, file: l.file, level: l.level, source: lock?.source || null, status: "invalid-lock", violation, action: `fix or remove the entry in ${l.file} (never auto-repaired)` }
-              : { id, file: l.file, level: l.level, source: lock.source, status: "pending-migration", action: `oas migrate --dir ${l.level}` };
-          })), lockError: null };
+        const legacy = readPackageLocks(ctx).legacy;
+        return {
+          migrationResidue: legacy.filter((l) => l.lockfileVersion === 2).flatMap((l) =>
+            Object.entries(l.capabilities).map(([id, lock]) => {
+              const violation = residueEntryViolation(lock);
+              return violation
+                ? { id, file: l.file, level: l.level, source: lock?.source || null, status: "invalid-lock", violation, action: `fix or remove the entry in ${l.file} (never auto-repaired)` }
+                : { id, file: l.file, level: l.level, source: lock.source, status: "pending-migration", action: `oas migrate --dir ${l.level}` };
+            })),
+          // Empty/nonempty v1 files: pending LOCK-FORMAT migration (maintainer
+          // ruling — distinct from capability residue).
+          legacyLockFiles: legacy.filter((l) => l.lockfileVersion !== 2).map((l) => ({ file: l.file, level: l.level, lockfileVersion: l.lockfileVersion ?? 1, empty: !Object.keys(l.capabilities || {}).length, status: "pending-format-migration", action: `oas migrate --dir ${l.level}` })),
+          lockError: null,
+        };
       } catch (e) {
-        return { migrationResidue: [], lockError: { code: e.code || "invalid-lock", message: e.message, provenance: e.provenance || null } };
+        return { migrationResidue: [], legacyLockFiles: [], lockError: { code: e.code || "invalid-lock", message: e.message, provenance: e.provenance || null } };
       }
     })(),
     retiredArtifacts: Object.entries(mans)
@@ -274,7 +281,11 @@ function doctor(dir) {
     if (!pkgs.some((p) => p.package === id)) console.log(`  ERROR: package ${id} is locked in ${shortPath(lock._file)} but not installed — run \`oas install\` [missing locked package]`);
   }
   for (const l of pkgLocks.legacy) {
-    if (l.lockfileVersion !== 2) console.log(`  WARNING: ${shortPath(l.file)} is lockfileVersion ${l.lockfileVersion ?? 1} — \`oas migrate\` maps its capability locks to packages`);
+    if (l.lockfileVersion !== 2) {
+      // Empty v1 = pending LOCK-FORMAT migration (never capability residue).
+      if (!Object.keys(l.capabilities || {}).length) console.log(`  WARNING: ${shortPath(l.file)} is an empty lockfileVersion ${l.lockfileVersion ?? 1} file — pending lock-format migration: run \`oas migrate --dir ${shortPath(l.level)}\` (converts to canonical v2, no residue)`);
+      else console.log(`  WARNING: ${shortPath(l.file)} is lockfileVersion ${l.lockfileVersion ?? 1} — \`oas migrate\` maps its capability locks to packages`);
+    }
     else if (Object.keys(l.capabilities).length) {
       for (const [rid, rlock] of Object.entries(l.capabilities)) {
         const violation = residueEntryViolation(rlock);
@@ -652,7 +663,7 @@ function migrateCmd() {
     catch (e) { cmdFail(e.code || "invalid-lock", e.message || e); return; }
     if (JSON_MODE) { jsonOk({ dryRun: true, plan, warnings }); return; }
     if (!plan.length) { console.log("Nothing to migrate at this scope."); return; }
-    for (const s of plan) console.log(`${s.action.padEnd(10)} ${s.capabilityId}${s.package ? `  → ${s.package.spec}` : ""}`);
+    for (const s of plan) console.log(s.action === "convert-format" ? `${s.action.padEnd(14)} ${s.note}` : `${s.action.padEnd(10)} ${s.capabilityId}${s.package ? `  → ${s.package.spec}` : ""}`);
     for (const w of warnings) console.log(`WARNING: ${w}`);
     return;
   }
@@ -662,6 +673,7 @@ function migrateCmd() {
   for (const m of r.migrated) console.log(`migrated  ${m.capability} → package ${m.package}@${m.version}`);
   for (const c of r.residue) console.log(`residue   ${c}  (kept as a legacy capability lock)`);
   for (const w of r.warnings) console.log(`WARNING: ${w}`);
+  if (r.formatConverted) { console.log(`${shortPath(r.file)} was an empty lockfileVersion 1 file — converted to canonical v2 (no residue).`); return; }
   if (r.file) console.log(`${shortPath(r.file)} is now lockfileVersion 2. Config activation (from: installed) is unchanged; re-run \`oas trust\` for executable capabilities — package integrity approvals are not carried over.`);
 }
 

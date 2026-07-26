@@ -1725,3 +1725,76 @@ test("relative dependency paths resolve against the DEPENDING package's root, no
   assert.throws(() => acquirePackage(scope(base, "s2"), `file://${g}`), (e) => e.code === "invalid-source" && /relative path/.test(e.message));
   rmSync(base, { recursive: true, force: true });
 });
+
+// ---------- empty-v1-lock ruling (maintainer, coordinator mail 9aaea2c3) ----------
+
+test("empty v1 locks SURFACE, convert trivially, and doctor reports format migration (maintainer ruling)", () => {
+  const base = temp();
+  const s = scope(base);
+  writeFileSync(join(s, OAS_LOCK_FILE), JSON.stringify({ lockfileVersion: 1, capabilities: {} }, null, 2));
+  // 1. read: legacy includes the EMPTY v1 file with provenance
+  const locks = readPackageLocks(s);
+  assert.equal(locks.legacy.length, 1);
+  assert.equal(locks.legacy[0].lockfileVersion, 1);
+  assert.equal(Object.keys(locks.legacy[0].capabilities).length, 0);
+  assert.equal(locks.legacy[0].level, s);
+  // 2. dry-run reports the format conversion, not "nothing found"
+  let r = cli(s, "migrate", "--dry-run", "--dir", s);
+  assert.match(r.stdout, /convert-format/);
+  assert.match(r.stdout, /canonical v2/);
+  r = cli(s, "migrate", "--dry-run", "--dir", s, "--json");
+  const env = JSON.parse(r.stdout);
+  assert.equal(env.result.plan[0].action, "convert-format");
+  // 3. doctor: pending LOCK-FORMAT migration, never residue
+  r = cli(s, "doctor", s);
+  assert.match(r.stdout, /pending lock-format migration/);
+  assert.ok(!/residue/.test(r.stdout.split("pending lock-format")[0].slice(-200)), "not described as residue");
+  const dj = JSON.parse(cli(s, "doctor", s, "--json").stdout);
+  assert.equal(dj.legacyLockFiles.length, 1);
+  assert.equal(dj.legacyLockFiles[0].empty, true);
+  assert.equal(dj.legacyLockFiles[0].status, "pending-format-migration");
+  assert.deepEqual(dj.migrationResidue, [], "empty v1 is NOT capability residue");
+  // 4. migrate: atomic canonical v2, no residue
+  r = cli(s, "migrate", "--dir", s);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /converted to canonical v2/);
+  const parsed = JSON.parse(readFileSync(join(s, OAS_LOCK_FILE), "utf8"));
+  assert.deepEqual(parsed, { lockfileVersion: 2, packages: {} });
+  // 5. post-conversion: legacy list is empty (v2 {capabilities:{}} is NOT residue)
+  assert.deepEqual(readPackageLocks(s).legacy, []);
+  const dj2 = JSON.parse(cli(s, "doctor", s, "--json").stdout);
+  assert.deepEqual(dj2.legacyLockFiles, []);
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("cutover gate probe: two-part acceptance and rejection (empty v1 blocks; nonempty residue blocks; clean passes)", () => {
+  const base = temp();
+  // scope A: empty v1 (blocks part a) — a lock-owning scope with NO config
+  const a = join(base, "a");
+  mkdirSync(a, { recursive: true });
+  writeFileSync(join(a, OAS_LOCK_FILE), JSON.stringify({ lockfileVersion: 1, capabilities: {} }));
+  // discovery includes lock-owning scopes without config entries: read from a CHILD dir
+  const child = join(a, "nested", "deeper");
+  mkdirSync(child, { recursive: true });
+  const gate = (dir) => {
+    const l = readPackageLocks(dir).legacy;
+    const v1Files = l.filter((x) => x.lockfileVersion !== 2);
+    const residue = l.filter((x) => x.lockfileVersion === 2 && Object.keys(x.capabilities).length);
+    return { pass: v1Files.length === 0 && residue.length === 0, v1Files: v1Files.length, residue: residue.length };
+  };
+  let g = gate(child);
+  assert.equal(g.pass, false, "empty v1 blocks the cutover");
+  assert.equal(g.v1Files, 1);
+  // convert → passes
+  cli(a, "migrate", "--dir", a);
+  g = gate(child);
+  assert.equal(g.pass, true, "clean two-part gate passes after conversion");
+  // scope B: nonempty v2 residue blocks part b
+  const b = join(base, "b");
+  mkdirSync(b, { recursive: true });
+  writeFileSync(join(b, OAS_LOCK_FILE), JSON.stringify({ lockfileVersion: 2, packages: {}, capabilities: { "res.cap": { source: "marketplace:res.cap@1", version: "1", integrity: `sha256-${"a".repeat(64)}` } } }));
+  g = gate(b);
+  assert.equal(g.pass, false, "nonempty v2 residue blocks the cutover");
+  assert.equal(g.residue, 1);
+  rmSync(base, { recursive: true, force: true });
+});
