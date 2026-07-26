@@ -665,7 +665,7 @@ test("a consented requirement install that fails makes oas install exit nonzero 
   const r1 = cli(["install", "--accept-requirement", "never-cli", "--dir", mkWs("ws1", "never-cli")], { env });
   assert.equal(r1.status, 1, `manager failure must exit nonzero:\n${r1.stdout}`);
   assert.match(r1.stdout, /FAILED/);
-  assert.match(r1.stdout, /consented requirement install.*failed/);
+  assert.match(r1.stdout, /requirement never-cli/);
   // manager succeeds but the command never lands on PATH
   write(join(bin, "npm"), "#!/bin/sh\nexit 0\n"); chmodSync(join(bin, "npm"), 0o755);
   const r2 = cli(["install", "--accept-requirement", "never-cli", "--dir", mkWs("ws2", "never-cli")], { env });
@@ -755,6 +755,94 @@ test("doctor --json carries schemaVersion 1 and the WS2 payload with field parit
   assert.match(human.stdout, /profile "default"/);
   assert.match(human.stdout, /json-doctor-missing-cmd/);
   assert.match(human.stdout, /oas install --accept-requirement json-doctor-missing-cmd/);
+});
+
+test("install --json: full success emits ONE compact ok envelope; failures emit E_RECONCILE_FAILED with the complete report in error.details", () => {
+  const base = temp();
+  const pkg = fixturePackage(join(base, "pkg"));
+  const ws = join(base, "ws");
+  write(join(ws, "oas-config.yaml"), "name: ws\nteam:\n  name: t\n");
+  installFixturePackage(ws, pkg);
+  // success path
+  const ok = cli(["install", "--no-requirements", "--json", "--dir", ws], { cwd: ws });
+  assert.equal(ok.status, 0, ok.stderr);
+  const okEnv = JSON.parse(ok.stdout); // throws on stdout contamination
+  assert.equal(okEnv.schemaVersion, 1);
+  assert.equal(okEnv.ok, true);
+  assert.equal(okEnv.result.boundaryKind, "team");
+  assert.equal(okEnv.result.boundary, ws);
+  const artifacts = okEnv.result.scopes.flatMap((s) => s.artifacts);
+  assert.ok(artifacts.some((a) => a.id === "example.engineering" && a.kind === "package" && a.status === "present"), JSON.stringify(artifacts));
+  assert.deepEqual(okEnv.result.failures, []);
+  // failure path: descendant scope with an unrestorable lock — partial outcomes preserved in error.details
+  write(join(ws, "member", "oas-config.yaml"), "name: member\n");
+  write(join(ws, "member", "oas-lock.json"), JSON.stringify({ lockfileVersion: 1, capabilities: { "ghost.cap": { source: "path:/nonexistent-src", version: "1.0.0", integrity: `sha256-${"0".repeat(64)}` } } }));
+  const bad = cli(["install", "--no-requirements", "--json", "--dir", ws], { cwd: ws });
+  assert.equal(bad.status, 1);
+  const badEnv = JSON.parse(bad.stdout);
+  assert.equal(badEnv.ok, false);
+  assert.equal(badEnv.error.code, "E_RECONCILE_FAILED");
+  const details = badEnv.error.details;
+  assert.equal(details.boundaryKind, "team");
+  const all = details.scopes.flatMap((s) => s.artifacts);
+  assert.ok(all.some((a) => a.id === "example.engineering" && a.status === "present"), "partial success preserved in details");
+  assert.ok(all.some((a) => a.id === "ghost.cap" && a.status === "failed"), JSON.stringify(all));
+  assert.ok(details.failures.some((f) => f.id === "ghost.cap"));
+  // non-team chain path also honors --json (boundaryKind "chain")
+  const ws2 = join(base, "ws2");
+  write(join(ws2, "oas-config.yaml"), "name: ws2\n");
+  const chain = cli(["install", "--no-requirements", "--json", "--dir", ws2], { cwd: ws2 });
+  assert.equal(chain.status, 0, chain.stderr);
+  const chainEnv = JSON.parse(chain.stdout);
+  assert.equal(chainEnv.result.boundaryKind, "chain");
+});
+
+test("install --json requirements: all four consent outcomes with structured plans, no TTY prompt in JSON mode", () => {
+  const base = temp();
+  const bin = join(base, "bin"); mkdirSync(bin, { recursive: true });
+  write(join(bin, "npm"), `#!/bin/sh\nprintf '#!/bin/sh\\nexit 0\\n' > "${join(bin, "wanted-cli")}"\nchmod +x "${join(bin, "wanted-cli")}"\n`);
+  chmodSync(join(bin, "npm"), 0o755);
+  const env = { ...process.env, PATH: `${bin}:${process.env.PATH}` };
+  const mkWs = (name, cmd) => {
+    const ws = join(base, name);
+    write(join(ws, ".agents", "capabilities", "owned", "needy", "oas.json"), JSON.stringify({
+      capability: "needy.cap", version: "1.0.0", description: "x",
+      requires: [{ command: cmd, why: "testing", install: { docs: "https://example.invalid", methods: [{ platform: process.platform, manager: "npm-global", package: `${cmd}@1.0.0` }] } }],
+    }));
+    write(join(ws, "oas-config.yaml"), "name: ws\nteam:\n  name: t\ncapabilities:\n  additive:\n    needy.cap:\n      from: owned\n      global: true\n");
+    return ws;
+  };
+  // consent-required: not accepted → ok envelope, outcome enum, structured plan equal to the human plan data
+  const w1 = mkWs("w1", "wanted-cli");
+  const r1 = cli(["install", "--json", "--dir", w1], { cwd: w1, env });
+  assert.equal(r1.status, 0, r1.stderr);
+  const e1 = JSON.parse(r1.stdout);
+  assert.equal(e1.ok, true);
+  assert.equal(e1.result.requirements.length, 1);
+  const q1 = e1.result.requirements[0];
+  assert.equal(q1.outcome, "consent-required");
+  assert.deepEqual(q1.plan, { manager: "npm-global", argv: ["npm", "install", "-g", "wanted-cli@1.0.0"], source: "npm registry (wanted-cli@1.0.0)", version: "1.0.0", scope: "user-level (npm global prefix)" });
+  assert.deepEqual(q1.requestedBy.map((x) => x.capability), ["needy.cap"]);
+  // skipped: --no-requirements
+  const r2 = cli(["install", "--json", "--no-requirements", "--dir", w1], { cwd: w1, env });
+  const e2 = JSON.parse(r2.stdout);
+  assert.equal(e2.result.requirements[0].outcome, "skipped");
+  // installed: accepted, lands on PATH, onPath true
+  const r3 = cli(["install", "--json", "--accept-requirement", "wanted-cli", "--dir", w1], { cwd: w1, env });
+  assert.equal(r3.status, 0, r3.stdout);
+  const e3 = JSON.parse(r3.stdout);
+  assert.equal(e3.result.requirements[0].outcome, "installed");
+  assert.equal(e3.result.requirements[0].onPath, true);
+  // failed: accepted but the manager never delivers → E_RECONCILE_FAILED with the requirement in details
+  write(join(bin, "npm"), "#!/bin/sh\nexit 0\n"); chmodSync(join(bin, "npm"), 0o755);
+  const w2 = mkWs("w2", "never-cli");
+  const r4 = cli(["install", "--json", "--accept-requirement", "never-cli", "--dir", w2], { cwd: w2, env });
+  assert.equal(r4.status, 1);
+  const e4 = JSON.parse(r4.stdout);
+  assert.equal(e4.error.code, "E_RECONCILE_FAILED");
+  const q4 = e4.error.details.requirements.find((q) => q.command === "never-cli");
+  assert.equal(q4.outcome, "failed");
+  assert.equal(q4.onPath, false);
 });
 
 // ---------- provenance helpers ----------

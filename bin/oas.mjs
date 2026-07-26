@@ -505,19 +505,48 @@ function packageLockReport(level) {
 }
 
 /** Bare `oas install`: restore every locked-but-missing capability in the config chain
- * and verify every v2 package lock in the chain against the installed store. */
+ * and verify every v2 package lock in the chain against the installed store.
+ * Returns { report, failed }; output goes to stdout (human) or stderr (JSON mode). */
 function restore(dir) {
   const report = [...restoreCapabilities(dir), ...lockLevelsUp(dir).flatMap(packageLockReport)];
-  if (!report.length) { console.log("Nothing to restore — no locked capabilities in the config chain."); return; }
+  const note = (msg) => (JSON_MODE ? console.error(msg) : console.log(msg));
+  if (!report.length) note("Nothing to restore — no locked capabilities in the config chain.");
   let failed = 0;
   for (const r of report) {
     const what = r.package ? `package ${r.id}` : r.id;
-    if (r.status === "present") console.log(`ok        ${what}  (${shortPath(r.dir)})`);
-    else if (r.status === "restored") console.log(`restored  ${what} → ${shortPath(r.dir)}  (${r.integrity})`);
-    else if (r.status === "retired") console.log(`RETIRED   ${what}  ${r.reason}`);
-    else { failed++; console.log(`FAILED    ${what}  ${r.reason}`); }
+    if (r.status === "present") note(`ok        ${what}  (${shortPath(r.dir)})`);
+    else if (r.status === "restored") note(`restored  ${what} → ${shortPath(r.dir)}  (${r.integrity})`);
+    else if (r.status === "retired") note(`RETIRED   ${what}  ${r.reason}`);
+    else { failed++; note(`FAILED    ${what}  ${r.reason}`); }
   }
-  if (failed) die(`${failed} artifact${failed > 1 ? "s" : ""} could not be restored`);
+  return { report, failed };
+}
+
+/** One artifact report item → the machine shape (kind capability|package). */
+const artifactJson = (r) => ({
+  id: r.id, kind: r.package ? "package" : "capability", level: r.level,
+  status: r.status, ...(r.dir ? { dir: r.dir } : {}), ...(r.reason ? { reason: r.reason } : {}),
+});
+
+/** Emit the reconcile/restore result: human exit or the single-envelope JSON contract.
+ * Full success → { ok: true, result }. ANY artifact or consented-install failure →
+ * nonzero with error.code E_RECONCILE_FAILED and the SAME complete report under
+ * error.details — partial outcomes are never lost. */
+function emitReconcileResult({ boundary, boundaryKind, scopes, requirements, failures }) {
+  const result = { boundary, boundaryKind, scopes, requirements, failures };
+  if (JSON_MODE) {
+    if (failures.length) {
+      console.log(JSON.stringify({ schemaVersion: 1, ok: false, error: { code: "E_RECONCILE_FAILED", message: `${failures.length} failure${failures.length > 1 ? "s" : ""} during restore/reconciliation`, details: result } }));
+      process.exit(1);
+    }
+    jsonOk(result);
+    return;
+  }
+  if (failures.length) {
+    console.log("\nFailures by scope:");
+    for (const f of failures) console.log(`  ${shortPath(f.scope)}: ${f.id} — ${f.reason}`);
+    die(`${failures.length} failure${failures.length > 1 ? "s" : ""} during restore/reconciliation`);
+  }
 }
 
 /** Bare `oas install` at a team boundary: reconcile the whole workspace — restore the
@@ -533,17 +562,28 @@ function reconcile(dir) {
   const recursive = args.includes("--recursive");
   if (!declaresTeamHere && !recursive) {
     // Current-chain behavior, plus the requirements gate for this chain's active capabilities.
-    restore(dir);
-    const failed = requirementsGate([dir]);
-    if (failed) die(`${failed} consented requirement install${failed > 1 ? "s" : ""} failed`);
+    const { report, failed } = restore(dir);
+    const requirements = requirementsGate([dir]);
+    const failures = [
+      ...report.filter((r) => r.status === "failed" || r.status === "unrestorable").map((r) => ({ scope: r.level, id: r.package ? `package ${r.id}` : r.id, reason: r.reason })),
+      ...requirements.filter((q) => q.outcome === "failed").map((q) => ({ scope: dir, id: `requirement ${q.command}`, reason: q.reason || "consented install failed" })),
+    ];
+    void failed;
+    emitReconcileResult({
+      boundary: dir, boundaryKind: "chain",
+      scopes: [{ scope: dir, artifacts: report.map(artifactJson) }],
+      requirements, failures,
+    });
     return;
   }
   const boundary = dir;
+  const note = (msg) => (JSON_MODE ? console.error(msg) : console.log(msg));
   // The chosen boundary is printed BEFORE any network or host work — always.
-  console.log(`Workspace reconciliation boundary: ${shortPath(boundary)}${declaresTeamHere ? " (team scope)" : " (--recursive)"}`);
+  note(`Workspace reconciliation boundary: ${shortPath(boundary)}${declaresTeamHere ? " (team scope)" : " (--recursive)"}`);
   const scopes = [boundary, ...discoverWorkspaceScopes(boundary)];
   const failures = [];
-  const reported = [];
+  const scopeReports = [];
+  let reportedAny = false;
   const restoredLevels = new Set(); // each lock level's graph restores exactly once
   const packageCheckedLevels = new Set(); // each level's package locks verified exactly once
   for (const scope of scopes) {
@@ -559,12 +599,12 @@ function reconcile(dir) {
     const pkgLevels = (scope === boundary ? lockLevelsUp(boundary) : [scope]).filter((l) => !packageCheckedLevels.has(resolve(l)));
     for (const l of pkgLevels) { packageCheckedLevels.add(resolve(l)); report.push(...packageLockReport(l)); }
     for (const r of report) {
-      reported.push({ scope, ...r });
+      reportedAny = true;
       const what = r.package ? `package ${r.id}` : r.id;
-      if (r.status === "present") console.log(`ok        ${what}  [${shortPath(r.level)}]`);
-      else if (r.status === "restored") console.log(`restored  ${what} → ${shortPath(r.dir)}  [${shortPath(r.level)}]`);
-      else if (r.status === "retired") console.log(`RETIRED   ${what}  ${r.reason}  [${shortPath(r.level)}]`);
-      else { failures.push({ scope: r.level, id: what, reason: r.reason }); console.log(`FAILED    ${what}  ${r.reason}  [${shortPath(r.level)}]`); }
+      if (r.status === "present") note(`ok        ${what}  [${shortPath(r.level)}]`);
+      else if (r.status === "restored") note(`restored  ${what} → ${shortPath(r.dir)}  [${shortPath(r.level)}]`);
+      else if (r.status === "retired") note(`RETIRED   ${what}  ${r.reason}  [${shortPath(r.level)}]`);
+      else { failures.push({ scope: r.level, id: what, reason: r.reason }); note(`FAILED    ${what}  ${r.reason}  [${shortPath(r.level)}]`); }
     }
     if (scope === boundary) for (const cfg of configChain(boundary)) restoredLevels.add(resolve(cfg._level));
     for (const r of report) restoredLevels.add(resolve(r.level));
@@ -589,15 +629,17 @@ function reconcile(dir) {
         }
       } catch (e) { failures.push({ scope, id: "(config)", reason: e.message }); }
     }
+    scopeReports.push({ scope, artifacts: report.map(artifactJson) });
   }
-  if (!reported.length && scopes.length === 1) console.log("Nothing to restore — no locked capabilities or packages found in the boundary.");
-  const consentFailures = requirementsGate(scopes);
-  if (consentFailures) failures.push({ scope: boundary, id: "(requirements)", reason: `${consentFailures} consented requirement install${consentFailures > 1 ? "s" : ""} failed` });
-  if (failures.length) {
-    console.log("\nFailures by scope:");
-    for (const f of failures) console.log(`  ${shortPath(f.scope)}: ${f.id} — ${f.reason}`);
-    die(`${failures.length} scope failure${failures.length > 1 ? "s" : ""} during workspace reconciliation`);
+  if (!reportedAny && scopes.length === 1) note("Nothing to restore — no locked capabilities or packages found in the boundary.");
+  const requirements = requirementsGate(scopes);
+  for (const q of requirements) {
+    if (q.outcome === "failed") failures.push({ scope: boundary, id: `requirement ${q.command}`, reason: q.reason || "consented install failed" });
   }
+  emitReconcileResult({
+    boundary, boundaryKind: declaresTeamHere ? "team" : "recursive",
+    scopes: scopeReports, requirements, failures,
+  });
 }
 
 /** Host-requirement consent gate. Requirements are considered only for capabilities
@@ -606,27 +648,39 @@ function reconcile(dir) {
  * non-interactive runs NEVER install by default — automation names each accepted
  * requirement via --accept-requirement <command>; --no-requirements skips entirely.
  * Skipping leaves an actionable doctor warning (doctor recomputes missing commands).
- * Returns the number of CONSENTED installs that failed (manager error or the
- * command still absent from PATH) — the caller exits nonzero on any, so
- * automation using --accept-requirement can detect installation failure.
- * Unaccepted/skipped optional requirements stay non-fatal. */
+ * Returns structured entries with a stable outcome enum:
+ *   "installed"        consented install ran and the command verified on PATH
+ *   "failed"           consented install errored or PATH verification missed (→ reconcile failure)
+ *   "consent-required" not explicitly accepted — nothing installed
+ *   "skipped"          --no-requirements, or no safe installer for this host
+ * JSON plan data equals the human prompt plan (argv/source/version/scope/requestedBy;
+ * never shell text). In JSON mode all prose goes to stderr. */
 function requirementsGate(scopes) {
-  if (args.includes("--no-requirements")) return 0;
   const missing = aggregateMissingRequirements(scopes);
-  if (!missing.length) return 0;
+  if (!missing.length) return [];
+  const note = (msg) => (JSON_MODE ? console.error(msg) : console.log(msg));
+  const entryOf = (req, outcome, extra = {}) => ({
+    command: req.command, why: req.why || null,
+    plan: req.plan && !req.plan.unavailable
+      ? { manager: req.plan.manager, argv: req.plan.argv, source: req.plan.source, version: req.plan.version || null, scope: req.plan.scope }
+      : null,
+    requestedBy: req.requestedBy, docs: req.docs || null, outcome, ...extra,
+  });
+  if (args.includes("--no-requirements")) return missing.map((req) => entryOf(req, "skipped", { reason: "--no-requirements" }));
   const accepted = new Set(flagAll("accept-requirement"));
-  const interactive = process.stdin.isTTY && process.stdout.isTTY;
-  let failed = 0;
-  console.log(`\nMissing host commands for active capabilities (${missing.length}):`);
+  const interactive = !JSON_MODE && process.stdin.isTTY && process.stdout.isTTY;
+  const out = [];
+  note(`\nMissing host commands for active capabilities (${missing.length}):`);
   for (const req of missing) {
     const requesters = req.requestedBy.map((r) => `${r.capability} [${shortPath(r.scope)}]`).join(", ");
-    console.log(`  ${req.command} — ${req.why || "required"} (requested by: ${requesters})`);
+    note(`  ${req.command} — ${req.why || "required"} (requested by: ${requesters})`);
     const plan = req.plan;
     if (!plan || plan.unavailable) {
-      console.log(`    no safe installer: ${plan?.unavailable || "no recipe"}${req.docs ? ` — install docs: ${req.docs}` : ""}`);
+      note(`    no safe installer: ${plan?.unavailable || "no recipe"}${req.docs ? ` — install docs: ${req.docs}` : ""}`);
+      out.push(entryOf(req, "skipped", { reason: plan?.unavailable || "no safe installer" }));
       continue;
     }
-    console.log(`    installer: ${plan.argv.join(" ")}  (source: ${plan.source}${plan.version ? `, version ${plan.version}` : ""}; ${plan.scope})`);
+    note(`    installer: ${plan.argv.join(" ")}  (source: ${plan.source}${plan.version ? `, version ${plan.version}` : ""}; ${plan.scope})`);
     let consent = accepted.has(req.command);
     if (!consent && interactive) {
       process.stdout.write(`    Run this install now? [y/N] `);
@@ -636,20 +690,21 @@ function requirementsGate(scopes) {
       consent = answer === "y" || answer === "yes";
     }
     if (!consent) {
-      console.log(`    skipped — ${interactive ? "not consented" : "non-interactive; pass --accept-requirement " + req.command + " to install"}; \`oas doctor\` will keep warning until ${req.command} is on PATH`);
+      note(`    skipped — ${interactive ? "not consented" : "non-interactive; pass --accept-requirement " + req.command + " to install"}; \`oas doctor\` will keep warning until ${req.command} is on PATH`);
+      out.push(entryOf(req, "consent-required"));
       continue;
     }
     try {
       const r = runRequirementInstall(plan);
-      if (r.onPath) console.log(`    installed — ${req.command} verified on PATH`);
-      else { failed++; console.log(`    FAILED: install ran but ${req.command} is still not on PATH — check your shell PATH/prefix`); }
+      if (r.onPath) { note(`    installed — ${req.command} verified on PATH`); out.push(entryOf(req, "installed", { onPath: true })); }
+      else { note(`    FAILED: install ran but ${req.command} is still not on PATH — check your shell PATH/prefix`); out.push(entryOf(req, "failed", { onPath: false, reason: "install ran but the command is not on PATH" })); }
     } catch (e) {
-      failed++;
-      console.log(`    FAILED: ${e.message}`);
+      note(`    FAILED: ${e.message}`);
+      out.push(entryOf(req, "failed", { onPath: false, reason: e.message }));
     }
   }
-  console.log("Requirement consent is separate from capability trust — installing a binary does not activate or approve any capability.");
-  return failed;
+  note("Requirement consent is separate from capability trust — installing a binary does not activate or approve any capability.");
+  return out;
 }
 
 function trust() {
