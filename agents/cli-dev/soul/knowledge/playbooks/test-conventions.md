@@ -3,7 +3,7 @@ type: Playbook
 title: Test conventions in test/capabilities.test.mjs
 description: Kernel and CLI tests run node:test against temp directories with fixture souls, fake/runtime tmux shims on PATH, spawnSync of bin/oas.mjs for CLI behavior, and regression coverage at the layer where bugs occurred.
 tags: [testing, conventions, fixtures, cli, regression, tmux]
-timestamp: 2026-07-25
+timestamp: 2026-07-26
 ---
 
 # The house style
@@ -106,6 +106,13 @@ All kernel/CLI behavior tests live in `test/capabilities.test.mjs`
   at config-chain levels; a bare git repo without `oas-config.yaml` can silently
   hide a fixture and turn the assertion into `E_UNKNOWN_COMMAND` instead of
   exercising manifest code.
+- Symlink-containment walker tests should use a real `npm ci` `file:` dependency
+  layout when validating package materialization: npm creates `node_modules/dep`
+  as a relative symlink, and the security regression shape can require an
+  inside symlink to a target directory that itself contains an escaping symlink.
+  Keep recursive walk failures outside convenience `lstat` probe catches so
+  escape errors propagate; see
+  [symlink-containment walker throws](/lessons/symlink-containment-walker-throws.md).
 - Team/cross-repo tests: build a workspace with a `team:` config and two
   member repos each holding `agents/` — this caught the "instance names only
   unique per agent dir" bug.
