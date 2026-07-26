@@ -1,6 +1,28 @@
 # Knowledge Log
 
 ## 2026-07-25
+* **Update**: [canonical-worktree-verification](/lessons/canonical-worktree-verification.md) merges capture-canonical-path-before-hooks: capture the canonical worktree path immediately after `git worktree add`, retain it through hooks and compensation, and fail closed when no retained identity exists.
+* **Update**: [rollback-probes-argv-and-fail-closed](/lessons/rollback-probes-argv-and-fail-closed.md) points worktree rollback probes at the retained canonical identity instead of rollback-time re-canonicalization or lexical fallback.
+* **Update**: [test-conventions](/playbooks/test-conventions.md) records the symlinked-root, retire-hook-removes-work, stale canonical worktree-list fixture for retained-path rollback coverage.
+* **Creation**: [canonical-worktree-verification](/lessons/canonical-worktree-verification.md) records the symlink canonicalization rollback gotcha: capture `realpath(work)` before removal and compare exact NUL-delimited `git worktree list --porcelain -z` records.
+* **Update**: [rollback-probes-argv-and-fail-closed](/lessons/rollback-probes-argv-and-fail-closed.md) links the general argv-safe, fail-closed rule to exact canonical worktree record parsing.
+* **Update**: [test-conventions](/playbooks/test-conventions.md) records the symlinked-agents-root regression fixture for canonical Git worktree rollback diagnostics.
+* **Creation**: [rollback-probes-argv-and-fail-closed](/lessons/rollback-probes-argv-and-fail-closed.md) records that public refs in rollback probes must be argv-safe and that unverifiable cleanup probes are incomplete, not absent.
+* **Update**: [test-conventions](/playbooks/test-conventions.md) records the malicious-ref rollback probe test and the exact-edit/stash rule for temporary bug simulations.
+* **Update**: [cross-instance-writes-commit-last](/lessons/cross-instance-writes-commit-last.md) records structured failure channels and effect verification for hook, tmux, and git rollback cleanup truthfulness.
+* **Update**: [test-conventions](/playbooks/test-conventions.md) records stateful tmux and pinned-worktree recipes for exercising swallowed failures, silent successes, and cleanup effect checks.
+* **Update**: [cross-instance-writes-commit-last](/lessons/cross-instance-writes-commit-last.md) records truthful rollback diagnostics: collect cleanup failures, verify effects, and report incomplete cleanup without masking the original error.
+* **Update**: [test-conventions](/playbooks/test-conventions.md) records the read-only-retire-hook recipe for forcing scaffold-home removal failure and asserting the incomplete-rollback diagnostic plus remaining home.
+* **Update**: [cross-instance-writes-commit-last](/lessons/cross-instance-writes-commit-last.md) records that rollback cleanup steps must each be independently guarded so one cleanup failure cannot skip later compensation or mask the original error.
+* **Update**: [test-conventions](/playbooks/test-conventions.md) records the temp-path directory recipe for proving rollback continues after a cleanup step itself throws.
+* **Update**: [cross-instance-writes-commit-last](/lessons/cross-instance-writes-commit-last.md) merges the rollback completeness checklist: atomic temp+rename metadata writes, retire-hook compensation for capability state, and cleanup of launched/scaffolded side effects.
+* **Update**: [test-conventions](/playbooks/test-conventions.md) records the launched-path rollback test recipe with a recording fake tmux, forced atomic write failure, hook assertions, and PATH tool symlinks.
+* **Update**: [cross-instance-writes-commit-last](/lessons/cross-instance-writes-commit-last.md) records that final cross-instance metadata writes are themselves fallible and need compensation for prior launch/scaffold side effects.
+* **Update**: [test-conventions](/playbooks/test-conventions.md) records the chmod recipe for forcing metadata-write failures and asserting full rollback.
+* **Update**: [kernel-validation-before-side-effects](/lessons/kernel-validation-before-side-effects.md) links to the cross-instance write ordering lesson as the transactionality counterpart to pre-side-effect validation.
+* **Creation**: [cross-instance-writes-commit-last](/lessons/cross-instance-writes-commit-last.md) records that writes to another instance's metadata must wait until every remaining fallible step has succeeded, or be compensated on failure.
+* **Update**: [test-conventions](/playbooks/test-conventions.md) records direct-kernel coverage for raw spawn relation option combinations, matching CLI `E_BAD_ARGS` cases and no-home side-effect assertions.
+* **Update**: [kernel-validation-before-side-effects](/lessons/kernel-validation-before-side-effects.md) records that raw `spawnInstance` option combinations must be validated before relation sugar expansion or explicit-none normalization.
 * **Update**: [test-conventions](/playbooks/test-conventions.md) records that name-resolution tests need local-soul fixtures because overlapping discovery phases only double-count there.
 * **Update**: [lineage-edge-ambiguity-posture](/lessons/lineage-edge-ambiguity-posture.md) records canonical-home de-duplication before treating all-match enumeration results as intra-root duplicates.
 * **Creation**: [overlapping-instance-home-scans-dedupe](/lessons/overlapping-instance-home-scans-dedupe.md) records the `findInstanceHomes` lesson that overlapping `listAgents`/`localAgentBases` scans must dedupe local souls by canonical home.
