@@ -1,0 +1,66 @@
+# oas-aweb
+
+Official [OAS](https://github.com/OAS-Framework/oas) messaging-layer integration for [aweb](https://aweb.ai). It provides:
+
+- per-instance, team-scoped aweb identity minting at spawn and self-deletion at retire;
+- bounded authority discovery that never walks above the deployment workspace;
+- `oas aweb roster` and guided `oas aweb setup` commands;
+- official `aweb-messaging`, `aweb-team-membership`, and `aweb-identity` skills from `@awebai/pi`; and
+- a Claude Code channel-plugin launch integration for real-time events.
+
+Messaging is deliberately separate from durable task tracking. The selected tasks integration owns task state.
+
+## Requirements
+
+Install the `aw` CLI and initialize an aweb workspace at the deployment's team scope. `oas aweb setup` reports the next onboarding step without authenticating or creating a team silently.
+
+The package owns its JavaScript runtime closure with checked `package-lock.json`. Materialize it exactly, without lifecycle scripts:
+
+```bash
+npm ci --ignore-scripts
+```
+
+This creates package-local `node_modules/@awebai/pi/skills/...`, which satisfies all three skill paths in `oas.json`. OAS package acquisition must use the same script-free materialization contract.
+
+The final OAS compatibility floor and flat dependency layout are blocked on the package-engine freeze; see [`SCHEMA-STATUS.md`](SCHEMA-STATUS.md).
+
+## Acquire and activate
+
+Acquisition does not activate the capability. After an official release exists:
+
+```bash
+oas install oas.aweb --dir /path/to/scope
+oas trust oas.aweb --dir /path/to/scope
+oas use oas.aweb --global --dir /path/to/scope
+oas aweb setup
+oas doctor /path/to/scope --soul <soul-name>
+```
+
+A pinned Git source may be used after publication:
+
+```bash
+oas install git:https://github.com/OAS-Framework/oas-aweb.git@v1.5.1 --dir /path/to/scope
+```
+
+Commands and identity lifecycle hooks are executable, so they require explicit per-capability trust tied to the exact package integrity. Targeting and team identity are deployment-owned. A typical config scope declares the team boundary and activates the messaging layer:
+
+```yaml
+team:
+  name: example-team
+  id: example-team:aweb.ai
+capabilities:
+  layers:
+    messaging:
+      capability: oas.aweb
+      from: installed
+      global: true
+```
+
+## Development
+
+```bash
+npm ci --ignore-scripts
+npm test
+```
+
+Tests validate both manifests, prove all declared skills resolve from this repository's materialized dependency tree, and exercise missing-CLI/bounded-root/retire hook behavior. The full acquire → lock → trust → activate → spawn probe remains blocked on engine consumer fixtures.
