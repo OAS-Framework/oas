@@ -699,6 +699,7 @@ test("retired oas.web: config, install, and lock paths all give actionable migra
   const docJson = spawnSync(process.execPath, [CLI, "doctor", repo, "--json"], { encoding: "utf8" });
   assert.notEqual(docJson.status, 0);
   const dj = JSON.parse(docJson.stdout);
+  assert.equal(dj.schemaVersion, 1, "the retired-capability error document carries the doctor v1 schema version");
   assert.deepEqual(dj.retired, ["oas.web"], "doctor --json reports the retired id");
   assert.match(dj.error, /Remove the oas\.web entry/, "doctor --json carries the cleanup instruction");
   // explicit install of the retired id explains instead of "not a marketplace capability"

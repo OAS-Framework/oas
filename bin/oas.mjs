@@ -98,7 +98,7 @@ function resolveForDoctor(ctx, soulName, { json } = {}) {
   catch (e) {
     const retiredId = Object.keys(RETIRED_CAPABILITIES).find((id) => String(e.message).includes(`"${id}"`) && String(e.message).includes("retired"));
     if (!retiredId) throw e;
-    if (json) { console.log(JSON.stringify({ context: ctx, error: e.message, retired: [retiredId] }, null, 2)); process.exit(1); }
+    if (json) { console.log(JSON.stringify({ schemaVersion: 1, context: ctx, error: e.message, retired: [retiredId] }, null, 2)); process.exit(1); }
     die(`${e.message}`);
   }
 }
