@@ -38,7 +38,7 @@
               "source": {
                 "description": "Normalized acquisition source: git:<url>@<ref>, path:<dir>, or catalog:<id>@<selector> (official catalog resolution is recorded but grants no executable trust).",
                 "type": "string",
-                "minLength": 1
+                "pattern": "^(git:|path:|catalog:).+"
               },
               "version": {
                 "description": "Version from the locked oas-package.json.",
@@ -46,12 +46,17 @@
                 "minLength": 1
               },
               "commit": {
-                "description": "Exact git commit the package was acquired at. For path: sources this is the string \"local\".",
+                "description": "Exact git commit the package was acquired at (40-hex). For path: sources this is the string \"local\".",
                 "type": "string",
-                "minLength": 1
+                "pattern": "^([0-9a-f]{40}|local)$"
               },
               "integrity": {
                 "description": "sha256 tree hash of the installed package root; any change invalidates all capability approvals.",
+                "type": "string",
+                "pattern": "^sha256-[0-9a-f]{64}$"
+              },
+              "depsIntegrity": {
+                "description": "sha256 digest of the MATERIALIZED runtime dependency closure (every node_modules tree under the package root); absent when the package has no runtime deps. Trust verifies it alongside the source integrity.",
                 "type": "string",
                 "pattern": "^sha256-[0-9a-f]{64}$"
               },
@@ -84,6 +89,19 @@
               }
             },
             "additionalProperties": false
+          }
+        },
+        "capabilities": {
+          "description": "OPTIONAL legacy v1 capability-lock residue retained during staged migration (entries `oas migrate` could not yet map to packages). Same entry shape as lockfileVersion 1; doctor flags them as pending migration.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "required": [
+              "source",
+              "version",
+              "integrity"
+            ],
+            "additionalProperties": true
           }
         }
       },

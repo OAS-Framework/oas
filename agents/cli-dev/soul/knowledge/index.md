@@ -14,6 +14,9 @@ read what the current task needs, not everything.
 
 * [decisions/spawn-lineage-explicit-only.md](decisions/spawn-lineage-explicit-only.md) - parentInstance now comes only from an explicit relation/--parent inside the target deployment or the attached-mode owner binding; env vars are never consulted, and cross-deployment spawns stay operator-origin.
 * [decisions/attached-spawns-child-of-work-owner.md](decisions/attached-spawns-child-of-work-owner.md) - attached work mode always makes the new agent a child of the verified work-tree owner; contradictory relations are rejected.
+* [decisions/package-runtime-boundary-structured-cli.md](decisions/package-runtime-boundary-structured-cli.md) - Official packages reach the kernel only through oas CLI commands with Desktop-API-v1 JSON envelopes and a packageRuntimeApi probe field; a blessed module export was rejected because it preserves the oas-root dynamic-import coupling and creates a second public JS surface.
+* [decisions/flat-single-capability-packages.md](decisions/flat-single-capability-packages.md) - A capability directory may be the package root with oas-package.json and oas.json side by side when capabilities is exactly ["."]; package integrity covers the whole tree, and npm materialization roots are realpath-deduped.
+* [decisions/per-capability-npm-locks.md](decisions/per-capability-npm-locks.md) - Materialization roots are the package root plus declared capability dirs that have both package.json and package-lock.json; each root runs an independent npm ci --ignore-scripts, and inner resources resolve manifest-relative inside containment.
 
 ## Architecture
 
@@ -33,6 +36,9 @@ read what the current task needs, not everything.
 * [lessons/team-agent-roots-nonexistent-roots.md](lessons/team-agent-roots-nonexistent-roots.md) - teamAgentRoots deliberately retains nonexistent agents/ anchors for all-local sibling scopes; deployment-wide scans must not existence-filter them away.
 * [lessons/task-flag-boolean-crash.md](lessons/task-flag-boolean-crash.md) - bin/oas.mjs flag() yields boolean true when the next argv token starts with "--"; oas spawn dev --task --purpose x passed task=true into spawnInstance and crashed mid-scaffold at task.trim(), while task delivery itself was never broken.
 * [lessons/capability-source-edits-require-lock-refresh.md](lessons/capability-source-edits-require-lock-refresh.md) - edits under capabilities/<pkg>/ change capabilityIntegrity, so clean-clone CI fails restore unless the package version and matching oas-lock.json source/version/integrity are refreshed in the same commit.
+* [lessons/frozen-interface-first-delivery.md](lessons/frozen-interface-first-delivery.md) - When sibling workstreams block on a shared contract, ship the schemas plus a contract doc with exact function signatures and error codes as a standalone first commit before any implementation.
+* [lessons/package-engine-implementation-gotchas.md](lessons/package-engine-implementation-gotchas.md) - Concrete pitfalls hit while implementing distribution packages — YAML subset config shape in tests, path-vs-git source disambiguation via file://, spawnInstance needs an agent object, hook meta lands in instance.json capabilityMeta, depsIntegrity closes the node_modules trust gap, and empty npm closures create no node_modules.
+* [lessons/deps-integrity-trust-binding.md](lessons/deps-integrity-trust-binding.md) - Excluding node_modules from packageIntegrity creates a trust bypass unless materialized dependency trees have their own depsIntegrity digest that trust, approval carry-over, and restore all verify.
 * [lessons/json-mode-cli-contract.md](lessons/json-mode-cli-contract.md) - when a CLI command grows a machine-readable --json mode for an external consumer, success and failure must be one stdout JSON envelope with stable error codes, and all human progress prose must move to stderr in JSON mode.
 * [lessons/json-envelope-dispatch-boundary.md](lessons/json-envelope-dispatch-boundary.md) - A capability command's --json envelope guarantee is void unless the generic CLI dispatcher wraps the whole dispatch path, including manifest discovery, trust checks, command decoding, non-match fallthrough, and child spawn failures.
 * [lessons/release-workflow-static-tests.md](lessons/release-workflow-static-tests.md) - A cheap, robust way to regression-test a GitHub Actions release workflow's binding ordering guarantees is a node:test file over raw YAML, but run-block extraction and wording guards need precise slices and documented historical exceptions.
@@ -58,6 +64,7 @@ read what the current task needs, not everything.
 ## References
 
 * [references/oas-expert-decisions.md](references/oas-expert-decisions.md) - pointers to the canonical Decision records and docs governing this area.
+* [references/strict-curriculum-scoping.md](references/strict-curriculum-scoping.md) - Key launch-path facts gathered while scoping strict instance curriculum enforcement: pi can combine --no-skills with explicit --skill, Claude Code isolation needs CLAUDE_CONFIG_DIR plus a version-probed allowlist, and enforcement belongs in spawnInstance command-line construction.
 
 Grow role-specific sections beyond these as the agent's role demands — list
 them here and log the growth in log.md.
