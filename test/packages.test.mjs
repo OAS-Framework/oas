@@ -1687,3 +1687,41 @@ test("trust query RETHROWS invalid-lock (fail closed; only doctor catches) — r
   assert.match(r.stdout, /invalid-lock/);
   rmSync(base, { recursive: true, force: true });
 });
+
+// ---------- WS2-reported engine bugs (coordinator mail dd2acc27) ----------
+
+test("hostile manifest roots: JSON null/scalar/array are invalid-package-manifest, never TypeError (WS2 bug 1)", () => {
+  const base = temp();
+  for (const [label, body] of [["null", "null"], ["scalar", "42"], ["string", '"x"'], ["array", "[1,2]"]]) {
+    const d = join(base, `h-${label}`);
+    write(join(d, "oas-package.json"), body);
+    assert.throws(() => loadPackageManifestAt(d), (e) => e.code === "invalid-package-manifest" && /must be a JSON object/.test(e.message), label);
+  }
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("relative dependency paths resolve against the DEPENDING package's root, not CWD (WS2 bug 2)", () => {
+  const base = temp();
+  const s = scope(base);
+  // package at <base>/a depending on ./sub — must resolve <base>/a/sub regardless of CWD
+  const a = join(base, "a");
+  pkgSource(join(a, "sub"), { package: "sub.p" }, { "cap": { capability: "sub.cap" } });
+  pkgSource(a, { package: "root.rel", dependencies: ["./sub"] }, { "cap": { capability: "root.relcap" } });
+  // run acquire from a DIFFERENT cwd (the CLI always runs elsewhere)
+  const elsewhere = join(base, "elsewhere");
+  mkdirSync(elsewhere, { recursive: true });
+  const prevCwd = process.cwd();
+  try {
+    process.chdir(elsewhere);
+    const r = acquirePackage(s, a);
+    assert.deepEqual(r.installed.map((p) => p.package).sort(), ["root.rel", "sub.p"]);
+    assert.match(readPackageLocks(s).packages["sub.p"].source, /path:.*\/a\/sub$/, "resolved against the depending package root");
+  } finally {
+    process.chdir(prevCwd);
+  }
+  // a relative dependency declared by a NON-path (git) parent is a coded error, not CWD guessing
+  const g = pkgSource(join(base, "g"), { package: "g.rel", dependencies: ["./sub"] });
+  gitify(g);
+  assert.throws(() => acquirePackage(scope(base, "s2"), `file://${g}`), (e) => e.code === "invalid-source" && /relative path/.test(e.message));
+  rmSync(base, { recursive: true, force: true });
+});
