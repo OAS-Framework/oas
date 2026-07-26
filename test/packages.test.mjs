@@ -2,13 +2,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import {
-  acquirePackage, applyLegacyLockMigration, approveCapability, capabilityManifests, capabilityManifest, capabilityTrust,
+  acquirePackage, applyLegacyLockMigration, approveCapability, capabilityIntegrity, capabilityManifests, capabilityManifest, capabilityTrust,
   capabilitySkillDirs, capabilityExecutablePath, listInstalledPackages, loadPackageManifestAt, migrateLegacyLock,
-  materializePackageDeps, packageIntegrity, parsePackageSource, readPackageLocks, removePackage, resolveOasConfig, restorePackages,
+  materializePackageDeps, packageIntegrity, parsePackageSource, readPackageLocks, removePackage, resolveOasConfig, restoreCapabilities, restorePackages,
   findAgent, spawnInstance, updatePackage, validateLockEntry, writeCapabilityLock, writePackageLock, installedPackagesDir, OAS_LOCK_FILE,
 } from "../lib/core.mjs";
 
@@ -1120,7 +1120,7 @@ test("invalid-lock: malformed mixed-v2 residue is diagnosed, never repaired, nev
   writeFileSync(lockFile, JSON.stringify(parsed, null, 2));
   const before = readFileSync(lockFile, "utf8");
   const r = cli(s, "doctor", s);
-  assert.match(r.stdout, /residue entry mal\.cap .* is malformed .* \[invalid-lock\]/);
+  assert.match(r.stdout, /legacy entry "mal\.cap" is malformed .* \[invalid-lock\]/);
   assert.equal(readFileSync(lockFile, "utf8"), before, "doctor never repairs the lock");
   rmSync(base, { recursive: true, force: true });
 });
@@ -1585,12 +1585,11 @@ test("doctor --json diagnoses malformed residue with invalid-lock status; human/
   writeFileSync(lockFile, JSON.stringify(parsed, null, 2));
   const rj = cli(s, "doctor", s, "--json");
   const doc = JSON.parse(rj.stdout);
-  const entry = doc.migrationResidue.find((e) => e.id === "ok.res");
-  assert.equal(entry.status, "invalid-lock");
-  assert.match(entry.violation, /version/);
-  assert.match(entry.action, /fix or remove/);
+  assert.equal(doc.error.code, "invalid-lock");
+  assert.match(doc.error.message, /legacy entry "ok\.res" is malformed \(missing\/invalid version\)/);
+  assert.match(JSON.stringify(doc.error.provenance), /ok\.res/);
   const rh = cli(s, "doctor", s);
-  assert.match(rh.stdout, /residue entry ok\.res .* is malformed \(missing\/invalid version\)/);
+  assert.match(rh.stdout, /legacy entry "ok\.res" is malformed \(missing\/invalid version\)/);
   rmSync(base, { recursive: true, force: true });
 });
 
@@ -2374,6 +2373,62 @@ test("tilde dependency spellings from git parents are rejected — no ambient $H
     assert.equal(r.root, "hbait.p", "operator tilde spec still works at the CLI root level");
   } finally {
     rmSync(bait, { recursive: true, force: true });
+  }
+  rmSync(base, { recursive: true, force: true });
+});
+
+// ---------- reviewer-12e2d86 findings ----------
+
+test("legacy restore validates the COMPLETE residue map before any acquisition (reviewer-12e2d86)", () => {
+  const base = temp();
+  const s = scope(base);
+  const goodSrc = join(base, "good-cap");
+  write(join(goodSrc, "oas.json"), JSON.stringify({ capability: "good.cap", version: "1.0.0", description: "d" }));
+  const goodIntegrity = capabilityIntegrity(goodSrc);
+  // Ordered good first, malformed bad second — old code restored good before throwing on bad.
+  writeFileSync(join(s, OAS_LOCK_FILE), JSON.stringify({
+    lockfileVersion: 2,
+    packages: {},
+    capabilities: {
+      "good.cap": { source: `path:${goodSrc}`, version: "1.0.0", integrity: goodIntegrity },
+      "bad.cap": null,
+    },
+  }, null, 2));
+  const capStore = join(s, ".agents", "capabilities", "installed");
+  assert.throws(() => restoreCapabilities(s), (e) => e.code === "invalid-lock" && /bad\.cap/.test(e.message));
+  assert.ok(!existsSync(capStore) || readdirSync(capStore).length === 0, "complete-map preflight: good.cap was NOT restored before bad.cap failed");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("malformed residue cannot grant marketplace/hoisted-path exemption during discovery (reviewer-12e2d86)", () => {
+  const base = temp();
+  const s = scope(base);
+  // Installed standalone capability that would receive _marketplace from residue source.
+  const cdir = join(s, ".agents", "capabilities", "installed", "evil-cap");
+  write(join(cdir, "oas.json"), JSON.stringify({ capability: "evil.cap", version: "1.0.0", description: "d", skills: ["skills"] }));
+  // malformed: source looks marketplace, but required version/integrity absent
+  writeFileSync(join(s, OAS_LOCK_FILE), JSON.stringify({ lockfileVersion: 2, packages: {}, capabilities: { "evil.cap": { source: "marketplace:evil.cap@1" } } }));
+  assert.throws(() => capabilityManifests(s), (e) => e.code === "invalid-lock" && /evil\.cap/.test(e.message), "discovery rejects before annotating _marketplace");
+  assert.throws(() => resolveOasConfig(s), (e) => e.code === "invalid-lock", "untargeted resolution also fails closed — invalid data never consumed");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("doctor human+JSON diagnose malformed v1 entries, including config-less lock-only scopes (reviewer-12e2d86)", () => {
+  const base = temp();
+  for (const [label, withConfig] of [["config", true], ["lock-only", false]]) {
+    const s = join(base, label);
+    mkdirSync(s, { recursive: true });
+    if (withConfig) write(join(s, "oas-config.yaml"), "name: t\n");
+    writeFileSync(join(s, OAS_LOCK_FILE), JSON.stringify({ lockfileVersion: 1, capabilities: { "x.c": null } }));
+    // Human doctor: actionable invalid-lock, no silent pending-format-only report.
+    const rh = cli(s, "doctor", s);
+    assert.match(rh.stdout, /invalid-lock/, `${label}: human diagnosis`);
+    assert.match(rh.stdout, /x\.c|legacy entry/, `${label}: offending entry named`);
+    // JSON: either early typed error (config scope) or lockError (lock-only scope), never lockError:null/pending-only.
+    const rj = cli(s, "doctor", s, "--json");
+    const doc = JSON.parse(rj.stdout);
+    const err = doc.error?.code ? doc.error : doc.lockError;
+    assert.ok(err && err.code === "invalid-lock", `${label}: ${JSON.stringify(doc)}`);
   }
   rmSync(base, { recursive: true, force: true });
 });

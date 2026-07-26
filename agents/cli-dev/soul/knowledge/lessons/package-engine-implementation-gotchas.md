@@ -15,6 +15,11 @@ timestamp: 2026-07-26
 - A pinned local git dependency spec can't be `path@commit` (parses as a
   path); use `file://<dir>@<commit>` so it takes the git branch of
   parsePackageSource. I added `file://` to the raw-git-URL regex for this.
+- Local dependency policy checks must classify the spelling before
+  normalization. `~/bait` and `path:~/bait` from git/catalog manifests are
+  host-ambient and must remain `relative:true` for no-local-base checks even
+  though the final resolved path is absolute; only operator root sources may
+  use tilde. See [path policy before normalization](/lessons/local-path-policy-before-expansion.md).
 - `spawnInstance(root, agent, ...)` takes the agent OBJECT from
   `findAgent(root, name)`, not a name string.
 - Spawn-hook JSON meta surfaces as `instance.json` `capabilityMeta[capId]`,
