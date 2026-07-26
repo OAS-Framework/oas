@@ -1,6 +1,8 @@
 # Knowledge Log
 
 ## 2026-07-26
+* **Creation**: [restore-preflight-visible-chain](/lessons/restore-preflight-visible-chain.md) records that restore must strictly parse the full visible lock chain before fetching, staging, or swapping artifacts so malformed inner locks cannot fail after outer mutations.
+* **Update**: [package-engine-implementation-gotchas](/lessons/package-engine-implementation-gotchas.md) links package restore gotchas to the visible-lock-chain preflight lesson.
 * **Creation**: [local-path-policy-before-expansion](/lessons/local-path-policy-before-expansion.md) records that local-path dependency policy must classify tilde/relative spellings before expansion so remote package metadata cannot bypass no-local-base guards.
 * **Update**: [package-engine-implementation-gotchas](/lessons/package-engine-implementation-gotchas.md) links the package gotcha list to the local-path policy-before-normalization lesson.
 * **Creation**: [symlink-containment-walker-throws](/lessons/symlink-containment-walker-throws.md) records the recursive symlink walker lesson: broad lstat probe catches can swallow deeper path-escape throws, so guards must be narrowed and real npm `file:` symlink layouts must be tested.
