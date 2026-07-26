@@ -14,6 +14,7 @@ import {
   terminalTypography, setTerminalFontSize, setTerminalFontFamily, onTerminalTypographyChange,
 } from "./theme.mjs";
 import { createPalette } from "./palette.mjs";
+import { createQuickOpen } from "./quick-open.mjs";
 import {
   registerAction, setActiveContexts, getBinding, onKeymapChange, formatChord, handleKeydown, matchEvent,
 } from "./keybindings.mjs";
@@ -423,9 +424,9 @@ function onTabKeydown(e, id) {
   if (activateTab(nextId)) tab.triggerEl.focus();
 }
 
-function addTab({ title, key, kind = "artifact", workspace = null, onClose, onShow }) {
+function addTab({ title, key, kind = "artifact", workspace = null, onClose, onShow, focusContent = null, focusOnActivate = false }) {
   if (key) {
-    for (const [tid, t] of tabs) if (t.key === key) { activateTab(tid); return null; }
+    for (const [tid, t] of tabs) if (t.key === key) { activateTab(tid, { focusContent: focusOnActivate }); return null; }
   }
   const id = nextTabId++;
   const { tabEl, triggerEl, closeEl, paneEl } = createTabChrome(
@@ -436,12 +437,17 @@ function addTab({ title, key, kind = "artifact", workspace = null, onClose, onSh
   triggerEl.addEventListener("click", () => activateTab(id));
   triggerEl.addEventListener("keydown", (e) => onTabKeydown(e, id));
   closeEl.addEventListener("click", (e) => { e.stopPropagation(); closeTab(id, true); });
-  tabs.set(id, { tabEl, triggerEl, closeEl, paneEl, title, key, kind, workspace, onClose, onShow });
+  tabs.set(id, { tabEl, triggerEl, closeEl, paneEl, title, key, kind, workspace, onClose, onShow, focusContent });
   activateTab(id);
   return { id, paneEl };
 }
 
-function activateTab(id) {
+/** Activate a tab. opts.focusContent distinguishes USER-INITIATED jumps
+ * (palette instance jump, roster row Enter/click, quick-open) — which end
+ * with the tab's content focused (a terminal's xterm textarea, via the
+ * tab's focusContent callback) — from side-effect activations (workspace-
+ * switch restoration, close-fallback), which must NOT steal focus. */
+function activateTab(id, { focusContent = false } = {}) {
   const current = tabs.get(id);
   // Hidden is not security: reject cross-workspace terminal activation at
   // the mutation boundary before its pane can become active/receive input.
@@ -468,6 +474,7 @@ function activateTab(id) {
     t.paneEl.hidden = !selected;
   }
   tabs.get(id)?.onShow?.();
+  if (focusContent) tabs.get(id)?.focusContent?.();
   return true;
 }
 
@@ -598,7 +605,10 @@ async function openTerminalTab(ref) {
   }
   const { inst, key } = r;
   await whenKeyFree(key);
-  for (const [tid, t] of tabs) if (t.key === key) { activateTab(tid); return; }
+  // Every jump path through here is user-initiated (palette, roster row,
+  // quick-open, post-spawn open) — activating an existing tab focuses its
+  // terminal input so the user can type into tmux immediately.
+  for (const [tid, t] of tabs) if (t.key === key) { activateTab(tid, { focusContent: true }); return; }
   if (pendingTerms.has(key)) return; // an open for this key is already in flight
   pendingTerms.add(key);
   try {
@@ -666,6 +676,9 @@ async function openTerminalTabInner(inst, ws, key, owns) {
     // actually ran — closeTab reserves the key on this promise.
     onClose: () => { offTheme(); offTypography(); return tab.close(); },
     onShow: () => { requestAnimationFrame(() => { try { fit.fit(); } catch {} }); },
+    // user-initiated activation → keyboard lands in the xterm textarea
+    focusContent: () => { try { term.focus(); } catch {} },
+    focusOnActivate: true, // addTab's own dedup here is a user jump too
   });
   if (!made) { offTheme(); offTypography(); term.dispose(); return; } // lost a race to an identical tab
   made.paneEl.append(wrap);
@@ -723,10 +736,12 @@ const palette = createPalette({
     // View commands derive from the nav manifest so a new rail destination
     // can never be palette-invisible (review 8441961 nit).
     ...NAV.map((v) => ({ label: `View: ${v.label}`, detail: chordDetail(`stage.${v.name}`), run: () => showStage(v.name) })),
+    { label: "Souls: quick open…", detail: chordDetail("app.quickOpenSouls"), run: () => quickOpen.open() },
     { label: "Theme: toggle light/dark", detail: chordDetail("app.themeToggle"), run: () => toggleTheme() },
     { label: "Shortcuts: edit keyboard shortcuts…", detail: chordDetail("app.shortcuts"), run: () => openShortcutsEditor() },
     { label: "Workspace: switch…", detail: chordDetail("app.workspaces"), run: () => workspaceLabel.openMenu() },
     { label: "Instances: focus the sidebar roster", detail: chordDetail("sidebar.focusFilter"), run: () => focusRoster() },
+    { label: "Terminal: focus the active terminal input", detail: chordDetail("terminal.focusActive"), run: () => focusActiveTerminal() },
     { label: "Terminal: increase font size", detail: chordDetail("terminal.fontBigger"), run: () => setTerminalFontSize(terminalTypography().fontSize + 1) },
     { label: "Terminal: decrease font size", detail: chordDetail("terminal.fontSmaller"), run: () => setTerminalFontSize(terminalTypography().fontSize - 1) },
     { label: "Terminal: set font family…", run: () => {
@@ -738,12 +753,41 @@ const palette = createPalette({
   ],
 });
 
+// ── Quick Open for souls (Mod+P): find a soul, land in its spawn form ──
+// Selection hands off to the Spawn view's OWN form flow (preselectSoul —
+// consumed by the view's next roster paint), so CLI degradation and the
+// attached-only rule render exactly as the Spawn view always renders them.
+// Terminal policy (documented): app.quickOpenSouls is NOT terminal-
+// allowlisted — ⌘P fires inside xterm on macOS by the ⌘-chord policy, but
+// Ctrl+P inside xterm on Linux/Windows belongs to the shell's history.
+const quickOpen = createQuickOpen({
+  loadSouls: async () => {
+    const ws = currentWorkspace();
+    return api(`/api/agents${ws ? `?ws=${encodeURIComponent(ws)}` : ""}`);
+  },
+  onPick: async (soul) => {
+    const { preselectSoul } = await import("./views/spawn.mjs");
+    preselectSoul(soul);
+    showStage("spawn");
+  },
+});
+
 // ── shortcuts editor (rail-footer button + palette + Mod+,) ────────────
 const shortcutsEditor = createKeybindingsEditor({ doc: document, isMac });
 function openShortcutsEditor() { shortcutsEditor.open(); }
 
 function focusRoster() {
   contextRosterEl?.querySelector(".ctx-filter")?.focus();
+}
+
+/** Focus the ACTIVE terminal tab's xterm input from anywhere in the shell
+ * (explicit action — rebindable, editor-visible). No default chord: every
+ * safe candidate is taken or terminal-hostile (any Ctrl chord belongs to
+ * the pty on Linux/Windows; plain keys are guarded off editables) — users
+ * who want one bind it in the shortcuts editor. */
+function focusActiveTerminal() {
+  const t = activeTab != null ? tabs.get(activeTab) : null;
+  if (t?.kind === "terminal") t.focusContent?.();
 }
 
 function visibleTabEntries() {
@@ -762,6 +806,7 @@ function cycleTab(delta) {
 // Default chords live in the engine's DEFAULT_KEYMAP (keybindings.mjs);
 // user overrides persist in localStorage via the shortcuts editor.
 registerAction({ id: "app.palette", label: "Open the command palette", context: "global", run: () => palette.toggle() });
+registerAction({ id: "app.quickOpenSouls", label: "Quick open a soul to spawn", context: "global", run: () => quickOpen.toggle() });
 registerAction({ id: "app.shortcuts", label: "Edit keyboard shortcuts", context: "global", run: () => openShortcutsEditor() });
 // stage-switch actions derive from the nav manifest (same rule as the
 // palette): a new rail destination can never be shortcut-invisible.
@@ -772,6 +817,8 @@ NAV.forEach((v) => registerAction({
 registerAction({ id: "app.themeToggle", label: "Toggle light/dark theme", context: "global", run: () => toggleTheme() });
 registerAction({ id: "app.workspaces", label: "Open the workspace switcher", context: "global", run: () => workspaceLabel.openMenu() });
 registerAction({ id: "sidebar.focusFilter", label: "Focus the instance roster filter", context: "global", run: () => focusRoster() });
+// No defaultChord (documented): safe candidates are exhausted — rebindable in the editor.
+registerAction({ id: "terminal.focusActive", label: "Focus the active terminal input", context: "global", run: () => focusActiveTerminal() });
 registerAction({ id: "terminal.fontBigger", label: "Terminal: increase font size", context: "global", run: () => setTerminalFontSize(terminalTypography().fontSize + 1) });
 registerAction({ id: "terminal.fontSmaller", label: "Terminal: decrease font size", context: "global", run: () => setTerminalFontSize(terminalTypography().fontSize - 1) });
 registerAction({ id: "terminal.fontReset", label: "Terminal: reset typography", context: "global", run: () => { setTerminalFontFamily(""); setTerminalFontSize(13); } });

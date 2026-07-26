@@ -1,6 +1,12 @@
 # Knowledge Log
 
 ## 2026-07-26
+* **Creation**: promoted [Consumed-once pending intents must gate on data currency](/lessons/pending-intent-data-currency.md) from the oas-desktop-engineer-quick-open notes.
+* **Update**: [Quick Open hands off to Spawn via a consumed-once preselect](/decisions/quick-open-spawn-preselect-handoff.md) now requires current intent and roster generations before consuming the preselect, and reveals filtered targets before focusing.
+* **Update**: linked [Split request generations by independently superseding request kind](/lessons/split-generation-counters-per-request-kind.md) to the pending-intent data-currency lesson.
+* **Creation**: promoted [Terminal focus follows user intent through activateTab's focusContent option](/decisions/terminal-focus-intent.md) from the oas-desktop-engineer-quick-open notes.
+* **Creation**: promoted [Quick Open hands off to Spawn via a consumed-once preselect](/decisions/quick-open-spawn-preselect-handoff.md) from the oas-desktop-engineer-quick-open notes.
+* **Creation**: promoted [Palette subsequence scorer's no-match sentinel must be out-of-band](/lessons/palette-fuzzy-score-null-sentinel.md) from the oas-desktop-engineer-quick-open notes.
 * **Fix**: [final agent-relations kernel contract](/references/agent-relations-kernel-contract.md) resolves the flag clarifier, distinguishes absent explicit relation from attached auto-child topology, records equivalent non-instance attached child syntax, and includes `E_PARENT_NOT_FOUND`/`E_RELATIVE_AMBIGUOUS`.
 * **Update**: [desktop cluster grouping sibling-link seam](/decisions/desktop-cluster-grouping-sibling-seam.md) describes the shipped sidebar and panel projection in present tense without the removed Instances-roster surface.
 
