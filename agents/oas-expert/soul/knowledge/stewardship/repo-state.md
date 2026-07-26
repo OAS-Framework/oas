@@ -15,6 +15,8 @@ than letting the file grow stale.
 
 ## On main
 
+- **PR #40 merged 2026-07-26 as `3da7ce8`** — Desktop Quick Open for souls (`Mod+P`) and terminal focus on user-initiated jumps. Adds shared overlay-picker machinery, fixes the palette fuzzy scorer's negative-prefix no-match bug, routes soul selection through Spawn's consumed-once `preselectSoul()` handoff, keeps `Ctrl+P` in Linux/Windows terminals shell-owned, and makes terminal content focus explicit via `activateTab(id, { focusContent })` plus a chordless `terminal.focusActive` action. Final exact head `9d00985`; scratch gates, strict OKF for all 8 bundles, PR CI, and all three installer verify jobs passed. Same-account approval was recorded as a comment; the remote feature branch is deleted. Not yet released.
+
 - **RELEASED v0.18.6 (2026-07-26)** — tag `v0.18.6` on release-notes/stewardship commit `0dd7878`, containing PR #38 agent relations and PR #35 editable keybindings. Published `@oas-framework/oas@0.18.6` + `@oas-framework/pi@0.18.6` and GitHub Release v0.18.6 with all six Desktop installers, SHA256SUMS.txt, and build provenance. Release run `30198186842` passed build/test and macOS arm64/x64 plus Linux x64 installer build+smoke; its only failure was the known org-policy block on Actions-created PRs after publication. Manifests were bumped through manual rescue PR #39 (`9fc7c0e`). The published kernel passed syntax checks and a clean create→root-qualified child relation spawn→metadata/layout inspect→retire probe; canonical soul content stayed unchanged.
 
 - **PR #38 merged 2026-07-26 as `dfa0ac0`** — explicit child/sibling/parent/unrelated spawn relations across kernel, CLI, and Desktop; ambiguity-safe root-qualified anchors; attached child-of-owner semantics; retirement splice repair; composite instance identity; cluster-first Active/sidebar surfaces; and a relation-aware spawn modal. The merge preserves PR #35 editable keybindings and PR #36 knowledge, with reviewed fixes for composite roster parent focus, hierarchy Brain selection, and modal shortcut ownership. Final exact head `4bbfe8d`; all local, strict OKF, PR CI, and three installer checks passed after two RETURNs. The remote feature branch is deleted. Scaffold-only child-relation probe `oas-expert-pr38-probe` verified expected layout, real skill directories, relation metadata, no launch, and clean retirement. The [spawn-relations decision](/decisions/spawn-relations-live-lineage.md) records the human-accepted no-journal/lease limitations. Released exactly as v0.18.6.
@@ -159,10 +161,13 @@ than letting the file grow stale.
 
 ## In flight
 
-- (nothing currently recorded) — PR #38 and the exact v0.18.6 release reached terminal outcomes.
+- (nothing currently recorded) — PR #40, PR #38, and the exact v0.18.6 release reached terminal outcomes.
 
 ## Recent deliveries
 
+- PR #40 Desktop Quick Open for souls + terminal focus on user jumps: MERGED
+  2026-07-26 as `3da7ce8`; exact head `9d00985`, remote branch deleted
+  (see delivery-log).
 - PR #39 release: v0.18.6 manifest bump (manual rescue after complete
   publication): MERGED 2026-07-26 as `9fc7c0e` (see delivery-log).
 - PR #38 spawn-time agent relations across kernel, CLI, and Desktop: MERGED

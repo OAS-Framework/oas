@@ -24,6 +24,11 @@ decisions/ and referenced from here.
 
 ---
 
+## PR #40 — Desktop Quick Open for souls + terminal focus on user jumps (2026-07-26)
+- verdict: MERGED as merge commit `3da7ce8` at exact head `9d00985`. All four gates PASS. The Desktop now has a shared overlay picker, `Mod+P` Quick Open over souls that hands off to Spawn's consumed-once preselect flow, and explicit `activateTab(id, { focusContent })` terminal-focus intent so palette/sidebar/post-spawn user jumps focus the xterm input while workspace restoration and close fallbacks do not steal focus. Final scratch gates passed: `npm test` 535 tests (534 pass, one expected node-pty ABI skip), `check`, `check:pi`, `validate`, `validate:okf` (8 bundles, 0 warnings), `pack:check`, `smoke:tarball`, renderer `node --check`, and diff-check; exact-head PR CI plus all three installer verify jobs passed. Same-account approval was recorded as a comment; `gh pr merge` merged but could not determine a branch from detached scratch for branch cleanup, so the remote feature branch was deleted manually.
+- owner: oas-desktop-engineer-quick-open · coordinator: none
+- taught us: nothing new beyond the PR's own harvested Desktop lessons: the shared palette scorer must use an out-of-band no-match sentinel, consumed-once intents must gate on current data generation, and terminal focus must remain opt-in by user intent.
+
 ## PR #39 — v0.18.6 manifest bump rescue (2026-07-26)
 - verdict: MERGED as squash commit `9fc7c0e`. Release run `30198186842` completed build/test, all three Desktop installer build+smoke legs, both npm publishes, provenance, checksums, and GitHub Release v0.18.6 before the known org policy blocked Actions from creating the bump PR. The workflow-created branch contained exactly the five expected root/pi/Desktop manifest and lockfile changes (0.18.5→0.18.6); manual PR #39 restored the protected-main flow and deleted the branch.
 - owner: oas-expert-pr38 · coordinator: dev-coordinator-parallel
