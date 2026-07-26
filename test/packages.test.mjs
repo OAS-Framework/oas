@@ -1077,3 +1077,101 @@ test("invalid-lock: malformed mixed-v2 residue is diagnosed, never repaired, nev
   assert.equal(readFileSync(lockFile, "utf8"), before, "doctor never repairs the lock");
   rmSync(base, { recursive: true, force: true });
 });
+
+// ---------- reviewer-d64af2e blocker fixes ----------
+
+test("trust binds the materialized dependency closure: tampering node_modules invalidates approval", () => {
+  const base = temp();
+  const s = scope(base);
+  const src = pkgSource(join(base, "src"), { package: "nm.p" }, { "cap": { capability: "nm.cap", commands: { r: { exec: "r.mjs" } } } });
+  write(join(src, "cap", "r.mjs"), "//\n");
+  write(join(src, "vendor/dep/package.json"), JSON.stringify({ name: "dep", version: "1.0.0" }));
+  write(join(src, "vendor/dep/index.js"), "module.exports = 1;\n");
+  write(join(src, "package.json"), JSON.stringify({ name: "nm-p", version: "1.0.0", dependencies: { dep: "file:vendor/dep" } }));
+  write(join(src, "package-lock.json"), JSON.stringify({
+    name: "nm-p", version: "1.0.0", lockfileVersion: 3, requires: true,
+    packages: { "": { name: "nm-p", version: "1.0.0", dependencies: { dep: "file:vendor/dep" } }, "node_modules/dep": { resolved: "vendor/dep", link: true }, "vendor/dep": { version: "1.0.0" } },
+  }));
+  acquirePackage(s, src);
+  const lock = readPackageLocks(s).packages["nm.p"];
+  assert.match(lock.depsIntegrity, /^sha256-/, "materialized closure digest locked");
+  approveCapability(s, "nm.cap");
+  assert.equal(capabilityTrust(s, "nm.cap").trusted, true);
+  // tamper the materialized closure with a planted file — only the deps digest
+  // sees it (packageIntegrity excludes node_modules entirely)
+  const dest = join(installedPackagesDir(s), "nm.p");
+  write(join(dest, "node_modules", "evil.js"), "module.exports = 666; // planted\n");
+  const t = capabilityTrust(s, "nm.cap");
+  assert.equal(t.trusted, false);
+  assert.match(t.reason, /dependency/);
+  assert.throws(() => approveCapability(s, "nm.cap"), (e) => e.code === "integrity-drift");
+  // restore re-materializes and verifies the digest
+  rmSync(dest, { recursive: true, force: true });
+  const rep = restorePackages(s);
+  assert.equal(rep.find((r) => r.package === "nm.p").status, "restored");
+  assert.equal(capabilityTrust(s, "nm.cap").trusted, true, "approval survives restore at identical source+deps digests");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("contract signature: capabilityTrust(startDir, capabilityId) returns package/integrity/executableSurface", () => {
+  const base = temp();
+  const s = scope(base);
+  const src = pkgSource(join(base, "src"), { package: "sig.p" }, { "cap": { capability: "sig.cap", commands: { go: { exec: "g.mjs" } }, hooks: { spawn: "h.mjs" } } });
+  write(join(src, "cap", "g.mjs"), "//\n");
+  write(join(src, "cap", "h.mjs"), "//\n");
+  acquirePackage(s, src);
+  const t = capabilityTrust(s, "sig.cap");
+  assert.equal(t.trusted, false);
+  assert.equal(t.package, "sig.p");
+  assert.deepEqual(t.executableSurface, { commands: ["go"], hooks: ["spawn"] });
+  approveCapability(s, "sig.cap");
+  const t2 = capabilityTrust(s, "sig.cap");
+  assert.equal(t2.trusted, true);
+  assert.match(t2.integrity, /^sha256-/);
+  // legacy shape still works
+  assert.equal(capabilityTrust(capabilityManifests(s)["sig.cap"], s).trusted, true);
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("acquire transaction: failed materialization aborts with nothing installed or locked", () => {
+  const base = temp();
+  const s = scope(base);
+  const src = pkgSource(join(base, "src"), { package: "fx.p" }, { "cap": { capability: "fx2.cap" } });
+  // package.json/lockfile MISMATCH → npm ci fails deterministically offline
+  write(join(src, "package.json"), JSON.stringify({ name: "fx-p", version: "1.0.0", dependencies: { "some-dep": "^9.9.9" } }));
+  write(join(src, "package-lock.json"), JSON.stringify({ name: "fx-p", version: "1.0.0", lockfileVersion: 3, requires: true, packages: { "": { name: "fx-p", version: "1.0.0" } } }));
+  assert.throws(() => acquirePackage(s, src), (e) => /materialization failed/.test(e.message));
+  assert.ok(!existsSync(join(installedPackagesDir(s), "fx.p")), "nothing installed");
+  const lockFile = join(s, OAS_LOCK_FILE);
+  assert.ok(!existsSync(lockFile) || !JSON.parse(readFileSync(lockFile, "utf8")).packages?.["fx.p"], "nothing locked");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("update transaction: identity change fails PRE-COMMIT — nothing installed under the new identity", () => {
+  const base = temp();
+  const s = scope(base);
+  const src = pkgSource(join(base, "src"), { package: "old.id" }, { "cap": { capability: "oi.cap" } });
+  gitify(src);
+  acquirePackage(s, `file://${src}`);
+  // source renames its identity
+  write(join(src, "oas-package.json"), JSON.stringify({ package: "new.id", version: "2.0.0", description: "p", compatibility: { oas: ">=0.1.0" }, capabilities: ["cap"] }));
+  gitCommit(src);
+  assert.throws(() => updatePackage(s, "old.id"), (e) => e.code === "duplicate-package-identity");
+  assert.ok(!existsSync(join(installedPackagesDir(s), "new.id")), "new identity NOT installed");
+  assert.equal(readPackageLocks(s).packages["new.id"], undefined, "new identity NOT locked");
+  assert.equal(readPackageLocks(s).packages["old.id"].version, "1.0.0", "old lock intact");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("manifest schema semantics: numeric version/description, extra profile keys, duplicate dependencies rejected", () => {
+  const base = temp();
+  const mk = (m) => { const d = join(base, `m${Math.random().toString(36).slice(2)}`); write(join(d, "oas-package.json"), JSON.stringify({ package: "sv.p", version: "1.0.0", description: "d", compatibility: { oas: ">=0.1.0" }, ...m })); return d; };
+  assert.throws(() => loadPackageManifestAt(mk({ version: 1 })), (e) => /string version/.test(e.message));
+  assert.throws(() => loadPackageManifestAt(mk({ description: 42 })), (e) => /string version and description/.test(e.message));
+  assert.throws(() => loadPackageManifestAt(mk({ compatibility: { oas: ">=0.1.0", extra: true } })), (e) => /"compatibility" has unknown keys/.test(e.message));
+  const withProfile = mk({ configs: { a: { path: "a.yaml", bogus: 1 } } });
+  write(join(withProfile, "a.yaml"), "x\n");
+  assert.throws(() => loadPackageManifestAt(withProfile), (e) => /unknown keys: bogus/.test(e.message));
+  assert.throws(() => loadPackageManifestAt(mk({ dependencies: ["dup.spec", "dup.spec"] })), (e) => /"dependencies" contains duplicates/.test(e.message));
+  rmSync(base, { recursive: true, force: true });
+});

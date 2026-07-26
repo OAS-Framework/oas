@@ -122,25 +122,30 @@ with the acquire → lock → trust → activate → spawn probe from
   dependencies are ABSENT from the materialized tree.
 - **Integrity coverage**: the lock `integrity` covers the package SOURCE tree
   only — every `node_modules` (at any depth) is excluded from the hash (as
-  are `.git` and `oas-lock.json`). The dependency closures' integrity is
-  carried by the checked-in `package-lock.json` files, which ARE inside the
-  hashed source tree; `npm ci` fails closed on any lockfile mismatch. Doctor
-  reports source integrity + the presence/staleness of materialized closures.
+  are `.git` and `oas-lock.json`). The MATERIALIZED closure is bound
+  separately: the lock records `depsIntegrity`, a deterministic digest of
+  every materialized `node_modules` tree under the package root (absent for
+  an empty closure). Trust verifies BOTH digests — tampering a materialized
+  dependency invalidates capability approvals exactly like source drift.
+  `npm ci` fails closed on any lockfile mismatch. Doctor reports source
+  integrity + the materialized-closure state.
 - **Reproducibility**: `node_modules` is a derived, platform-dependent
-  artifact — never hashed, never committed, always reproducible from the
-  locked `package-lock.json` on the host platform. A failed materialization
-  is a WARNING on acquire/update reports (the source artifact and lock are
-  still valid and exact); doctor surfaces it until resolved.
+  artifact — never part of the SOURCE hash, never committed, always
+  reproduced from the locked `package-lock.json` on the host platform, then
+  verified against the locked `depsIntegrity`. Platform-dependent closures
+  (native builds) will produce platform-specific digests; v1 packages should
+  prefer pure-JS closures (the official set qualifies).
 - **Containment**: capability code/hook paths must resolve inside the locked
   package root after symlink resolution; materialized `node_modules` trees
   under that root (package-root or per-capability) are inside the boundary by
   construction. Paths escaping the root — including through `node_modules`
   symlinks — are `path-escape`.
-- **Rollback**: materialization happens after the artifact/lock commit point;
-  a materialization failure never rolls back or invalidates the acquired
-  package (re-running install/update retries it). A failure BEFORE the commit
-  point rolls back per §3 with no `node_modules` remnants (staging directories
-  are removed wholesale).
+- **Rollback**: materialization happens IN STAGING before any destination
+  mutation; a materialization failure fails the whole acquire/update
+  transaction with the store and lock unchanged, and a restore whose
+  re-materialized closure does not reproduce the locked `depsIntegrity`
+  fails as `integrity-drift` with the prior artifact left in place. Staging
+  directories are removed wholesale on any failure.
 
 ## 3. Incremental transaction semantics
 
