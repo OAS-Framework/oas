@@ -1,6 +1,7 @@
 # Knowledge Log
 
 ## 2026-07-26
+* **Delivery**: PR #46 merged as `83ce16f` at exact head `2551f1d`; [repo state](/stewardship/repo-state.md) and the [delivery log](/stewardship/delivery-log.md) record the warning-free Desktop handback-race knowledge harvest, semantic/full gates, same-account approval comment, and deleted remote branch.
 * **Delivery**: PR #45 merged as `6f35e9e` at final exact head `9c4e995` after four mergeability-only RETURNs; [repo state](/stewardship/repo-state.md) and the [delivery log](/stewardship/delivery-log.md) record the Desktop readiness/modal/quiet-open fix, green exact-head checks, deleted remote branch, and clean scaffold-only probe.
 * **Update**: skills/pr-review — added the merge-range scope gotcha: PR reviewers must compare the PR description with the full changed-file list and commit range before expensive gates, and return branches that carry unrelated base/stewardship commits.
 * **Creation**: [Review the whole PR merge range for scope, not only the intended feature files](/lessons/pr-branch-merge-range-scope.md) — a feature PR can silently carry unrelated local or stewardship commits unless maintainers inspect the actual merge range before running expensive gates.
