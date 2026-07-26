@@ -1,5 +1,6 @@
 # Lessons
 
+* [Review the whole PR merge range for scope, not only the intended feature files](pr-branch-merge-range-scope.md) - A feature PR can accidentally carry unrelated local or stewardship commits that are not on GitHub main, so maintainers must inspect the actual merge range before running expensive gates.
 * [A green repository OKF command can still carry producer warnings](strict-okf-zero-exit-can-have-warnings.md) - Maintainer review must inspect OKF validator output, not only its exit status, because the repository aggregate command can exit zero while strict validation reports unreachable concepts.
 * [Harvest cherry-picks must preserve source branch state, not only terminal commits](harvest-cherrypick-parent-state.md) - A terminal harvest commit can depend on unmerged semantic knowledge fixes in its parent branch, so reviewers must compare source-branch state for linked concepts before accepting a cherry-picked final diff.
 * [PR reviews need semantic knowledge consistency checks after branch-union harvests](pr-review-knowledge-consistency-after-branch-union.md) - Strict OKF validation proves structure, not truth; branch-union harvests need a human semantic read so transitional concepts match the final converged design or mark history as superseded.

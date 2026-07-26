@@ -1,4 +1,9 @@
 # Lessons
 
+* [Evolve the existing Active overview hierarchy view](active-overview-hierarchy-reuse.md) - The desktop Active overview is already implemented by hierarchy.mjs, so cluster-first work should evolve that surface instead of adding a parallel tab.
+* [Include group offsets on both axes when fitting clustered Active overview layouts](active-overview-fit-group-offsets.md) - Active overview fit math must include both left and top offsets for positioned .hier-group elements or lower cluster groups can be clipped/miscentered.
+* [Absorb pending contract churn with adapter seams](adapter-seams-absorb-contract-churn.md) - When an upstream contract's final name or shape is pending, route reads through one adapter seam and consume shared helpers as black boxes so landed changes stay small and test-pinned.
+* [Keep cluster identity keys separate from rendered labels](cluster-identity-internal-key-vs-label.md) - When a derived cluster name stabilizes grouping and ordering, removing cluster names from the UI should hide the label while preserving the internal deterministic key.
+* [Resolve team-scoped roster relations with composite full-scope identity](team-roster-identity-resolution-scope.md) - Team-scoped roster views must key instances by a composite identity and resolve relation names against the full roster, not filtered groups.
 * [Validate effective contrast across shipped style sources](effective-contrast-inventory.md) - Token-pair contrast tests are insufficient when opacity, fallbacks, or JavaScript theme fields create untracked effective colors.
 * [Separate latest-intent ownership by operation class](latest-intent-and-mutation-ownership.md) - Asynchronous UI stays truthful when reads, modal lifetime, discovery, and side-effecting mutations have separate ownership tokens and mutations are single-flight.

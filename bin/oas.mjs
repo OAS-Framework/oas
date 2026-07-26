@@ -23,17 +23,19 @@ import {
   acquireCapability, restoreCapabilities, marketplaceCapabilities,
   capabilityManifests, capabilityManifest, capabilityMissingRequires, capabilityIntegrity, capabilityTrust, capabilityExecutablePath,
   readCapabilityLocks, writeCapabilityLock,
+  parsePackageSource, acquirePackage, restorePackages, listInstalledPackages, readPackageLocks,
+  approveCapability, updatePackage, removePackage, migrateLegacyLock, applyLegacyLockMigration,
+  packageIntegrity, packageDepsIntegrity, installedPackagesDir, loadPackageManifestAt,
   resolveOasConfig, resolveWorkMode, composeInstanceAgentsMd, parseYamlNested, packagedInject, teamAgentRoots,
   findTeamAgent, findTeamInstance, findCapabilityAgent, findInstanceHome, listCapabilityAgents, workspaceOf,
   ensureRoot, findRoot, findAgent, listAgents, listInstances, listAgentDefs, createAgent as coreCreateAgent,
   spawnInstance, retireInstance, upsertLocalAgent, defaultRepo, RELATIONS,
 } from "../lib/core.mjs";
 import {
-  acquirePackage, aggregateMissingRequirements, diffConfigTexts, discoverWorkspaceScopes, installedPackageDir,
-  loadPackageManifest, lockedPackageCapabilities,
-  parseProfileProvenance, profileProvenanceHeader, readPackageLocks, readPackageLocksAt, readProfileText,
-  requirementInstallPlan, resolvePackageClosure, resolvePackageSource, restorePackages, runRequirementInstall, selectProfile, validateProfile,
-  packageCapabilityIds,
+  aggregateMissingRequirements, diffConfigTexts, discoverWorkspaceScopes,
+  lockedPackageCapabilities, parseProfileProvenance, profileProvenanceHeader,
+  readProfileText, requirementInstallPlan, resolveProfilePackage,
+  runRequirementInstall, selectProfile, validateProfile,
 } from "../lib/packages.mjs";
 
 const args = process.argv.slice(2);
@@ -127,15 +129,14 @@ function doctorPackagesData(ctx, chain) {
     adoptedPackages.add(prov.package);
   }
   const unappliedProfiles = [];
-  for (const [id, lock] of Object.entries(pkgLocks)) {
-    if (adoptedPackages.has(id)) continue;
-    const pkgDir = installedPackageDir(lock, id);
-    if (!pkgDir) continue;
-    try {
-      const m = loadPackageManifest(pkgDir);
-      const profiles = Object.keys(m?.configs || {});
-      if (profiles.length) unappliedProfiles.push({ package: id, profiles });
-    } catch { /* broken installed package reported through capability paths */ }
+  // Available-but-unapplied profiles: engine-indexed installed packages whose
+  // manifests export config profiles no chain config has adopted.
+  let installedPkgs = [];
+  try { installedPkgs = listInstalledPackages(ctx); } catch { /* doctor's package section reports indexing errors */ }
+  for (const p of installedPkgs) {
+    if (adoptedPackages.has(p.package)) continue;
+    const profiles = Object.keys(p.manifest?.configs || {});
+    if (profiles.length) unappliedProfiles.push({ package: p.package, profiles });
   }
   const missingHostRequirements = aggregateMissingRequirements([ctx]).map((req) => ({
     command: req.command, why: req.why || null, docs: req.docs || null,
@@ -182,6 +183,8 @@ function doctorJson(dir) {
     retiredLocks: Object.entries(readCapabilityLocks(ctx))
       .filter(([id]) => RETIRED_CAPABILITIES[id])
       .map(([id, lock]) => ({ id, file: lock._file, reason: RETIRED_CAPABILITIES[id] })),
+    migrationResidue: readPackageLocks(ctx).legacy.filter((l) => l.lockfileVersion === 2).flatMap((l) =>
+      Object.entries(l.capabilities).map(([id, lock]) => ({ id, file: l.file, level: l.level, source: lock.source || null, status: "pending-migration", action: `oas migrate --dir ${l.level}` }))),
     retiredArtifacts: Object.entries(mans)
       .filter(([id]) => RETIRED_CAPABILITIES[id])
       .map(([id, m]) => ({ id, dir: m._dir, origin: m._origin, reason: RETIRED_CAPABILITIES[id] })),
@@ -273,15 +276,46 @@ function doctor(dir) {
   }
   if (existsSync(LEGACY_HOME_CAPABILITIES_DIR)) console.log(`  WARNING: legacy ~/.oas/capabilities exists and is no longer discovered — reinstall its packages at a config scope and remove it`);
 
-  // Distribution packages (WS2): same data source as doctor --json.
-  const pkg = doctorPackagesData(ctx, chain);
-  if (pkg.packages.length) {
-    console.log("\nDistribution packages:");
-    for (const p of pkg.packages) {
-      console.log(`  ${p.id}  ${p.version || ""}  [${shortPath(p.level)}]  source: ${p.source || "?"}`);
-      if (p.capabilities.length) console.log(`             capabilities: ${p.capabilities.join(", ")}`);
+  // Distribution packages: package failures are distinguished from capability failures (engine diagnostics).
+  console.log("\nInstalled packages:");
+  const pkgLocks = readPackageLocks(ctx);
+  let pkgs = [];
+  try { pkgs = listInstalledPackages(ctx); }
+  catch (e) { console.log(`  ERROR: ${e.message}${e.code ? ` [${e.code}]` : ""}`); }
+  if (!pkgs.length && !Object.keys(pkgLocks.packages).length && !pkgLocks.legacy.length) console.log("  (none)");
+  for (const p of pkgs) {
+    const lock = pkgLocks.packages[p.package];
+    console.log(`  ${p.package}@${p.version}  [${levelOf(p.level)} ${shortPath(p.level)}]`);
+    if (!lock) { console.log(`             ERROR: installed but not locked — reacquire it [manifest graph error]`); continue; }
+    if (p.lockError) console.log(`             ERROR: ${p.lockError} [invalid-lock]`);
+    const integ = packageIntegrity(p.dir);
+    if (integ !== lock.integrity) console.log(`             ERROR: integrity drift — installed ${integ}, locked ${lock.integrity}; all capability approvals are invalid [integrity-drift]`);
+    // Runtime closure presence/staleness (runtime API addendum §2): node_modules
+    // is derived; deviation from the locked digest is repairable via bare `oas install`.
+    const depsNow = packageDepsIntegrity(p.dir);
+    if ((lock.depsIntegrity || undefined) !== depsNow) console.log(`             ERROR: materialized runtime closure ${depsNow ? "differs from" : "missing vs"} the locked depsIntegrity — run \`oas install\` to re-materialize [integrity-drift]`);
+    const have = new Set(p.capabilities.map((c) => c.id));
+    for (const c of lock.capabilities || []) if (!have.has(c)) console.log(`             ERROR: locked capability "${c}" is missing from the package manifest [capability-list-mismatch]`);
+    for (const c of p.capabilities) {
+      const executable = Object.keys(c.manifest.commands || {}).length || Object.keys(c.manifest.hooks || {}).length;
+      if (executable && !(lock.trustedCapabilities || []).includes(c.id) && integ === lock.integrity) console.log(`             capability ${c.id}: executable surface UNTRUSTED — \`oas trust ${c.id}\``);
     }
   }
+  for (const [id, lock] of Object.entries(pkgLocks.packages)) {
+    if (!pkgs.some((p) => p.package === id)) console.log(`  ERROR: package ${id} is locked in ${shortPath(lock._file)} but not installed — run \`oas install\` [missing locked package]`);
+  }
+  for (const l of pkgLocks.legacy) {
+    if (l.lockfileVersion !== 2) console.log(`  WARNING: ${shortPath(l.file)} is lockfileVersion ${l.lockfileVersion ?? 1} — \`oas migrate\` maps its capability locks to packages`);
+    else if (Object.keys(l.capabilities).length) {
+      for (const [rid, rlock] of Object.entries(l.capabilities)) {
+        const malformed = !rlock || typeof rlock !== "object" || !rlock.source || !rlock.integrity;
+        if (malformed) console.log(`  ERROR: residue entry ${rid} in ${shortPath(l.file)} is malformed (missing source/integrity) — never auto-repaired; fix or remove the entry [invalid-lock]`);
+        else console.log(`  NOTE: ${rid} in ${shortPath(l.file)} is legacy migration residue (${rlock.source}) — pending migration: re-run \`oas migrate --dir ${shortPath(l.level)}\` when its official package publishes, or remove the entry if the capability is abandoned`);
+      }
+    }
+  }
+  // WS2 additions: profile provenance, unapplied profiles, missing host requirements (same data as doctor --json).
+  const pkg = doctorPackagesData(ctx, chain);
   for (const prov of pkg.profileProvenance) {
     console.log(`\nConfig profile provenance: ${shortPath(prov.file)} adopted ${prov.package}${prov.ref ? `@${prov.ref}` : ""} profile "${prov.profile}" (snapshot — compare with \`oas config diff\`)`);
   }
@@ -464,7 +498,10 @@ function use() {
   console.log("New instances receive the resolved capability; committed souls are unchanged.");
 }
 
-// ---------- install / trust ----------
+// ---------- install / trust / list / remove / migrate ----------
+/** `oas install <source>`: distribution-package acquisition (exact-lock closure,
+ * activates nothing). Marketplace capability ids keep the legacy capability path
+ * until workstream 3 publishes the official packages. */
 function install() {
   const src = args[1];
   const dir = resolve(flag("dir") || process.cwd());
@@ -476,6 +513,13 @@ function install() {
     return;
   }
   if (RETIRED_CAPABILITIES[src]) die(`${RETIRED_CAPABILITIES[src]}`);
+  // Package source? (git/path with an oas-package.json, or a catalog id) — otherwise legacy capability acquisition.
+  let parsedSrc;
+  try { parsedSrc = parsePackageSource(src); } catch { parsedSrc = undefined; }
+  const isMarketplaceCap = parsedSrc?.kind === "catalog" && !!marketplaceCapabilities()[src.replace(/@.*$/, "")];
+  const isLocalPackage = parsedSrc?.kind === "path" && existsSync(join(parsedSrc.path, "oas-package.json"));
+  const isCatalogPackage = parsedSrc?.kind === "catalog" && !isMarketplaceCap;
+  if (parsedSrc && (parsedSrc.kind === "git" || isLocalPackage || isCatalogPackage)) { installPackage(dir, src); return; }
   const known = capabilityManifest(src, dir);
   if (known) {
     console.log(`Already acquired capability ${known.capability} (${known.version || "unversioned"}); not activated or updated.`);
@@ -508,31 +552,53 @@ function lockLevelsUp(dir) {
   return levels.reverse();
 }
 
-/** Check/restore one level's v2 package locks against the installed store via
- * the engine seam (restorePackages — exact restore, no ref advancement). A
- * missing artifact with a restorable path source is restored; anything else
- * (git/catalog sources pre-engine, integrity drift, capability-list mismatch)
- * is a clear FAILURE, never silent success. Returns report items. */
+/** Check/restore one level's v2 package locks via the ENGINE's restorePackages
+ * (exact restore, no ref advancement, staging + integrity/capability/deps
+ * verification inside). The engine walks the lock chain from the given dir;
+ * reconciliation calls it per deduplicated level and keeps that level's rows. */
 function packageLockReport(level) {
-  return restorePackages(level, { levels: [level] }).map((r) => ({
+  return restorePackages(level).filter((r) => resolve(r.level) === resolve(level)).map((r) => ({
     id: r.package, level: r.level, package: true, dir: r.dir,
-    status: r.status === "ok" ? "present" : r.status, reason: r.reason,
+    status: r.status === "ok" ? "present" : r.status, reason: r.reason, code: r.code,
   }));
 }
 
-/** Bare `oas install`: restore every locked-but-missing capability in the config chain
- * and verify every v2 package lock in the chain against the installed store.
- * Returns { report, failed }; output goes to stdout (human) or stderr (JSON mode). */
+function installPackage(dir, src) {
+  const bail = (e) => (JSON_MODE ? jsonFail(e.code || "E_INSTALL_FAILED", e.message || e) : die(e.message || e));
+  let r;
+  try { r = acquirePackage(dir, src); } catch (e) { bail(e); return; }
+  if (JSON_MODE) { jsonOk({ root: r.root, installed: r.installed, lockFile: r.lockFile, depWarnings: r.depWarnings || [] }); return; }
+  for (const p of r.installed) {
+    console.log(`${p.kept ? "ok       " : "Acquired "}${p.package}@${p.version} → ${shortPath(p.dir)}`);
+    console.log(`  locked ${p.commit === "local" ? "local tree" : p.commit} (${p.integrity}); capabilities: ${p.capabilities.join(", ") || "(none)"}`);
+  }
+  for (const w of r.depWarnings || []) console.log(`WARNING: ${w}`);
+  console.log(`Locked in ${shortPath(r.lockFile)}; nothing activated.`);
+  const executables = r.installed.flatMap((p) => p.capabilities).filter((c) => {
+    const m = capabilityManifest(c, dir);
+    return m && (Object.keys(m.commands || {}).length || Object.keys(m.hooks || {}).length);
+  });
+  if (executables.length) console.log(`Executable surfaces blocked until trusted: ${executables.map((c) => `oas trust ${c}`).join("; ")}`);
+}
+
+/** Bare `oas install` chain restore: engine packages (lock v2) + legacy locked
+ * capabilities (v1). Returns { report, failed }; output goes to stdout (human)
+ * or stderr (JSON mode) — the reconcile envelope owns stdout in JSON mode. */
 function restore(dir) {
-  const report = [...restoreCapabilities(dir), ...lockLevelsUp(dir).flatMap(packageLockReport)];
   const note = (msg) => (JSON_MODE ? console.error(msg) : console.log(msg));
+  const pkgReport = restorePackages(dir).map((r) => ({
+    id: r.package, level: r.level, package: true, dir: r.dir,
+    status: r.status === "ok" ? "present" : r.status, reason: r.reason, code: r.code,
+  }));
+  const report = [...restoreCapabilities(dir), ...pkgReport];
   if (!report.length) note("Nothing to restore — no locked capabilities in the config chain.");
   let failed = 0;
   for (const r of report) {
-    const what = r.package ? `package ${r.id}` : r.id;
+    const what = r.package ? `package ${r.id ?? "(lock)"}` : r.id;
     if (r.status === "present") note(`ok        ${what}  (${shortPath(r.dir)})`);
-    else if (r.status === "restored") note(`restored  ${what} → ${shortPath(r.dir)}  (${r.integrity})`);
+    else if (r.status === "restored") note(`restored  ${what} → ${shortPath(r.dir)}${r.integrity ? `  (${r.integrity})` : ""}`);
     else if (r.status === "retired") note(`RETIRED   ${what}  ${r.reason}`);
+    else if (r.status === "legacy") note(`LEGACY    ${shortPath(join(r.level, OAS_LOCK_FILE))}: ${r.reason}`);
     else { failed++; note(`FAILED    ${what}  ${r.reason}`); }
   }
   return { report, failed };
@@ -596,6 +662,8 @@ function reconcileInner(dir) {
     const { report, failed } = restore(dir);
     const requirements = requirementsGate([dir]);
     const failures = [
+      // "legacy" is informational (v1 locks restore via the capability path);
+      // only failed/unrestorable rows are failures.
       ...report.filter((r) => r.status === "failed" || r.status === "unrestorable").map((r) => ({ scope: r.level, id: r.package ? `package ${r.id}` : r.id, reason: r.reason })),
       ...requirements.filter((q) => q.outcome === "failed").map((q) => ({ scope: dir, id: `requirement ${q.command}`, reason: q.reason || "consented install failed" })),
     ];
@@ -631,10 +699,11 @@ function reconcileInner(dir) {
     for (const l of pkgLevels) { packageCheckedLevels.add(resolve(l)); report.push(...packageLockReport(l)); }
     for (const r of report) {
       reportedAny = true;
-      const what = r.package ? `package ${r.id}` : r.id;
+      const what = r.package ? `package ${r.id ?? "(lock)"}` : r.id;
       if (r.status === "present") note(`ok        ${what}  [${shortPath(r.level)}]`);
       else if (r.status === "restored") note(`restored  ${what} → ${shortPath(r.dir)}  [${shortPath(r.level)}]`);
       else if (r.status === "retired") note(`RETIRED   ${what}  ${r.reason}  [${shortPath(r.level)}]`);
+      else if (r.status === "legacy") note(`LEGACY    ${shortPath(join(r.level, OAS_LOCK_FILE))}: ${r.reason}`);
       else { failures.push({ scope: r.level, id: what, reason: r.reason }); note(`FAILED    ${what}  ${r.reason}  [${shortPath(r.level)}]`); }
     }
     if (scope === boundary) for (const cfg of configChain(boundary)) restoredLevels.add(resolve(cfg._level));
@@ -756,18 +825,47 @@ function requirementsGate(scopes) {
   return out;
 }
 
+/** oas trust <capability> | oas trust <package> --all-capabilities */
 function trust() {
   const id = args[1];
-  if (!id || id.startsWith("--")) die("usage: oas trust <capability> [--dir <dir>]");
+  if (!id || id.startsWith("--")) die("usage: oas trust <capability> [--dir <dir>] | oas trust <package> --all-capabilities [--dir <dir>]");
   const dir = resolve(flag("dir") || process.cwd());
+  const all = args.includes("--all-capabilities");
+  // Package-backed approval path (per-capability, or explicit bulk on a package id).
+  const pkgs = listInstalledPackages(dir);
+  const backing = all ? pkgs.find((p) => p.package === id) : pkgs.find((p) => p.capabilities.some((c) => c.id === id));
+  if (backing) {
+    if (all && !JSON_MODE) {
+      console.log(`Package ${backing.package}@${backing.version} full executable surface:`);
+      for (const c of backing.capabilities) {
+        const cmds = Object.keys(c.manifest.commands || {});
+        const hooks = Object.keys(c.manifest.hooks || {});
+        console.log(`  ${c.id}: commands [${cmds.join(", ") || "none"}], hooks [${hooks.join(", ") || "none"}]`);
+      }
+    }
+    let r;
+    try { r = approveCapability(dir, id, { allCapabilities: all }); } catch (e) { JSON_MODE ? jsonFail(e.code || "E_TRUST_FAILED", e.message || e) : die(e.message); return; }
+    if (JSON_MODE) {
+      const surface = {};
+      for (const c of backing.capabilities) surface[c.id] = { commands: Object.keys(c.manifest.commands || {}), hooks: Object.keys(c.manifest.hooks || {}) };
+      jsonOk({ package: r.package, integrity: r.integrity, approved: r.approved, skipped: r.skipped, executableSurface: surface, file: r.file });
+      return;
+    }
+    if (r.approved.length) console.log(`Trusted executable commands/hooks for ${r.approved.join(", ")} (package ${r.package} at ${r.integrity}).`);
+    if (r.skipped.length) console.log(`No executable surface (lock integrity suffices, no approval needed): ${r.skipped.join(", ")}`);
+    return;
+  }
+  if (all) JSON_MODE ? jsonFail("unknown-capability", `no installed package "${id}" — --all-capabilities takes a package identity`) : die(`no installed package "${id}" — --all-capabilities takes a package identity`);
+  // Legacy standalone capability path.
   const manifest = capabilityManifest(id, dir);
-  if (!manifest) die(`unknown capability "${id}"`);
+  if (!manifest) JSON_MODE ? jsonFail("unknown-capability", `unknown capability "${id}"`) : die(`unknown capability "${id}"`);
   const lock = readCapabilityLocks(dir)[manifest.capability];
-  if (!lock) die(`${manifest.capability} is not locked in ${OAS_LOCK_FILE}`);
+  if (!lock) JSON_MODE ? jsonFail("invalid-lock", `${manifest.capability} is not locked in ${OAS_LOCK_FILE}`) : die(`${manifest.capability} is not locked in ${OAS_LOCK_FILE}`);
   const integrity = capabilityIntegrity(manifest._dir);
-  if (integrity !== lock.integrity) die(`integrity changed (${lock.integrity} → ${integrity}); reacquire explicitly before trusting`);
+  if (integrity !== lock.integrity) JSON_MODE ? jsonFail("integrity-drift", `integrity changed (${lock.integrity} → ${integrity}); reacquire explicitly before trusting`) : die(`integrity changed (${lock.integrity} → ${integrity}); reacquire explicitly before trusting`);
   const { _file, ...clean } = lock;
   writeCapabilityLock(dirname(_file), manifest.capability, { ...clean, trustedExecutables: true });
+  if (JSON_MODE) { jsonOk({ capability: manifest.capability, integrity, legacy: true }); return; }
   console.log(`Trusted executable commands/hooks for ${manifest.capability} at ${integrity}.`);
 }
 
@@ -787,26 +885,48 @@ function flagAll(name) {
 /** Capability ids supplied by a package's dependency closure, read from visible locks (phase 1).
  * The scope's own lock is merged in directly: during init no oas-config.yaml exists
  * there yet, so configChain-based reading cannot see same-lock dependencies. */
+/** Capability ids supplied by a package's dependency closure, resolved through
+ * the ENGINE's lock graph (dependencies recorded by identity) plus the indexed
+ * installed store. During init the scope may have a lock without a config;
+ * readPackageLocks walks the chain and the scope itself. */
 function dependencyClosureCapabilities(manifest, dir) {
-  const locks = { ...readPackageLocks(dir).packages, ...readPackageLocksAt(dir) };
+  // The scope's own lock is read directly: during init no oas-config.yaml
+  // exists there yet, so configChain-based reads cannot see that level.
+  const locks = { ...readPackageLocks(dir).packages };
+  try {
+    const parsed = JSON.parse(readFileSync(join(dir, OAS_LOCK_FILE), "utf8"));
+    if (parsed.lockfileVersion === 2) for (const [id, e] of Object.entries(parsed.packages || {})) locks[id] ||= e;
+  } catch { /* no own lock */ }
+  const byId = new Map(listInstalledPackages(dir).map((p) => [p.package, p]));
   const out = [];
   const seen = new Set();
+  const idOf = (dep) => {
+    // Engine lock-graph dependencies are identities; manifest entries may be
+    // source specs (paths/git/catalog). Identity first, then derive.
+    if (byId.has(dep) || locks[dep]) return dep;
+    const path = String(dep).startsWith("path:") ? String(dep).slice(5) : String(dep);
+    if (path.startsWith(".") || path.startsWith("/") || path.startsWith("~")) {
+      // Local-path dependency spec: the package id lives in ITS manifest.
+      try { return loadPackageManifestAt(path.startsWith("~/") ? join(process.env.HOME || "", path.slice(2)) : path).package; } catch { return undefined; }
+    }
+    return String(dep).split("@")[0].replace(/^git:.*\/|\.git$/g, "");
+  };
   const visit = (deps) => {
     for (const dep of deps || []) {
-      const id = String(dep).split("@")[0].replace(/^git:.*\/|\.git$/g, "");
-      if (seen.has(id)) continue;
+      const id = idOf(dep);
+      if (!id || seen.has(id)) continue;
       seen.add(id);
-      const lock = locks[id];
-      if (!lock) continue; // reported by validation when a referenced capability has no provider
-      out.push(...(lock.capabilities || []));
-      visit(lock.dependencies || []);
+      const entry = locks[id];
+      const pkg = byId.get(id);
+      if (!entry && !pkg) continue; // reported by validation when a referenced capability has no provider
+      out.push(...(entry?.capabilities || pkg?.capabilities?.map((c) => c.id) || []));
+      visit(entry?.dependencies || []);
     }
   };
   visit(manifest.dependencies);
   return out;
 }
 
-/** oas init --package <source> [--config <name>]: preview, validate, and snapshot one package config profile. */
 /** oas init --package <source> [--config <name>]: preview, validate, and snapshot one package config profile.
  * JSON mode: one compact envelope; WS2 codes E_PROFILE_INVALID / E_PROFILE_AMBIGUOUS /
  * E_PROFILE_NOT_FOUND (E_CONFIG_EXISTS is raised by init() before this); engine
@@ -817,54 +937,68 @@ function initPackage(src, dir, file) {
   const note = (msg) => (JSON_MODE ? console.error(msg) : console.log(msg));
   const configFlag = flag("config");
   if (configFlag === true) bail("E_USAGE", "--config needs a profile name");
-  let resolved;
-  const tmp = /^(https?:\/\/|git@|ssh:\/\/)/.test(src) ? mkdtempSync(join(tmpdir(), "oas-package-")) : undefined;
+  // During init the target scope may carry a lock/store WITHOUT an
+  // oas-config.yaml — configChain-based engine reads cannot see that level
+  // (init-acquires-before-config-exists), so read the scope's own lock v2
+  // directly for the id checks.
+  const ownLockV2 = (() => {
+    try {
+      const parsed = JSON.parse(readFileSync(join(dir, OAS_LOCK_FILE), "utf8"));
+      return parsed.lockfileVersion === 2 ? parsed.packages || {} : {};
+    } catch { return {}; }
+  })();
+  const installedAt = (id) => {
+    const d = join(installedPackagesDir(dir), id);
+    return ownLockV2[id] && existsSync(join(d, "oas-package.json")) ? d : undefined;
+  };
+  const isUrlOrCatalog = /^(https?:\/\/|git@|ssh:\/\/|git:)/.test(src) || (!src.startsWith(".") && !src.startsWith("/") && !src.startsWith("~") && !src.startsWith("path:") && !ownLockV2[src] && !readPackageLocks(dir).packages[src] && !listInstalledPackages(dir).some((p) => p.package === src));
   try {
-    try { resolved = resolvePackageSource(src, dir, { clone: tmp }); }
-    catch (e) { bail(e.code || "E_PACKAGE_UNRESOLVED", e.message); }
-    const { manifest, commit } = resolved;
+    // Gate 1: adoption leaves the root + dependency closure exact-locked via
+    // the ENGINE's acquirePackage — which now supports git, catalog, AND local
+    // sources. Acquisition runs BEFORE the config snapshot is published (a
+    // failed acquire/lock must not leave a config behind), and its exact-
+    // integrity reuse rejects same-ID/different-source drift. Already-installed
+    // ids are resolved from the store without re-fetching.
+    let manifest, commit;
+    const installedDir = !isUrlOrCatalog && (installedAt(src) || listInstalledPackages(dir).find((p) => p.package === src)?.dir);
+    if (installedDir) {
+      manifest = loadPackageManifestAt(installedDir);
+      commit = (ownLockV2[src] || readPackageLocks(dir).packages[src])?.commit || "local";
+    } else {
+      let acq;
+      try { acq = acquirePackage(dir, src); }
+      catch (e) { bail(e.code || "E_ACQUIRE_FAILED", e.message); }
+      note(`Acquired + locked package closure: ${acq.installed.map((p) => `${p.package}@${p.version}`).join(", ")} → ${shortPath(acq.lockFile)}`);
+      const rootRec = acq.installed.find((p) => p.package === acq.root);
+      manifest = loadPackageManifestAt(rootRec.dir);
+      commit = rootRec.commit;
+    }
     let profile;
     try { profile = selectProfile(manifest, configFlag); }
     catch (e) { bail(e.code || "E_PROFILE_AMBIGUOUS", e.message); }
     let errors;
-    try {
-      // Dependency-supplied capabilities: from visible locks, plus — for fresh
-      // local sources — the source closure itself (nothing is locked yet).
-      let depCaps = dependencyClosureCapabilities(manifest, dir);
-      if (!tmp && (manifest.dependencies || []).length && manifest._dir) {
-        try { depCaps = [...new Set([...depCaps, ...resolvePackageClosure(manifest._dir).flatMap((e) => e.capabilities)])]; }
-        catch { /* closure errors resurface in acquisition with their own codes */ }
-      }
-      errors = validateProfile(manifest, profile, { dependencyCapabilities: depCaps });
-    }
+    try { errors = validateProfile(manifest, profile, { dependencyCapabilities: dependencyClosureCapabilities(manifest, dir) }); }
     catch (e) { bail(e.code || "E_PROFILE_INVALID", e.message); }
     if (errors.length) bail("E_PROFILE_INVALID", `profile "${profile.name}" of package ${manifest.package} failed validation:\n  - ${errors.join("\n  - ")}`);
-    let body, capabilities;
-    try { body = readProfileText(manifest, profile); capabilities = packageCapabilityIds(manifest); }
+    let body;
+    try { body = readProfileText(manifest, profile); }
     catch (e) { bail(e.code || "E_PROFILE_INVALID", e.message); }
+    const capabilities = (manifest._capabilities || []).map((c) => c.id);
     // Preview before writing: package, profile, exported capabilities.
     note(`Package ${manifest.package}@${manifest.version} — profile "${profile.name}"${profile.description ? `: ${profile.description}` : ""}`);
     note(`  exports capabilities: ${capabilities.join(", ") || "(none)"}`);
-    // Gate 1: adoption must leave the root + dependency closure exact-locked.
-    // Acquisition runs BEFORE the config snapshot is published — a failed
-    // acquire/lock must not leave a config behind (E_CONFIG_EXISTS trap).
-    // Local-path sources ALWAYS run acquirePackage: a same-ID lock from a
-    // DIFFERENT source must not pass as proof of acquisition — acquirePackage's
-    // exact-integrity reuse rejects drift, and re-acquiring an identical
-    // source is a no-op re-lock.
-    const isLocalSource = !tmp && (src.startsWith(".") || src.startsWith("/") || src.startsWith("~") || src.startsWith("path:"));
-    if (isLocalSource) {
-      try {
-        const acq = acquirePackage(dir, src);
-        note(`Acquired + locked package closure: ${acq.installed.map((p) => `${p.package}@${p.version}`).join(", ")} → ${shortPath(acq.lockFile)}`);
-      } catch (e) { bail(e.code || "E_ACQUIRE_FAILED", e.message); }
-    }
     const text = `${profileProvenanceHeader({ pkg: manifest.package, version: manifest.version, profile: profile.name, commit })}\n` +
       body.replace(/^name:.*$/m, `name: ${basename(dir)}`).replace(/\n*$/, "\n");
     writeFileSync(file, text);
     note(`Created ${shortPath(file)} (${levelOf(dir)} level) from package profile ${manifest.package}:${profile.name}`);
     note("The snapshot is an ordinary scoped config — edit it, retarget or disable any capability; package updates never rewrite it.");
-    const locks = { ...readPackageLocks(dir).packages, ...readPackageLocksAt(dir) };
+    // After the snapshot exists, the scope IS a config level — but merge the own
+    // lock read too for the paranoid path (lock written moments ago).
+    const locks = { ...readPackageLocks(dir).packages };
+    try {
+      const parsed = JSON.parse(readFileSync(join(dir, OAS_LOCK_FILE), "utf8"));
+      if (parsed.lockfileVersion === 2) for (const [id, e] of Object.entries(parsed.packages || {})) locks[id] = { ...e, _file: join(dir, OAS_LOCK_FILE) };
+    } catch { /* no own lock */ }
     if (!locks[manifest.package]) note(`NOTE: package ${manifest.package} is not locked at this scope yet — acquire it with \`oas install ${src}\` so its capabilities restore.`);
     if (JSON_MODE) {
       const lockEntry = locks[manifest.package];
@@ -876,7 +1010,7 @@ function initPackage(src, dir, file) {
       });
       return;
     }
-  } finally { if (tmp) rmSync(tmp, { recursive: true, force: true }); }
+  } finally { /* engine acquisition stages its own temp dirs */ }
   offerTmuxMouseScrolling();
 }
 
@@ -899,7 +1033,7 @@ function configDiffCmd() {
   const tmp = /^(https?:\/\/|git@|ssh:\/\/)/.test(pkgId) ? mkdtempSync(join(tmpdir(), "oas-package-")) : undefined;
   try {
     let resolved;
-    try { resolved = resolvePackageSource(pkgId, dir, { clone: tmp }); }
+    try { resolved = resolveProfilePackage(pkgId, dir, { clone: tmp }); }
     catch (e) { bail(e.code || "E_PACKAGE_UNRESOLVED", e.message); }
     let profile;
     try { profile = selectProfile(resolved.manifest, profileName); }
@@ -928,6 +1062,80 @@ function configDiffCmd() {
     }
     console.log(`\n${changed.length} differing line${changed.length > 1 ? "s" : ""} (+ local only, - package profile only). Snapshots deliberately drift; adopt package changes by hand if wanted.`);
   } finally { if (tmp) rmSync(tmp, { recursive: true, force: true }); }
+}
+
+/** oas list — installed packages, exported capabilities, scopes. */
+function listCmd() {
+  const dir = resolve(flag("dir") || process.cwd());
+  let pkgs;
+  try { pkgs = listInstalledPackages(dir); } catch (e) { die(e.message); }
+  const locks = readPackageLocks(dir);
+  if (JSON_MODE) {
+    jsonOk({
+      packages: pkgs.map((p) => ({ package: p.package, version: p.version, level: p.level, source: p.source || null, commit: p.commit || null, integrity: p.integrity || null, locked: p.locked, lockError: p.lockError || null, dependencies: p.dependencies, trustedCapabilities: p.trustedCapabilities, capabilities: p.capabilities.map((c) => c.id) })),
+      legacy: locks.legacy.map((l) => ({ file: l.file, level: l.level, lockfileVersion: l.lockfileVersion, capabilities: Object.keys(l.capabilities) })),
+    });
+    return;
+  }
+  if (!pkgs.length) console.log("No installed packages in this config chain.");
+  for (const p of pkgs) {
+    console.log(`${p.package}@${p.version}  [${levelOf(p.level)} ${shortPath(p.level)}]${p.locked ? "" : "  UNLOCKED (no lock entry — reacquire)"}${p.lockError ? `  INVALID LOCK: ${p.lockError}` : ""}`);
+    if (p.source) console.log(`  source: ${p.source}  commit: ${p.commit || "?"}`);
+    for (const c of p.capabilities) {
+      const executable = Object.keys(c.manifest.commands || {}).length || Object.keys(c.manifest.hooks || {}).length;
+      const trusted = p.trustedCapabilities.includes(c.id);
+      console.log(`  capability ${c.id}${c.manifest.layer ? `  layer: ${c.manifest.layer}` : ""}${executable ? (trusted ? "  [trusted]" : "  [executable — needs oas trust]") : ""}`);
+    }
+    if (p.dependencies.length) console.log(`  depends on: ${p.dependencies.join(", ")}`);
+  }
+  for (const l of locks.legacy) console.log(`Legacy capability locks (lockfileVersion ${l.lockfileVersion ?? 1}) in ${shortPath(l.file)}: ${Object.keys(l.capabilities).join(", ")} — \`oas migrate\` maps them to packages`);
+}
+
+/** oas remove <package> — refuses while config or dependent packages reference it. */
+function removeCmd() {
+  const id = args[1];
+  if (!id || id.startsWith("--")) JSON_MODE ? jsonFail("E_USAGE", "usage: oas remove <package> [--dir <dir>]") : die("usage: oas remove <package> [--dir <dir>]");
+  const dir = resolve(flag("dir") || process.cwd());
+  let r;
+  try { r = removePackage(dir, id); } catch (e) { JSON_MODE ? jsonFail(e.code || "E_REMOVE_FAILED", e.message || e) : die(e.message); return; }
+  if (JSON_MODE) { jsonOk(r); return; }
+  console.log(`Removed package ${r.package} (${shortPath(r.dir)}) and its entry in ${shortPath(r.lockFile)}.`);
+}
+
+/** oas migrate — map this scope's v1 marketplace capability locks to package locks. */
+function migrateCmd() {
+  const dir = resolve(flag("dir") || process.cwd());
+  const dryRun = args.includes("--dry-run");
+  if (dryRun) {
+    const { plan, warnings } = migrateLegacyLock(dir);
+    if (JSON_MODE) { jsonOk({ dryRun: true, plan, warnings }); return; }
+    if (!plan.length) { console.log("Nothing to migrate at this scope."); return; }
+    for (const s of plan) console.log(`${s.action.padEnd(10)} ${s.capabilityId}${s.package ? `  → ${s.package.spec}` : ""}`);
+    for (const w of warnings) console.log(`WARNING: ${w}`);
+    return;
+  }
+  let r;
+  try { r = applyLegacyLockMigration(dir); } catch (e) { JSON_MODE ? jsonFail(e.code || "E_MIGRATE_FAILED", e.message || e) : die(e.message); return; }
+  if (JSON_MODE) { jsonOk(r); return; }
+  for (const m of r.migrated) console.log(`migrated  ${m.capability} → package ${m.package}@${m.version}`);
+  for (const c of r.residue) console.log(`residue   ${c}  (kept as a legacy capability lock)`);
+  for (const w of r.warnings) console.log(`WARNING: ${w}`);
+  if (r.file) console.log(`${shortPath(r.file)} is now lockfileVersion 2. Config activation (from: installed) is unchanged; re-run \`oas trust\` for executable capabilities — package integrity approvals are not carried over.`);
+}
+
+/** oas update <package> — transactional package update with diff + trust reset. */
+function updatePackageCmd(id) {
+  const dir = resolve(flag("dir") || process.cwd());
+  let r;
+  try { r = updatePackage(dir, id); } catch (e) { JSON_MODE ? jsonFail(e.code || "E_UPDATE_FAILED", e.message || e) : die(e.message); return; }
+  if (JSON_MODE) { jsonOk(r); return; }
+  if (!r.changed) { console.log(`${r.package} is already up to date (${r.after.version}, ${r.after.integrity}).`); return; }
+  console.log(`Updated ${r.package}: ${r.before.version} (${r.before.commit}) → ${r.after.version} (${r.after.commit})`);
+  console.log(`  integrity ${r.before.integrity} → ${r.after.integrity}`);
+  if (r.addedCapabilities.length) console.log(`  + capabilities: ${r.addedCapabilities.join(", ")}`);
+  if (r.removedCapabilities.length) console.log(`  - capabilities: ${r.removedCapabilities.join(", ")}`);
+  for (const w of r.depWarnings || []) console.log(`WARNING: ${w}`);
+  if (r.invalidatedApprovals.length) console.log(`  APPROVALS INVALIDATED (integrity changed): ${r.invalidatedApprovals.join(", ")} — re-approve with \`oas trust\` after review.`);
 }
 
 // ---------- init ----------
@@ -1343,10 +1551,12 @@ function capabilityCommand() {
     let teamCtx;
     const instanceHome = process.env.PI_AGENT_HOME || process.env.OAS_HOME;
     const metaFile = instanceHome && join(instanceHome, "instance.json");
+    let capSettings = {};
     try {
       if (metaFile && existsSync(metaFile)) {
         const meta = JSON.parse(readFileSync(metaFile, "utf8"));
         activeIds = (meta.capabilities || []).map((c) => c.id);
+        for (const c of meta.capabilities || []) capSettings[c.id] = c.settings || {};
         context = meta.repo || context;
         // Team: the spawn-time snapshot, but fall back to live config — instances
         // spawned before a team: block was declared have no snapshot.
@@ -1354,6 +1564,7 @@ function capabilityCommand() {
       } else {
         const resolved = resolveOasConfig(context, flag("soul"));
         activeIds = resolved.capabilities.map((c) => c.id);
+        for (const c of resolved.capabilities) capSettings[c.id] = c.settings || {};
         teamCtx = resolved.team;
       }
     } catch (e) { bail("E_CONFIG_BROKEN", e.message || e); throw e; }
@@ -1384,6 +1595,11 @@ function capabilityCommand() {
     if (!abs) bail("E_CAPABILITY_BROKEN", `${cmd} ${sub}: script not found (${join(m._dir, script)})`);
     const r = spawnSync("node", [abs, ...rest, ...args.slice(2)], { stdio: "inherit", env: {
       ...process.env, OAS_CAPABILITY: m.capability,
+      // Package-runtime boundary: dispatched commands receive the active
+      // capability's EFFECTIVE settings (instance snapshot or resolved context),
+      // same contract as lifecycle hooks — capabilities read their settings
+      // here instead of importing the kernel resolver.
+      OAS_SETTINGS: JSON.stringify(capSettings[m.capability] || {}),
       OAS_TEAM_NAME: teamCtx?.name || "", OAS_TEAM_ID: teamCtx?.id || "", OAS_TEAM_SCOPE: teamCtx?.scope || "",
     } });
     // Child never ran (spawn error): nothing reached stdout — keep the envelope contract.
@@ -1542,12 +1758,15 @@ if (cmd === "doctor") {
   args.includes("--json") ? doctorJson(doctorDir) : doctor(doctorDir);
 }
 else if (cmd === "use") use();
-else if (cmd === "update") updateCmd();
+else if (cmd === "update") { const t = args[1] && !args[1].startsWith("--") ? args[1] : undefined; t ? updatePackageCmd(t) : updateCmd(); }
 else if (cmd === "type") typeCmd();
 else if (cmd === "inject") injectCmd();
 else if (cmd === "install") install();
 else if (cmd === "config") configDiffCmd();
 else if (cmd === "trust") trust();
+else if (cmd === "list") listCmd();
+else if (cmd === "remove") removeCmd();
+else if (cmd === "migrate") migrateCmd();
 else if (cmd === "root") console.log(resolve(new URL("..", import.meta.url).pathname));
 else if (cmd === "init") init();
 else if (cmd === "status") status();
@@ -1590,25 +1809,39 @@ Usage:
                                             --soul shows final composed AGENTS.md
   oas update [--check] [--yes]              check npm for a newer kernel+pi bridge and
                                             optionally run the update; then run oas doctor
-  oas install [<id|git-url|path>] [--dir <d>] acquire + lock into <level>/.agents/
-                                            capabilities/installed/; bare \`oas install\`
-                                            restores locked-but-missing artifacts; at a
-                                            team: scope (or with --recursive) it reconciles
+  oas install [<source>] [--dir <d>]        acquire + exact-lock a package closure
+                                            (git:host/org/repo@ref, git URL, local
+                                            path, official catalog id) or a legacy
+                                            marketplace capability; never activates
+      [--recursive] [--no-requirements]     bare \`oas install\` exactly restores this
+      [--accept-requirement <cmd> ...]      chain's locked packages + capabilities; at a
+      [--json]                              team: scope (or with --recursive) it reconciles
                                             the whole workspace — descendant scopes restore
                                             once in path order (pruned discovery), then the
-                                            host-requirement consent gate runs
-      [--recursive] [--no-requirements]     --no-requirements = package-only (CI);
-      [--accept-requirement <cmd> ...]      non-interactive runs never install host tools
-      [--json]                              unless each requirement is named explicitly;
+                                            host-requirement consent gate runs;
+                                            --no-requirements = package-only (CI);
+                                            non-interactive runs never install host tools
+                                            unless each requirement is named explicitly;
                                             --json = one envelope (failures carry the full
-                                            report under error.details); never activates
+                                            report under error.details)
+  oas list [--dir <d>] [--json]             installed packages, exported capabilities,
+                                            scopes, trust state
+  oas update <package> [--dir <d>]          transactional package update: temp fetch,
+                                            closure validation, diff, lock replace,
+                                            all capability approvals invalidated
+  oas remove <package> [--dir <d>]          remove a package (refuses while config or
+                                            dependent packages reference it)
+  oas migrate [--dry-run] [--dir <d>]       map this scope's v1 capability locks to
+                                            package locks (preserves config activation)
   oas config diff [--package <id|url|path>] report how the local snapshot differs from the
       [--config <name>] [--dir <d>] [--json] package's current profile — never merges/overwrites;
                                             an adopted snapshot's provenance header supplies
                                             --package/--config defaults; --json emits one
                                             envelope (differingLines 0 = no drift)
-  oas trust <capability> [--dir <dir>]      approve executable commands/hooks for
-                                            the currently locked integrity
+  oas trust <capability> [--dir <dir>]      approve that capability's commands/hooks at
+                                            the provider package's exact integrity
+  oas trust <package> --all-capabilities    explicit bulk approval with a full
+                                            executable-surface summary
   oas use <capability>                      activate for one config-owned target
       [--global|--type <t>|--soul <s>]      (--global is default); --disable excludes
       [--disable] [--settings k=v [k2=v2 ...]] [--dir <d>]

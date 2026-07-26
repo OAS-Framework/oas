@@ -1,8 +1,8 @@
 ---
 type: Lesson
-title: Consumed-once pending intents must gate on data currency
-description: A consumed-once intent that applies to async workspace data must check the intent generation and the data generation before clearing itself, and reveal the resolved target if filters hide it.
-tags: [desktop, spawn, quick-open, races, generation-tokens]
+title: Consumed-once pending intents must gate on data currency and owner lifetime
+description: A consumed-once intent that applies to async workspace data must check intent/data generations before clearing, die with the mounted consumer, and reveal the resolved target if filters hide it.
+tags: [desktop, spawn, quick-open, lifecycle, races, generation-tokens]
 timestamp: 2026-07-26
 ---
 
@@ -23,6 +23,14 @@ For a pending intent that resolves against async workspace data:
 5. Only clear the consumed-once intent after the generation checks prove it is being applied to current data.
 
 This extends [split request generations by independently superseding request kind](/lessons/split-generation-counters-per-request-kind.md): presence of data is not the same as currency of data when workspace switches can overlap a refresh.
+
+# Deferred intents must die with their consumer
+
+The same Quick Open preselect used a module-level `pendingPreselect`. After the stale-roster fix began deferring until the roster generation became current, `unmount()` still only killed the view state. A deferred intent could survive navigation away from Spawn and be consumed by a later remount in the same workspace generation, popping a modal minutes after the user's intent expired.
+
+Generation gates protect against wrong data, not against a dead consumer. Any pending intent parked at module scope while waiting for data currency must be bound to the lifetime of the owner that will consume it: clear it in that owner's teardown, or carry a mount token and discard when the owner dies. For Spawn preselects, `unmount()` clears `pendingPreselect`.
+
+Regression shape: defer with a hanging roster, unmount Spawn, release the roster, remount Spawn in the same workspace generation, and assert no modal. Mutation-check by removing only the unmount clear; the test must fail.
 
 # Reveal intents must reveal the target
 

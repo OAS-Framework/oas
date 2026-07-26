@@ -15,6 +15,9 @@ read what the current task needs, not everything.
 * [decisions/spawn-lineage-explicit-only.md](decisions/spawn-lineage-explicit-only.md) - parentInstance now comes only from an explicit relation/--parent inside the target deployment or the attached-mode owner binding; env vars are never consulted, and cross-deployment spawns stay operator-origin.
 * [decisions/attached-spawns-child-of-work-owner.md](decisions/attached-spawns-child-of-work-owner.md) - attached work mode always makes the new agent a child of the verified work-tree owner; contradictory relations are rejected.
 * [decisions/package-engine-seam-teardown.md](decisions/package-engine-seam-teardown.md) - After the package engine lands, WS2 package CLI code must route resolver semantics to engine exports, keep only WS2 policy helpers, and preserve engine lock and integrity errors instead of wrapping them as prose.
+* [decisions/package-runtime-boundary-structured-cli.md](decisions/package-runtime-boundary-structured-cli.md) - Official packages reach the kernel only through oas CLI commands with Desktop-API-v1 JSON envelopes and a packageRuntimeApi probe field; a blessed module export was rejected because it preserves the oas-root dynamic-import coupling and creates a second public JS surface.
+* [decisions/flat-single-capability-packages.md](decisions/flat-single-capability-packages.md) - A capability directory may be the package root with oas-package.json and oas.json side by side when capabilities is exactly ["."]; package integrity covers the whole tree, and npm materialization roots are realpath-deduped.
+* [decisions/per-capability-npm-locks.md](decisions/per-capability-npm-locks.md) - Materialization roots are the package root plus declared capability dirs that have both package.json and package-lock.json; each root runs an independent npm ci --ignore-scripts, and inner resources resolve manifest-relative inside containment.
 
 ## Architecture
 
@@ -57,6 +60,10 @@ read what the current task needs, not everything.
 * [lessons/lineage-edge-ambiguity-posture.md](lessons/lineage-edge-ambiguity-posture.md) - Any operation recording or copying a bare-name cross-instance edge needs all-match enumeration, rejection of intra-root duplicates, and round-trip validation from every context that will interpret the stored name.
 * [lessons/overlapping-instance-home-scans-dedupe.md](lessons/overlapping-instance-home-scans-dedupe.md) - listAgents(root) already includes local souls from localAgentBases(root), so all-match instance enumerators that also scan localAgentBases for capability fallbacks must dedupe by canonical home or local instances look duplicated.
 * [lessons/relation-policy-migration-and-retire-splice.md](lessons/relation-policy-migration-and-retire-splice.md) - Introducing or changing spawn relation policy must update every agent-facing spawn recipe and repair mutated lineage on both sides, across the full scope where references can be created.
+* [lessons/frozen-interface-first-delivery.md](lessons/frozen-interface-first-delivery.md) - When sibling workstreams block on a shared contract, ship the schemas plus a contract doc with exact function signatures and error codes as a standalone first commit before any implementation.
+* [lessons/package-engine-implementation-gotchas.md](lessons/package-engine-implementation-gotchas.md) - Concrete pitfalls hit while implementing distribution packages — YAML subset config shape in tests, path-vs-git source disambiguation via file://, spawnInstance needs an agent object, hook meta lands in instance.json capabilityMeta, depsIntegrity closes the node_modules trust gap, and empty npm closures create no node_modules.
+* [lessons/deps-integrity-trust-binding.md](lessons/deps-integrity-trust-binding.md) - Excluding node_modules from packageIntegrity creates a trust bypass unless materialized dependency trees have their own depsIntegrity digest that trust, approval carry-over, and restore all verify.
+* [lessons/json-envelope-dispatch-boundary.md](lessons/json-envelope-dispatch-boundary.md) - A capability command's --json envelope guarantee is void unless the generic CLI dispatcher wraps the whole dispatch path, including manifest discovery, trust checks, command decoding, non-match fallthrough, and child spawn failures.
 
 ## Playbooks
 
@@ -66,6 +73,7 @@ read what the current task needs, not everything.
 ## References
 
 * [references/oas-expert-decisions.md](references/oas-expert-decisions.md) - pointers to the canonical Decision records and docs governing this area.
+* [references/strict-curriculum-scoping.md](references/strict-curriculum-scoping.md) - Key launch-path facts gathered while scoping strict instance curriculum enforcement: pi can combine --no-skills with explicit --skill, Claude Code isolation needs CLAUDE_CONFIG_DIR plus a version-probed allowlist, and enforcement belongs in spawnInstance command-line construction.
 
 Grow role-specific sections beyond these as the agent's role demands — list
 them here and log the growth in log.md.

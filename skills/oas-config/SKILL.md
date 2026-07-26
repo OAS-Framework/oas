@@ -8,7 +8,7 @@ description: >-
   "target these souls", "agent type", "override an injection", "oas use",
   "oas init", "configure OAS", "oas-config.yaml", "adopt a profile".
   Package acquisition/update/remove, locks, restore, and trust mechanics
-  belong to the oas-packages skill (shipping with the package engine).
+  belong to the oas-packages skill.
 ---
 
 # Configuring OAS
@@ -90,11 +90,9 @@ edit `.agents/capabilities/owned/<id>/injects/` directly.
 ## Acquire, trust, activate
 
 These are separate steps. **Acquisition, locks, restore, and trust are the
-package supply chain — they belong to the `oas-packages` skill (shipping
-with the package engine); until it is available use docs/packages.md and
-the top-level `oas help` output** (`oas install`, `oas trust`,
-lock/migration mechanics, workspace restore, requirements/package
-diagnosis). This skill covers the config side:
+package supply chain — load the `oas-packages` skill for those operations**
+(`oas install`, `oas trust`, lock/migration mechanics, workspace restore,
+requirements/package diagnosis). This skill covers the config side:
 activation and targeting of already-acquired capabilities.
 
 ```bash
@@ -103,8 +101,7 @@ oas use <capability> --type <agent-type> [--disable]
 oas use <capability> --soul <name> [--settings k=v [k2=v2 ...]]
 ```
 
-Key invariants (full detail: docs/packages.md and, once shipped, the
-oas-packages skill): OAS never silently pulls; approval
+Key invariants (full detail: the oas-packages skill): OAS never silently pulls; approval
 is tied to exact integrity; acquired or marketplace availability never
 implies activation. Never hand-edit `oas-lock.json` or the installed stores
 — the CLI owns them.

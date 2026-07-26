@@ -124,6 +124,12 @@ Packages under a scope's `owned/` subtree are config-owned. Anything under
 `installed/` requires a matching lock entry, so an acquired artifact cannot
 bypass executable trust by its directory location.
 
+Distribution packages generalize this: one locked Git/local package root under
+`.agents/packages/installed/` may export several capabilities, each
+independently addressable and independently trusted at the package's exact
+integrity (`lockfileVersion: 2`). See `docs/design/package-engine-contract.md`
+for the resolver/lock API and error taxonomy.
+
 ## Hooks and scaffold ownership
 
 Only `soul-scaffold`, `spawn`, and `retire` manifest hooks are accepted.

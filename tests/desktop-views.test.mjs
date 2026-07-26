@@ -193,7 +193,7 @@ test("ws generation: a spawn begun in workspace A completing after a switch to B
   const { doSpawn } = await import(new URL("../packages/desktop/renderer/views/spawn.mjs", import.meta.url).href);
   const opened = [];
   let release;
-  const panelWith = (names) => ({ ok: true, status: 200, json: async () => ({ instances: names.map((n) => ({ instance: n })) }) });
+  const panelWith = (names) => ({ ok: true, status: 200, json: async () => ({ instances: names.map((n) => ({ instance: n, running: true, tmux: { session: "pi-agents" } })) }) });
   const ctx = {
     api: (pathname) => pathname.startsWith("/api/panel")
       ? Promise.resolve(panelWith(["dev-1"]))          // roster already caught up
@@ -231,7 +231,7 @@ test("spawn op token: a stale workspace-A spawn completing during an in-flight B
   const respond = (instance) => ({ ok: true, status: 200, json: async () => ({ instance, launched: true }) });
   const ctx = {
     api: (pathname) => pathname.startsWith("/api/panel")
-      ? Promise.resolve({ ok: true, status: 200, json: async () => ({ instances: [{ instance: "inst-A" }, { instance: "inst-B" }] }) })
+      ? Promise.resolve({ ok: true, status: 200, json: async () => ({ instances: [{ instance: "inst-A", running: true, tmux: { session: "pi-agents" } }, { instance: "inst-B", running: true, tmux: { session: "pi-agents" } }] }) })
       : new Promise((ok) => releases.push(ok)),
     openTerminal: (name) => opened.push(name),
   };
@@ -272,7 +272,7 @@ test("spawn op token: a stale spawn ERROR never overwrites the active spawn's st
   const { doSpawn } = await import(new URL("../packages/desktop/renderer/views/spawn.mjs", import.meta.url).href);
   const releases = [];
   const ctx = {
-    api: (pathname) => pathname.startsWith("/api/panel") ? Promise.resolve({ ok: true, status: 200, json: async () => ({ instances: [{ instance: "inst-2" }] }) }) : new Promise((ok, err) => releases.push({ ok, err })),
+    api: (pathname) => pathname.startsWith("/api/panel") ? Promise.resolve({ ok: true, status: 200, json: async () => ({ instances: [{ instance: "inst-2", running: true, tmux: { session: "pi-agents" } }] }) }) : new Promise((ok, err) => releases.push({ ok, err })),
     openTerminal: () => {},
   };
   const fields = { ftask: { value: "" }, fpurpose: { value: "" }, fspawn: { disabled: false, textContent: "" }, fstatus: { textContent: "" } };
@@ -300,7 +300,7 @@ test("stale snapshot: spawn waits for the instance to appear in /api/panel befor
   const { doSpawn } = await import(new URL("../packages/desktop/renderer/views/spawn.mjs", import.meta.url).href);
   const opened = [];
   let panelCalls = 0;
-  const panel = (names) => ({ ok: true, status: 200, json: async () => ({ instances: names.map((n) => ({ instance: n })) }) });
+  const panel = (names) => ({ ok: true, status: 200, json: async () => ({ instances: names.map((n) => ({ instance: n, running: true, tmux: { session: "pi-agents" } })) }) });
   const ctx = {
     // background snapshot lags: first two polls miss the new instance, third has it
     api: (pathname) => pathname.startsWith("/api/panel")

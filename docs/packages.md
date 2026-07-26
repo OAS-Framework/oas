@@ -165,16 +165,15 @@ When no safe recipe matches the host, OAS prints the documented install URL.
 - **missing host commands** for active capabilities, with the exact consent
   command when a safe installer exists.
 
-## Phase note
+## Engine integration
 
-The package engine's interface is frozen (see the workstream-1 contract:
-`docs/design/package-engine-contract.md` and the `oas-package.schema.json` /
-`oas-lock.schema.json` schemas on its branch). Until the engine lands here,
-`oas init --package` and `oas config diff` resolve package ids through lock
-v2 `packages:` entries and the installed package store
-(`<scope>/.agents/packages/installed/<slug>/`); local paths and git URLs work
-standalone. The team-boundary reconciliation described above wraps the
-engine's `restorePackages` (current-chain exact restore) as its per-scope
-primitive. Acquiring packages (`oas install <source>` for multi-capability
-packages), lock v2 writing, update/remove, and per-capability trust are the
-engine workstream.
+The package engine (acquisition, store, lock v2, exact restore, capability
+indexing, per-capability trust — see `docs/design/package-engine-contract.md`
+and `docs/design/package-runtime-api.md`) is merged: `oas init --package`
+acquires and exact-locks the full closure through the engine's
+`acquirePackage` for every source kind (git, catalog, local path); the
+team-boundary reconciliation described above wraps the engine's
+`restorePackages` (current-chain exact restore, integrity/capability/runtime-
+closure verification) as its per-scope primitive; profile resolution reads
+the engine's indexed store. Legacy v1 capability locks keep restoring via the
+capability path and are reported as LEGACY with the `oas migrate` pointer.

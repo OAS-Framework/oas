@@ -200,6 +200,17 @@ export function registerAction({ id, label, context = "global", run, defaultChor
   };
 }
 
+/** Run a registered action by id exactly as a matched chord would —
+ * context-gated, so a mouse affordance can never fire an action its
+ * keyboard dispatch could not (buttons and chords share ONE registered
+ * run — single source of truth). Returns true when the action ran. */
+export function runAction(id) {
+  const action = actions.get(id);
+  if (!action || !contextEligible(action.context)) return false;
+  try { action.run(); } catch { /* an action must not break its caller */ }
+  return true;
+}
+
 /** Registered actions (editor rendering). */
 export function listActions() {
   return [...actions.values()];

@@ -141,7 +141,7 @@ test("pi and Claude instances receive the same exact local skills and generated 
     const claude = spawnInstance(root, agent, { instance: "dev-claude", runtime: "claude", launch: false });
     for (const meta of [pi, claude]) {
       const names = readdirSync(join(meta.home, ".agents", "skills")).sort();
-      assert.deepEqual(names, ["oas", "oas-config", "private", "review"]);
+      assert.deepEqual(names, ["oas", "oas-config", "oas-packages", "private", "review"]);
       assert.equal(lstatSync(join(meta.home, ".agents", "skills", "review")).isDirectory(), true);
       assert.equal(existsSync(join(meta.home, ".agents", "skills", "pollution")), false);
       assert.equal(lstatSync(join(meta.home, "AGENTS.md")).isSymbolicLink(), false);
