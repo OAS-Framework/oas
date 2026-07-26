@@ -14,6 +14,7 @@ read what the current task needs, not everything.
 
 * [decisions/spawn-lineage-explicit-only.md](decisions/spawn-lineage-explicit-only.md) - parentInstance now comes only from an explicit relation/--parent inside the target deployment or the attached-mode owner binding; env vars are never consulted, and cross-deployment spawns stay operator-origin.
 * [decisions/attached-spawns-child-of-work-owner.md](decisions/attached-spawns-child-of-work-owner.md) - attached work mode always makes the new agent a child of the verified work-tree owner; contradictory relations are rejected.
+* [decisions/package-runtime-boundary-structured-cli.md](decisions/package-runtime-boundary-structured-cli.md) - Official packages reach the kernel only through oas CLI commands with Desktop-API-v1 JSON envelopes and a packageRuntimeApi probe field; a blessed module export was rejected because it preserves the oas-root dynamic-import coupling and creates a second public JS surface.
 
 ## Architecture
 
