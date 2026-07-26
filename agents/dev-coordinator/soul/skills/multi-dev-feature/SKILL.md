@@ -11,6 +11,11 @@ you go idle — never sleep-poll.
 
 ## 1. Setup
 
+First prove this is actually multi-developer work: scan the relevant repo
+surfaces, the soul roster, and likely owning code paths. If every changed
+surface belongs to one developer soul, collapse to a single-developer feature
+instead of inventing parallel choreography.
+
 ```bash
 git -C ./work fetch origin
 git -C ./work push origin origin/main:refs/heads/feature/<name>
@@ -65,6 +70,13 @@ Push the feature branch when green.
 
 ## 4. Merged-state review
 
+Before each merged-state review, fetch origin and compare the feature against
+current `origin/main`. If main advanced since the feature base, reconcile and
+re-gate before spawning the reviewer or opening the PR; a stale-base green gate
+tests the wrong product. Route behavioral merge conflicts in developer-owned
+feature logic back to that developer with the conflict map; keep only
+trivial/union conflicts yourself.
+
 After ALL developer branches are merged and the gate is green, launch a
 fresh reviewer on the integrated diff:
 
@@ -113,6 +125,18 @@ to the owning developer(s), re-merge, re-gate, re-review.
 
 ## Gotchas
 
+- A task can arrive at the coordinator sounding multi-dev but map entirely to
+  one soul after repo/soul ownership scouting. Do the ownership scan before
+  spawning developers, and collapse to a single-developer path when only one
+  soul owns the touched surfaces. See [Scope a coordinator feature to one
+  developer when ownership scan
+  collapses](../knowledge/lessons/scope-feature-before-spawning-developers.md).
+- Before merged-state review and PR delivery, check whether `origin/main`
+  advanced since the feature base. If it did, reconcile first; route behavioral
+  conflicts in developer-owned feature logic back to that developer rather than
+  resolving feature semantics in the coordinator worktree. See [Merged-state
+  reviewers catch stale-base drift against moving
+  main](../knowledge/lessons/stale-base-drift-merged-review.md).
 - In a fast two-developer loop, crossed aweb mail can dominate coordination
   churn. Anchor every mail on exact commit heads, what is already merged, and a
   single next action; once PR-ready, declare a hard freeze where only
