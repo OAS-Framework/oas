@@ -20,6 +20,7 @@ const MOD_ORDER = ["Mod", "Ctrl", "Alt", "Shift"];
 // e.key values normalized so layouts/shift variants land on one spelling.
 const KEY_ALIASES = new Map([
   ["+", "="], // Shift-= / numpad plus both mean the "=" binding (Mod+=)
+  ["|", "\\"], // Shift-\ produces "|" — both mean the "\" binding (Mod+Shift+\)
   ["esc", "escape"],
   [" ", "space"],
   ["spacebar", "space"],
@@ -140,6 +141,7 @@ function isEditableTarget(target) {
 
 export const DEFAULT_KEYMAP = Object.freeze({
   "app.palette": "Mod+K",
+  "app.quickOpenSouls": "Mod+P",
   "app.shortcuts": "Mod+,",
   "app.themeToggle": "Mod+Shift+T",
   "stage.hierarchy": "Mod+1",
@@ -148,6 +150,10 @@ export const DEFAULT_KEYMAP = Object.freeze({
   "tabs.prev": "Ctrl+Shift+Tab",
   "tabs.close": "Mod+W",
   "sidebar.focusFilter": "Mod+Shift+E",
+  "sidebar.toggle": "Mod+B",
+  "split.vertical": "Mod+\\",
+  "split.horizontal": "Mod+Shift+\\",
+  "split.close": "Mod+Alt+W",
   "terminal.fontBigger": "Mod+=",
   "terminal.fontSmaller": "Mod+-",
   "terminal.fontReset": "Mod+0",
@@ -156,8 +162,15 @@ export const DEFAULT_KEYMAP = Object.freeze({
 // Action ids allowed to fire inside .xterm on Linux/Windows, where their
 // chords would otherwise belong to the attached program. Allowlisting by
 // action id (not chord) keeps the policy stable across user rebinds.
+// sidebar.toggle is deliberately NOT allowlisted: its default Mod+B would
+// intercept Ctrl+B — the tmux prefix — inside the terminal on non-mac
+// (macOS ⌘B still fires in xterm via the ⌘-chord rule).
+// app.quickOpenSouls is deliberately ABSENT too: Ctrl+P inside a terminal
+// is shell history navigation — it must reach the pty (⌘P on macOS still
+// fires inside xterm via the ⌘-chord policy above).
 export const TERMINAL_ALLOWLIST = Object.freeze([
   "app.palette", "tabs.next", "tabs.prev", "tabs.close",
+  "split.vertical", "split.horizontal", "split.close",
 ]);
 
 export const CONTEXTS = Object.freeze([

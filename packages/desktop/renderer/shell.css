@@ -8,6 +8,10 @@ body {
   font: 13px/1.45 -apple-system, "Segoe UI", system-ui, sans-serif;
 }
 #app { display: flex; }
+/* Hideable sidebar: terminals get the full window width. Class-driven so the
+   toggle is one line of JS; every terminal tab's ResizeObserver refits xterm
+   when the panes change size. */
+#app.sidebar-hidden #sidebar { display: none; }
 
 /* ── nav rail ── */
 #sidebar {
@@ -174,6 +178,16 @@ body {
 .tab .close { color: var(--muted); margin: 0 8px 0 2px; padding: 2px 5px; border-radius: 4px; font-size: 15px; }
 .tab .close:hover, .tab .close:focus-visible { color: var(--fg); background: var(--surface-2); }
 #tabhost { flex: 1; position: relative; min-height: 0; }
+/* ── split panes: member terminal tabs become flex cells of #tabhost ── */
+#tabhost.split-row { display: flex; flex-direction: row; }
+#tabhost.split-col { display: flex; flex-direction: column; }
+.tab-pane.split-cell { position: relative; inset: auto; flex: 1 1 0; min-width: 0; min-height: 0; }
+#tabhost.split-row > .split-cell + .split-cell,
+#tabhost.split-row > .split-cell ~ .split-empty { border-left: 1px solid var(--border); }
+#tabhost.split-col > .split-cell + .split-cell,
+#tabhost.split-col > .split-cell ~ .split-empty { border-top: 1px solid var(--border); }
+.split-empty { flex: 1 1 0; min-width: 0; min-height: 0; display: flex; align-items: center; justify-content: center;
+               padding: 24px; color: var(--muted); font-size: 13px; text-align: center; background: var(--term-bg); }
 #stagehost { flex: 1; position: relative; min-height: 0; }
 #stagehost > div { height: 100%; }
 .tab-pane { position: absolute; inset: 0; display: none; overflow: auto; }

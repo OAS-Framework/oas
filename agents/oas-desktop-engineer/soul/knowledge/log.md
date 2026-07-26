@@ -1,6 +1,19 @@
 # Knowledge Log
 
 ## 2026-07-26
+* **Creation**: promoted [Reconciling split panes with quick-open focusContent semantics](/lessons/split-quickopen-merge-reconciliation.md) from the oas-desktop-engineer-split-panels notes.
+* **Update**: merged the merged-state split review findings from oas-desktop-engineer-split-panels into [terminal allowlist action-id policy](/lessons/keybindings-terminal-allowlist-by-action-id.md) and [split panes flex-cell reprojection](/lessons/split-panes-flex-reprojection.md): check newly allowlisted actions' resolved non-mac chords against terminal-owned bytes, keep pending split state to the single renderer placeholder, and select split-adjacent close fallback before removal.
+* **Creation**: promoted [default chords with shifted punctuation must alias the shifted character](/lessons/shifted-punctuation-default-chords.md) from the oas-desktop-engineer-split-panels notes.
+* **Update**: merged the split-pane selection-wiring note into [split panes as flex-cell reprojection of existing tab panes](/lessons/split-panes-flex-reprojection.md): visible split panes need pointerdown/focusin activation without DOM focus stealing or re-appending already-in-place panes.
+* **Creation**: promoted [split panes as flex-cell reprojection of existing tab panes](/lessons/split-panes-flex-reprojection.md) from the oas-desktop-engineer-split-panels notes.
+* **Update**: merged the deferred-intent unmount note into [Consumed-once pending intents must gate on data currency and owner lifetime](/lessons/pending-intent-data-currency.md): module-level deferred intents must be cleared on owner unmount or carry a mount token, because generation gates do not prove the consumer is alive.
+* **Update**: [Quick Open hands off to Spawn via a consumed-once preselect](/decisions/quick-open-spawn-preselect-handoff.md) now records that Spawn unmount clears deferred `pendingPreselect` intents before a later remount in the same workspace generation can consume them.
+* **Creation**: promoted [Consumed-once pending intents must gate on data currency](/lessons/pending-intent-data-currency.md) from the oas-desktop-engineer-quick-open notes.
+* **Update**: [Quick Open hands off to Spawn via a consumed-once preselect](/decisions/quick-open-spawn-preselect-handoff.md) now requires current intent and roster generations before consuming the preselect, and reveals filtered targets before focusing.
+* **Update**: linked [Split request generations by independently superseding request kind](/lessons/split-generation-counters-per-request-kind.md) to the pending-intent data-currency lesson.
+* **Creation**: promoted [Terminal focus follows user intent through activateTab's focusContent option](/decisions/terminal-focus-intent.md) from the oas-desktop-engineer-quick-open notes.
+* **Creation**: promoted [Quick Open hands off to Spawn via a consumed-once preselect](/decisions/quick-open-spawn-preselect-handoff.md) from the oas-desktop-engineer-quick-open notes.
+* **Creation**: promoted [Palette subsequence scorer's no-match sentinel must be out-of-band](/lessons/palette-fuzzy-score-null-sentinel.md) from the oas-desktop-engineer-quick-open notes.
 * **Fix**: [final agent-relations kernel contract](/references/agent-relations-kernel-contract.md) resolves the flag clarifier, distinguishes absent explicit relation from attached auto-child topology, records equivalent non-instance attached child syntax, and includes `E_PARENT_NOT_FOUND`/`E_RELATIVE_AMBIGUOUS`.
 * **Update**: [desktop cluster grouping sibling-link seam](/decisions/desktop-cluster-grouping-sibling-seam.md) describes the shipped sidebar and panel projection in present tense without the removed Instances-roster surface.
 
