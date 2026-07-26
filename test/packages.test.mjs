@@ -1581,3 +1581,41 @@ test("doctor --json diagnoses malformed residue with invalid-lock status; human/
   assert.match(rh.stdout, /residue entry ok\.res .* is malformed \(missing\/invalid version\)/);
   rmSync(base, { recursive: true, force: true });
 });
+
+// ---------- maintainer finding 2: platform-invariance enforcement ----------
+
+test("platform-variant closures are rejected at materialization (v1 MUST, finding 2)", () => {
+  const base = temp();
+  const s = scope(base);
+  const src = pkgSource(join(base, "src"), { package: "pv.p" }, { "cap": { capability: "pv.cap" } });
+  // lockfile resolving a platform-constrained (native-style) package
+  write(join(src, "package.json"), JSON.stringify({ name: "pv-p", version: "1.0.0", dependencies: { "fake-native": "1.0.0" } }));
+  write(join(src, "package-lock.json"), JSON.stringify({
+    name: "pv-p", version: "1.0.0", lockfileVersion: 3, requires: true,
+    packages: {
+      "": { name: "pv-p", version: "1.0.0", dependencies: { "fake-native": "1.0.0" } },
+      "node_modules/fake-native": { version: "1.0.0", resolved: "https://registry.npmjs.org/fake-native/-/fake-native-1.0.0.tgz", integrity: "sha512-AAA", os: ["darwin"], cpu: ["arm64"] },
+    },
+  }));
+  assert.throws(() => acquirePackage(s, src), /platform-variant runtime closure.*os\/cpu\/libc/);
+  assert.ok(!existsSync(join(installedPackagesDir(s), "pv.p")), "nothing installed");
+  // install-script marker also rejected
+  const src2 = pkgSource(join(base, "src2"), { package: "pv2.p" }, { "cap": { capability: "pv2.cap" } });
+  write(join(src2, "package.json"), JSON.stringify({ name: "pv2-p", version: "1.0.0", dependencies: { "gyp-dep": "1.0.0" } }));
+  write(join(src2, "package-lock.json"), JSON.stringify({
+    name: "pv2-p", version: "1.0.0", lockfileVersion: 3, requires: true,
+    packages: {
+      "": { name: "pv2-p", version: "1.0.0", dependencies: { "gyp-dep": "1.0.0" } },
+      "node_modules/gyp-dep": { version: "1.0.0", resolved: "https://registry.npmjs.org/gyp-dep/-/gyp-dep-1.0.0.tgz", integrity: "sha512-BBB", hasInstallScript: true },
+    },
+  }));
+  assert.throws(() => acquirePackage(s, src2), /install script/);
+  // pure-JS closures still pass (regression: the vendored prod-dep fixture pattern)
+  const ok = pkgSource(join(base, "ok"), { package: "pi.p" }, { "cap": { capability: "pi.cap" } });
+  write(join(ok, "vendor/dep/package.json"), JSON.stringify({ name: "dep", version: "1.0.0" }));
+  write(join(ok, "package.json"), JSON.stringify({ name: "pi-p", version: "1.0.0", dependencies: { dep: "file:vendor/dep" } }));
+  write(join(ok, "package-lock.json"), JSON.stringify({ name: "pi-p", version: "1.0.0", lockfileVersion: 3, requires: true, packages: { "": { name: "pi-p", version: "1.0.0", dependencies: { dep: "file:vendor/dep" } }, "node_modules/dep": { resolved: "vendor/dep", link: true }, "vendor/dep": { version: "1.0.0" } } }));
+  const r = acquirePackage(s, ok);
+  assert.equal(r.root, "pi.p");
+  rmSync(base, { recursive: true, force: true });
+});
