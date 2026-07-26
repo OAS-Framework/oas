@@ -1,0 +1,15 @@
+{
+  "name": "@oas-framework/oas-aweb",
+  "version": "1.5.1",
+  "description": "Official OAS messaging integration for team-scoped aweb identities, mail, chat, and roster discovery.",
+  "license": "MIT",
+  "type": "module",
+  "private": true,
+  "dependencies": {
+    "@awebai/pi": "^0.2.1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/OAS-Framework/oas-aweb"
+  }
+}
