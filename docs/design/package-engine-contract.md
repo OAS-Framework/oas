@@ -216,8 +216,9 @@ lifecycle commands):
 - Every exported capability stays independently addressable by capability ID;
   capability manifests still cannot carry deployment targets; packages cannot
   make capabilities or family assignments mandatory.
-- No silent lock advancement; no npm lifecycle scripts (`npm ci
-  --ignore-scripts` only, for a checked-in `package-lock.json`); no
+- No silent lock advancement; no npm lifecycle scripts (`npm ci --omit=dev
+  --omit=peer --ignore-scripts` only, for a checked-in `package-lock.json` —
+  see the runtime API addendum §2); no
   executable-trust broadening; official identity ≠ executable trust.
 - Any package integrity change invalidates all of its capability approvals.
 - Existing config targeting/layer/injection/override semantics unchanged.

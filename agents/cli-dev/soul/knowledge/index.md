@@ -55,6 +55,7 @@ read what the current task needs, not everything.
 * [lessons/lineage-edge-ambiguity-posture.md](lessons/lineage-edge-ambiguity-posture.md) - Any operation recording or copying a bare-name cross-instance edge needs all-match enumeration, rejection of intra-root duplicates, and round-trip validation from every context that will interpret the stored name.
 * [lessons/overlapping-instance-home-scans-dedupe.md](lessons/overlapping-instance-home-scans-dedupe.md) - listAgents(root) already includes local souls from localAgentBases(root), so all-match instance enumerators that also scan localAgentBases for capability fallbacks must dedupe by canonical home or local instances look duplicated.
 * [lessons/relation-policy-migration-and-retire-splice.md](lessons/relation-policy-migration-and-retire-splice.md) - Introducing or changing spawn relation policy must update every agent-facing spawn recipe and repair mutated lineage on both sides, across the full scope where references can be created.
+* [lessons/coordinator-stale-verification-loop.md](lessons/coordinator-stale-verification-loop.md) - When a coordinator repeatedly verifies stale commits and demands already-landed work, answer with branch-head, ancestry, and blob-level evidence plus explicit ACKs for the named mails.
 
 ## Playbooks
 

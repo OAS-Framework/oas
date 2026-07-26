@@ -13,10 +13,11 @@
  * The kernel resolves per-key closest-wins from wherever agents actually run,
  * so binding at a level scopes the capability to everything under it.
  */
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { execFileSync, spawnSync } from "node:child_process";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { enableTmuxMouse, tmuxConfigPath, tmuxMouseEnabled } from "../lib/tmux-config.mjs";
 import {
   LAYERS, LEGACY_HOME_CAPABILITIES_DIR, OAS_LOCK_FILE, OAS_VERSION, RETIRED_CAPABILITIES, configChain,
@@ -43,6 +44,9 @@ const die = (msg) => { console.error(`oas: ${msg}`); process.exit(1); };
 // object on stdout — { schemaVersion: 1, ok: false, error: { code, message } } —
 // with a nonzero exit; progress prose goes to stderr, never stdout.
 const JSON_MODE = args.includes("--json");
+// Canonical absolute path of this CLI executable — the versioned OAS_CLI_BIN
+// env contract for dispatched package commands (never resolved via PATH).
+const CLI_BIN = realpathSync(fileURLToPath(import.meta.url));
 const jsonFail = (code, message) => { console.log(JSON.stringify({ schemaVersion: 1, ok: false, error: { code, message: String(message) } })); process.exit(1); };
 const jsonOk = (result) => { console.log(JSON.stringify({ schemaVersion: 1, ok: true, result })); };
 
@@ -123,8 +127,15 @@ function doctorJson(dir) {
     retiredLocks: Object.entries(readCapabilityLocks(ctx))
       .filter(([id]) => RETIRED_CAPABILITIES[id])
       .map(([id, lock]) => ({ id, file: lock._file, reason: RETIRED_CAPABILITIES[id] })),
-    migrationResidue: readPackageLocks(ctx).legacy.filter((l) => l.lockfileVersion === 2).flatMap((l) =>
-      Object.entries(l.capabilities).map(([id, lock]) => ({ id, file: l.file, level: l.level, source: lock.source || null, status: "pending-migration", action: `oas migrate --dir ${l.level}` }))),
+    ...(() => {
+      // Doctor JSON catches the typed fail-closed error and diagnoses (finding 3).
+      try {
+        return { migrationResidue: readPackageLocks(ctx).legacy.filter((l) => l.lockfileVersion === 2).flatMap((l) =>
+          Object.entries(l.capabilities).map(([id, lock]) => ({ id, file: l.file, level: l.level, source: lock.source || null, status: "pending-migration", action: `oas migrate --dir ${l.level}` }))), lockError: null };
+      } catch (e) {
+        return { migrationResidue: [], lockError: { code: e.code || "invalid-lock", message: e.message, provenance: e.provenance || null } };
+      }
+    })(),
     retiredArtifacts: Object.entries(mans)
       .filter(([id]) => RETIRED_CAPABILITIES[id])
       .map(([id, m]) => ({ id, dir: m._dir, origin: m._origin, reason: RETIRED_CAPABILITIES[id] })),
@@ -213,17 +224,24 @@ function doctor(dir) {
   if (existsSync(LEGACY_HOME_CAPABILITIES_DIR)) console.log(`  WARNING: legacy ~/.oas/capabilities exists and is no longer discovered — reinstall its packages at a config scope and remove it`);
 
   // Distribution packages: package failures are distinguished from capability failures.
+  // Doctor is the DIAGNOSIS surface: it catches the typed invalid-lock error the
+  // fail-closed read/list paths raise and renders it actionably (finding 3).
   console.log("\nInstalled packages:");
-  const pkgLocks = readPackageLocks(ctx);
+  let pkgLocks = { packages: {}, legacy: [] };
   let pkgs = [];
-  try { pkgs = listInstalledPackages(ctx); }
-  catch (e) { console.log(`  ERROR: ${e.message}${e.code ? ` [${e.code}]` : ""}`); }
-  if (!pkgs.length && !Object.keys(pkgLocks.packages).length && !pkgLocks.legacy.length) console.log("  (none)");
+  let lockBroken;
+  try { pkgLocks = readPackageLocks(ctx); pkgs = listInstalledPackages(ctx); }
+  catch (e) {
+    lockBroken = e;
+    const prov = Array.isArray(e.provenance) ? e.provenance[0] : undefined;
+    console.log(`  ERROR: ${e.message} [${e.code || "invalid-lock"}]`);
+    if (prov?.file) console.log(`         fix or remove the offending entry in ${shortPath(prov.file)} — the lock is never auto-repaired; package operations fail closed until it is valid`);
+  }
+  if (!lockBroken && !pkgs.length && !Object.keys(pkgLocks.packages).length && !pkgLocks.legacy.length) console.log("  (none)");
   for (const p of pkgs) {
     const lock = pkgLocks.packages[p.package];
     console.log(`  ${p.package}@${p.version}  [${levelOf(p.level)} ${shortPath(p.level)}]`);
     if (!lock) { console.log(`             ERROR: installed but not locked — reacquire it [manifest graph error]`); continue; }
-    if (p.lockError) console.log(`             ERROR: ${p.lockError} [invalid-lock]`);
     const integ = packageIntegrity(p.dir);
     if (integ !== lock.integrity) console.log(`             ERROR: integrity drift — installed ${integ}, locked ${lock.integrity}; all capability approvals are invalid [integrity-drift]`);
     // Runtime closure presence/staleness (runtime API addendum §2): node_modules
@@ -550,19 +568,21 @@ function trust() {
 /** oas list — installed packages, exported capabilities, scopes. */
 function listCmd() {
   const dir = resolve(flag("dir") || process.cwd());
-  let pkgs;
-  try { pkgs = listInstalledPackages(dir); } catch (e) { die(e.message); }
-  const locks = readPackageLocks(dir);
+  // FAIL-CLOSED (maintainer finding 3): list RAISES on invalid locks — an
+  // invalid lock must never render as usable/absent data.
+  let pkgs, locks;
+  try { pkgs = listInstalledPackages(dir); locks = readPackageLocks(dir); }
+  catch (e) { JSON_MODE ? jsonFail(e.code || "invalid-lock", e.message || e) : die(e.message); return; }
   if (JSON_MODE) {
     jsonOk({
-      packages: pkgs.map((p) => ({ package: p.package, version: p.version, level: p.level, source: p.source || null, commit: p.commit || null, integrity: p.integrity || null, locked: p.locked, lockError: p.lockError || null, dependencies: p.dependencies, trustedCapabilities: p.trustedCapabilities, capabilities: p.capabilities.map((c) => c.id) })),
+      packages: pkgs.map((p) => ({ package: p.package, version: p.version, level: p.level, source: p.source || null, commit: p.commit || null, integrity: p.integrity || null, locked: p.locked, dependencies: p.dependencies, trustedCapabilities: p.trustedCapabilities, capabilities: p.capabilities.map((c) => c.id) })),
       legacy: locks.legacy.map((l) => ({ file: l.file, level: l.level, lockfileVersion: l.lockfileVersion, capabilities: Object.keys(l.capabilities) })),
     });
     return;
   }
   if (!pkgs.length) console.log("No installed packages in this config chain.");
   for (const p of pkgs) {
-    console.log(`${p.package}@${p.version}  [${levelOf(p.level)} ${shortPath(p.level)}]${p.locked ? "" : "  UNLOCKED (no lock entry — reacquire)"}${p.lockError ? `  INVALID LOCK: ${p.lockError}` : ""}`);
+    console.log(`${p.package}@${p.version}  [${levelOf(p.level)} ${shortPath(p.level)}]${p.locked ? "" : "  UNLOCKED (no lock entry — reacquire)"}`);
     if (p.source) console.log(`  source: ${p.source}  commit: ${p.commit || "?"}`);
     for (const c of p.capabilities) {
       const executable = Object.keys(c.manifest.commands || {}).length || Object.keys(c.manifest.hooks || {}).length;
@@ -1075,6 +1095,10 @@ function capabilityCommand() {
       // same contract as lifecycle hooks — capabilities read their settings
       // here instead of importing the kernel resolver.
       OAS_SETTINGS: JSON.stringify(capSettings[m.capability] || {}),
+      // PATH is not a trusted runtime boundary (maintainer finding 1): pass the
+      // canonical absolute executable of THIS CLI; official consumers execFile
+      // it directly and never resolve `oas` from PATH or a shell.
+      OAS_CLI_BIN: CLI_BIN,
       OAS_TEAM_NAME: teamCtx?.name || "", OAS_TEAM_ID: teamCtx?.id || "", OAS_TEAM_SCOPE: teamCtx?.scope || "",
     } });
     // Child never ran (spawn error): nothing reached stdout — keep the envelope contract.
