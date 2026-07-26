@@ -123,6 +123,8 @@ function doctorJson(dir) {
     retiredLocks: Object.entries(readCapabilityLocks(ctx))
       .filter(([id]) => RETIRED_CAPABILITIES[id])
       .map(([id, lock]) => ({ id, file: lock._file, reason: RETIRED_CAPABILITIES[id] })),
+    migrationResidue: readPackageLocks(ctx).legacy.filter((l) => l.lockfileVersion === 2).flatMap((l) =>
+      Object.entries(l.capabilities).map(([id, lock]) => ({ id, file: l.file, level: l.level, source: lock.source || null, status: "pending-migration", action: `oas migrate --dir ${l.level}` }))),
     retiredArtifacts: Object.entries(mans)
       .filter(([id]) => RETIRED_CAPABILITIES[id])
       .map(([id, m]) => ({ id, dir: m._dir, origin: m._origin, reason: RETIRED_CAPABILITIES[id] })),
@@ -235,7 +237,9 @@ function doctor(dir) {
   }
   for (const l of pkgLocks.legacy) {
     if (l.lockfileVersion !== 2) console.log(`  WARNING: ${shortPath(l.file)} is lockfileVersion ${l.lockfileVersion ?? 1} — \`oas migrate\` maps its capability locks to packages`);
-    else if (Object.keys(l.capabilities).length) console.log(`  NOTE: ${shortPath(l.file)} retains legacy capability locks pending migration: ${Object.keys(l.capabilities).join(", ")}`);
+    else if (Object.keys(l.capabilities).length) {
+      for (const [rid, rlock] of Object.entries(l.capabilities)) console.log(`  NOTE: ${rid} in ${shortPath(l.file)} is legacy migration residue (${rlock.source || "unknown source"}) — pending migration: re-run \`oas migrate --dir ${shortPath(l.level)}\` when its official package publishes, or remove the entry if the capability is abandoned`);
+    }
   }
   // Capability provenance mismatch: a config from: installed capability that no visible package or store provides is already reported above.
 

@@ -195,23 +195,39 @@ Semantics:
   `package.json` + `package-lock.json` pair is the capability's closure (it is
   detected once, not twice).
 
-## 6. Legacy residue in v2 locks (pending maintainer ruling; default = retain)
+## 6. Legacy residue in v2 locks (maintainer-approved, binding constraints)
 
 A `lockfileVersion: 2` file MAY carry an optional legacy `capabilities` map —
-v1 entries `oas migrate` could not yet map to packages (typically marketplace
-capabilities whose official package is unpublished during the interim).
-Rules:
+v1 entries `oas migrate` could not yet map to packages. **Maintainer ruling:
+approved as a temporary READ-ONLY migration envelope**, under these binding
+constraints:
 
-- Only the explicit migration command flips a lock to v2; residue is created
-  there and only there. `writePackageLock` still refuses pure-v1 files
-  (`legacy-lock`); `writeCapabilityLock` may update residue entries without
-  downgrading the version.
-- Legacy restore/trust semantics keep working for residue entries unchanged.
-- **Doctor flags residue** as pending migration at every scope that has it
-  (NOTE line naming the capabilities), so the state is visible until the
-  official packages publish and a re-run of `oas migrate` clears it.
-- If the maintainer rules STRICT instead: the residue branch is dropped from
-  `docs/oas-lock.schema.json` (the optional `capabilities` property on the v2
-  branch), `applyLegacyLockMigration` refuses to flip a scope while any entry
-  is unmappable, and this section is replaced accordingly. The delta is
-  isolated to those three places.
+1. Only explicit `oas migrate` flips pure v1 → v2 and creates/carries
+   residue. `install`, `writePackageLock`, restore, and update never
+   synthesize new legacy entries (`writeCapabilityLock` in a v2 file may only
+   UPDATE an existing residue entry; adding a new one is `legacy-lock`).
+2. Migration converts every catalog-mappable entry transactionally and
+   retains only entries genuinely unmappable at that moment, preserving exact
+   source/version/commit/integrity/`trustedExecutables` semantics. Re-running
+   `oas migrate` on a v2 lock retries the residue (later successful
+   conversion).
+3. A residue capability ID colliding with a package-exported capability at
+   the same scope is `duplicate-capability-id` with provenance — no implicit
+   winner, no dual execution/trust path.
+4. Package operations preserve unrelated residue byte-semantically; legacy
+   restore/trust services residue only via the existing exact-integrity path.
+   Package trust never inherits `trustedExecutables` from residue.
+5. Doctor (human and `--json` `migrationResidue`) identifies each residue
+   entry as `pending-migration` with the exact retry action
+   (`oas migrate --dir <level>`) or removal guidance.
+6. Cutover gate: the official-catalog/kernel-marketplace switch requires ZERO
+   residue in the deployment probe. Post-transition, residue is readable only
+   for pointed diagnosis/migration — never a discovery source, never a way to
+   add legacy capabilities.
+7. Migration and rollback are atomic: any conversion failure restores the
+   original v1 lock byte-identically and removes every package the migration
+   installed.
+
+Required tests (maintainer-named, in `test/packages.test.mjs`): mixed v2,
+unmappable retention, later successful conversion, collision failure, trust
+non-transfer, rollback.

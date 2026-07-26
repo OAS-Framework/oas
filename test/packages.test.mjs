@@ -147,15 +147,16 @@ test("writePackageLock/readPackageLocks: v2 round-trip, closest scope wins, refu
   rmSync(base, { recursive: true, force: true });
 });
 
-test("writeCapabilityLock never downgrades a v2 lock (residue coexistence)", () => {
+test("writeCapabilityLock never downgrades a v2 lock and refuses NEW legacy entries there", () => {
   const base = temp();
   const s = scope(base);
   writePackageLock(s, "a.pkg", { source: "path:/x", version: "1", commit: "local", integrity: "sha256-0", capabilities: [] });
-  writeCapabilityLock(s, "legacy.cap", { source: "path:/y", version: "1", integrity: "sha256-1" });
+  // Only `oas migrate` creates residue: adding a fresh legacy entry to a v2 lock is refused.
+  assert.throws(() => writeCapabilityLock(s, "legacy.cap", { source: "path:/y", version: "1", integrity: "sha256-1" }), (e) => e.code === "legacy-lock");
   const parsed = JSON.parse(readFileSync(join(s, OAS_LOCK_FILE), "utf8"));
   assert.equal(parsed.lockfileVersion, 2);
   assert.ok(parsed.packages["a.pkg"]);
-  assert.ok(parsed.capabilities["legacy.cap"]);
+  assert.equal(parsed.capabilities?.["legacy.cap"], undefined);
   rmSync(base, { recursive: true, force: true });
 });
 
@@ -817,5 +818,88 @@ test("flat single-capability package: capabilities: [\".\"] — acquire/discover
   write(join(bad, "sub", "oas.json"), JSON.stringify({ capability: "b.sub", version: "1", description: "c" }));
   write(join(bad, "oas-package.json"), JSON.stringify({ package: "b.p", version: "1", description: "p", capabilities: [".", "sub"] }));
   assert.throws(() => loadPackageManifestAt(bad), (e) => e.code === "invalid-package-manifest" && /must be the only entry/.test(e.message));
+  rmSync(base, { recursive: true, force: true });
+});
+
+// ---------- residue constraints (maintainer ruling, addendum §6) ----------
+
+test("residue: later successful conversion — re-running migrate converts once the catalog can map", () => {
+  const base = temp();
+  const s = scope(base);
+  writeCapabilityLock(s, "late.cap", { source: "marketplace:late.cap@1.0.0", version: "1.0.0", integrity: "sha256-a" });
+  // first migrate: not in catalog → residue
+  let r = applyLegacyLockMigration(s, { catalog: () => undefined });
+  assert.deepEqual(r.residue, ["late.cap"]);
+  assert.equal(JSON.parse(readFileSync(join(s, OAS_LOCK_FILE), "utf8")).lockfileVersion, 2);
+  // official package publishes
+  const official = pkgSource(join(base, "official"), { package: "late.cap" }, { "cap": { capability: "late.cap" } });
+  gitify(official);
+  const catalog = (id) => (id === "late.cap" ? { url: official } : undefined);
+  // second migrate on the (now v2) lock: converts the residue
+  const r2 = applyLegacyLockMigration(s, { catalog });
+  assert.deepEqual(r2.migrated.map((m) => m.capability), ["late.cap"]);
+  assert.deepEqual(r2.residue, []);
+  const parsed2 = JSON.parse(readFileSync(join(s, OAS_LOCK_FILE), "utf8"));
+  assert.ok(parsed2.packages["late.cap"]);
+  assert.equal(Object.keys(parsed2.capabilities || {}).length, 0, "residue cleared after conversion");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("residue: collision failure — installing a package exporting a residue capability ID errors with provenance", () => {
+  const base = temp();
+  const s = scope(base);
+  writeCapabilityLock(s, "col.cap", { source: "marketplace:col.cap@1.0.0", version: "1.0.0", integrity: "sha256-a" });
+  applyLegacyLockMigration(s, { catalog: () => undefined }); // flips to v2 with residue
+  const p = pkgSource(join(base, "p"), { package: "other.p" }, { "cap": { capability: "col.cap" } });
+  assert.throws(() => acquirePackage(s, p), (e) => e.code === "duplicate-capability-id" && Array.isArray(e.provenance) && e.provenance.some((x) => String(x).startsWith("residue:")));
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("residue: v2 locks reject NEW legacy entries — only existing residue may be updated", () => {
+  const base = temp();
+  const s = scope(base);
+  writeCapabilityLock(s, "old.cap", { source: "marketplace:old.cap@1", version: "1", integrity: "sha256-a" });
+  applyLegacyLockMigration(s, { catalog: () => undefined });
+  // updating the existing residue entry is allowed (legacy restore/trust path)
+  writeCapabilityLock(s, "old.cap", { source: "marketplace:old.cap@1", version: "1", integrity: "sha256-a", trustedExecutables: true });
+  assert.equal(JSON.parse(readFileSync(join(s, OAS_LOCK_FILE), "utf8")).lockfileVersion, 2);
+  // synthesizing a NEW legacy entry in a v2 lock is refused
+  assert.throws(() => writeCapabilityLock(s, "new.cap", { source: "path:/x", version: "1", integrity: "sha256-b" }), (e) => e.code === "legacy-lock");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("residue: migration failure is atomic — original v1 lock restored, migration-installed packages removed", () => {
+  const base = temp();
+  const s = scope(base);
+  // two mappable entries; the second one's package does NOT export the expected capability → conversion fails
+  const good = pkgSource(join(base, "good"), { package: "ok.cap" }, { "cap": { capability: "ok.cap" } });
+  gitify(good);
+  const wrong = pkgSource(join(base, "wrong"), { package: "bad.cap" }, { "cap": { capability: "something.else" } });
+  gitify(wrong);
+  writeCapabilityLock(s, "ok.cap", { source: "marketplace:ok.cap@1.0.0", version: "1.0.0", integrity: "sha256-a" });
+  writeCapabilityLock(s, "bad.cap", { source: "marketplace:bad.cap@1.0.0", version: "1.0.0", integrity: "sha256-b" });
+  const original = readFileSync(join(s, OAS_LOCK_FILE), "utf8");
+  const catalog = (id) => (id === "ok.cap" ? { url: good } : id === "bad.cap" ? { url: wrong } : undefined);
+  assert.throws(() => applyLegacyLockMigration(s, { catalog }), (e) => /rolled back/.test(e.message));
+  assert.equal(readFileSync(join(s, OAS_LOCK_FILE), "utf8"), original, "original v1 lock byte-identical");
+  assert.ok(!existsSync(join(installedPackagesDir(s), "ok.cap")), "migration-installed package removed on rollback");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("residue: doctor --json lists each residue entry as pending-migration with a retry action", () => {
+  const base = temp();
+  const s = scope(base);
+  writeCapabilityLock(s, "res.cap", { source: "marketplace:res.cap@1.0.0", version: "1.0.0", integrity: "sha256-a" });
+  applyLegacyLockMigration(s, { catalog: () => undefined });
+  const r = cli(s, "doctor", s, "--json");
+  const doc = JSON.parse(r.stdout);
+  const entry = doc.migrationResidue.find((e) => e.id === "res.cap");
+  assert.ok(entry, "residue entry present in doctor JSON");
+  assert.equal(entry.status, "pending-migration");
+  assert.match(entry.action, /oas migrate/);
+  // human doctor names the retry action too
+  const rh = cli(s, "doctor", s);
+  assert.match(rh.stdout, /res\.cap .*legacy migration residue/);
+  assert.match(rh.stdout, /re-run `oas migrate/);
   rmSync(base, { recursive: true, force: true });
 });
