@@ -1,5 +1,6 @@
 # Lessons
 
+* [`--relation parent` re-points only the anchor's lineage](relation-parent-repoints-only-anchor.md) - When spawning an overseer for multiple instances, the relation flag binds only the spawning instance; the other party must be brought under the new parent separately.
 * [Scope a coordinator feature to one developer when ownership scan collapses](scope-feature-before-spawning-developers.md) - A coordinator task that sounds multi-dev can map entirely to one soul; scan repo surfaces and the soul roster before spawning developers so parallel choreography does not get invented.
 * [Merged-state reviewers catch stale-base drift against moving main](stale-base-drift-merged-review.md) - A feature branch cut early can silently regress freshly-shipped main work; check origin/main movement before each review round, and route behavioral merge conflicts to the owning developer.
 * [Crossed aweb mail dominates multi-dev integration churn — anchor every mail on exact heads](crossed-mail-coordination.md) - In a fast two-developer loop, most coordination rounds were resolving stale crossed mail; stating exact commit heads, what is already merged, and a single explicit next action in every mail is the effective countermeasure, plus declaring a hard freeze once PR-ready.
