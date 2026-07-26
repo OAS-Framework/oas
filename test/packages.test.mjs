@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync, chmodSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { resolveOasConfig, capabilityIntegrity } from "../lib/core.mjs";
@@ -18,6 +18,13 @@ function temp() { return mkdtempSync(join(tmpdir(), "oas-pkg-test-")); }
 function write(path, content) { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, content); }
 function cli(args, opts = {}) {
   return spawnSync(process.execPath, [CLI, ...args], { encoding: "utf8", ...opts });
+}
+function gitRepo(dir) {
+  execFileSync("git", ["init", "-q", dir]);
+  execFileSync("git", ["-C", dir, "config", "user.email", "test@example.invalid"]);
+  execFileSync("git", ["-C", dir, "config", "user.name", "Test"]);
+  execFileSync("git", ["-C", dir, "add", "."]);
+  execFileSync("git", ["-C", dir, "commit", "-qm", "init"]);
 }
 
 /** Contract-level fixture package (per the Decision's oas-package.json shape). */
@@ -1118,6 +1125,55 @@ test("init --package on a configless scope sees same-lock dependency capabilitie
   assert.equal(env.ok, true, JSON.stringify(env));
   assert.equal(env.result.package, "root.pkg");
   assert.deepEqual(env.result.lockedPackages.sort(), ["dep.pkg", "root.pkg"]);
+});
+
+test("restore containment: hostile lock package ids never escape the store and cleanup removes only staging", () => {
+  const base = temp();
+  const ws = join(base, "ws");
+  write(join(ws, "oas-config.yaml"), "name: ws\nteam:\n  name: t\n");
+  // Sentinel artifact that a store-wide rmSync would delete.
+  const sentinel = join(ws, ".agents", "packages", "installed", "innocent-pkg", "oas-package.json");
+  write(sentinel, JSON.stringify({ package: "innocent-pkg", version: "1.0.0", description: "x" }));
+  // Hostile lock: package id "." with an invalid path source — pre-fix, the
+  // failure cleanup rmSync'd the derived destination = the whole installed root.
+  write(join(ws, "oas-lock.json"), JSON.stringify({ lockfileVersion: 2, packages: {
+    ".": { source: "path:/nonexistent", version: "1.0.0", commit: "local", integrity: `sha256-${"0".repeat(64)}`, capabilities: [], trustedCapabilities: [] },
+    "..": { source: "path:/nonexistent", version: "1.0.0", commit: "local", integrity: `sha256-${"0".repeat(64)}`, capabilities: [], trustedCapabilities: [] },
+  } }, null, 2));
+  const r = cli(["install", "--no-requirements", "--dir", ws], { cwd: ws });
+  assert.equal(r.status, 1, r.stdout);
+  assert.match(r.stdout, /invalid package id in lock/);
+  assert.ok(existsSync(sentinel), "the installed store must survive hostile lock keys");
+  // no staging leftovers
+  const entries = readdirSync(join(ws, ".agents", "packages", "installed"));
+  assert.deepEqual(entries.filter((e) => e.includes("staging")), []);
+});
+
+test("acquisition truthfulness: path locks record commit local; stale installed content refuses to lock; config only after successful acquire", () => {
+  const base = temp();
+  const pkg = fixturePackage(join(base, "pkg"));
+  // (a) commit is "local" for path sources even when the source IS a git checkout
+  gitRepo(pkg);
+  const ws = join(base, "ws"); mkdirSync(ws, { recursive: true });
+  const r = cli(["init", "--package", pkg, "--json", "--dir", ws]);
+  assert.equal(r.status, 0, r.stdout);
+  const lock = JSON.parse(readFileSync(join(ws, "oas-lock.json"), "utf8"));
+  assert.equal(lock.packages["example.engineering"].commit, "local", "path sources lock commit 'local' per the frozen schema");
+  // (b) failed acquisition leaves NO config snapshot behind
+  const badRoot = fixturePackage(join(base, "bad"), { id: "bad.pkg", dependencies: ["./missing-dep"], configs: { d: { path: "configs/default/oas-config.yaml", default: true } } });
+  const ws2 = join(base, "ws2"); mkdirSync(ws2);
+  const r2 = cli(["init", "--package", badRoot, "--json", "--dir", ws2]);
+  assert.equal(r2.status, 1);
+  assert.equal(existsSync(join(ws2, "oas-config.yaml")), false, "failed acquire must not publish the config");
+  const retry = cli(["init", "--package", pkg, "--json", "--dir", ws2]);
+  assert.equal(retry.status, 0, `retry must not hit E_CONFIG_EXISTS:\n${retry.stdout}`);
+  // (c) stale same-ID installed content refuses to lock against a fresh source
+  const ws3 = join(base, "ws3"); mkdirSync(ws3);
+  const staleDest = join(ws3, ".agents", "packages", "installed", "example.engineering");
+  write(join(staleDest, "oas-package.json"), JSON.stringify({ package: "example.engineering", version: "0.0.9", description: "stale" }));
+  const r3 = cli(["init", "--package", pkg, "--json", "--dir", ws3]);
+  assert.equal(r3.status, 1);
+  assert.equal(JSON.parse(r3.stdout).error.code, "integrity-drift");
 });
 
 // ---------- oas.dev consumer fixture (primary WS2 acceptance case) ----------

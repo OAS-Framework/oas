@@ -839,17 +839,10 @@ function initPackage(src, dir, file) {
     // Preview before writing: package, profile, exported capabilities.
     note(`Package ${manifest.package}@${manifest.version} — profile "${profile.name}"${profile.description ? `: ${profile.description}` : ""}`);
     note(`  exports capabilities: ${capabilities.join(", ") || "(none)"}`);
-    const text = `${profileProvenanceHeader({ pkg: manifest.package, version: manifest.version, profile: profile.name, commit })}\n` +
-      body.replace(/^name:.*$/m, `name: ${basename(dir)}`).replace(/\n*$/, "\n");
-    writeFileSync(file, text);
-    note(`Created ${shortPath(file)} (${levelOf(dir)} level) from package profile ${manifest.package}:${profile.name}`);
-    note("The snapshot is an ordinary scoped config — edit it, retarget or disable any capability; package updates never rewrite it.");
-    const locks0 = { ...readPackageLocks(dir).packages, ...readPackageLocksAt(dir) };
     // Gate 1: adoption must leave the root + dependency closure exact-locked.
-    // A fresh (unlocked) local-path source is acquired through the acquisition
-    // seam (frozen acquirePackage signature; the engine replaces the body in
-    // phase 2). Locked/installed ids are already locked; git URLs await the
-    // engine's acquisition and only warn.
+    // Acquisition runs BEFORE the config snapshot is published — a failed
+    // acquire/lock must not leave a config behind (E_CONFIG_EXISTS trap).
+    const locks0 = { ...readPackageLocks(dir).packages, ...readPackageLocksAt(dir) };
     const isLocalSource = !tmp && (src.startsWith(".") || src.startsWith("/") || src.startsWith("~") || src.startsWith("path:"));
     if (!locks0[manifest.package] && isLocalSource) {
       try {
@@ -857,6 +850,11 @@ function initPackage(src, dir, file) {
         note(`Acquired + locked package closure: ${acq.installed.map((p) => `${p.package}@${p.version}`).join(", ")} → ${shortPath(acq.lockFile)}`);
       } catch (e) { bail(e.code || "E_ACQUIRE_FAILED", e.message); }
     }
+    const text = `${profileProvenanceHeader({ pkg: manifest.package, version: manifest.version, profile: profile.name, commit })}\n` +
+      body.replace(/^name:.*$/m, `name: ${basename(dir)}`).replace(/\n*$/, "\n");
+    writeFileSync(file, text);
+    note(`Created ${shortPath(file)} (${levelOf(dir)} level) from package profile ${manifest.package}:${profile.name}`);
+    note("The snapshot is an ordinary scoped config — edit it, retarget or disable any capability; package updates never rewrite it.");
     const locks = { ...readPackageLocks(dir).packages, ...readPackageLocksAt(dir) };
     if (!locks[manifest.package]) note(`NOTE: package ${manifest.package} is not locked at this scope yet — acquire it with \`oas install ${src}\` so its capabilities restore.`);
     if (JSON_MODE) {
