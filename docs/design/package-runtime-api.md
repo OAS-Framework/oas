@@ -44,7 +44,10 @@ on failure; progress prose only on stderr.
 
 Covers the complete official-package consumer inventory (oas.okf:
 `findAgent`, `upsertLocalAgent`/`upsertTmpAgent`, `spawnInstance`,
-`resolveOasConfig`; no other official package imports core).
+`resolveOasConfig`; no other official package imports core). File-of-record
+for the consumer inventory: `packaging/oas-okf/KERNEL-API-NEEDS.md` on kernel
+branch `integrations-expert/official-packages-staging` @ `60d5eb6` (design
+input; this contract remains authoritative).
 
 1. **Agent lookup** — `oas agent show <name> [--dir <d>] --json`
    - result: `{ name, kind, repo, work, runtime, model, type, dir } | null`
