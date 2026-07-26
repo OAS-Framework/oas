@@ -91,28 +91,37 @@ with the acquire → lock → trust → activate → spawn probe from
 
 ## 2. Package-local npm runtime closure
 
-- **Detection**: exactly a ROOT-level `package.json` AND `package-lock.json`
-  in the installed package root. Nested lockfiles are not consulted.
+- **Detection and placement**: materialization roots are (a) the PACKAGE root
+  and (b) each manifest-declared capability directory — any of these carrying
+  BOTH `package.json` AND `package-lock.json` is materialized independently.
+  Per-capability locks are the norm when an inner `oas.json` resolves
+  resources via `node_modules/...` relative to the capability manifest (e.g.
+  oas-aweb's `node_modules/@awebai/pi/skills/...`): deps land beside the
+  manifest that references them, inside the package containment boundary. A
+  package-root lock serves package-wide tooling. One or many locks per
+  package are allowed; each is its own `npm ci` unit. Directories not
+  enumerated by the manifest are never scanned.
 - **When**: materialization runs at the END of a successful acquire, update,
   and restore of that package (after integrity verification, before the
   operation reports success). It is `npm ci --ignore-scripts --no-audit
   --no-fund` in the package root — **no npm lifecycle scripts ever run**, at
   any phase.
 - **Integrity coverage**: the lock `integrity` covers the package SOURCE tree
-  only — `node_modules` is excluded from the hash (as are `.git` and
-  `oas-lock.json`). The dependency closure's integrity is carried by the
-  checked-in `package-lock.json`, which IS inside the hashed source tree;
-  `npm ci` fails closed on any lockfile mismatch. Doctor reports source
-  integrity + the presence/staleness of the materialized closure.
+  only — every `node_modules` (at any depth) is excluded from the hash (as
+  are `.git` and `oas-lock.json`). The dependency closures' integrity is
+  carried by the checked-in `package-lock.json` files, which ARE inside the
+  hashed source tree; `npm ci` fails closed on any lockfile mismatch. Doctor
+  reports source integrity + the presence/staleness of materialized closures.
 - **Reproducibility**: `node_modules` is a derived, platform-dependent
   artifact — never hashed, never committed, always reproducible from the
   locked `package-lock.json` on the host platform. A failed materialization
   is a WARNING on acquire/update reports (the source artifact and lock are
   still valid and exact); doctor surfaces it until resolved.
 - **Containment**: capability code/hook paths must resolve inside the locked
-  package root after symlink resolution; the materialized `node_modules`
-  under that root is inside the boundary by construction. Paths escaping the
-  root — including through `node_modules` symlinks — are `path-escape`.
+  package root after symlink resolution; materialized `node_modules` trees
+  under that root (package-root or per-capability) are inside the boundary by
+  construction. Paths escaping the root — including through `node_modules`
+  symlinks — are `path-escape`.
 - **Rollback**: materialization happens after the artifact/lock commit point;
   a materialization failure never rolls back or invalidates the acquired
   package (re-running install/update retries it). A failure BEFORE the commit

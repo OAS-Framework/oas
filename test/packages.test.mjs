@@ -8,7 +8,7 @@ import { dirname, join, resolve } from "node:path";
 import {
   acquirePackage, applyLegacyLockMigration, approveCapability, capabilityManifests, capabilityManifest, capabilityTrust,
   capabilitySkillDirs, capabilityExecutablePath, listInstalledPackages, loadPackageManifestAt, migrateLegacyLock,
-  packageIntegrity, parsePackageSource, readPackageLocks, removePackage, resolveOasConfig, restorePackages,
+  materializePackageDeps, packageIntegrity, parsePackageSource, readPackageLocks, removePackage, resolveOasConfig, restorePackages,
   findAgent, spawnInstance, updatePackage, validateLockEntry, writeCapabilityLock, writePackageLock, installedPackagesDir, OAS_LOCK_FILE,
 } from "../lib/core.mjs";
 
@@ -771,5 +771,24 @@ test("runtime API consumer fixture: agent show → upsert → config get → spa
   env = JSON.parse(r.stdout);
   assert.equal(env.ok, false);
   assert.equal(env.error.code, "E_BAD_ARGS");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("materializePackageDeps: per-capability lock placement — deps land beside the inner manifest, integrity unchanged", () => {
+  const base = temp();
+  const s = scope(base);
+  const src = pkgSource(join(base, "src"), { package: "aw.p" }, { "capabilities/aweb": { capability: "aw.cap" } });
+  // per-capability dependency lock (empty closure; npm ci creates node_modules)
+  write(join(src, "capabilities/aweb", "package.json"), JSON.stringify({ name: "aw-cap", version: "1.0.0", scripts: { postinstall: `node -e "require('fs').writeFileSync('PWNED','x')"` } }));
+  write(join(src, "capabilities/aweb", "package-lock.json"), JSON.stringify({ name: "aw-cap", version: "1.0.0", lockfileVersion: 3, requires: true, packages: { "": { name: "aw-cap", version: "1.0.0" } } }));
+  const before = packageIntegrity(src);
+  // root selection: the per-capability dir is a materialization root
+  const rep = materializePackageDeps(src);
+  assert.deepEqual(rep.roots, [join(src, "capabilities/aweb")], "per-capability lock detected as its own npm ci root");
+  assert.equal(rep.error, undefined);
+  acquirePackage(s, src);
+  const dest = join(installedPackagesDir(s), "aw.p");
+  assert.ok(!existsSync(join(dest, "capabilities/aweb", "PWNED")), "postinstall suppressed in per-capability materialization");
+  assert.equal(readPackageLocks(s).packages["aw.p"].integrity, before, "nested node_modules excluded from integrity");
   rmSync(base, { recursive: true, force: true });
 });
