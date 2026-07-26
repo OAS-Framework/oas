@@ -17,8 +17,10 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - name: Materialize locked runtime dependencies without lifecycle scripts
-        run: npm ci --ignore-scripts --prefix capabilities/oas-aweb
+      - name: Materialize locked runtime dependencies without development or peer packages
+        run: npm ci --omit=dev --omit=peer --ignore-scripts --prefix capabilities/oas-aweb
+      - name: Audit the materialized runtime closure
+        run: npm audit --omit=dev --omit=peer --prefix capabilities/oas-aweb
       - name: Validate manifests, package-local skills, and hooks
         run: npm test
       - name: Consumer probe status

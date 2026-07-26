@@ -17,10 +17,10 @@ Install the `aw` CLI and initialize an aweb workspace at the deployment's team s
 The inner capability directory owns its JavaScript runtime closure with checked `capabilities/oas-aweb/package-lock.json`. Materialize it exactly, without lifecycle scripts:
 
 ```bash
-npm ci --ignore-scripts --prefix capabilities/oas-aweb
+npm ci --omit=dev --omit=peer --ignore-scripts --prefix capabilities/oas-aweb
 ```
 
-This creates `capabilities/oas-aweb/node_modules/@awebai/pi/skills/...` beside the inner manifest, satisfying all three escape-free skill paths in `oas.json`. OAS package acquisition must use the same script-free materialization contract.
+This creates `capabilities/oas-aweb/node_modules/@awebai/pi/skills/...` beside the inner manifest, satisfying all three escape-free skill paths in `oas.json`. The package retains `@awebai/pi` 0.2.x but omits its unused pi-coding-agent peer; the capability consumes the packaged skills, and its commands/hooks do not import that peer. OAS package acquisition must use the same script-free, peer-omitting materialization contract.
 
 This nested placement is the staging ruling while WS1 amends the closure contract; revalidate it before publication. The final OAS compatibility floor also awaits the lock-v2/materialization release decision. See [`SCHEMA-STATUS.md`](SCHEMA-STATUS.md).
 
@@ -59,8 +59,9 @@ capabilities:
 ## Development
 
 ```bash
-npm ci --ignore-scripts --prefix capabilities/oas-aweb
+npm ci --omit=dev --omit=peer --ignore-scripts --prefix capabilities/oas-aweb
+npm audit --omit=dev --omit=peer --prefix capabilities/oas-aweb
 npm test
 ```
 
-Tests validate both manifests, prove all declared skills resolve from this repository's materialized dependency tree, and exercise missing-CLI/bounded-root/retire hook behavior. The full acquire → lock → trust → activate → spawn probe remains blocked on engine consumer fixtures.
+Tests validate both manifests, prove all declared skills resolve while the unused peer remains absent, reject peer imports from executable scripts, and exercise missing-CLI/bounded-root/retire hook behavior. The full acquire → lock → trust → activate → spawn probe remains blocked on engine consumer fixtures.
