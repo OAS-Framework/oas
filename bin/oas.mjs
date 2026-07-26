@@ -566,7 +566,22 @@ function emitReconcileResult({ boundary, boundaryKind, scopes, requirements, fai
  * config-referenced capabilities against visible locked packages; aggregate
  * missing requirements and failures by scope.
  * Non-team scopes keep current-chain behavior unless --recursive names a boundary. */
+/** Bare `oas install` (no source): current-chain restore or team-boundary
+ * reconciliation. JSON-mode boundary: ANY throw before emitReconcileResult
+ * (malformed lock/config, discovery failures) must still yield the single
+ * envelope — never empty stdout with a stack trace. */
 function reconcile(dir) {
+  try { reconcileInner(dir); }
+  catch (e) {
+    if (JSON_MODE) {
+      console.log(JSON.stringify({ schemaVersion: 1, ok: false, error: { code: e.code || "E_RECONCILE_FAILED", message: String(e.message || e) } }));
+      process.exit(1);
+    }
+    die(e.message || e);
+  }
+}
+
+function reconcileInner(dir) {
   const cfgFile = join(dir, "oas-config.yaml");
   const declaresTeamHere = existsSync(cfgFile) && !!parseYamlNested(readFileSync(cfgFile, "utf8")).team;
   const recursive = args.includes("--recursive");
@@ -723,7 +738,7 @@ function requirementsGate(scopes) {
       continue;
     }
     try {
-      const r = runRequirementInstall(plan);
+      const r = runRequirementInstall(plan, JSON_MODE ? { stdio: ["ignore", 2, 2] } : {});
       if (r.onPath) { note(`    installed — ${req.command} verified on PATH`); out.push(entryOf(req, "installed", { onPath: true })); }
       else { note(`    FAILED: install ran but ${req.command} is still not on PATH — check your shell PATH/prefix`); out.push(entryOf(req, "failed", { onPath: false, reason: "install ran but the command is not on PATH" })); }
     } catch (e) {

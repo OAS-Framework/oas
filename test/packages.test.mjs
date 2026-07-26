@@ -701,6 +701,54 @@ test("a consented requirement install that fails makes oas install exit nonzero 
   assert.match(r3.stdout, /skipped — non-interactive/);
 });
 
+test("JSON envelope integrity: noisy installers cannot contaminate stdout, and pre-report throws still emit the envelope", () => {
+  const base = temp();
+  const bin = join(base, "bin"); mkdirSync(bin, { recursive: true });
+  // NOISY manager: prints to stdout, then installs the tool (success case)
+  write(join(bin, "npm"), `#!/bin/sh\necho "PACKAGE MANAGER PROGRESS"\nprintf '#!/bin/sh\\nexit 0\\n' > "${join(bin, "noisy-cli")}"\nchmod +x "${join(bin, "noisy-cli")}"\n`);
+  chmodSync(join(bin, "npm"), 0o755);
+  const env = { ...process.env, PATH: `${bin}:${process.env.PATH}` };
+  const ws = join(base, "ws");
+  write(join(ws, ".agents", "capabilities", "owned", "needy", "oas.json"), JSON.stringify({
+    capability: "needy.cap", version: "1.0.0", description: "x",
+    requires: [{ command: "noisy-cli", why: "x", install: { methods: [{ platform: process.platform, manager: "npm-global", package: "noisy-cli" }] } }],
+  }));
+  write(join(ws, "oas-config.yaml"), "name: ws\nteam:\n  name: t\ncapabilities:\n  additive:\n    needy.cap:\n      from: owned\n      global: true\n");
+  const ok = cli(["install", "--json", "--accept-requirement", "noisy-cli", "--dir", ws], { cwd: ws, env });
+  assert.equal(ok.status, 0, ok.stdout + ok.stderr);
+  const env1 = JSON.parse(ok.stdout); // throws if the manager's stdout reached ours
+  assert.equal(env1.result.requirements[0].outcome, "installed");
+  // NOISY FAILING manager
+  write(join(bin, "npm"), "#!/bin/sh\necho NOISE-BEFORE-FAILURE\nexit 3\n"); chmodSync(join(bin, "npm"), 0o755);
+  const ws2 = join(base, "ws2");
+  write(join(ws2, ".agents", "capabilities", "owned", "needy", "oas.json"), JSON.stringify({
+    capability: "needy.cap", version: "1.0.0", description: "x",
+    requires: [{ command: "never-cli", why: "x", install: { methods: [{ platform: process.platform, manager: "npm-global", package: "never-cli" }] } }],
+  }));
+  write(join(ws2, "oas-config.yaml"), "name: ws\nteam:\n  name: t\ncapabilities:\n  additive:\n    needy.cap:\n      from: owned\n      global: true\n");
+  const bad = cli(["install", "--json", "--accept-requirement", "never-cli", "--dir", ws2], { cwd: ws2, env });
+  assert.equal(bad.status, 1);
+  const env2 = JSON.parse(bad.stdout); // single parseable envelope despite manager noise
+  assert.equal(env2.error.code, "E_RECONCILE_FAILED");
+  // pre-report throw: malformed oas-lock.json still yields ONE envelope, not a stack trace
+  const ws3 = join(base, "ws3");
+  write(join(ws3, "oas-config.yaml"), "name: ws\nteam:\n  name: t\n");
+  write(join(ws3, "oas-lock.json"), "{not json");
+  const broken = cli(["install", "--json", "--no-requirements", "--dir", ws3], { cwd: ws3 });
+  assert.equal(broken.status, 1);
+  const env3 = JSON.parse(broken.stdout);
+  assert.equal(env3.ok, false);
+  assert.ok(env3.error.code, "stable code on pre-report failures");
+  // non-team chain path with a malformed lock too
+  const ws4 = join(base, "ws4");
+  write(join(ws4, "oas-config.yaml"), "name: ws\n");
+  write(join(ws4, "oas-lock.json"), "[]");
+  const broken2 = cli(["install", "--json", "--dir", ws4], { cwd: ws4 });
+  if (broken2.status !== 0) {
+    assert.equal(JSON.parse(broken2.stdout).ok, false, "chain path keeps the envelope on malformed locks");
+  }
+});
+
 // ---------- doctor ----------
 
 test("doctor reports profile provenance, available-but-unapplied profiles, and missing host commands", () => {
