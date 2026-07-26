@@ -1,6 +1,8 @@
 # Knowledge Log
 
 ## 2026-07-26
+* **Creation**: promoted [Split tab-strip alignment moves real tab elements into per-pane groups](/lessons/split-tab-strip-real-tab-groups.md) from the oas-desktop-engineer-split-ui notes.
+* **Creation**: promoted [Mouse affordances dispatch registered actions through a context-gated runAction](/lessons/run-action-context-gated-buttons.md) from the oas-desktop-engineer-split-ui notes.
 * **Creation**: promoted [Maintainer handback loops race the maintainer's own stewardship commits](/lessons/maintainer-handback-stewardship-race.md) from the oas-desktop-engineer-spawn-modal-fix notes.
 * **Update**: linked [Crossed mail coordination needs repository verification and single replies](/lessons/crossed-mail-coordination.md) to the maintainer handback race lesson: named base SHAs in stewardship-loop handbacks are minimums once `origin/main` advances, and duplicate stale verdicts should get only one git-evidence reply.
 * **Creation**: promoted [Quiet automated opens must contain the whole flow's rejections](/lessons/quiet-open-whole-flow-rejection-containment.md) from the oas-desktop-engineer-spawn-modal-fix notes.
