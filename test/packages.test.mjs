@@ -1845,3 +1845,30 @@ test("typed codes preserved: retired manifest → retired-capability; malformed 
   assert.equal(env.error.code, "invalid-lock", "malformed JSON is invalid-lock, not legacy-lock");
   rmSync(base, { recursive: true, force: true });
 });
+
+// ---------- corrective item 5: same-bytes drift vs existing lock (coordinator mail 169d7944) ----------
+
+test("re-acquisition cannot re-legitimize same-bytes drift against an existing lock (item 5)", () => {
+  const base = temp();
+  const s = scope(base);
+  const src = pkgSource(join(base, "src"), { package: "dr.p" }, { "cap": { capability: "dr.cap", commands: { r: { exec: "r.mjs" } } } });
+  write(join(src, "cap", "r.mjs"), "// v1\n");
+  acquirePackage(s, src);
+  approveCapability(s, "dr.cap");
+  const lockBefore = readFileSync(join(s, OAS_LOCK_FILE), "utf8");
+  // drift SOURCE and INSTALLED trees to the SAME bytes post-acquisition
+  const dest = join(installedPackagesDir(s), "dr.p");
+  write(join(src, "cap", "r.mjs"), "// drifted identically\n");
+  write(join(dest, "cap", "r.mjs"), "// drifted identically\n");
+  // re-acquire: keep-path integrities match each other but NOT the lock → integrity-drift
+  assert.throws(() => acquirePackage(s, src), (e) => e.code === "integrity-drift" && /oas update/.test(e.message));
+  assert.equal(readFileSync(join(s, OAS_LOCK_FILE), "utf8"), lockBefore, "lock unchanged — drift not re-legitimized");
+  // no trust survival through the drift: the query fails closed on the drifted artifact
+  const t = capabilityTrust(s, "dr.cap");
+  assert.equal(t.trusted, false, "approval does not survive the drift");
+  // explicit update is the sanctioned advancement path
+  const r = updatePackage(s, "dr.p", { spec: src });
+  assert.equal(r.changed, true);
+  assert.deepEqual(readPackageLocks(s).packages["dr.p"].trustedCapabilities, [], "approvals reset by the explicit update");
+  rmSync(base, { recursive: true, force: true });
+});
