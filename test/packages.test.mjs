@@ -130,15 +130,15 @@ test("writePackageLock/readPackageLocks: v2 round-trip, closest scope wins, refu
   const base = temp();
   const outer = scope(base, "outer");
   const inner = scope(join(base, "outer"), "inner");
-  writePackageLock(outer, "a.pkg", { source: "path:/x", version: "1.0.0", commit: "local", integrity: "sha256-0", capabilities: ["a.cap"] });
-  writePackageLock(inner, "a.pkg", { source: "path:/y", version: "2.0.0", commit: "local", integrity: "sha256-1", capabilities: ["a.cap"] });
+  writePackageLock(outer, "a.pkg", { source: "path:/x", version: "1.0.0", commit: "local", integrity: `sha256-${"0".repeat(64)}`, capabilities: ["a.cap"] });
+  writePackageLock(inner, "a.pkg", { source: "path:/y", version: "2.0.0", commit: "local", integrity: `sha256-${"1".repeat(64)}`, capabilities: ["a.cap"] });
   const locks = readPackageLocks(inner);
   assert.equal(locks.packages["a.pkg"].version, "2.0.0"); // closer wins
   assert.equal(readPackageLocks(outer).packages["a.pkg"].version, "1.0.0");
   // v1 file refuses package writes with legacy-lock
   const v1 = scope(base, "v1scope");
   writeCapabilityLock(v1, "old.cap", { source: "marketplace:old.cap@1.0.0", version: "1.0.0", integrity: "sha256-x" });
-  assert.throws(() => writePackageLock(v1, "a.pkg", { source: "path:/z", version: "1", commit: "local", integrity: "sha256-2", capabilities: [] }), (e) => e.code === "legacy-lock");
+  assert.throws(() => writePackageLock(v1, "a.pkg", { source: "path:/z", version: "1", commit: "local", integrity: `sha256-${"2".repeat(64)}`, capabilities: [] }), (e) => e.code === "legacy-lock");
   // legacy locks surface separately
   assert.equal(readPackageLocks(v1).legacy.length, 1);
   // deleting an entry
@@ -150,9 +150,9 @@ test("writePackageLock/readPackageLocks: v2 round-trip, closest scope wins, refu
 test("writeCapabilityLock never downgrades a v2 lock and refuses NEW legacy entries there", () => {
   const base = temp();
   const s = scope(base);
-  writePackageLock(s, "a.pkg", { source: "path:/x", version: "1", commit: "local", integrity: "sha256-0", capabilities: [] });
+  writePackageLock(s, "a.pkg", { source: "path:/x", version: "1", commit: "local", integrity: `sha256-${"0".repeat(64)}`, capabilities: [] });
   // Only `oas migrate` creates residue: adding a fresh legacy entry to a v2 lock is refused.
-  assert.throws(() => writeCapabilityLock(s, "legacy.cap", { source: "path:/y", version: "1", integrity: "sha256-1" }), (e) => e.code === "legacy-lock");
+  assert.throws(() => writeCapabilityLock(s, "legacy.cap", { source: "path:/y", version: "1", integrity: `sha256-${"1".repeat(64)}` }), (e) => e.code === "legacy-lock");
   const parsed = JSON.parse(readFileSync(join(s, OAS_LOCK_FILE), "utf8"));
   assert.equal(parsed.lockfileVersion, 2);
   assert.ok(parsed.packages["a.pkg"]);
@@ -441,7 +441,7 @@ test("removePackage: refuses while a dependent package or a config reference exi
   // drop the config reference → removable
   write(join(s, "oas-config.yaml"), "name: t\n");
   removePackage(s, "rm.dep");
-  assert.deepEqual(readPackageLocks(s).packages, {});
+  assert.deepEqual({ ...readPackageLocks(s).packages }, {});
   rmSync(base, { recursive: true, force: true });
 });
 
@@ -1043,13 +1043,18 @@ test("invalid-lock: update/remove planning fail closed; doctor and list diagnose
   // update and remove planning fail closed with invalid-lock
   assert.throws(() => updatePackage(s, "hd.p"), (e) => e.code === "invalid-lock");
   assert.throws(() => removePackage(s, "hd.p"), (e) => e.code === "invalid-lock");
-  // list --json diagnoses (lockError), does not crash
-  const env = JSON.parse(cli(s, "list", "--dir", s, "--json").stdout);
-  assert.equal(env.ok, true);
-  assert.match(env.result.packages.find((p) => p.package === "hd.p").lockError, /trustedCapabilities/);
-  // doctor human output carries the actionable diagnosis
-  const r = cli(s, "doctor", s);
+  // list FAILS CLOSED (maintainer finding 3): raises typed invalid-lock via the envelope
+  let r = cli(s, "list", "--dir", s, "--json");
+  let env = JSON.parse(r.stdout);
+  assert.equal(env.ok, false);
+  assert.equal(env.error.code, "invalid-lock");
+  assert.match(env.error.message, /trustedCapabilities/);
+  assert.notEqual(r.status, 0);
+  // doctor CATCHES the typed error and diagnoses actionably without crashing
+  r = cli(s, "doctor", s);
+  assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /\[invalid-lock\]/);
+  assert.match(r.stdout, /never auto-repaired/);
   rmSync(base, { recursive: true, force: true });
 });
 
@@ -1218,5 +1223,103 @@ test("restore repairs a deleted node_modules closure; doctor probes closure stal
   assert.ok(existsSync(join(dest, "node_modules", "dep")), "closure re-materialized by restore");
   r = cli(s, "doctor", s);
   assert.ok(!/materialized runtime closure/.test(r.stdout), "doctor clean after repair");
+  rmSync(base, { recursive: true, force: true });
+});
+
+// ---------- maintainer RETURN corrections (fda72763) + reviewer-4d1b826 blocker ----------
+
+test("__proto__ raw-JSON lock keys cannot forge trusted entries (reviewer-4d1b826 blocker)", () => {
+  const base = temp();
+  const s = scope(base);
+  const src = pkgSource(join(base, "src"), { package: "p" }, { "cap": { capability: "p.cap", commands: { r: { exec: "r.mjs" } } } });
+  write(join(src, "cap", "r.mjs"), "//\n");
+  acquirePackage(s, src);
+  const genuine = readPackageLocks(s).packages["p"];
+  // craft a lock whose ONLY package key is __proto__ nesting a forged trusted entry
+  const forged = { lockfileVersion: 2, packages: JSON.parse(`{"__proto__": {"p": ${JSON.stringify({ source: genuine.source, version: genuine.version, commit: genuine.commit, integrity: genuine.integrity, ...(genuine.depsIntegrity ? { depsIntegrity: genuine.depsIntegrity } : {}), capabilities: ["p.cap"], dependencies: [], trustedCapabilities: ["p.cap"] })}}}`) };
+  writeFileSync(join(s, OAS_LOCK_FILE), JSON.stringify(forged, null, 2));
+  // fail-closed read: the invalid key raises; no code path can see a forged "p" entry
+  assert.throws(() => readPackageLocks(s), (e) => e.code === "invalid-lock" && /invalid package key/.test(e.message));
+  // trust can only fail closed: either the typed raise (via discovery) or untrusted — never trusted:true
+  let trusted;
+  try { trusted = capabilityTrust(s, "p.cap").trusted; } catch (e) { assert.equal(e.code, "invalid-lock"); trusted = false; }
+  assert.equal(trusted, false, "forged prototype entry must never read as trusted");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("validateLockEntry: falsey non-array optional fields are invalid (null/false/0/'')", () => {
+  const sha = "a".repeat(40);
+  const integ = `sha256-${"0".repeat(64)}`;
+  const mk = (over) => ({ source: "git:https://h/x.git@v1", version: "1", commit: sha, integrity: integ, capabilities: ["x.c"], ...over });
+  for (const v of [null, false, 0, ""]) {
+    assert.throws(() => validateLockEntry("p", mk({ dependencies: v }), {}, {}), (e) => e.code === "invalid-lock", `dependencies=${JSON.stringify(v)}`);
+    assert.throws(() => validateLockEntry("p", mk({ trustedCapabilities: v }), {}, {}), (e) => e.code === "invalid-lock", `trustedCapabilities=${JSON.stringify(v)}`);
+  }
+  // absent stays valid; malformed depsIntegrity is invalid
+  assert.equal(validateLockEntry("p", mk({}), {}, {}), true);
+  assert.throws(() => validateLockEntry("p", mk({ depsIntegrity: "sha256-xyz" }), {}, {}), (e) => /depsIntegrity/.test(e.message));
+});
+
+test("dispatch passes OAS_CLI_BIN (absolute, canonical); malicious earlier-PATH oas cannot intercept (finding 1)", () => {
+  const base = temp();
+  const repo = join(base, "repo");
+  write(join(repo, "README.md"), "r\n");
+  const capDir = join(repo, ".agents", "capabilities", "owned", "clibin");
+  write(join(capDir, "oas.json"), JSON.stringify({ capability: "cb.svc", version: "1.0.0", description: "d", command: "cbsvc", commands: { probe: "bin/probe.mjs" } }));
+  // consumer-style probe: execFile the OAS_CLI_BIN path (never PATH), re-emit its envelope
+  write(join(capDir, "bin", "probe.mjs"), `
+import { execFileSync } from "node:child_process";
+const bin = process.env.OAS_CLI_BIN;
+if (!bin || !bin.startsWith("/")) { console.log(JSON.stringify({ ok: false, why: "no absolute OAS_CLI_BIN" })); process.exit(1); }
+const out = execFileSync(process.execPath, [bin, "version", "--json"], { encoding: "utf8" });
+console.log(JSON.stringify({ ok: true, probe: JSON.parse(out) }));
+`);
+  write(join(repo, "oas-config.yaml"), "name: t\ncapabilities:\n  additive:\n    cb.svc:\n      global: true\n");
+  gitify(repo);
+  // malicious PATH: an earlier `oas` that would poison any PATH-based resolution
+  const evil = join(base, "evilbin");
+  write(join(evil, "oas"), "#!/bin/sh\necho INTERCEPTED; exit 99\n");
+  execFileSync("chmod", ["+x", join(evil, "oas")]);
+  const r = spawnSync(process.execPath, [CLI, "cbsvc", "probe"], { cwd: repo, encoding: "utf8", env: { ...process.env, PATH: `${evil}:${process.env.PATH}`, PI_AGENT_HOME: "", OAS_HOME: "" } });
+  const out = JSON.parse(r.stdout.trim().split("\n").pop());
+  assert.equal(out.ok, true, r.stdout + r.stderr);
+  assert.equal(out.probe.name, "@oas-framework/oas", "consumer reached the REAL CLI via OAS_CLI_BIN");
+  assert.ok(!r.stdout.includes("INTERCEPTED"), "PATH-shadowed oas never executed");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("materialized symlink containment: escaping/broken node_modules links fail the transaction with rollback (finding 4)", () => {
+  const base = temp();
+  const s = scope(base);
+  // package whose npm ci produces a node_modules symlink escaping the root:
+  // file: dep pointing OUTSIDE the package root does exactly that.
+  write(join(base, "outside-dep", "package.json"), JSON.stringify({ name: "outside-dep", version: "1.0.0" }));
+  const src = pkgSource(join(base, "src"), { package: "sl.p" }, { "cap": { capability: "sl.cap" } });
+  write(join(src, "package.json"), JSON.stringify({ name: "sl-p", version: "1.0.0", dependencies: { "outside-dep": "file:../outside-dep" } }));
+  write(join(src, "package-lock.json"), JSON.stringify({
+    name: "sl-p", version: "1.0.0", lockfileVersion: 3, requires: true,
+    packages: { "": { name: "sl-p", version: "1.0.0", dependencies: { "outside-dep": "file:../outside-dep" } }, "node_modules/outside-dep": { resolved: "../outside-dep", link: true }, "../outside-dep": { version: "1.0.0" } },
+  }));
+  assert.throws(() => acquirePackage(s, src), (e) => e.code === "path-escape" && /symlink/.test(e.message));
+  assert.ok(!existsSync(join(installedPackagesDir(s), "sl.p")), "rollback: nothing installed");
+  const lockFile = join(s, OAS_LOCK_FILE);
+  assert.ok(!existsSync(lockFile) || !JSON.parse(readFileSync(lockFile, "utf8")).packages?.["sl.p"], "rollback: nothing locked");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("writePackageLock validates the FULL prospective map (finding 3)", () => {
+  const base = temp();
+  const s = scope(base);
+  const sha = "a".repeat(40);
+  const integ = `sha256-${"3".repeat(64)}`;
+  const good = { source: `git:https://h/x.git@v1`, version: "1", commit: sha, integrity: integ, capabilities: ["g.c"], dependencies: [], trustedCapabilities: [] };
+  writePackageLock(s, "good.p", good);
+  // writing an entry that references a missing dependency is rejected...
+  assert.throws(() => writePackageLock(s, "bad.p", { ...good, capabilities: ["b.c"], dependencies: ["ghost.p"] }), (e) => e.code === "invalid-lock");
+  // ...and the file still contains only the valid entry
+  const parsed = JSON.parse(readFileSync(join(s, OAS_LOCK_FILE), "utf8"));
+  assert.deepEqual(Object.keys(parsed.packages), ["good.p"]);
+  // an invalid package identity key is rejected up front
+  assert.throws(() => writePackageLock(s, "__proto__", good), (e) => e.code === "invalid-lock");
   rmSync(base, { recursive: true, force: true });
 });

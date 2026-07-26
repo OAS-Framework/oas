@@ -79,10 +79,14 @@ this contract remains authoritative).
    context), the same contract lifecycle hooks already have. Capabilities
    read their settings (e.g. oas.okf's `harvest-model`) from `OAS_SETTINGS`;
    there is NO public resolved-config read command.
-4. **Consumer rules**: a package command invokes the installed/selected
-   `oas` CLI from PATH, parses the one schema-v1 envelope, emits its own
-   envelope, and never imports `lib/core.mjs` or calls `oas root` for
-   kernel-file resolution.
+4. **Consumer rules**: a package command executes the CLI at the exact
+   absolute path the dispatcher provides in the **`OAS_CLI_BIN`** environment
+   variable (part of the dispatch env contract, beside `OAS_SETTINGS`), via
+   `execFile` on that path — **never** by resolving `oas` from `PATH` and
+   never through a shell: PATH is not a trusted runtime boundary, and package
+   commands run in worktrees where it can be shadowed. The consumer parses
+   the one schema-v1 envelope, emits its own envelope, and never imports
+   `lib/core.mjs` or calls `oas root` for kernel-file resolution.
 
 Error codes are part of the contract: `E_USAGE`, `E_BAD_ARGS`,
 `E_UNKNOWN_COMMAND`, `E_SPAWN_FAILED`, `E_PARENT_NOT_FOUND`,
@@ -207,7 +211,20 @@ complete:
     self-dependency and no cycle in the locked dependency graph;
   - arrays retain schema uniqueness (no duplicates);
   - malformed mixed-v2 legacy residue is DIAGNOSED by doctor (human and
-    JSON), never silently repaired and never a trust source.
+    JSON), never silently repaired and never a trust source;
+  - optional `depsIntegrity`, when present, must be a well-formed sha256
+    digest (semantic check, not just schema).
+
+Fail-closed enforcement points: `readPackageLocks` and
+`listInstalledPackages` RAISE `invalid-lock` — consumers never see invalid
+locks as absent or usable data; `writePackageLock` validates the complete
+prospective packages map before writing; restore, trust queries, approval,
+and update/remove planning validate before acting. Doctor (human and
+`--json`) catches the typed error and renders the actionable diagnosis — it
+is the only consumer that continues past an invalid lock, and it never uses
+the invalid data. Lock package-map keys are validated against the package
+identity charset and read into null-prototype maps, so raw-JSON
+`__proto__`/`constructor` keys cannot forge entries.
 
 `invalid-lock` joins the error taxonomy of the main contract (§4).
 

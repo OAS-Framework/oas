@@ -41,7 +41,9 @@ Installed roots live in `<scope>/.agents/packages/installed/` (gitignored).
 oas install                    # bare: EXACT restore of this chain's locks (never advances refs)
 oas list [--json]              # packages, exported capabilities, scopes, trust state
 oas update <package>           # transactional: temp fetch, closure validation, diff,
-                               # artifact+lock replaced together, ALL approvals invalidated
+                               # artifact+lock replaced together; approvals of every
+                               # CHANGED-integrity package are invalidated (unchanged
+                               # packages in the closure keep theirs)
 oas remove <package>           # refuses while config or dependent packages reference it
 ```
 
@@ -64,8 +66,11 @@ but no approval. Official-catalog identity is NOT executable trust.
 A package (root or per-capability dir) may check in `package.json` +
 `package-lock.json`; OAS materializes it with
 `npm ci --omit=dev --omit=peer --ignore-scripts` — production tree only, no
-lifecycle scripts, `node_modules` never hashed (reproducible from the locked
-lockfile). Host peer APIs are reached only through the supported runtime
+lifecycle scripts. The source hash excludes `node_modules`, but the
+materialized closure is hashed SEPARATELY as the lock's `depsIntegrity` and
+verified by trust and restore — tampering materialized deps invalidates
+approvals like source drift. Closures must be platform-invariant in v1.
+Host peer APIs are reached only through the supported runtime
 boundary, never auto-installed.
 
 ## Migration from v1 locks
