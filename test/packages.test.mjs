@@ -2014,3 +2014,55 @@ test("platform scan is a transaction-wide preflight incl. kept/no-op paths (revi
   assert.throws(() => acquirePackage(s2, clean, { replace: true }), /platform-variant/);
   rmSync(base, { recursive: true, force: true });
 });
+
+// ---------- reviewer-5f1188d blockers: strict root/map shapes, additionalProperties ----------
+
+test("lock root and packages-map shapes are strictly validated everywhere (reviewer-5f1188d)", () => {
+  const base = temp();
+  const shapes = [
+    ["array-root", "[]"],
+    ["null-root", "null"],
+    ["v2-null-packages", JSON.stringify({ lockfileVersion: 2, packages: null })],
+    ["v2-array-packages", JSON.stringify({ lockfileVersion: 2, packages: [] })],
+    ["v2-string-packages", JSON.stringify({ lockfileVersion: 2, packages: "" })],
+    ["v2-missing-packages", JSON.stringify({ lockfileVersion: 2 })],
+    ["string-version", JSON.stringify({ lockfileVersion: "2", packages: {} })],
+    ["unsupported-version", JSON.stringify({ lockfileVersion: 3, packages: {} })],
+  ];
+  for (const [label, body] of shapes) {
+    const s = scope(base, `s-${label}`);
+    writeFileSync(join(s, OAS_LOCK_FILE), body);
+    // read raises typed
+    assert.throws(() => readPackageLocks(s), (e) => e.code === "invalid-lock", `read ${label}`);
+    // restore raises typed
+    assert.throws(() => restorePackages(s), (e) => e.code === "invalid-lock", `restore ${label}`);
+    // list (with a store dir present — the doctor-crash repro) raises typed via the envelope
+    mkdirSync(installedPackagesDir(s), { recursive: true });
+    const r = cli(s, "list", "--dir", s, "--json");
+    const env = JSON.parse(r.stdout);
+    assert.equal(env.ok, false, `list ${label}`);
+    assert.equal(env.error.code, "invalid-lock", `list ${label}`);
+    // doctor human catches the typed error and diagnoses (no crash)
+    const rh = cli(s, "doctor", s);
+    assert.equal(rh.status, 0, `doctor ${label}: ${rh.stderr.slice(0, 200)}`);
+    assert.match(rh.stdout, /invalid-lock/, `doctor ${label}`);
+  }
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("lock entries enforce additionalProperties: false (reviewer-5f1188d)", () => {
+  const base = temp();
+  const s = scope(base);
+  const sha = "a".repeat(40);
+  const integ = `sha256-${"0".repeat(64)}`;
+  writeFileSync(join(s, OAS_LOCK_FILE), JSON.stringify({
+    lockfileVersion: 2,
+    packages: { "x.p": { source: "git:https://h/x.git@v1", version: "1", commit: sha, integrity: integ, capabilities: [], wat: true } },
+  }));
+  assert.throws(() => readPackageLocks(s), (e) => e.code === "invalid-lock" && /unknown keys: wat/.test(e.message));
+  assert.throws(() => restorePackages(s), (e) => e.code === "invalid-lock");
+  const env = JSON.parse(cli(s, "list", "--dir", s, "--json").stdout);
+  assert.equal(env.ok, false);
+  assert.equal(env.error.code, "invalid-lock");
+  rmSync(base, { recursive: true, force: true });
+});
