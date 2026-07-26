@@ -1,6 +1,9 @@
 # Knowledge Log
 
 ## 2026-07-26
+* **Creation**: promoted [Consumed-once pending intents must gate on data currency](/lessons/pending-intent-data-currency.md) from the oas-desktop-engineer-quick-open notes.
+* **Update**: [Quick Open hands off to Spawn via a consumed-once preselect](/decisions/quick-open-spawn-preselect-handoff.md) now requires current intent and roster generations before consuming the preselect, and reveals filtered targets before focusing.
+* **Update**: linked [Split request generations by independently superseding request kind](/lessons/split-generation-counters-per-request-kind.md) to the pending-intent data-currency lesson.
 * **Creation**: promoted [Terminal focus follows user intent through activateTab's focusContent option](/decisions/terminal-focus-intent.md) from the oas-desktop-engineer-quick-open notes.
 * **Creation**: promoted [Quick Open hands off to Spawn via a consumed-once preselect](/decisions/quick-open-spawn-preselect-handoff.md) from the oas-desktop-engineer-quick-open notes.
 * **Creation**: promoted [Palette subsequence scorer's no-match sentinel must be out-of-band](/lessons/palette-fuzzy-score-null-sentinel.md) from the oas-desktop-engineer-quick-open notes.
