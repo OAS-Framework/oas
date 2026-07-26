@@ -144,17 +144,25 @@ from `test/packages.test.mjs`. (The oas.okf tree changes themselves —
   dependency invalidates capability approvals exactly like source drift.
   `npm ci` fails closed on any lockfile mismatch. Doctor reports source
   integrity + the materialized-closure state.
-- **Reproducibility**: `node_modules` is a derived, platform-dependent
-  artifact — never part of the SOURCE hash, never committed, always
-  reproduced from the locked `package-lock.json` on the host platform, then
-  verified against the locked `depsIntegrity`. Platform-dependent closures
-  (native builds) will produce platform-specific digests; v1 packages should
-  prefer pure-JS closures (the official set qualifies).
+- **Reproducibility (v1 MUST: platform-invariant closures)**: `node_modules`
+  is a derived artifact — never part of the SOURCE hash, never committed,
+  always reproduced from the locked `package-lock.json` and verified against
+  the locked `depsIntegrity`. Because one `depsIntegrity` lives in a shared
+  lock, **v1 packages MUST have platform-invariant materialized closures**:
+  no native builds, no platform-specific optional dependencies, no
+  install-time variance of any kind. A closure that cannot materialize
+  byte-identically across supported platforms is UNSUPPORTED in v1 — the
+  package must vendor a pure-JS closure or drop the dependency; official
+  dependency-bearing packages gate this across their published platforms in
+  CI. (A future keyed per-platform closure map may relax this.)
 - **Containment**: capability code/hook paths must resolve inside the locked
   package root after symlink resolution; materialized `node_modules` trees
   under that root (package-root or per-capability) are inside the boundary by
-  construction. Paths escaping the root — including through `node_modules`
-  symlinks — are `path-escape`.
+  construction — and ENFORCED: after `npm ci`, before any digest or swap,
+  every symlink under every materialized `node_modules` is realpath-checked
+  to resolve inside the package root; a broken or escaping link fails the
+  transaction (`path-escape`) with full rollback. Node import resolution
+  follows symlinks, so this check is global, not best-effort.
 - **Rollback**: materialization happens IN STAGING before any destination
   mutation; a materialization failure fails the whole acquire/update
   transaction with the store and lock unchanged, and a restore whose
