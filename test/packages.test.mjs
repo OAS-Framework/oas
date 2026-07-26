@@ -746,14 +746,14 @@ test("JSON envelope integrity: noisy installers cannot contaminate stdout, and p
   const env3 = JSON.parse(broken.stdout);
   assert.equal(env3.ok, false);
   assert.ok(env3.error.code, "stable code on pre-report failures");
-  // non-team chain path with a malformed lock too
+  // non-team chain path with a malformed lock too — actually invalid JSON,
+  // asserted unconditionally: nonzero exit, one parseable failure envelope
   const ws4 = join(base, "ws4");
   write(join(ws4, "oas-config.yaml"), "name: ws\n");
-  write(join(ws4, "oas-lock.json"), "[]");
+  write(join(ws4, "oas-lock.json"), "{broken json");
   const broken2 = cli(["install", "--json", "--dir", ws4], { cwd: ws4 });
-  if (broken2.status !== 0) {
-    assert.equal(JSON.parse(broken2.stdout).ok, false, "chain path keeps the envelope on malformed locks");
-  }
+  assert.equal(broken2.status, 1, broken2.stdout);
+  assert.equal(JSON.parse(broken2.stdout).ok, false, "chain path keeps the envelope on malformed locks");
 });
 
 // ---------- doctor ----------
