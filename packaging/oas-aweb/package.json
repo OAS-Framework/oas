@@ -6,7 +6,8 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "materialize": "npm ci --ignore-scripts --prefix capabilities/oas-aweb",
+    "materialize": "npm ci --omit=dev --omit=peer --ignore-scripts --prefix capabilities/oas-aweb",
+    "audit:runtime": "npm audit --omit=dev --omit=peer --ignore-scripts --prefix capabilities/oas-aweb",
     "validate": "node scripts/validate-manifests.mjs",
     "test": "npm run validate && node --test"
   },

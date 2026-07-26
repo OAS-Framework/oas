@@ -56,6 +56,23 @@ test("checked lock pins the aweb skill dependency", () => {
   assert.ok(lock.packages["node_modules/@awebai/pi"].integrity);
 });
 
+test("materialized closure keeps aweb pi 0.2.x and omits its coding-agent peer", () => {
+  const pi = JSON.parse(readFileSync(join(CAPABILITY, "node_modules", "@awebai", "pi", "package.json"), "utf8"));
+  assert.match(pi.version, /^0\.2\./);
+  assert.equal(existsSync(join(CAPABILITY, "node_modules", "@earendil-works", "pi-coding-agent")), false);
+});
+
+test("declared commands and hooks do not import the omitted peer", () => {
+  const manifest = JSON.parse(readFileSync(join(CAPABILITY, "oas.json"), "utf8"));
+  const commands = [...Object.values(manifest.commands || {}), ...Object.values(manifest.hooks || {})];
+  const entrypoints = new Set(commands.map((command) => command.trim().split(/\s+/)[0]));
+  assert.ok(entrypoints.size > 0);
+  for (const entrypoint of entrypoints) {
+    const source = readFileSync(join(CAPABILITY, entrypoint), "utf8");
+    assert.doesNotMatch(source, /@earendil-works\/pi-coding-agent/);
+  }
+});
+
 test("spawn degrades cleanly when aw is absent", async (t) => {
   const home = tempDir(t);
   const result = await run(["spawn"], {
