@@ -155,11 +155,15 @@ from `test/packages.test.mjs`. (The oas.okf tree changes themselves —
   byte-identically across supported platforms is UNSUPPORTED in v1 — the
   package must vendor a pure-JS closure or drop the dependency; official
   dependency-bearing packages gate this across their published platforms in
-  CI. The engine ENFORCES this at materialization: a lockfile resolving
-  packages with os/cpu/libc constraints or install scripts (native-build
-  markers) is rejected before anything materializes, failing the
-  acquire/update transaction. (A future keyed per-platform closure map may
-  relax this.)
+  CI. The engine ENFORCES this at materialization as a transaction-wide
+  preflight: every materialization root's lockfile (package root and
+  per-capability, kept and fresh) is scanned BEFORE any `npm ci`; a
+  PRODUCTION-reachable package with os/cpu/libc constraints is rejected
+  (dev/peer entries the omit set never installs are ignored, and
+  `hasInstallScript` alone is not variance — scripts are inert under the
+  mandatory `--ignore-scripts`). npm lockfileVersion 1 (no `packages` map)
+  fails closed — regenerate with modern npm. (A future keyed per-platform
+  closure map may relax this.)
 - **Containment**: capability code/hook paths must resolve inside the locked
   package root after symlink resolution; materialized `node_modules` trees
   under that root (package-root or per-capability) are inside the boundary by
