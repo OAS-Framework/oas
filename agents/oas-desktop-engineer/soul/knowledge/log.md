@@ -1,6 +1,7 @@
 # Knowledge Log
 
 ## 2026-07-26
+* **Creation**: promoted [split panes as flex-cell reprojection of existing tab panes](/lessons/split-panes-flex-reprojection.md) from the oas-desktop-engineer-split-panels notes.
 * **Fix**: [final agent-relations kernel contract](/references/agent-relations-kernel-contract.md) resolves the flag clarifier, distinguishes absent explicit relation from attached auto-child topology, records equivalent non-instance attached child syntax, and includes `E_PARENT_NOT_FOUND`/`E_RELATIVE_AMBIGUOUS`.
 * **Update**: [desktop cluster grouping sibling-link seam](/decisions/desktop-cluster-grouping-sibling-seam.md) describes the shipped sidebar and panel projection in present tense without the removed Instances-roster surface.
 
