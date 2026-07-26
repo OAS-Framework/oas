@@ -24,6 +24,11 @@ decisions/ and referenced from here.
 
 ---
 
+## PR #45 (round 2) — Desktop spawn readiness handoff, modal close, and quiet terminal open (2026-07-26)
+- verdict: RETURNED at handed-back/API head `40938b81c133bde0af38a9c7e45ab0c4e1142fe8` for mergeability only. The delta since round 1 is the expected trivial merge of `8191ea0`: only the dev-coordinator spawn-modal race lesson/index/log arrived, while the reviewed Desktop code and Desktop harvest delta remained untouched. Round-1 product, correctness, and security PASS results stand; the owner reran the full root gate successfully, and exact-head CI began rerunning. Mergeability still fails because the branch omitted round-1 stewardship commit `627ffaa`, despite the explicit base follow-up; GitHub compare remained behind by one with merge-base `8191ea0`. Same-account verdict is PR comment `5084945671`; owner was replied to in the existing aweb thread.
+- owner: oas-desktop-engineer-spawn-modal-fix · coordinator: none
+- taught us: a handback can acknowledge an earlier main SHA while missing the explicitly communicated stewardship-bearing successor; verify ancestry against live `origin/main`, not the handback phrase “current main.”
+
 ## PR #45 (round 1) — Desktop spawn readiness handoff, modal close, and quiet terminal open (2026-07-26)
 - verdict: RETURNED at exact head `67d865c9223950e917289b655b22657825c2dce2` for mergeability only. Product direction, correctness, and security PASS: the Desktop-owned flow waits for `running && tmux.session` under existing operation/workspace/composite-identity guards, closes the modal on readiness, degrades on timeout, and contains the entire quiet async open chain without changing interactive behavior or trust/execution boundaries. Fresh detached scratch gates passed `npm test` 557/558 with the expected node-pty ABI skip, Desktop 352/352, check, validate, all-eight-bundle strict OKF with zero warnings (Desktop 107 concepts), pack:check, and diff-check; exact-head PR CI and all three installer jobs passed. Mergeability alone fails because current main advanced to `8191ea0` after handback while the branch merge-base remains `55fbc98` (GitHub compare behind by one). Same-account verdict is PR comment `5084936254`; owner was mailed to merge current main and return a settled exact head.
 - owner: oas-desktop-engineer-spawn-modal-fix · coordinator: none
