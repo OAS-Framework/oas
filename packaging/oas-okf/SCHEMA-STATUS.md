@@ -1,8 +1,7 @@
 # Schema status
 
-- **Prepare-only schema snapshot**: the vendored schema currently matches returned package-engine head `dfa2ae7`; re-vendor only after WS1 broadcasts the corrected freeze.
-- **Runtime boundary prepared**: harvest uses the absolute `OAS_CLI_BIN` dispatch contract with argv-safe `execFile`, structured spawn envelopes, dispatch settings, a capability-defined agent, and cleaned-up mode-0600 task files. No PATH search, private kernel import, or root lookup remains.
-- `TODO(corrected-runtime-addendum)`: verify exact wording/error expectations against WS1's corrected broadcast, re-vendor final schemas, and update this prepare-only record to final.
-- `TODO(engine-consumer-fixtures)`: run the released OAS 0.19.0 three-mode harvest fixture, Pi/Claude scaffold parity, and sub-floor rejection when WS1 fixtures are available.
+- **Corrected schemas verified**: all three vendored schemas are byte-identical to package-engine head `19fbc86`; CI validates package and capability manifests against them.
+- **Runtime boundary final**: harvest requires the dispatcher's canonical absolute `OAS_CLI_BIN`, invokes it with argv-safe `execFile`, parses schema-v1 envelopes, reads dispatch settings, uses a capability-defined agent, and cleans mode-0600 task files. It never searches PATH or imports/discovers kernel files.
+- `TODO(engine-consumer-fixtures)`: run the released OAS 0.19.0 three-mode harvest fixture, Pi/Claude scaffold parity, retired-flag/sub-floor rejection, and task-file cleanup when WS1 fixtures are published.
 
-No publication tag or catalog entry may be created while either TODO remains open.
+No publication tag or catalog entry may be created while this item remains open.

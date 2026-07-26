@@ -8,7 +8,7 @@ Every repository contains:
 
 - `oas-package.json`, enumerating package resources explicitly;
 - exactly one self-contained capability directory (normally `capabilities/<name>`; the frozen addendum supports `.` for a flat single-capability package);
-- byte-identical amended `schemas/oas-package.schema.json`, `schemas/oas-lock.schema.json`, and `schemas/capability-manifest.schema.json`;
+- `schemas/oas-package.schema.json`, `schemas/oas-lock.schema.json`, and `schemas/capability-manifest.schema.json` byte-identical to corrected package-engine head `19fbc86`;
 - `scripts/validate-manifests.mjs`, including package-path, config-profile, schema, cardinality, and symlink-containment checks;
 - standalone tests under `test/`, runnable with `npm test`;
 - `.github/workflows/ci.yml`, `README.md`, `SCHEMA-STATUS.md`, and the identical MIT `LICENSE`;
@@ -28,9 +28,9 @@ Each repository's `ci` workflow runs for pull requests and pushes to `main` on N
 5. runs package-specific unit/smoke tests; and
 6. exposes the released-0.19.0 consumer-fixture gate without pretending a placeholder is a passing probe.
 
-Package/capability directories carrying both `package.json` and `package-lock.json` are independent runtime closure roots. Materialize each with `npm ci --omit=dev --omit=peer --ignore-scripts` (`--no-audit --no-fund` may suppress engine noise); never run lifecycle scripts. Source integrity excludes generated `node_modules`; kernel lock v2 separately records `depsIntegrity` for the materialized closure and trust verifies both digests.
+Package/capability directories carrying both `package.json` and `package-lock.json` are independent runtime closure roots. Materialize each with `npm ci --omit=dev --omit=peer --ignore-scripts` (`--no-audit --no-fund` may suppress engine noise); never run lifecycle scripts. V1 closures must be platform-invariant: materialized lock entries with os/cpu/libc constraints or install-script markers are rejected before install. Every `node_modules` symlink is realpath-checked inside the package before digest/swap, with full rollback on failure. Source integrity excludes generated dependencies; lock v2 separately records deterministic `depsIntegrity` for the actual materialized closure and trust verifies both digests. Dependency-bearing official packages gate the same closure across every published platform in CI.
 
-`oas-aweb` owns its closure at `capabilities/oas-aweb`. CI resolves all three skills inside that closure, proves the unused pi-coding-agent peer is absent, rejects executable imports of omitted peers, and requires `npm audit --omit=dev --omit=peer --ignore-scripts` to report zero vulnerabilities.
+When an otherwise useful dependency cannot satisfy v1 platform invariance, do not weaken closure checks: vendor only the reviewed redistributable resources the capability needs. `oas-aweb` vendors three MIT Agent Skill trees from an exact `@awebai/pi` tag/commit, includes the upstream license and `VENDORED.md` provenance, and ships a deterministic local-checkout sync script that produces reviewable diffs. CI verifies frontmatter names, provenance/license, executable independence from npm packages, and the complete absence of runtime dependency manifests, npm locks, and `node_modules`. Runtime acquisition never fetches vendored resources.
 
 ## Per-repository consumer probe
 
@@ -42,9 +42,11 @@ The binding probe shape is `docs/design/package-runtime-api.md` §1 **Consumer f
 4. scaffold pi and Claude probes and compare exact OAS-managed skills/instructions;
 5. inspect `instance.json`, layer selection, provenance, settings, hooks, and trust;
 6. run `oas doctor`, then retire every probe; and
-7. assert zero lock-v2 `migrationResidue` before catalog/default cutover.
+7. enforce the two-part catalog/default cutover gate through doctor JSON: `legacyLockFiles.length === 0` (including empty v1 lock files) and no nonempty v2 `migrationResidue`.
 
-OKF additionally runs its capability-defined harvester in all three source modes: attached local-soul, workspace-mode soul-repository worktree, and attached repo-resident. It verifies parent relation, purpose-derived naming/debounce, dispatch settings, mode-0600 task-file cleanup, schema-v1 success/failure envelopes, and Pi/Claude parity.
+Invalid v2 locks fail closed with `invalid-lock` before restore, trust, approval, or planning; doctor may render the diagnosis but never use invalid data.
+
+OKF additionally runs its capability-defined harvester in all three source modes: attached local-soul, workspace-mode soul-repository worktree, and attached repo-resident. It verifies parent relation, purpose-derived naming/debounce, rejection/absence of retired `--instance` and `--ephemeral` flags, dispatch settings, mode-0600 task-file cleanup, schema-v1 success/failure envelopes, and Pi/Claude parity.
 
 These probes remain pending released OAS 0.19.0 consumer fixtures. `oas.dev` additionally waits for immutable dependency selectors and publishes last.
 

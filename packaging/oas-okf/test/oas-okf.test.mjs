@@ -210,6 +210,8 @@ test("local-soul harvest spawns attached through the CLI boundary with effective
   const record = JSON.parse(readFileSync(fixture.record, "utf8"));
   assert.deepEqual(record.args.slice(0, 2), ["spawn", "memory-harvest"]);
   assert.equal(argValue(record.args, "--purpose"), "source-instance-1");
+  assert.equal(record.args.includes("--instance"), false, "retired raw-instance flag must never cross the boundary");
+  assert.equal(record.args.includes("--ephemeral"), false, "retired ephemeral flag must never cross the boundary");
   assert.equal(argValue(record.args, "--parent"), "source-instance-1");
   assert.equal(argValue(record.args, "--repo"), fixture.context);
   assert.equal(argValue(record.args, "--work"), "attached");
