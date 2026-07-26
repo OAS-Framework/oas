@@ -1,6 +1,7 @@
 # Knowledge Log
 
 ## 2026-07-26
+* **Update**: [frozen-package-engine-contract-alignment](/lessons/frozen-package-engine-contract-alignment.md) merges review follow-ups: empty legacy v1 locks must surface in `readPackageLocks`' `legacy` list, and parsed-but-invalid manifests/resources must fail with `invalid-package-manifest` before dereference.
 * **Creation**: [reconciliation-truthfulness-fixes](/lessons/reconciliation-truthfulness-fixes.md) records the review lesson that reconciliation must restore each lock level once, fail locked-but-uninstalled v2 package locks, and exit nonzero for consented requirement install failures.
 * **Fix**: [team-boundary-scan-pruning](/lessons/team-boundary-scan-pruning.md) replaces after-the-fact restore report filtering with exact-level restore plus processed-level tracking.
 * **Update**: [requirement-recipes-data-allowlist](/lessons/requirement-recipes-data-allowlist.md) records that consented requirement install failures are fatal while skipped requirements remain non-fatal.

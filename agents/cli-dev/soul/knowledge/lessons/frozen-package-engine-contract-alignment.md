@@ -1,7 +1,7 @@
 ---
 type: Lesson
 title: Align phase-1 package fixtures to frozen engine envelopes and error codes
-description: When a sibling package-engine workstream freezes an interface, align shared-reader return envelopes, schema-verbatim fixture data, and the shared error-code taxonomy before treating the seam as swappable.
+description: When a sibling package-engine workstream freezes an interface, align shared-reader envelopes including legacy-lock presence, schema-verbatim fixture data, and stable coded validation failures before treating the seam as swappable.
 tags: [packages, contract, fixtures, error-codes]
 timestamp: 2026-07-26
 ---
@@ -15,8 +15,10 @@ highest-value alignment points:
 
 - **Envelope shape of shared readers**: `readPackageLocks` returns
   `{ packages, legacy }`, not a bare id-to-entry map. Legacy v1 files surface
-  separately and untouched. Match that envelope early so later integration is a
-  re-import instead of a call-site rewrite.
+  separately and untouched; even an empty v1 lock with `lockfileVersion: 1` and
+  `capabilities: {}` carries contract information and must appear in `legacy`.
+  Match that envelope early so later integration is a re-import instead of a
+  call-site rewrite.
 - **Schema-verbatim fixture data**: identity/profile names use
   `^[a-z0-9][a-z0-9._-]*$` (dots and underscores allowed); path sources still
   require `commit: "local"`; integrity strings match `^sha256-[0-9a-f]{64}$`.
@@ -25,8 +27,12 @@ highest-value alignment points:
 - **Error codes as `error.code`**: reuse the package-engine taxonomy
   (`invalid-package-manifest`, `path-escape`, `invalid-source`, …) on thrown
   `Error` objects so `--json` envelopes and tests stay stable across the seam.
-  Add local codes only for local-only surfaces such as consent, boundary, or
-  profile validation.
+  After parsing package manifests or declared capability `oas.json` resources,
+  assert object-and-not-array before dereferencing; missing, malformed,
+  null/array, or id-less declared resources must route through
+  `invalid-package-manifest` rather than leaking uncoded `TypeError`s. Add local
+  codes only for local-only surfaces such as consent, boundary, or profile
+  validation.
 
 Read frozen sibling contracts read-only with `git show origin/<branch>:<path>`.
 Do not merge or branch from the sibling workstream ref; feature-branch
