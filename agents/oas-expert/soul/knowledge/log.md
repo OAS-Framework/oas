@@ -1,6 +1,8 @@
 # Knowledge Log
 
 ## 2026-07-26
+* **Update**: skills/pr-review — added the OKF validator output gotcha: PR reviewers must inspect per-bundle strict output and require zero producer warnings for changed bundles even when the aggregate command exits zero.
+* **Creation**: [A green repository OKF command can still carry producer warnings](/lessons/strict-okf-zero-exit-can-have-warnings.md) — repository aggregate OKF validation can exit zero while per-bundle strict output reports unreachable concepts, so maintainers must inspect warnings as well as status.
 * **Creation**: [Spawn relations use sparse live lineage, not a transaction journal](/decisions/spawn-relations-live-lineage.md) records the accepted explicit child/sibling/parent/unrelated contract, attached child-of-owner rule, ambiguity-safe identity posture, v0.18.6 Desktop capability floor, and the human decision to accept bounded concurrent-parent and sequential-retirement-splice limitations instead of adding a lineage journal/lease subsystem.
 * **Update**: [Repo state](/stewardship/repo-state.md) and the [delivery log](/stewardship/delivery-log.md) record PR #38 round 1 RETURN for stale relation knowledge plus merge conflicts; executable/security gates otherwise passed at exact head `e3f7401`.
 
