@@ -2200,3 +2200,29 @@ test("included optional deps and post-materialization .node binaries are rejecte
   assert.ok(!existsSync(join(installedPackagesDir(scope(base, "s2")), "nb.p")), "rollback: nothing installed");
   rmSync(base, { recursive: true, force: true });
 });
+
+// ---------- reviewer-7b2cd36 findings ----------
+
+test("valueless --dir is E_BAD_ARGS for status/spawn/retire/create too (reviewer-7b2cd36)", () => {
+  const base = temp();
+  const s = scope(base);
+  for (const argv of [["status"], ["spawn", "x"], ["retire", "x"], ["create", "x"]]) {
+    const r = cli(s, ...argv, "--dir", "--json");
+    const env = JSON.parse(r.stdout);
+    assert.equal(env.ok, false, argv.join(" "));
+    assert.equal(env.error.code, "E_BAD_ARGS", `${argv.join(" ")}: ${env.error.message}`);
+    assert.ok(!r.stderr.includes("TypeError"), `${argv.join(" ")}: no stack trace`);
+  }
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("human-mode bare restore exits nonzero for retired locks (reviewer-7b2cd36)", () => {
+  const base = temp();
+  const s = scope(base);
+  writeCapabilityLock(s, "oas.web", { source: "marketplace:oas.web@1.0.0", version: "1.0.0", integrity: `sha256-${"a".repeat(64)}` });
+  const r = cli(s, "install", "--dir", s);
+  assert.notEqual(r.status, 0, "retired lock must fail the restore exit code");
+  assert.match(r.stdout, /RETIRED\s+oas\.web/, "actionable RETIRED rendering retained");
+  assert.match(r.stderr, /could not be restored/);
+  rmSync(base, { recursive: true, force: true });
+});
