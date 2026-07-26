@@ -142,11 +142,63 @@ function doctorComposition(ctx, soulName) {
  * doctor output: lock v2 packages, adopted-profile provenance, available-but-
  * unapplied profiles, and missing host requirements with structured plans. */
 function doctorPackagesData(ctx, chain) {
-  const pkgLocks = readPackageLocks(ctx).packages;
-  const packages = Object.entries(pkgLocks).map(([id, lock]) => ({
-    id, version: lock.version || null, level: lock._level, source: lock.source || null,
-    commit: lock.commit || null, capabilities: lock.capabilities || [],
-  }));
+  // reviewer-455ba15 fix 4: the ENGINE diagnostics the human doctor renders
+  // (invalid locks, missing artifacts, integrity/runtime-closure drift,
+  // capability-list mismatches, untrusted surfaces, legacy/residue states)
+  // are computed HERE so doctor --json exposes them structurally — machine
+  // consumers see every state the human report calls broken. Fail-closed
+  // reads are diagnosed, never consumed as data and never swallowed.
+  let pkgLocks = { packages: {}, legacy: [] };
+  let installedPkgs = [];
+  let lockBroken = null;
+  try { pkgLocks = readPackageLocks(ctx); installedPkgs = listInstalledPackages(ctx); }
+  catch (e) {
+    const prov = Array.isArray(e.provenance) ? e.provenance[0] : undefined;
+    lockBroken = { code: e.code || "invalid-lock", message: String(e.message || e), file: prov?.file || null, provenance: e.provenance || null };
+  }
+  const packages = [];
+  for (const p of installedPkgs) {
+    const lock = pkgLocks.packages[p.package];
+    const problems = [];
+    if (!lock) problems.push({ code: "invalid-lock", detail: "installed but not locked — reacquire it" });
+    else {
+      const integ = packageIntegrity(p.dir);
+      if (integ !== lock.integrity) problems.push({ code: "integrity-drift", detail: `integrity drift — installed ${integ}, locked ${lock.integrity}; all capability approvals are invalid` });
+      const depsNow = packageDepsIntegrity(p.dir);
+      if ((lock.depsIntegrity || undefined) !== depsNow) problems.push({ code: "integrity-drift", detail: `materialized runtime closure ${depsNow ? "differs from" : "missing vs"} the locked depsIntegrity — run oas install to re-materialize` });
+      const have = new Set(p.capabilities.map((c) => c.id));
+      for (const c of lock.capabilities || []) if (!have.has(c)) problems.push({ code: "capability-list-mismatch", detail: `locked capability "${c}" is missing from the package manifest` });
+      for (const c of p.capabilities) {
+        const executable = Object.keys(c.manifest.commands || {}).length || Object.keys(c.manifest.hooks || {}).length;
+        if (executable && !(lock.trustedCapabilities || []).includes(c.id) && packageIntegrity(p.dir) === lock.integrity) problems.push({ code: "untrusted-surface", detail: `capability ${c.id}: executable surface UNTRUSTED — \`oas trust ${c.id}\`` });
+      }
+    }
+    packages.push({
+      id: p.package, version: p.version || null, level: p.level, source: lock?.source || null,
+      commit: lock?.commit || null, capabilities: p.capabilities.map((c) => c.id),
+      status: problems.length ? "broken" : "ok", problems,
+    });
+  }
+  for (const [id, lock] of Object.entries(pkgLocks.packages)) {
+    if (!installedPkgs.some((p) => p.package === id)) {
+      packages.push({ id, version: lock.version || null, level: lock._level, source: lock.source || null, commit: lock.commit || null, capabilities: lock.capabilities || [], status: "broken", problems: [{ code: "missing-locked-package", detail: `locked in ${lock._file} but not installed — run oas install` }] });
+    }
+  }
+  // Legacy v1 files and v2 residue — the ENGINE's doctor shapes (its tests pin
+  // status/action fields): empty/nonempty v1 = pending LOCK-FORMAT migration
+  // (maintainer ruling — distinct from capability residue); v2 residue entries
+  // carry pending-migration or invalid-lock with the retry/fix action.
+  const legacyLockFiles = pkgLocks.legacy
+    .filter((l) => l.lockfileVersion !== 2)
+    .map((l) => ({ file: l.file, level: l.level, lockfileVersion: l.lockfileVersion ?? 1, empty: !Object.keys(l.capabilities || {}).length, status: "pending-format-migration", action: `oas migrate --dir ${l.level}` }));
+  const migrationResidue = pkgLocks.legacy
+    .filter((l) => l.lockfileVersion === 2)
+    .flatMap((l) => Object.entries(l.capabilities || {}).map(([id, lock]) => {
+      const violation = residueEntryViolation(lock);
+      return violation
+        ? { id, file: l.file, level: l.level, source: lock?.source || null, status: "invalid-lock", violation, action: `fix or remove the entry in ${l.file} (never auto-repaired)` }
+        : { id, file: l.file, level: l.level, source: lock.source, status: "pending-migration", action: `oas migrate --dir ${l.level}` };
+    }));
   const profileProvenance = [];
   const adoptedPackages = new Set();
   for (const cfg of chain) {
@@ -156,10 +208,6 @@ function doctorPackagesData(ctx, chain) {
     adoptedPackages.add(prov.package);
   }
   const unappliedProfiles = [];
-  // Available-but-unapplied profiles: engine-indexed installed packages whose
-  // manifests export config profiles no chain config has adopted.
-  let installedPkgs = [];
-  try { installedPkgs = listInstalledPackages(ctx); } catch { /* doctor's package section reports indexing errors */ }
   for (const p of installedPkgs) {
     if (adoptedPackages.has(p.package)) continue;
     const profiles = Object.keys(p.manifest?.configs || {});
@@ -181,7 +229,7 @@ function doctorPackagesData(ctx, chain) {
       ? `oas install --accept-requirement ${req.command} --dir ${shellQuote(ctx)}`
       : null,
   }));
-  return { packages, profileProvenance, unappliedProfiles, missingHostRequirements };
+  return { lockError: lockBroken, packages, legacyLockFiles, migrationResidue, profileProvenance, unappliedProfiles, missingHostRequirements };
 }
 
 function doctorJson(dir) {
@@ -210,31 +258,17 @@ function doctorJson(dir) {
     retiredLocks: Object.entries(readCapabilityLocks(ctx))
       .filter(([id]) => RETIRED_CAPABILITIES[id])
       .map(([id, lock]) => ({ id, file: lock._file, reason: RETIRED_CAPABILITIES[id] })),
-    ...(() => {
-      // Doctor JSON catches the typed fail-closed error and diagnoses (finding 3).
-      try {
-        const legacy = readPackageLocks(ctx).legacy;
-        return {
-          migrationResidue: legacy.filter((l) => l.lockfileVersion === 2).flatMap((l) =>
-            Object.entries(l.capabilities).map(([id, lock]) => {
-              const violation = residueEntryViolation(lock);
-              return violation
-                ? { id, file: l.file, level: l.level, source: lock?.source || null, status: "invalid-lock", violation, action: `fix or remove the entry in ${l.file} (never auto-repaired)` }
-                : { id, file: l.file, level: l.level, source: lock.source, status: "pending-migration", action: `oas migrate --dir ${l.level}` };
-            })),
-          // Empty/nonempty v1 files: pending LOCK-FORMAT migration (maintainer
-          // ruling — distinct from capability residue).
-          legacyLockFiles: legacy.filter((l) => l.lockfileVersion !== 2).map((l) => ({ file: l.file, level: l.level, lockfileVersion: l.lockfileVersion ?? 1, empty: !Object.keys(l.capabilities || {}).length, status: "pending-format-migration", action: `oas migrate --dir ${l.level}` })),
-          lockError: null,
-        };
-      } catch (e) {
-        return { migrationResidue: [], legacyLockFiles: [], lockError: { code: e.code || "invalid-lock", message: e.message, provenance: e.provenance || null } };
-      }
-    })(),
+    // Shared WS2+engine package payload (fix 4: human and JSON doctor derive
+    // from ONE computation; fail-closed reads are diagnosed via lockError).
+    migrationResidue: pkg.migrationResidue,
+    legacyLockFiles: pkg.legacyLockFiles,
+    lockError: pkg.lockError,
     retiredArtifacts: Object.entries(mans)
       .filter(([id]) => RETIRED_CAPABILITIES[id])
       .map(([id, m]) => ({ id, dir: m._dir, origin: m._origin, reason: RETIRED_CAPABILITIES[id] })),
     packages: pkg.packages,
+    legacyLockFiles: pkg.legacyLockFiles,
+    migrationResidue: pkg.migrationResidue,
     profileProvenance: pkg.profileProvenance,
     unappliedProfiles: pkg.unappliedProfiles,
     missingHostRequirements: pkg.missingHostRequirements,
@@ -322,57 +356,32 @@ function doctor(dir) {
   }
   if (existsSync(LEGACY_HOME_CAPABILITIES_DIR)) console.log(`  WARNING: legacy ~/.oas/capabilities exists and is no longer discovered — reinstall its packages at a config scope and remove it`);
 
-  // Distribution packages: package failures are distinguished from capability failures.
-  // Doctor is the DIAGNOSIS surface: it catches the typed invalid-lock error the
-  // fail-closed read/list paths raise and renders it actionably (finding 3).
+  // Distribution packages: package failures are distinguished from capability
+  // failures. Doctor is the DIAGNOSIS surface — human and JSON render the SAME
+  // doctorPackagesData computation (reviewer-455ba15 fix 4); fail-closed
+  // invalid-lock raises are diagnosed here, never consumed as data.
   console.log("\nInstalled packages:");
-  let pkgLocks = { packages: {}, legacy: [] };
-  let pkgs = [];
-  let lockBroken;
-  try { pkgLocks = readPackageLocks(ctx); pkgs = listInstalledPackages(ctx); }
-  catch (e) {
-    lockBroken = e;
-    const prov = Array.isArray(e.provenance) ? e.provenance[0] : undefined;
-    console.log(`  ERROR: ${e.message} [${e.code || "invalid-lock"}]`);
-    if (prov?.file) console.log(`         fix or remove the offending entry in ${shortPath(prov.file)} — the lock is never auto-repaired; package operations fail closed until it is valid`);
-  }
-  if (!lockBroken && !pkgs.length && !Object.keys(pkgLocks.packages).length && !pkgLocks.legacy.length) console.log("  (none)");
-  for (const p of pkgs) {
-    const lock = pkgLocks.packages[p.package];
-    console.log(`  ${p.package}@${p.version}  [${levelOf(p.level)} ${shortPath(p.level)}]`);
-    if (!lock) { console.log(`             ERROR: installed but not locked — reacquire it [manifest graph error]`); continue; }
-    const integ = packageIntegrity(p.dir);
-    if (integ !== lock.integrity) console.log(`             ERROR: integrity drift — installed ${integ}, locked ${lock.integrity}; all capability approvals are invalid [integrity-drift]`);
-    // Runtime closure presence/staleness (runtime API addendum §2): node_modules
-    // is derived; deviation from the locked digest is repairable via bare `oas install`.
-    const depsNow = packageDepsIntegrity(p.dir);
-    if ((lock.depsIntegrity || undefined) !== depsNow) console.log(`             ERROR: materialized runtime closure ${depsNow ? "differs from" : "missing vs"} the locked depsIntegrity — run \`oas install\` to re-materialize [integrity-drift]`);
-    const have = new Set(p.capabilities.map((c) => c.id));
-    for (const c of lock.capabilities || []) if (!have.has(c)) console.log(`             ERROR: locked capability "${c}" is missing from the package manifest [capability-list-mismatch]`);
-    for (const c of p.capabilities) {
-      const executable = Object.keys(c.manifest.commands || {}).length || Object.keys(c.manifest.hooks || {}).length;
-      if (executable && !(lock.trustedCapabilities || []).includes(c.id) && integ === lock.integrity) console.log(`             capability ${c.id}: executable surface UNTRUSTED — \`oas trust ${c.id}\``);
-    }
-  }
-  for (const [id, lock] of Object.entries(pkgLocks.packages)) {
-    if (!pkgs.some((p) => p.package === id)) console.log(`  ERROR: package ${id} is locked in ${shortPath(lock._file)} but not installed — run \`oas install\` [missing locked package]`);
-  }
-  for (const l of pkgLocks.legacy) {
-    if (l.lockfileVersion !== 2) {
-      // Empty v1 = pending LOCK-FORMAT migration (never capability residue).
-      if (!Object.keys(l.capabilities || {}).length) console.log(`  WARNING: ${shortPath(l.file)} is an empty lockfileVersion ${l.lockfileVersion ?? 1} file — pending lock-format migration: run \`oas migrate --dir ${shortPath(l.level)}\` (converts to canonical v2, no residue)`);
-      else console.log(`  WARNING: ${shortPath(l.file)} is lockfileVersion ${l.lockfileVersion ?? 1} — \`oas migrate\` maps its capability locks to packages`);
-    }
-    else if (Object.keys(l.capabilities).length) {
-      for (const [rid, rlock] of Object.entries(l.capabilities)) {
-        const violation = residueEntryViolation(rlock);
-        if (violation) console.log(`  ERROR: residue entry ${rid} in ${shortPath(l.file)} is malformed (${violation}) — never auto-repaired; fix or remove the entry [invalid-lock]`);
-        else console.log(`  NOTE: ${rid} in ${shortPath(l.file)} is legacy migration residue (${rlock.source}) — pending migration: re-run \`oas migrate --dir ${shortPath(l.level)}\` when its official package publishes, or remove the entry if the capability is abandoned`);
-      }
-    }
-  }
-  // WS2 additions: profile provenance, unapplied profiles, missing host requirements (same data as doctor --json).
   const pkg = doctorPackagesData(ctx, chain);
+  if (pkg.lockError) {
+    console.log(`  ERROR: ${pkg.lockError.message} [${pkg.lockError.code}]`);
+    if (pkg.lockError.file) console.log(`         fix or remove the offending entry in ${shortPath(pkg.lockError.file)} — the lock is never auto-repaired; package operations fail closed until it is valid`);
+  }
+  if (!pkg.lockError && !pkg.packages.length && !pkg.legacyLockFiles.length && !pkg.migrationResidue.length) console.log("  (none)");
+  for (const p of pkg.packages) {
+    console.log(`  ${p.id}@${p.version}  [${levelOf(p.level)} ${shortPath(p.level)}]`);
+    for (const prob of p.problems) {
+      if (prob.code === "untrusted-surface") console.log(`             ${prob.detail}`);
+      else console.log(`             ERROR: ${prob.detail} [${prob.code}]`);
+    }
+  }
+  for (const l of pkg.legacyLockFiles) {
+    if (l.empty) console.log(`  WARNING: ${shortPath(l.file)} is an empty lockfileVersion ${l.lockfileVersion} file — pending lock-format migration: run \`oas migrate --dir ${shortPath(l.level)}\` (converts to canonical v2, no residue)`);
+    else console.log(`  WARNING: ${shortPath(l.file)} is lockfileVersion ${l.lockfileVersion} — \`oas migrate\` maps its capability locks to packages`);
+  }
+  for (const res of pkg.migrationResidue) {
+    if (res.status === "invalid-lock") console.log(`  ERROR: residue entry ${res.id} in ${shortPath(res.file)} is malformed (${res.violation}) — never auto-repaired; fix or remove the entry [invalid-lock]`);
+    else console.log(`  NOTE: ${res.id} in ${shortPath(res.file)} is legacy migration residue (${res.source}) — pending migration: re-run \`oas migrate --dir ${shortPath(res.level)}\` when its official package publishes, or remove the entry if the capability is abandoned`);
+  }
   for (const prov of pkg.profileProvenance) {
     console.log(`\nConfig profile provenance: ${shortPath(prov.file)} adopted ${prov.package}${prov.ref ? `@${prov.ref}` : ""} profile "${prov.profile}" (snapshot — compare with \`oas config diff\`)`);
   }
@@ -623,11 +632,26 @@ function lockLevelsUp(dir) {
  * (exact restore, no ref advancement, staging + integrity/capability/deps
  * verification inside). The engine walks the lock chain from the given dir;
  * reconciliation calls it per deduplicated level and keeps that level's rows. */
-function packageLockReport(level) {
-  return restorePackages(level).filter((r) => resolve(r.level) === resolve(level)).map((r) => ({
-    id: r.package, level: r.level, package: true, dir: r.dir,
-    status: r.status === "ok" ? "present" : r.status, reason: r.reason, code: r.code,
-  }));
+/** Map engine restore rows to WS2 report items (kind package). */
+const pkgRow = (r) => ({
+  id: r.package, level: r.level, package: true, dir: r.dir,
+  status: r.status === "ok" ? "present" : r.status, reason: r.reason, code: r.code,
+});
+
+/** Restore-and-partition for reconciliation (reviewer-455ba15 fix 1): the
+ * engine's restorePackages walks the WHOLE lock chain from a directory and has
+ * no exact-level option, so invoke it ONCE per deepest scope and PARTITION the
+ * report rows by lock level — never re-invoke per level (each re-invocation
+ * re-runs restore side effects for every ancestor lock). Returns a Map
+ * level(resolved) → rows. */
+function partitionedPackageRestore(deepestDir) {
+  const byLevel = new Map();
+  for (const r of restorePackages(deepestDir)) {
+    const key = resolve(r.level);
+    if (!byLevel.has(key)) byLevel.set(key, []);
+    byLevel.get(key).push(pkgRow(r));
+  }
+  return byLevel;
 }
 
 function installPackage(dir, src) {
@@ -760,7 +784,34 @@ function reconcileInner(dir) {
   const scopeReports = [];
   let reportedAny = false;
   const restoredLevels = new Set(); // each lock level's graph restores exactly once
-  const packageCheckedLevels = new Set(); // each level's package locks verified exactly once
+  const packageCheckedLevels = new Set(); // each level's package-lock rows consumed exactly once
+  // reviewer-455ba15 fix 1 — partition-not-rerun: run the engine's chain-walking
+  // package restore as FEW times as the API allows and hand out each level's
+  // rows exactly once. One invocation covers a scope's entire ancestor chain;
+  // rows are stashed so no level is ever REPORTED twice and no already-walked
+  // level triggers a re-invocation. RESIDUAL (pending WS1's exact-levels API,
+  // relayed as a want): a descendant owning its own lock necessarily re-walks
+  // its ancestors inside the engine — present/valid ancestor artifacts re-verify
+  // with local reads only, but a FAILED ancestor fetch may retry once per
+  // lock-owning descendant. The exact-once reporting contract holds.
+  const pendingPkgRows = new Map(); // level(resolved) → rows not yet consumed
+  const packageRowsFor = (scope, levels) => {
+    const wanted = levels.map((l) => resolve(l)).filter((l) => !packageCheckedLevels.has(l));
+    if (!wanted.length) return [];
+    if (wanted.some((l) => !pendingPkgRows.has(l))) {
+      // One restore invocation covers scope's whole chain; stash every level's
+      // rows so later scopes never re-invoke for already-walked levels.
+      for (const [lvl, rows] of partitionedPackageRestore(scope)) {
+        if (!pendingPkgRows.has(lvl)) pendingPkgRows.set(lvl, rows);
+      }
+    }
+    const out = [];
+    for (const l of wanted) {
+      packageCheckedLevels.add(l);
+      out.push(...(pendingPkgRows.get(l) || []));
+    }
+    return out;
+  };
   for (const scope of scopes) {
     // Boundary: full ancestor chain (current-chain semantics). Descendants: their
     // own level only — every level between boundary and descendant is either the
@@ -770,9 +821,8 @@ function reconcileInner(dir) {
     const report = restoreCapabilities(scope, chainLevels ? { levels: chainLevels.filter((l) => !restoredLevels.has(resolve(l))) } : undefined)
       .filter((r) => !restoredLevels.has(resolve(r.level)));
     // v2 package locks: every lock level this scope covers (the boundary covers
-    // its whole ancestor chain), each verified exactly once.
-    const pkgLevels = (scope === boundary ? lockLevelsUp(boundary) : [scope]).filter((l) => !packageCheckedLevels.has(resolve(l)));
-    for (const l of pkgLevels) { packageCheckedLevels.add(resolve(l)); report.push(...packageLockReport(l)); }
+    // its whole ancestor chain), each restored/verified exactly once.
+    report.push(...packageRowsFor(scope, scope === boundary ? lockLevelsUp(boundary) : [scope]));
     for (const r of report) {
       reportedAny = true;
       const what = r.package ? `package ${r.id ?? "(lock)"}` : r.id;
@@ -970,42 +1020,47 @@ function flagAll(name) {
  * the ENGINE's lock graph (dependencies recorded by identity) plus the indexed
  * installed store. During init the scope may have a lock without a config;
  * readPackageLocks walks the chain and the scope itself. */
-function dependencyClosureCapabilities(manifest, dir) {
+/** Dependency-closure PROVIDER RECORDS for profile validation, resolved from
+ * the acquired root's LOCK entry (identity-valued dependencies) and the
+ * engine-indexed store — reviewer-455ba15 fixes 2+3: no source-string
+ * reverse-engineering (a dependency's source need not encode its identity),
+ * and each provider carries its capability MANIFESTS so layer agreement
+ * validates against the real provider, not just an ID match.
+ * Returns { capabilities: Map<capabilityId, capManifest|null> }. */
+function dependencyClosureProviders(rootId, dir) {
   // The scope's own lock is read directly: during init no oas-config.yaml
   // exists there yet, so configChain-based reads cannot see that level.
   const locks = { ...readPackageLocks(dir).packages };
   try {
     const parsed = JSON.parse(readFileSync(join(dir, OAS_LOCK_FILE), "utf8"));
     if (parsed.lockfileVersion === 2) for (const [id, e] of Object.entries(parsed.packages || {})) locks[id] ||= e;
-  } catch { /* no own lock */ }
+  } catch { /* no own lock (or fail-closed raise — init surfaces it at acquire) */ }
   const byId = new Map(listInstalledPackages(dir).map((p) => [p.package, p]));
-  const out = [];
+  // Own-scope store read directly too (configChain cannot index a level with
+  // no oas-config.yaml yet — the closure was just acquired there).
+  for (const id of Object.keys(locks)) {
+    if (byId.has(id)) continue;
+    const d = join(installedPackagesDir(dir), id);
+    if (!existsSync(join(d, "oas-package.json"))) continue;
+    try {
+      const m = loadPackageManifestAt(d);
+      byId.set(id, { package: id, capabilities: (m._capabilities || []).map((c) => ({ id: c.id, manifest: c.manifest })) });
+    } catch { /* invalid installed manifest surfaces via doctor */ }
+  }
+  const capabilities = new Map(); // capability id → capability manifest (or null when only lock metadata is visible)
   const seen = new Set();
-  const idOf = (dep) => {
-    // Engine lock-graph dependencies are identities; manifest entries may be
-    // source specs (paths/git/catalog). Identity first, then derive.
-    if (byId.has(dep) || locks[dep]) return dep;
-    const path = String(dep).startsWith("path:") ? String(dep).slice(5) : String(dep);
-    if (path.startsWith(".") || path.startsWith("/") || path.startsWith("~")) {
-      // Local-path dependency spec: the package id lives in ITS manifest.
-      try { return loadPackageManifestAt(path.startsWith("~/") ? join(process.env.HOME || "", path.slice(2)) : path).package; } catch { return undefined; }
-    }
-    return String(dep).split("@")[0].replace(/^git:.*\/|\.git$/g, "");
+  const visit = (pkgId) => {
+    if (!pkgId || seen.has(pkgId)) return;
+    seen.add(pkgId);
+    const entry = locks[pkgId];
+    const pkg = byId.get(pkgId);
+    if (pkg) for (const c of pkg.capabilities) capabilities.set(c.id, c.manifest || null);
+    else if (entry) for (const c of entry.capabilities || []) { if (!capabilities.has(c)) capabilities.set(c, null); }
+    // Lock-graph dependencies are package identities (engine contract).
+    for (const dep of entry?.dependencies || []) visit(dep);
   };
-  const visit = (deps) => {
-    for (const dep of deps || []) {
-      const id = idOf(dep);
-      if (!id || seen.has(id)) continue;
-      seen.add(id);
-      const entry = locks[id];
-      const pkg = byId.get(id);
-      if (!entry && !pkg) continue; // reported by validation when a referenced capability has no provider
-      out.push(...(entry?.capabilities || pkg?.capabilities?.map((c) => c.id) || []));
-      visit(entry?.dependencies || []);
-    }
-  };
-  visit(manifest.dependencies);
-  return out;
+  for (const dep of locks[rootId]?.dependencies || []) visit(dep);
+  return { capabilities };
 }
 
 /** oas init --package <source> [--config <name>]: preview, validate, and snapshot one package config profile.
@@ -1058,7 +1113,7 @@ function initPackage(src, dir, file) {
     try { profile = selectProfile(manifest, configFlag); }
     catch (e) { bail(e.code || "E_PROFILE_AMBIGUOUS", e.message); }
     let errors;
-    try { errors = validateProfile(manifest, profile, { dependencyCapabilities: dependencyClosureCapabilities(manifest, dir) }); }
+    try { errors = validateProfile(manifest, profile, { dependencyProviders: dependencyClosureProviders(manifest.package, dir).capabilities }); }
     catch (e) { bail(e.code || "E_PROFILE_INVALID", e.message); }
     if (errors.length) bail("E_PROFILE_INVALID", `profile "${profile.name}" of package ${manifest.package} failed validation:\n  - ${errors.join("\n  - ")}`);
     let body;

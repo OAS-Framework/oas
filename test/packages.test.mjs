@@ -100,8 +100,22 @@ test("profile validation: schema, dependency closure, layer agreement, agent typ
   }, configs: { orphan: { path: "configs/orphan/oas-config.yaml", default: true } } }));
   const errs1 = validateProfile(orphan, selectProfile(orphan));
   assert.ok(errs1.some((e) => /ghost\.cap is not supplied/.test(e)), errs1.join("; "));
-  // ... but a dependency-supplied capability passes
-  assert.deepEqual(validateProfile(orphan, selectProfile(orphan), { dependencyCapabilities: ["ghost.cap"] }), []);
+  // ... but a dependency-supplied capability (with its provider manifest) passes
+  assert.deepEqual(validateProfile(orphan, selectProfile(orphan), { dependencyProviders: new Map([["ghost.cap", { capability: "ghost.cap" }]]) }), []);
+  // a dependency-supplied capability bound to a LAYER with a mismatched provider
+  // manifest is rejected (reviewer-455ba15 fix 3) — and an id-only (manifest-less)
+  // provider cannot silently pass layer validation either
+  const depLayer = loadFixtureManifest(fixturePackage(join(base, "dep-layer"), {
+    capabilities: { "capabilities/own": { capability: "own.cap", version: "1.0.0", description: "x", compatibility: { oas: ">=0.6.2" } } },
+    extraFiles: { "configs/l/oas-config.yaml": "name: w\ncapabilities:\n  layers:\n    knowledge:\n      capability: dep.knowledge\n      from: installed\n" },
+    configs: { l: { path: "configs/l/oas-config.yaml", default: true } },
+  }));
+  const wrongDep = validateProfile(depLayer, selectProfile(depLayer), { dependencyProviders: new Map([["dep.knowledge", { capability: "dep.knowledge", layer: "messaging" }]]) });
+  assert.ok(wrongDep.some((e) => /layer knowledge binds dep\.knowledge, but its manifest declares layer "messaging"/.test(e)), wrongDep.join("; "));
+  const manifestless = validateProfile(depLayer, selectProfile(depLayer), { dependencyProviders: new Map([["dep.knowledge", null]]) });
+  assert.ok(manifestless.some((e) => /provider manifest is not available to verify the layer/.test(e)), manifestless.join("; "));
+  const rightDep = validateProfile(depLayer, selectProfile(depLayer), { dependencyProviders: new Map([["dep.knowledge", { capability: "dep.knowledge", layer: "knowledge" }]]) });
+  assert.deepEqual(rightDep, []);
 
   // layer disagreement with the capability manifest
   const wrongLayer = loadFixtureManifest(fixturePackage(join(base, "wrong-layer"), { extraFiles: {
@@ -1058,7 +1072,11 @@ test("config diff --json: envelope with diff array; zero differences exits 0 wit
 
 test("init --package on a configless scope sees same-lock dependency capabilities in the closure", () => {
   const base = temp();
-  const dep = fixturePackage(join(base, "dep"), {
+  // Dependency whose package ID does NOT match its directory basename —
+  // reviewer-455ba15 fix 2: closure resolution must come from the acquired
+  // root's lock entry (identity-valued dependencies), never from
+  // reverse-engineering source strings.
+  const dep = fixturePackage(join(base, "some-repo-dir"), {
     id: "dep.pkg",
     capabilities: { "capabilities/dep-cap": { capability: "dep.cap", version: "1.0.0", description: "x" } },
     configs: {},
