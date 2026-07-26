@@ -1,6 +1,9 @@
 # Knowledge Log
 
 ## 2026-07-26
+* **Creation**: [team-boundary-scan-pruning](/lessons/team-boundary-scan-pruning.md) records team-boundary reconciliation discovery pruning by directory name, agent-home structure, nested team declarations, and symlink skipping.
+* **Creation**: [requirement-recipes-data-allowlist](/lessons/requirement-recipes-data-allowlist.md) records the allowlisted, argv-only, consented host-requirement install plan and PATH verification pattern.
+* **Creation**: [package-profile-validation-config-shape](/lessons/package-profile-validation-config-shape.md) records that package config profiles reuse the kernel config-shape validator while package-only checks stay in lib/packages.mjs.
 * **Fix**: [spawn-lineage-explicit-only](/decisions/spawn-lineage-explicit-only.md) scopes the top-level/no-lineage default to non-attached manual spawns, preserving attached owner auto-binding as the explicit exception.
 * **Fix**: [spawn-lineage-explicit-only](/decisions/spawn-lineage-explicit-only.md) now states the complete child/sibling/parent/unrelated lineage matrix, `--parent` child sugar, and attached auto-binding without a stored relation value.
 * **Update**: [spawn-relations-lineage-fields](/architecture/spawn-relations-lineage-fields.md) records the final human/maintainer-accepted concurrency limitations and the decision not to add a lineage transaction subsystem.
