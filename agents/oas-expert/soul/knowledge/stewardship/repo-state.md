@@ -158,10 +158,14 @@ than letting the file grow stale.
 
 ## In flight
 
-- **PR #38 feature/agent-relations — RETURNED round 1 at `e3f7401` (2026-07-26).** Direction and security pass; the two no-journal/lease limitations are consciously accepted. Executable gates pass and `RELATIONS_MIN=0.18.6` is correct. Before re-review the coordinator must fix three cli-dev OKF reachability warnings plus stale transitional relation concepts, merge latest main while preserving PR #35 keybindings/PR #36 knowledge, resolve Desktop shell/hierarchy/spawn/log conflicts, and hand back a settled exact head with full gates/CI.
+- **PR #38 feature/agent-relations — RETURNED round 2 at `df2e575` (2026-07-26), mergeability only.** Round-1 knowledge and conflict findings are fixed; direction, correctness, security, full local gates, exact-head PR CI, and all three installer checks pass. The PR preserves PR #35/#36 and adds reviewed identity-correct keybinding interactions. Its only blocker is ancestry: the maintainer's already-running round-1 harvester landed `d60ee05` after handback, so the coordinator must merge final current main (including this round-2 stewardship record), rerun/settle checks, and return the new exact head. No further harvest is being launched before handback.
 
 ## Recent deliveries
 
+- PR #38 round 2 spawn-time agent relations: RETURNED 2026-07-26 for
+  mergeability only at `df2e575`; all other gates and exact-head checks pass,
+  but a previously launched maintainer harvest advanced main after handback
+  (see delivery-log).
 - PR #38 spawn-time agent relations across kernel, CLI, and Desktop: RETURNED
   round 1 on 2026-07-26 for knowledge correctness and mergeability at
   `e3f7401`; executable/security gates passed (see delivery-log).

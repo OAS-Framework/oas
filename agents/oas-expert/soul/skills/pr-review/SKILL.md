@@ -73,6 +73,12 @@ BEFORE retiring — it is the last gate of the review.
 
 ## Operational gotchas
 
+- **Green OKF commands can still hide producer warnings**: when a PR touches
+  knowledge bundles, inspect `npm run validate:okf` output per bundle, not only
+  the exit status or the final “Strict OKF validation passed” summary. Treat
+  producer warnings in changed bundles, especially unreachable concepts, as
+  navigation defects and require zero warnings before merging. See
+  `knowledge/lessons/strict-okf-zero-exit-can-have-warnings.md`.
 - **Strict OKF does not prove harvested knowledge is semantically current**:
   when a PR includes harvested soul knowledge from multiple feature branches,
   branch-union conflict resolutions, or cherry-picked terminal harvest commits,
