@@ -16,11 +16,11 @@ function tempDir(t) {
   return dir;
 }
 
-function fakePath(t) {
+function fakePath(t, body = "exit 97") {
   const bin = join(tempDir(t), "bin");
   mkdirSync(bin);
   const aw = join(bin, "aw");
-  writeFileSync(aw, "#!/bin/sh\nexit 97\n");
+  writeFileSync(aw, `#!/bin/sh\n${body}\n`);
   chmodSync(aw, 0o755);
   return bin;
 }
@@ -85,6 +85,21 @@ test("authority discovery does not walk above the workspace", async (t) => {
   }, home);
   assert.equal(result.code, 0, result.stderr);
   assert.match(JSON.parse(result.stdout).warning, /no initialized aweb root/);
+});
+
+test("roster guidance uses the required --to recipient flag", async (t) => {
+  const root = tempDir(t);
+  mkdirSync(join(root, ".aw"));
+  const result = await run(["roster"], {
+    PATH: fakePath(t, `printf '%s\\n' '{"team_id":"default:test","members":[]}'`),
+    OAS_EVENT: "roster",
+    OAS_HOME: root,
+    OAS_TEAM_SCOPE: root,
+    OAS_TEAM_ID: "default:test",
+  }, root);
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /aw mail send --to <alias>/);
+  assert.doesNotMatch(result.stdout, /aw mail send <alias>/);
 });
 
 test("retire without persisted identity is an idempotent no-op", async (t) => {

@@ -57,8 +57,13 @@ const capabilitySchema = readJson(capabilitySchemaPath);
 
 if (packageManifest && packageSchema) validateSchema(packageManifest, packageSchema, "oas-package.json");
 
+const declaredCapabilities = Array.isArray(packageManifest?.capabilities) ? packageManifest.capabilities : [];
+if (declaredCapabilities.length !== 1) {
+  report("oas-package.json.capabilities", `official single-capability package must enumerate exactly one capability directory (found ${declaredCapabilities.length})`);
+}
+
 const capabilities = [];
-for (const [index, capabilityDir] of (packageManifest?.capabilities || []).entries()) {
+for (const [index, capabilityDir] of declaredCapabilities.entries()) {
   safeResource(root, capabilityDir, `oas-package.json.capabilities[${index}]`, "capability directory");
   if (isAbsolute(capabilityDir) || capabilityDir.split(/[\\/]+/).includes("..")) continue;
   const manifestPath = join(root, capabilityDir, "oas.json");

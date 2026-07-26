@@ -150,7 +150,7 @@ if (event === "spawn") {
   const members = r.members || [];
   if (!members.length) console.log("  (no member certificates visible from this workspace)");
   for (const m of members) console.log(`  ${m.alias || m.name || m.did || JSON.stringify(m)}`);
-  console.log("\nAliases minted by OAS are instance names; message one with `aw mail send <alias> ...`.");
+  console.log("\nAliases minted by OAS are instance names; message one with `aw mail send --to <alias> ...`.");
   process.exit(0);
 } else if (event === "setup") {
   // Guided onboarding — idempotent, prints what it finds and the one next step.

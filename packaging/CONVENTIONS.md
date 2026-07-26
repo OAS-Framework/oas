@@ -22,10 +22,11 @@ The package ID equals the single exported capability ID. Package version starts 
 Each repository's `ci` workflow runs for pull requests and pushes to `main` on Node.js 22 with read-only contents permission. The required job:
 
 1. validates `oas-package.json` against the repository's package schema;
-2. validates every enumerated `oas.json` against the capability schema;
-3. verifies that all declared resources exist, contain no parent-directory references, and remain inside the package after symlink resolution;
-4. runs package-specific unit/smoke tests; and
-5. reports the consumer-probe gate as blocked until engine fixtures are frozen.
+2. requires exactly one enumerated capability in these single-capability official repositories, with negative coverage for missing and extra entries;
+3. validates the enumerated `oas.json` against the capability schema;
+4. verifies that all declared resources exist, contain no parent-directory references, and remain inside the package after symlink resolution;
+5. runs package-specific unit/smoke tests; and
+6. reports the consumer-probe gate as blocked until engine fixtures are frozen.
 
 `oas-aweb` additionally runs `npm ci --ignore-scripts --prefix capabilities/oas-aweb`; the inner capability directory owns the checked dependency lock so its existing `node_modules/...` paths remain escape-free. CI proves that all three declared skill paths resolve from that materialized dependency tree. This placement remains pending confirmation by WS1's amended closure contract. No acquisition or CI step runs npm lifecycle scripts.
 
