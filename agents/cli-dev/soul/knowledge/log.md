@@ -1,6 +1,7 @@
 # Knowledge Log
 
 ## 2026-07-26
+* **Update**: [json-envelope-dispatch-boundary](/lessons/json-envelope-dispatch-boundary.md) merges the `install --json` review lesson: JSON boundaries must also catch pre-report throws and redirect spawned child stdout away from the envelope.
 * **Creation**: [package-engine-seam-teardown](/decisions/package-engine-seam-teardown.md) records the gate-2 package-engine seam teardown inventory: resolver/store semantics move to engine exports, WS2 keeps only policy helpers, and CLI/test call sites must preserve engine errors.
 * **Creation**: [init-lock-visibility-package-twin](/lessons/init-lock-visibility-package-twin.md) records that init-adjacent package lock resolution must read the target scope's own oas-lock.json directly when the scope has no config yet.
 * **Update**: [init-acquires-before-config-exists](/lessons/init-acquires-before-config-exists.md) links the package-lock twin of the init-time config-chain visibility gotcha.

@@ -1,9 +1,9 @@
 ---
 type: Lesson
-title: JSON contracts must cover dispatcher boundaries
-description: A capability command's --json envelope guarantee is void unless the generic CLI dispatcher wraps the whole dispatch path, including manifest discovery, trust checks, command decoding, non-match fallthrough, and child spawn failures.
+title: JSON contracts must cover dispatcher and process boundaries
+description: A command's --json envelope guarantee is void unless the JSON-aware boundary wraps the whole path, including dispatcher setup, pre-report throws, child spawn failures, and spawned children's stdout.
 tags: [cli, json, contract, capabilities]
-timestamp: 2026-07-24
+timestamp: 2026-07-26
 ---
 
 # Lesson
@@ -16,7 +16,10 @@ unknown namespaces, and malformed `instance.json` JSON.
 
 This extends the [JSON-mode CLI contract](/lessons/json-mode-cli-contract.md):
 all layers that can reach stdout need the JSON boundary, not only the final
-command implementation.
+command implementation. Later review of `install --json` in `5fd9158` found
+the same class of contract leak inside the command path: inherited child stdio
+can print before the envelope, and pre-report exceptions can leave empty stdout
+with only a stack trace.
 
 Patterns that generalized from the fix:
 
@@ -35,9 +38,17 @@ Patterns that generalized from the fix:
   starts;
 - move fallible module-top-level initialization, such as inherited
   `OAS_SETTINGS` parsing, inside the command boundary;
+- keep command implementations as thin JSON-aware boundaries around their full
+  fallible path, so exceptions thrown before the normal report call still emit
+  `{schemaVersion, ok:false, error:{code,message}}` in JSON mode, preserving
+  `e.code` when present;
+- in JSON mode, do not let spawned children inherit stdout: route child stdout
+  and stderr to the parent's stderr, for example `stdio: ["ignore", 2, 2]`,
+  while human mode may keep `inherit`;
 - test the contract end-to-end through `CLI <namespace> <subcommand> --json`,
   because directly invoking a capability executable cannot see dispatcher
-  failures.
+  failures, and add noisy-child shims that prove `JSON.parse(r.stdout)` works
+  on the whole stdout for both successful and failing child exits.
 
 Also, `oas.okf` is a fundamental-layer capability: test configs that need it
 must declare it under `capabilities.layers.knowledge`, not `additive`, or the
