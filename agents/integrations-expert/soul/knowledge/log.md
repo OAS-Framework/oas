@@ -1,5 +1,9 @@
 # Knowledge Log
 
+## 2026-07-26
+* **Harvest**: promoted [Script-free npm materialization still installs peer dependencies](/lessons/npm-ci-materializes-peer-dependency-closure.md) as a Lesson about npm peer dependency closure materialization during script-free package checks — harvested from integrations-expert-official-packages-staging.
+* **Update**: skills/integration-craft — added npm-backed external package materialization guidance for script-free installs, peer/optional dependency inspection, full production audit, advisory escalation, and `node_modules` cleanup.
+
 ## 2026-07-11
 * **Update**: [oas-jira settings contract](/decisions/oas-jira-settings-contract.md) now uses canonical capability binding settings and `capabilityMeta` instance metadata.
 * **Harvest**: promoted [Capability artifact paths must stay inside the integrity boundary](/lessons/capability-artifact-paths-must-be-integrity-bounded.md) as a Lesson about keeping locked external capability paths within the hashed artifact — harvested from integrations-expert-capability-packages-review.

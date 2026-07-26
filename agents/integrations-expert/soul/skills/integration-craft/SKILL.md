@@ -67,6 +67,13 @@ commands must stay beneath the real package root. Reject paths or symlinks that
 escape the artifact unless a bundled framework package has an explicit trusted
 exception.
 
+For independently released npm-backed OAS packages, proving a checked lock is
+not just “install without scripts.” Run `npm ci --ignore-scripts`, then inspect
+`npm ls` for automatically installed peer or optional dependencies and audit the
+complete production closure. Record or escalate advisories instead of applying
+an unreviewed override, and remove generated `node_modules` after proving clean
+materialization so only the checked lock remains.
+
 ## Targeting belongs to config
 
 ```yaml
