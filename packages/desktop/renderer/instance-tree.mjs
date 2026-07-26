@@ -2,8 +2,231 @@ export function collapseKey(workspace, instance) {
   return `${workspace || ""}\u0000${instance}`;
 }
 
+/** Names an instance is directly related to (undirected edge endpoints):
+ * its spawn parent plus its explicit sibling link. Kernel contract
+ * (feature/agent-relations, final): `parentInstance` and `siblingInstance`
+ * (string, only set when a sibling relation was declared against a ROOT
+ * instance — a sibling of a non-root simply shares the anchor's parent).
+ * Absent fields contribute no edges. */
+export function instanceLinks(instance) {
+  const out = [];
+  if (instance.parentInstance) out.push(instance.parentInstance);
+  if (instance.siblingInstance) out.push(instance.siblingInstance);
+  return out.filter((name) => name && name !== instance.instance);
+}
+
+/** Stable identity for one roster instance. Instance NAMES are only unique
+ * within one agents root — the kernel permits duplicate names across agent
+ * dirs/team repos — so graph code must never key nodes by bare name (a
+ * duplicate would silently hide a live instance; merged-state review
+ * f7c5769). The canonical home path is unique per instance; agentsRoot+name
+ * is the fallback; bare name only when the roster carries neither. */
+export function instanceId(instance) {
+  if (instance.home) return String(instance.home);
+  if (instance.agentsRoot) return `${instance.agentsRoot}\u0000${instance.instance}`;
+  return String(instance.instance);
+}
+
+/** Resolve one relation-edge NAME to the id of the instance it means.
+ * Relation names come from instance.json lineage, which is recorded within
+ * one deployment scope — so a name resolves to the same-agentsRoot instance
+ * first; a name that is globally unique resolves cross-root; an AMBIGUOUS
+ * name — no same-root candidate, or MORE THAN ONE same-root candidate
+ * (intra-root duplicates are legal and inherently ambiguous; merged-state
+ * review @7dd1e7b) — resolves to nothing (fail safe: two separate clusters,
+ * never a wrong merge, a false edge, or a hidden node).
+ * EXPORTED as the one shared resolver — ux-designer's hierarchy/cluster
+ * maps must use the same semantics rather than re-implementing them.
+ * byName: Map<name, instance[]> over the same roster. */
+export function resolveLinkId(fromInstance, name, byName) {
+  const candidates = byName.get(name);
+  if (!candidates || !candidates.length) return null;
+  if (candidates.length === 1) return instanceId(candidates[0]);
+  const sameRoot = candidates.filter((c) => c.agentsRoot && c.agentsRoot === fromInstance.agentsRoot);
+  return sameRoot.length === 1 ? instanceId(sameRoot[0]) : null;
+}
+
+/** Group instances into agent CLUSTERS — connected components of the
+ * undirected relation graph (parent/child spawn edges + sibling links).
+ * Unrelated instances are single-node clusters. Within a cluster the
+ * parent/child tree ordering is kept (parent-first walk with depth);
+ * cluster members related only by sibling links sit at depth 0.
+ * Nodes are keyed by instanceId (composite identity), never bare name —
+ * duplicate names across repos render as distinct nodes.
+ * Returns [{ key, instances: [{...instance, depth}] }] with clusters ranked
+ * running-first then by first member name, matching the roster sort. */
+export function clusterInstances(instances, { links = instanceLinks } = {}) {
+  const byId = new Map(instances.map((i) => [instanceId(i), i]));
+  const byName = new Map();
+  for (const i of instances) {
+    if (!byName.has(i.instance)) byName.set(i.instance, []);
+    byName.get(i.instance).push(i);
+  }
+  // undirected adjacency over IDs — unresolvable/ambiguous edges are ignored
+  const adj = new Map(instances.map((i) => [instanceId(i), new Set()]));
+  const parentIdOf = new Map(); // id -> resolved parent id (tree ordering)
+  for (const i of instances) {
+    const id = instanceId(i);
+    if (i.parentInstance) {
+      const pid = resolveLinkId(i, i.parentInstance, byName);
+      if (pid && pid !== id) parentIdOf.set(id, pid);
+    }
+    for (const other of links(i)) {
+      const oid = resolveLinkId(i, other, byName);
+      if (!oid || oid === id) continue;
+      adj.get(id).add(oid);
+      adj.get(oid).add(id);
+    }
+  }
+  const rank = (a, b) => (a.running === b.running ? a.instance.localeCompare(b.instance) : a.running ? -1 : 1);
+  const seen = new Set();
+  const clusters = [];
+  for (const start of [...instances].sort(rank)) {
+    if (seen.has(instanceId(start))) continue;
+    // collect the component
+    const members = [];
+    const queue = [instanceId(start)];
+    seen.add(instanceId(start));
+    while (queue.length) {
+      const id = queue.shift();
+      members.push(byId.get(id));
+      for (const next of adj.get(id) || []) if (!seen.has(next)) { seen.add(next); queue.push(next); }
+    }
+    // parent-first tree order INSIDE the component (cycle-safe: the walk
+    // visits each member once; leftovers append at depth 0)
+    const memberIds = new Set(members.map(instanceId));
+    const kids = (p) => members.filter((i) => parentIdOf.get(instanceId(i)) === instanceId(p));
+    const roots = members.filter((i) => {
+      const pid = parentIdOf.get(instanceId(i));
+      return !pid || !memberIds.has(pid);
+    });
+    roots.sort(rank);
+    const ordered = [];
+    const placed = new Set();
+    const walk = (i, depth) => {
+      if (placed.has(instanceId(i))) return;
+      placed.add(instanceId(i));
+      ordered.push({ ...i, depth });
+      kids(i).sort(rank).forEach((k) => walk(k, depth + 1));
+    };
+    roots.forEach((r) => walk(r, 0));
+    for (const i of [...members].sort(rank)) walk(i, 0); // malformed cycles must not hide members
+    // Deterministic cluster label: the lexically-smallest ROOT name —
+    // independent of liveness, so the visible cluster name does not flip
+    // when a different member starts/stops running (review f921f7d nit).
+    // Running-first `rank` still governs display ORDER within the cluster.
+    const rootNames = (roots.length ? roots : members).map((i) => i.instance).sort();
+    clusters.push({ key: rootNames[0], instances: ordered });
+  }
+  return clusters;
+}
+
+/** Anonymous cluster boundary for the instances sidebar (human re-test on
+ * feature/agent-relations): NO visible glyph or name — the group reads from
+ * spacing — but the element keeps role=separator + an aria-label with the
+ * member count so AT users still get the boundary. Importable so the
+ * regression exercises the exact builder the shell uses. */
+export function clusterSeparator(doc, memberCount) {
+  const el = doc.createElement("div");
+  el.className = "ctx-cluster-sep";
+  el.setAttribute("role", "separator");
+  el.setAttribute("aria-label", `Agent cluster of ${memberCount} related instances`);
+  return el;
+}
+
+/** Find the roster instance a UI reference means. References carry the
+ * display name plus whatever identity the caller knows (home/agentsRoot —
+ * sidebar rows know both; older callers pass a bare name). Identity match
+ * wins; bare names resolve only when unambiguous in the roster — an
+ * ambiguous bare name returns null rather than the first same-named match
+ * (which could open the WRONG agents root's tmux session; review 46f3fdc).
+ * Importable so the duplicate-name regression exercises this exact layer. */
+export function findRosterInstance(instances, ref) {
+  const name = typeof ref === "string" ? ref : ref.instance;
+  const home = typeof ref === "string" ? undefined : ref.home;
+  const root = typeof ref === "string" ? undefined : ref.agentsRoot;
+  if (home) {
+    const byHome = instances.find((i) => i.home === home);
+    if (byHome) return byHome;
+  }
+  if (root) {
+    const byRoot = instances.find((i) => i.instance === name && i.agentsRoot === root);
+    if (byRoot) return byRoot;
+  }
+  const named = instances.filter((i) => i.instance === name);
+  return named.length === 1 ? named[0] : null;
+}
+
+/** Terminal-tab dedup key for an instance reference: workspace-scoped and
+ * IDENTITY-scoped, so two same-named instances from different agents roots
+ * are different terminals (review 46f3fdc). Bare-name refs key by name
+ * (legacy callers; findRosterInstance already refuses ambiguous names). */
+export function terminalKey(workspace, ref) {
+  const id = typeof ref === "string" ? ref : instanceId(ref);
+  return `term:${workspace}:${id}`;
+}
+
+/** Shortest DISTINGUISHING path suffixes for a set of agents roots.
+ * Duplicate instance names are told apart by where they home, but naive
+ * single-segment tags collide (/a/project/agents and /b/project/agents both
+ * render "project"). Grow each root's suffix segment-by-segment until it is
+ * unique within the set; fall back to the full root. Returns Map<root, tag>.
+ * (Review cbd5bb3: duplicate option labels must actually differ.) */
+export function distinguishingRootTags(roots) {
+  const uniq = [...new Set(roots.filter(Boolean).map(String))];
+  const segs = new Map(uniq.map((r) => [r, r.split("/").filter(Boolean)]));
+  const tags = new Map();
+  for (const root of uniq) {
+    const mine = segs.get(root);
+    // skip the trailing "agents"-style leaf shared by every root: start the
+    // suffix ABOVE the leaf, then extend upward until unique
+    let take = 2; // leaf + one parent
+    let tag;
+    for (; take <= mine.length; take++) {
+      tag = mine.slice(-take, -1).join("/");
+      const clash = uniq.some((other) => other !== root
+        && segs.get(other).slice(-take, -1).join("/") === tag);
+      if (!clash) break;
+    }
+    tags.set(root, take > mine.length || !tag ? root : tag);
+  }
+  return tags;
+}
+
+/** Resolve a terminal-open reference and mint its canonical dedup key — in
+ * that ORDER (review 7d740f9): the key must derive from the RESOLVED roster
+ * instance, never the caller's ref shape, so a bare-name open and a sidebar
+ * object open of the same identity share one tab, and a stale bare-name
+ * tab can never be activated once the name has become ambiguous (resolution
+ * refuses first). Returns { inst, key } or { error: "ambiguous"|"unknown" }.
+ * Importable so the ordering regression exercises this exact layer. */
+export function resolveTerminalOpen(instances, ref, workspace) {
+  const name = typeof ref === "string" ? ref : ref.instance;
+  const inst = findRosterInstance(instances, ref);
+  if (!inst) {
+    const dup = instances.filter((i) => i.instance === name).length > 1;
+    return { error: dup ? "ambiguous" : "unknown", name };
+  }
+  return { inst, key: terminalKey(workspace, inst), name };
+}
+
+/** Whether an instance has children IN ITS OWN identity — parent edges
+ * resolve through resolveLinkId, so a childless parent whose NAME is shared
+ * by a parent in another agents root gets no disclosure control (review
+ * 7d740f9). Accepts the full instance object; the legacy bare-name call
+ * shape (string) keeps name matching for rosters without identity fields. */
 export function hasInstanceChildren(instances, instance) {
-  return instances.some((candidate) => candidate.parentInstance === instance);
+  if (typeof instance === "string") {
+    return instances.some((candidate) => candidate.parentInstance === instance);
+  }
+  const byName = new Map();
+  for (const i of instances) {
+    if (!byName.has(i.instance)) byName.set(i.instance, []);
+    byName.get(i.instance).push(i);
+  }
+  const id = instanceId(instance);
+  return instances.some((candidate) => candidate.parentInstance
+    && resolveLinkId(candidate, candidate.parentInstance, byName) === id);
 }
 
 export function instanceRepoLabel(instance) {
@@ -102,11 +325,20 @@ export function treeGuideSegments(items, item) {
   });
 }
 
-/** Include matching instances plus their ancestor paths, in source order. */
+/** Include matching instances plus their ancestor paths, in source order.
+ * IDENTITY-aware (merged-state review @3e76616): inclusion keys by
+ * instanceId and ancestors resolve through resolveLinkId over the FULL
+ * roster — a same-named instance in another root never leaks into this
+ * one's filter results, and an ambiguous parent edge includes nothing. */
 export function filterInstanceTree(instances, query) {
   const needle = String(query || "").trim().toLowerCase();
   if (!needle) return instances;
-  const byName = new Map(instances.map((item) => [item.instance, item]));
+  const byId = new Map(instances.map((item) => [instanceId(item), item]));
+  const byName = new Map();
+  for (const item of instances) {
+    if (!byName.has(item.instance)) byName.set(item.instance, []);
+    byName.get(item.instance).push(item);
+  }
   const included = new Set();
   for (const item of instances) {
     const matches = [item.instance, item.agent, item.repoName, item.task]
@@ -114,27 +346,56 @@ export function filterInstanceTree(instances, query) {
     if (!matches) continue;
     let cursor = item;
     const seen = new Set();
-    while (cursor && !seen.has(cursor.instance)) {
-      included.add(cursor.instance);
-      seen.add(cursor.instance);
-      cursor = byName.get(cursor.parentInstance);
+    while (cursor) {
+      const id = instanceId(cursor);
+      if (seen.has(id)) break;
+      included.add(id);
+      seen.add(id);
+      const pid = cursor.parentInstance ? resolveLinkId(cursor, cursor.parentInstance, byName) : null;
+      cursor = pid ? byId.get(pid) : null;
     }
   }
-  return instances.filter((item) => included.has(item.instance));
+  return instances.filter((item) => included.has(instanceId(item)));
+}
+
+/** Cluster the FULL roster, then project each cluster to its visible
+ * members — never cluster a filtered subset: dropping roster rows can turn
+ * a globally AMBIGUOUS relation edge into a false unique edge, silently
+ * re-linking nodes while the user types (merged-state review @3e76616).
+ * Cluster order and member depths come from the full-roster computation;
+ * clusters with no visible member disappear. */
+export function visibleClusters(allInstances, visibleInstances, { links = instanceLinks } = {}) {
+  const visibleIds = new Set(visibleInstances.map((i) => instanceId(i)));
+  return clusterInstances(allInstances, { links })
+    .map((c) => ({ ...c, instances: c.instances.filter((i) => visibleIds.has(instanceId(i))) }))
+    .filter((c) => c.instances.length);
 }
 
 /** Whether an item remains visible under VS Code-style collapsed ancestors.
  * Filtering temporarily reveals matching paths without mutating the user's
  * persisted collapse state. Parent traversal is cycle-safe. */
+/** Whether an item remains visible under VS Code-style collapsed ancestors.
+ * Filtering temporarily reveals matching paths without mutating the user's
+ * persisted collapse state. Parent traversal is cycle-safe and
+ * IDENTITY-aware: collapse keys are minted from instanceId, and parent
+ * names resolve through resolveLinkId so a collapsed duplicate name in
+ * another agents root can never hide this root's subtree (review 46f3fdc). */
 export function instanceVisibleInTree(instance, allInstances, collapsed, workspace, filtering = false) {
   if (filtering) return true;
-  const byName = new Map(allInstances.map((item) => [item.instance, item]));
-  const seen = new Set([instance.instance]);
-  let parentName = instance.parentInstance;
-  while (parentName && !seen.has(parentName)) {
-    if (collapsed.has(collapseKey(workspace, parentName))) return false;
-    seen.add(parentName);
-    parentName = byName.get(parentName)?.parentInstance;
+  const byId = new Map(allInstances.map((item) => [instanceId(item), item]));
+  const byName = new Map();
+  for (const item of allInstances) {
+    if (!byName.has(item.instance)) byName.set(item.instance, []);
+    byName.get(item.instance).push(item);
+  }
+  const seen = new Set([instanceId(instance)]);
+  let cursor = instance;
+  while (cursor?.parentInstance) {
+    const pid = resolveLinkId(cursor, cursor.parentInstance, byName);
+    if (!pid || seen.has(pid)) break;
+    if (collapsed.has(collapseKey(workspace, pid))) return false;
+    seen.add(pid);
+    cursor = byId.get(pid);
   }
   return true;
 }
@@ -169,13 +430,13 @@ export function captureTreeRenderState(listEl) {
 
 /** Filtering force-expands matching paths. Its disclosure remains truthful but
  * inert, so clicking cannot mutate persisted collapse state invisibly. */
-export function configureDisclosure(button, { instance, collapsed, filtering, onToggle }) {
+export function configureDisclosure(button, { instance, label, collapsed, filtering, onToggle }) {
   const expanded = filtering || !collapsed;
   button.dataset.treeInstance = instance;
   button.dataset.treeControl = "disclosure";
   button.textContent = expanded ? "▾" : "▸";
   button.setAttribute("aria-expanded", String(expanded));
-  button.setAttribute("aria-label", `${expanded ? "Collapse" : "Expand"} ${instance}`);
+  button.setAttribute("aria-label", `${expanded ? "Collapse" : "Expand"} ${label || instance}`);
   button.disabled = !!filtering;
   if (filtering) {
     button.setAttribute("aria-disabled", "true");
@@ -193,4 +454,22 @@ export function rosterResponseOwns({ dispatchWorkspace, responseWorkspace, curre
   if (dispatchGeneration !== currentGeneration) return false;
   return currentWorkspace === dispatchWorkspace
     || (!dispatchWorkspace && currentWorkspace === responseWorkspace);
+}
+
+/** Resolve the roster keyboard handler's ArrowLeft target: the parent
+ * instanceId of the row whose data-tree-instance is `id`, or null.
+ * Identity-aware end to end (review 96b037b): the current row is found by
+ * instanceId — rows carry composite ids, so a bare-name lookup never
+ * matches — and the parent edge resolves through resolveLinkId, so a
+ * duplicate parent name in another root (or intra-root) can never steal
+ * focus: ambiguity yields null and the key is a no-op. */
+export function rosterParentId(instances, id) {
+  const me = instances.find((i) => instanceId(i) === id);
+  if (!me?.parentInstance) return null;
+  const byName = new Map();
+  for (const i of instances) {
+    if (!byName.has(i.instance)) byName.set(i.instance, []);
+    byName.get(i.instance).push(i);
+  }
+  return resolveLinkId(me, me.parentInstance, byName);
 }

@@ -154,3 +154,68 @@ test("cliHarvest: runs `okf harvest --json` with cwd fixed to the given instance
   assert.equal(seen.opts.cwd, "/homes/dev-1", "cwd is the resolved instance home");
   assert.equal(seen.opts.shell, false);
 });
+
+/* ── spawn-time agent relations (feature/agent-relations) ── */
+
+test("spawnArgv: relation + relativeTo pass through as a validated pair", () => {
+  const argv = spawnArgv("dev", "/ws", "/t/TASK.md", { relation: "child", relativeTo: "coordinator-1" });
+  assert.deepEqual(argv, [
+    "spawn", "dev", "--dir", "/ws", "--task-file", "/t/TASK.md",
+    "--relation", "child", "--relative-to", "coordinator-1", "--json",
+  ]);
+  for (const relation of ["sibling", "parent"]) {
+    const a = spawnArgv("dev", "/ws", "/t/TASK.md", { relation, relativeTo: "x-1" });
+    assert.ok(a.includes("--relation") && a.includes(relation) && a.includes("--relative-to"));
+  }
+});
+
+test("spawnArgv: 'unrelated' (or absent) forwards NO relation flags", () => {
+  for (const opts of [{}, { relation: "unrelated" }, { relation: "" }, { relation: undefined }]) {
+    const argv = spawnArgv("dev", "/ws", "/t/TASK.md", opts);
+    assert.ok(!argv.includes("--relation") && !argv.includes("--relative-to"), JSON.stringify(opts));
+  }
+});
+
+test("spawnArgv: relation/relativeTo must travel together; hostile values rejected", () => {
+  assert.throws(() => spawnArgv("dev", "/ws", "/t/TASK.md", { relation: "child" }), /requires --relative-to/);
+  assert.throws(() => spawnArgv("dev", "/ws", "/t/TASK.md", { relativeTo: "x-1" }), /requires a relation/);
+  for (const opts of [
+    { relation: "--json", relativeTo: "x" },       // option-shaped / not in enum
+    { relation: "boss", relativeTo: "x" },         // unknown relation
+    { relation: "child", relativeTo: "--evil" },   // option-shaped instance
+    { relation: "child", relativeTo: "a b" },      // not an instance slug
+  ]) {
+    assert.throws(() => spawnArgv("dev", "/ws", "/t/TASK.md", opts), /invalid/, JSON.stringify(opts));
+  }
+});
+
+test("cliSpawn: relation pair reaches the CLI argv; bad pairs resolve E_BAD_ARGS without exec", async () => {
+  let seen = null;
+  const exec = (bin, argv, o, cb) => { seen = argv; cb(null, JSON.stringify({ schemaVersion: 1, ok: true, result: { instance: "dev-1" } })); };
+  const io = { exec, mkdtempSync: () => "/t", openSync: () => 3, writeSync: () => {}, closeSync: () => {}, rmSync: () => {}, tmpdir: () => "/tmp" };
+  const env = await cliSpawn("/abs/oas", { agent: "dev", workspaceDir: "/ws", relation: "parent", relativeTo: "worker-2" }, io);
+  assert.equal(env.ok, true);
+  assert.ok(seen.includes("--relation") && seen.includes("parent") && seen.includes("--relative-to") && seen.includes("worker-2"));
+
+  seen = null;
+  const bad = await cliSpawn("/abs/oas", { agent: "dev", workspaceDir: "/ws", relation: "child" }, io);
+  assert.equal(bad.ok, false);
+  assert.equal(bad.error.code, "E_BAD_ARGS");
+  assert.equal(seen, null, "invalid relation pair never reaches the CLI");
+});
+
+test("spawnArgv: relativeRoot rides with the relation pair as --relative-root; alone it is rejected", () => {
+  const argv = spawnArgv("dev", "/ws", "/t/TASK.md",
+    { relation: "child", relativeTo: "coord-1", relativeRoot: "/ws1/agents" });
+  const at = argv.indexOf("--relative-root");
+  assert.ok(at > 0, "--relative-root forwarded");
+  assert.equal(argv[at + 1], "/ws1/agents");
+  // pair without root still valid (root is optional on the wire)
+  assert.ok(!spawnArgv("dev", "/ws", "/t/TASK.md", { relation: "child", relativeTo: "x" }).includes("--relative-root"));
+  // root alone is meaningless — rejected like an unpaired relative-to
+  assert.throws(() => spawnArgv("dev", "/ws", "/t/TASK.md", { relativeRoot: "/ws1/agents" }),
+    /--relative-root requires/, "root without the relation pair rejected");
+  // option-shaped root rejected
+  assert.throws(() => spawnArgv("dev", "/ws", "/t/TASK.md",
+    { relation: "child", relativeTo: "x", relativeRoot: "--evil" }), /invalid/);
+});

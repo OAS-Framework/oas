@@ -70,9 +70,14 @@ fresh reviewer on the integrated diff:
 
 ```bash
 oas spawn reviewer --work attached --work-dir <integration-worktree> \
-  --purpose "<feature-short-sha>" --parent "$OAS_INSTANCE" \
+  --parent "$OAS_INSTANCE" \
+  --purpose "<feature-short-sha>" \
   --task "Review the merged feature diff origin/main..feature/<name>. Report to <your-instance> per your operating loop."
 ```
+
+(The integration worktree is yours, not an instance's `<home>/work`, so the
+owner cannot be inferred — `--parent "$OAS_INSTANCE"` names you explicitly;
+attached agents are always children of their owner.)
 
 Go idle; the verdict arrives by aweb mail. `NEEDS CHANGES` → route findings
 to the owning developer(s), re-merge, re-gate, re-review.
@@ -86,7 +91,7 @@ to the owning developer(s), re-merge, re-gate, re-review.
   maintainer instance** (even if another oas-expert is live):
 
   ```bash
-  oas spawn oas-expert --purpose "pr<n>" --parent "$OAS_INSTANCE" \
+  oas spawn oas-expert --purpose "pr<n>" --relation parent --relative-to "$OAS_INSTANCE" \
     --task "Maintainer review of PR #<n> (feature/<name>): run your pr-review gates. You own this PR to its terminal outcome — on RETURN stay alive and idle for my fixed-mail, re-review, repeat; on merge/close record the delivery in your stewardship knowledge and retire yourself. Report verdicts to <your-instance> by aweb mail."
   ```
 

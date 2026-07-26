@@ -52,10 +52,36 @@ const SPAWN_ARG_RULES = {
   work:    { flag: "--work",    re: /^(worktree|checkout|attached|workspace)$/ },
   runtime: { flag: "--runtime", re: /^(pi|claude)$/ },
   model:   { flag: "--model",   re: /^[^-][^\0]*$/ },                       // model pattern — not option-shaped
+  // Spawn-time agent relations (feature/agent-relations): the kernel links
+  // the new instance to an existing one. "unrelated" is the default and is
+  // NEVER forwarded — the CLI treats absence as unrelated.
+  relation:   { flag: "--relation",    re: /^(child|sibling|parent)$/ },
+  relativeTo: { flag: "--relative-to", re: /^[a-z0-9][a-z0-9._-]*$/i },     // instance-name slug
+  // Anchor disambiguation (kernel contract addition): the agents root the
+  // anchor homes in. Names shadow across roots, so the desktop ALWAYS sends
+  // the pair when it spawns related — path-shaped, never option-shaped.
+  relativeRoot: { flag: "--relative-root", re: /^[^-][^\0]*$/ },
 };
 export function spawnArgv(agent, workspaceDir, taskFile, opts = {}) {
   const agentName = String(agent);
   if (agentName.startsWith("-")) { const e = new Error(`invalid agent name "${agentName}"`); e.code = "E_BAD_ARGS"; throw e; }
+  // Relation flags travel as a PAIR: a relation needs a reference instance
+  // and a reference instance is meaningless without a relation. "unrelated"
+  // normalizes to absence before the pairing check.
+  if (opts.relation === "unrelated" || opts.relation === "") opts = { ...opts, relation: undefined };
+  const hasRelation = opts.relation !== undefined && opts.relation !== null;
+  const hasRef = opts.relativeTo !== undefined && opts.relativeTo !== null && opts.relativeTo !== "";
+  if (hasRelation !== hasRef) {
+    const e = new Error(hasRelation
+      ? "a relation requires --relative-to <instance>"
+      : "--relative-to requires a relation (child|sibling|parent)");
+    e.code = "E_BAD_ARGS"; throw e;
+  }
+  // relativeRoot rides along with the pair only — alone it is meaningless
+  if (!hasRef && opts.relativeRoot !== undefined && opts.relativeRoot !== null && opts.relativeRoot !== "") {
+    const e = new Error("--relative-root requires --relation and --relative-to");
+    e.code = "E_BAD_ARGS"; throw e;
+  }
   const argv = ["spawn", agentName, "--dir", String(workspaceDir), "--task-file", String(taskFile)];
   for (const [key, rule] of Object.entries(SPAWN_ARG_RULES)) {
     const v = opts[key];

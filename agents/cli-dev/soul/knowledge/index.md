@@ -12,7 +12,8 @@ read what the current task needs, not everything.
 
 ## Decisions
 
-* [decisions/spawn-lineage-explicit-only.md](decisions/spawn-lineage-explicit-only.md) - parentInstance now comes only from an explicit --parent/o.parent inside the target deployment or the attached-mode workDir-owner fallback; env vars are never consulted, and cross-deployment spawns stay operator-origin.
+* [decisions/spawn-lineage-explicit-only.md](decisions/spawn-lineage-explicit-only.md) - parentInstance now comes only from an explicit relation/--parent inside the target deployment or the attached-mode owner binding; env vars are never consulted, and cross-deployment spawns stay operator-origin.
+* [decisions/attached-spawns-child-of-work-owner.md](decisions/attached-spawns-child-of-work-owner.md) - attached work mode always makes the new agent a child of the verified work-tree owner; contradictory relations are rejected.
 
 ## Architecture
 
@@ -21,6 +22,7 @@ read what the current task needs, not everything.
 * [architecture/work-modes-and-workspace-mode.md](architecture/work-modes-and-workspace-mode.md) - the four work modes, packaged briefings as the contract, and workspace mode's boundary requirement and no-branch semantics.
 * [architecture/capability-defined-agents.md](architecture/capability-defined-agents.md) - manifest `agents:` souls resolving on declaration, and the _dir/_soulDir split for instance homing.
 * [architecture/model-preference-lists.md](architecture/model-preference-lists.md) - comma-separated model preferences probed via `pi --list-models` with first-entry fallback.
+* [architecture/spawn-relations-lineage-fields.md](architecture/spawn-relations-lineage-fields.md) - final child/sibling/parent/unrelated semantics, sparse lineage fields, attached-owner binding, ambiguity validation, and retirement splice behavior.
 
 ## Lessons
 
@@ -28,6 +30,7 @@ read what the current task needs, not everything.
 * [lessons/marketplace-trust-and-hoisted-paths.md](lessons/marketplace-trust-and-hoisted-paths.md) - marketplace-over-bundled migration: trust at acquisition and the lock-sourced hoisted-path exemption.
 * [lessons/init-acquires-before-config-exists.md](lessons/init-acquires-before-config-exists.md) - mid-init the config chain cannot rediscover a just-acquired capability; use the acquisition result directly.
 * [lessons/team-scope-and-cross-repo-spawn.md](lessons/team-scope-and-cross-repo-spawn.md) - team boundary scan, cross-repo spawn as a CLI resolution change, and why instance lookups stay local-first.
+* [lessons/team-agent-roots-nonexistent-roots.md](lessons/team-agent-roots-nonexistent-roots.md) - teamAgentRoots deliberately retains nonexistent agents/ anchors for all-local sibling scopes; deployment-wide scans must not existence-filter them away.
 * [lessons/task-flag-boolean-crash.md](lessons/task-flag-boolean-crash.md) - bin/oas.mjs flag() yields boolean true when the next argv token starts with "--"; oas spawn dev --task --purpose x passed task=true into spawnInstance and crashed mid-scaffold at task.trim(), while task delivery itself was never broken.
 * [lessons/capability-source-edits-require-lock-refresh.md](lessons/capability-source-edits-require-lock-refresh.md) - edits under capabilities/<pkg>/ change capabilityIntegrity, so clean-clone CI fails restore unless the package version and matching oas-lock.json source/version/integrity are refreshed in the same commit.
 * [lessons/json-mode-cli-contract.md](lessons/json-mode-cli-contract.md) - when a CLI command grows a machine-readable --json mode for an external consumer, success and failure must be one stdout JSON envelope with stable error codes, and all human progress prose must move to stderr in JSON mode.
@@ -37,11 +40,20 @@ read what the current task needs, not everything.
 * [lessons/aweb-identity-mismatch-recipient-cache.md](lessons/aweb-identity-mismatch-recipient-cache.md) - When aweb mail arrives as trust_status=identity_mismatch but read-only doctors pass on both sender and recipient, treat it as a recipient-side cached-key or verification defect rather than evidence of compromise.
 * [lessons/exact-tag-detached-head-refspec.md](lessons/exact-tag-detached-head-refspec.md) - Switching a release workflow checkout from main to github.sha preserves exact-tag integrity but leaves the runner in detached HEAD, so version-bump pushes must use a fully-qualified destination such as HEAD:refs/heads/<branch>.
 * [lessons/release-bump-pr-org-policy-block.md](lessons/release-bump-pr-org-policy-block.md) - A release can publish npm and GitHub Release successfully while the final version-bump PR is blocked by org policy, so publication-first ordering keeps the release live and leaves only manual PR rescue.
+* [lessons/kernel-validation-before-side-effects.md](lessons/kernel-validation-before-side-effects.md) - spawnInstance options that can be rejected (relations, anchors, relation sugar conflicts) must be checked in their raw caller shape before normalization and before mkdir/hooks because CLI prechecks do not protect direct kernel callers.
+* [lessons/cross-instance-writes-commit-last.md](lessons/cross-instance-writes-commit-last.md) - Spawn-style operations need late atomic cross-instance metadata writes, rollback that compensates launched/scaffolded side effects, and truthful diagnostics for incomplete cleanup.
+* [lessons/rollback-probes-argv-and-fail-closed.md](lessons/rollback-probes-argv-and-fail-closed.md) - Public branch/ref values must never be interpolated into shell probes; cleanup verification needs three outcomes, and unverifiable checks belong in incomplete rollback diagnostics.
+* [lessons/canonical-worktree-verification.md](lessons/canonical-worktree-verification.md) - Git canonicalizes symlinked worktree paths, so rollback checks must capture the work realpath immediately after add, retain it through hooks and compensation, and compare exact NUL-delimited worktree records.
+* [lessons/names-are-not-identity.md](lessons/names-are-not-identity.md) - Cross-instance references by bare name must be resolved from the referrer's context and realpath-compared before acting; path-identified owners need path-first matching and name round-trip verification before recording.
+* [lessons/path-first-resolution-round-trip.md](lessons/path-first-resolution-round-trip.md) - When a path identifies an instance but metadata records a name, search candidate homes by path first and accept the name only if it resolves back to the same home from the consumer's context.
+* [lessons/lineage-edge-ambiguity-posture.md](lessons/lineage-edge-ambiguity-posture.md) - Any operation recording or copying a bare-name cross-instance edge needs all-match enumeration, rejection of intra-root duplicates, and round-trip validation from every context that will interpret the stored name.
+* [lessons/overlapping-instance-home-scans-dedupe.md](lessons/overlapping-instance-home-scans-dedupe.md) - listAgents(root) already includes local souls from localAgentBases(root), so all-match instance enumerators that also scan localAgentBases for capability fallbacks must dedupe by canonical home or local instances look duplicated.
+* [lessons/relation-policy-migration-and-retire-splice.md](lessons/relation-policy-migration-and-retire-splice.md) - Introducing or changing spawn relation policy must update every agent-facing spawn recipe and repair mutated lineage on both sides, across the full scope where references can be created.
 
 ## Playbooks
 
 * [playbooks/release-tag-driven-ci.md](playbooks/release-tag-driven-ci.md) - Releases are cut by pushing a vX.Y.Z tag on main which makes CI bump and publish packages; local version bumps break the workflow, retries must skip already-published artifacts, and verification means installing the published artifact.
-* [playbooks/test-conventions.md](playbooks/test-conventions.md) - test/capabilities.test.mjs house style: temp dirs, fixtureSoul, fakeRuntimes, spawnSync of the CLI.
+* [playbooks/test-conventions.md](playbooks/test-conventions.md) - Kernel and CLI tests run node:test against temp directories with fixture souls, fake/runtime tmux shims on PATH, spawnSync of bin/oas.mjs for CLI behavior, and regression coverage at the layer where bugs occurred.
 
 ## References
 

@@ -109,7 +109,7 @@ test("ws generation: a deferred roster from workspace A never paints after switc
   const fakeEl = () => ({
     style: {}, dataset: {}, classList: { toggle() {}, add() {}, remove() {} },
     innerHTML: "", textContent: "", title: "",
-    append() {}, appendChild() {}, remove() {},
+    append() {}, appendChild() {}, prepend() {}, remove() {},
     querySelector: () => null, querySelectorAll: () => [],
     addEventListener() {}, setAttribute() {},
   });
@@ -146,4 +146,232 @@ test("refresh after teardown (alive=false) never mutates state", async () => {
   gate[0]({ ok: true, status: 200, json: async () => ({ instances: [{ instance: "late", running: true }] }) });
   await inFlight;
   assert.equal(s.panel.instances.length, 0, "post-unmount response must not paint");
+});
+
+test("layoutForest tolerates sibling-link fields — every instance placed, parent edges intact", () => {
+  // feature/agent-relations: rosters may carry sibling-link metadata; the
+  // hierarchy layout is parentInstance-driven and must neither crash nor
+  // drop sibling-linked nodes (they lay out as separate roots).
+  const { nodes } = hier.layoutForest([
+    { instance: "coord-1", running: true },
+    { instance: "dev-a", parentInstance: "coord-1", running: true },
+    { instance: "dev-b", parentInstance: "coord-1", running: false },
+    { instance: "peer-1", siblingInstance: "peer-2", relation: "sibling", relativeTo: "peer-2", running: false },
+    { instance: "peer-2", siblingInstance: "peer-1", running: false },
+  ]);
+  assert.equal(nodes.length, 5, "sibling metadata never hides an instance");
+  const byName = new Map(nodes.map((n) => [n.inst.instance, n]));
+  assert.ok(byName.get("coord-1").children.some((c) => c.inst.instance === "dev-a"), "parent edges survive");
+  assert.equal(byName.get("peer-1").y, 0, "sibling-only nodes are roots");
+  assert.equal(byName.get("peer-2").y, 0);
+});
+
+test("layoutClusters: multi-member clusters get cards; singletons collect in one Independent block", () => {
+  const { placed, soloBlock, width, height } = hier.layoutClusters([
+    { instance: "root", running: true },
+    { instance: "kid", parentInstance: "root", running: true },
+    { instance: "peer", running: true, siblingInstance: "root" },
+    { instance: "solo-1", running: false },
+    { instance: "solo-2", running: true },
+  ]);
+  assert.equal(placed.length, 1, "one multi-member cluster");
+  assert.equal(placed[0].cluster.size, 3);
+  assert.deepEqual(placed[0].sibs, [{ a: "peer", b: "root" }], "sibling edge surfaces for rendering");
+  assert.equal(soloBlock.nodes.length, 2, "singletons share the Independent block");
+  assert.ok(soloBlock.y >= placed[0].y + placed[0].h, "Independent block sits below cluster cards");
+  // node coordinates are group-local and inside the card's padded area
+  for (const n of placed[0].nodes) assert.ok(n.x >= 0 && n.y > 0);
+  assert.ok(width > 0 && height > 0);
+});
+
+test("layoutClusters: deterministic across roster order; no instance lost", () => {
+  const roster = [
+    { instance: "b-root", running: false },
+    { instance: "b-kid", parentInstance: "b-root", running: true },
+    { instance: "a-root", running: true },
+    { instance: "a-kid", parentInstance: "a-root", running: true },
+    { instance: "lone", running: false },
+  ];
+  const l1 = hier.layoutClusters(roster);
+  const l2 = hier.layoutClusters([...roster].reverse());
+  const namesOf = (l) => l.placed.map((p) => p.cluster.name);
+  assert.deepEqual(namesOf(l1), ["a-root", "b-root"], "running-heavy cluster first");
+  assert.deepEqual(namesOf(l2), namesOf(l1), "stable across shuffles");
+  const all = (l) => [...l.placed.flatMap((p) => p.nodes), ...(l.soloBlock?.nodes || [])].map((n) => n.inst.instance).sort();
+  assert.deepEqual(all(l1), ["a-kid", "a-root", "b-kid", "b-root", "lone"]);
+});
+
+test("layoutClusters: all-singleton roster yields only the Independent block", () => {
+  const { placed, soloBlock } = hier.layoutClusters([
+    { instance: "x", running: true }, { instance: "y", running: false },
+  ]);
+  assert.equal(placed.length, 0);
+  assert.equal(soloBlock.nodes.length, 2);
+  assert.equal(soloBlock.y, 0, "no cluster cards above — block starts at the top");
+});
+
+test("cluster cards are anonymous: header carries counts only, never the derived cluster name", async () => {
+  const { JSDOM } = await import("jsdom");
+  const dom = new JSDOM(`<div id="root"></div>`, { pretendToBeVisual: true });
+  const g = globalThis;
+  const prev = { window: g.window, document: g.document, localStorage: g.localStorage };
+  g.window = dom.window; g.document = dom.window.document;
+  g.localStorage = { getItem: () => null, setItem: () => {} };
+  try {
+    const panel = { instances: [
+      { instance: "named-root", running: true, parentInstance: null, siblingInstance: null },
+      { instance: "kid", running: false, parentInstance: "named-root", siblingInstance: null },
+      { instance: "solo", running: true, parentInstance: null, siblingInstance: null },
+    ], workspaces: [], workspace: null };
+    const ctx = { api: async () => ({ ok: true, status: 200, json: async () => panel }), openTerminal() {} };
+    const el = dom.window.document.getElementById("root");
+    const un = hier.mount(el, ctx);
+    await new Promise((r) => setTimeout(r, 30));
+    const head = el.querySelector(".hier-cluster .hier-chead");
+    assert.ok(head, "cluster card has a header");
+    assert.equal(head.textContent, "1/2 running", "counts only — no cluster name");
+    assert.ok(!head.textContent.includes("named-root"), "derived name never shown");
+    const card = el.querySelector(".hier-cluster");
+    assert.equal(card.getAttribute("aria-label"), "Cluster of 2 agents, 1 running",
+      "aria-label is counts-only — accessibility surfaces are part of the anonymity contract");
+    assert.ok(!card.getAttribute("aria-label").includes("named-root"), "derived name never spoken");
+    const soloCard = el.querySelector(".hier-solo");
+    assert.equal(soloCard.getAttribute("aria-label"), "Independent agents: 1",
+      "Independent is an allowed category label, not a cluster name");
+    const soloHead = el.querySelector(".hier-solo .hier-chead");
+    assert.ok(soloHead.textContent.startsWith("Independent"), "strip keeps its category label");
+    un();
+  } finally {
+    g.window = prev.window; g.document = prev.document; g.localStorage = prev.localStorage;
+  }
+});
+
+test("duplicate names across agents roots render as DISTINCT nodes; terminal opens carry identity", async () => {
+  const { JSDOM } = await import("jsdom");
+  const dom = new JSDOM(`<div id="root"></div>`, { pretendToBeVisual: true });
+  const g = globalThis;
+  const prev = { window: g.window, document: g.document, localStorage: g.localStorage };
+  g.window = dom.window; g.document = dom.window.document;
+  g.localStorage = { getItem: () => null, setItem: () => {} };
+  try {
+    const panel = { instances: [
+      { instance: "dev", agentsRoot: "/a/agents", home: "/a/agents/dev/i/dev", running: true },
+      { instance: "dev", agentsRoot: "/b/agents", home: "/b/agents/dev/i/dev", running: true },
+      { instance: "kid", agentsRoot: "/a/agents", home: "/a/agents/kid/i/kid", parentInstance: "dev", running: true },
+    ], workspaces: [], workspace: null };
+    const opened = [];
+    const ctx = { api: async () => ({ ok: true, status: 200, json: async () => panel }),
+                  openTerminal: (ref) => opened.push(ref) };
+    const el = dom.window.document.getElementById("root");
+    const un = hier.mount(el, ctx);
+    await new Promise((r) => setTimeout(r, 30));
+    const nodes = [...el.querySelectorAll(".hnode")];
+    assert.equal(nodes.length, 3, "duplicate-named instances are distinct nodes — none dropped");
+    assert.equal(new Set(nodes.map((n) => n.dataset.id)).size, 3, "node identity keys are unique");
+    // the OTHER-root dev is a singleton in the Independent strip, not merged
+    assert.equal(el.querySelectorAll(".hier-cluster .hnode").length, 2);
+    assert.equal(el.querySelectorAll(".hier-solo .hnode").length, 1);
+    // double-click opens with full identity (home/agentsRoot), not a bare name
+    const soloNode = el.querySelector(".hier-solo .hnode");
+    soloNode.dispatchEvent(new dom.window.Event("dblclick", { bubbles: true }));
+    assert.equal(opened.length, 1);
+    assert.equal(opened[0].home, "/b/agents/dev/i/dev", "terminal open addresses the exact instance");
+    assert.equal(opened[0].agentsRoot, "/b/agents");
+    un();
+  } finally {
+    g.window = prev.window; g.document = prev.document; g.localStorage = prev.localStorage;
+  }
+});
+
+test("relation resolution keeps FULL-roster scope after clustering: globally-ambiguous edge never reintroduced", () => {
+  // /c/kid joins /a/dev's component via an unambiguous sibling link, but
+  // kid.parentInstance="dev" is globally AMBIGUOUS (/a/dev vs /b/dev):
+  // clustering drops it — the per-cluster forest must NOT resurrect it.
+  const roster = [
+    { instance: "dev", agentsRoot: "/a", home: "/a/dev", running: true },
+    { instance: "dev", agentsRoot: "/b", home: "/b/dev", running: true },
+    { instance: "kid", agentsRoot: "/c", home: "/c/kid", parentInstance: "dev",
+      siblingInstance: "uniq", running: true },
+    // uniq shares /a with its parent "dev" — same-root resolution validly
+    // pulls /a/dev into kid's component, making "dev" unique WITHIN the
+    // cluster while staying ambiguous in the full roster.
+    { instance: "uniq", agentsRoot: "/a", home: "/a/uniq", parentInstance: "dev", running: true },
+  ];
+  const { placed } = hier.layoutClusters(roster);
+  const cl = placed.find((pc) => pc.nodes.some((n) => n.inst.home === "/c/kid"));
+  assert.ok(cl.nodes.some((n) => n.inst.home === "/a/dev"),
+    "fixture: /a/dev must share kid's cluster for the test to bite");
+  const kid = cl.nodes.find((n) => n.inst.home === "/c/kid");
+  const parentOfKid = cl.nodes.find((n) => n.children.includes(kid));
+  assert.equal(parentOfKid, undefined,
+    "ambiguous parent stays dropped inside the cluster forest — kid renders as a root");
+});
+
+test("layout determinism with duplicate names: identity tie-break keeps coordinates stable across roster order", () => {
+  const roster = [
+    { instance: "root", home: "/r/root", running: true },
+    { instance: "dev", agentsRoot: "/a", home: "/a/dev", parentInstance: "root", running: true },
+    { instance: "dev", agentsRoot: "/b", home: "/b/dev", parentInstance: "root", running: true },
+  ];
+  const posOf = (lay, home) => {
+    const n = lay.nodes.find((x) => x.inst.home === home);
+    return `${n.x}:${n.y}`;
+  };
+  const l1 = hier.layoutForest(roster);
+  const l2 = hier.layoutForest([...roster].reverse());
+  assert.equal(posOf(l1, "/a/dev"), posOf(l2, "/a/dev"), "same-named children never swap slots");
+  assert.equal(posOf(l1, "/b/dev"), posOf(l2, "/b/dev"));
+});
+
+test("full-roster scope covers SIBLING edges too: globally-ambiguous sibling name never becomes a false edge", () => {
+  // /c/kid declares siblingInstance="dev" — globally AMBIGUOUS (/a/dev vs
+  // /b/dev), so clustering drops it. But /a/dev is validly in kid's cluster
+  // (child of the same root), so a cluster-scoped index would see exactly
+  // one "dev" and resurrect the pair as a false sibling arc.
+  const roster = [
+    { instance: "root", home: "/c/root", running: true },
+    { instance: "kid", agentsRoot: "/c", home: "/c/kid", parentInstance: "root",
+      siblingInstance: "dev", running: true },
+    { instance: "dev", agentsRoot: "/a", home: "/a/dev", parentInstance: "root", running: true },
+    { instance: "dev", agentsRoot: "/b", home: "/b/dev", running: true },
+  ];
+  const { placed } = hier.layoutClusters(roster);
+  const cl = placed.find((pc) => pc.nodes.some((n) => n.inst.home === "/c/kid"));
+  assert.ok(cl.nodes.some((n) => n.inst.home === "/a/dev"),
+    "fixture: /a/dev must share kid's cluster for the narrowed-scope bug to bite");
+  assert.deepEqual(cl.sibs, [],
+    "ambiguous sibling name stays dropped — no false arc from cluster-local uniqueness");
+});
+
+test("keyboard Brain key matches the composite selection id — selecting a node and pressing B opens its Brain (review 96b037b)", async () => {
+  const { JSDOM } = await import("jsdom");
+  const dom = new JSDOM(`<div id="root"></div>`, { pretendToBeVisual: true });
+  const g = globalThis;
+  const prev = { window: g.window, document: g.document, localStorage: g.localStorage };
+  g.window = dom.window; g.document = dom.window.document;
+  g.localStorage = { getItem: () => null, setItem: () => {} };
+  try {
+    const panel = { instances: [
+      { instance: "dev", agent: "dev-soul", agentsRoot: "/a/agents", home: "/a/agents/dev/i/dev", running: true },
+    ], workspaces: [], workspace: null };
+    const brains = [];
+    const ctx = { api: async () => ({ ok: true, status: 200, json: async () => panel }),
+                  openTerminal: () => {}, openBrain: (agent) => brains.push(agent) };
+    const el = dom.window.document.getElementById("root");
+    const un = hier.mount(el, ctx);
+    await new Promise((r) => setTimeout(r, 30));
+    const node = el.querySelector(".hnode");
+    assert.ok(node, "node rendered");
+    // select the node (its dataset.id is the COMPOSITE instanceId — home)
+    node.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+    // dispatch the Brain default chord on the canvas (the keydown host):
+    // pre-fix, the bare-name lookup (x.instance === s.sel) missed the
+    // composite id and the key was consumed doing nothing
+    const canvas = el.querySelector(".hier-canvas");
+    canvas.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "B", bubbles: true, cancelable: true }));
+    assert.deepEqual(brains, ["dev-soul"], "Brain opens for the selected composite-id node");
+    un();
+  } finally {
+    g.window = prev.window; g.document = prev.document; g.localStorage = prev.localStorage;
+  }
 });

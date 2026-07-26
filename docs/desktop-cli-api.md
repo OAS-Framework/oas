@@ -48,10 +48,17 @@ Only two:
 | `tmux`     | {session,window} \| null | tmux target                       |
 
 Additional informative fields: `repo`, `runtime`, `model`, `parent`,
-`spawnOrigin`, `attach`.
+`sibling` (explicit sibling cluster link when a root-level sibling relation
+was declared, else null), `relation` (`child`/`sibling`/`parent` when a
+relation was declared at spawn, else null), `spawnOrigin`, `attach`.
 
 Stable error codes: `E_USAGE`, `E_NO_DEPLOYMENT`, `E_UNKNOWN_AGENT`,
-`E_AMBIGUOUS_SOUL`, `E_PARENT_NOT_FOUND`, `E_BAD_ARGS`, `E_SPAWN_FAILED`.
+`E_AMBIGUOUS_SOUL`, `E_PARENT_NOT_FOUND`, `E_RELATIVE_NOT_FOUND`,
+`E_RELATIVE_AMBIGUOUS` (a `--relative-to`/`--parent` anchor name matches
+multiple team instances — disambiguate with `--relative-root <agents-root>`
+— or the chosen anchor is shadowed by a same-named instance so the lineage
+edge would resolve wrongly), `E_BAD_ARGS`,
+`E_SPAWN_FAILED`.
 
 Dispatch-level failures (any `--json` command): `E_UNKNOWN_COMMAND` (no
 kernel subcommand or capability namespace matches, or unknown capability

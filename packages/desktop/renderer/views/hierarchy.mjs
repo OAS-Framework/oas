@@ -1,7 +1,12 @@
-/* oas desktop — Agents hierarchy view (the home surface).
-   An interactive tidy tree of who spawned whom, per workspace: spawn
-   parentage comes from the roster's parentInstance (a forest — so a layered
-   tidy tree, deliberately NOT force-directed: deterministic, no jitter).
+/* oas desktop — "Active" overview (the home surface): cluster-first live
+   view of everything currently happening. Agent clusters — connected
+   components of parent/child/sibling links (see clusters.mjs) — are the
+   primary visual unit: each multi-member cluster renders as a card with its
+   internal tidy tree (parent/child solid curved edges; sibling links as
+   dashed horizontal edges between peers — never color alone). Unrelated
+   single instances collect in a visually quieter "Independent" strip below.
+   Layout inside a cluster is a layered tidy tree, deliberately NOT
+   force-directed: deterministic, no jitter.
    Node cards show the app-wide status vocabulary (running = filled green
    dot; idle = hollow dot + dimmed card — never color alone, WCAG). Click
    selects and shows the action popover; double-click / Enter opens the
@@ -14,6 +19,8 @@
    Keyboard: arrows walk the tree, Enter/t opens the terminal, b Brain,
    s Spawn view, o action popover, +/- zoom, f fits, Escape clears.
    Contract: mount(el, ctx) / unmount(); data from GET /api/panel only. */
+import { computeClusters, siblingEdges } from "./clusters.mjs";
+import { instanceId, resolveLinkId } from "../instance-tree.mjs";
 import {
   escapeHtml, apiJson, ensureTheme,
   currentWorkspace, setWorkspace, adoptWorkspace, onWorkspaceChange,
@@ -34,6 +41,14 @@ const CSS = `
 .hier-canvas.panning { cursor: grabbing; }
 .hier-stage { position: absolute; left: 0; top: 0; transform-origin: 0 0; will-change: transform; }
 .hier-group { position: absolute; }
+.hier-group.hier-cluster { background: color-mix(in srgb, var(--surface) 55%, var(--bg));
+                           border: 1px solid var(--border); border-radius: 14px; }
+.hier-group.hier-solo .hnode { box-shadow: none; }
+.hier-chead { position: absolute; left: 12px; top: 7px; display: flex; align-items: baseline; gap: 8px;
+              max-width: calc(100% - 24px); white-space: nowrap; pointer-events: none; }
+.hier-chead .cnm { color: var(--muted); font-size: 11px; font-weight: 650; text-transform: uppercase;
+                   letter-spacing: .06em; overflow: hidden; text-overflow: ellipsis; }
+.hier-chead .cct { color: var(--faint); font-size: 11px; }
 .hier-zoom { position: absolute; right: 14px; bottom: 14px; z-index: 5; display: flex; gap: 4px;
              background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 3px; box-shadow: var(--shadow); }
 .hier-zoom button { background: none; border: none; color: var(--muted); font: 14px/1 inherit; width: 26px; height: 24px;
@@ -41,6 +56,7 @@ const CSS = `
 .hier-zoom button:hover { background: var(--surface-2); color: var(--fg); }
 .hier-edges { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
 .hier-edges path { stroke: var(--graph-edge); stroke-width: 1.5; fill: none; }
+.hier-edges path.sib { stroke-dasharray: 5 4; }
 .hier-edges path.lit { stroke: var(--accent); stroke-width: 2; }
 .hier-ws { position: absolute; color: var(--faint); font-size: 11px; font-weight: 650;
            text-transform: uppercase; letter-spacing: .06em; white-space: nowrap; }
@@ -68,20 +84,40 @@ const CSS = `
 `;
 
 const NODE_W = 208, NODE_H = 58, GAP_X = 26, GAP_Y = 46, PAD = 40;
+const CL_PAD = 18, CL_HEAD = 30, CL_GAP = 44, ROW_MAX = 1500, SOLO_GAP_Y = 20;
+
+/* Name index over a roster: name -> instance[] (resolveLinkId's shape). */
+function nameIndex(instances) {
+  const byName = new Map();
+  for (const i of instances) {
+    if (!byName.has(i.instance)) byName.set(i.instance, []);
+    byName.get(i.instance).push(i);
+  }
+  return byName;
+}
 
 /* Tidy-tree layout for a forest: post-order, children centered under the
-   parent; leaves packed left-to-right. Returns nodes with x/y set. */
-export function layoutForest(instances) {
-  const byName = new Map(instances.map((i) => [i.instance, { inst: i, children: [] }]));
+   parent; leaves packed left-to-right. Returns nodes with x/y set.
+   IDENTITY: nodes key by instanceId, and parent NAMES resolve through the
+   shared resolveLinkId — duplicate names across agents roots stay distinct
+   nodes. rosterByName is the FULL-roster name index: resolution scope must
+   not shrink to the cluster, or a globally-ambiguous name could falsely
+   become "unique" post-clustering and reintroduce a dropped edge (review
+   3ab2a40). Callers without a wider roster may omit it. */
+export function layoutForest(instances, rosterByName) {
+  const byId = new Map(instances.map((i) => [instanceId(i), { inst: i, id: instanceId(i), children: [] }]));
+  const byName = rosterByName || nameIndex(instances);
   const roots = [];
   const parentOf = new Map();
-  for (const n of byName.values()) {
-    const p = n.inst.parentInstance && byName.get(n.inst.parentInstance);
+  for (const n of byId.values()) {
+    const pid = n.inst.parentInstance ? resolveLinkId(n.inst, n.inst.parentInstance, byName) : null;
+    const p = pid && byId.get(pid);
     if (p && p !== n) { p.children.push(n); parentOf.set(n, p); }
     else roots.push(n);
   }
   const rank = (a, b) => (a.inst.running === b.inst.running
-    ? a.inst.instance.localeCompare(b.inst.instance) : a.inst.running ? -1 : 1);
+    ? (a.inst.instance.localeCompare(b.inst.instance) || a.id.localeCompare(b.id))
+    : a.inst.running ? -1 : 1);
 
   // A malformed parentInstance cycle has no natural root and used to vanish
   // entirely. Mark normal root-reachable nodes, then promote one deterministic
@@ -95,7 +131,7 @@ export function layoutForest(instances) {
     n.children.forEach(mark);
   };
   roots.forEach(mark);
-  for (const start of [...byName.values()].sort(rank)) {
+  for (const start of [...byId.values()].sort(rank)) {
     if (reachable.has(start)) continue;
 
     // Follow parent links from this node until the path repeats. `start` may
@@ -144,6 +180,57 @@ export function layoutForest(instances) {
 
 let state = null;
 
+/* Cluster-level placement: multi-member clusters flow left-to-right in
+   wrapping rows (deterministic — cluster order comes from computeClusters);
+   singletons collect in one quiet "Independent" block below. Every node's
+   x/y is made group-LOCAL including the card padding/header, so the
+   existing drag/edge/fit machinery works unchanged. Pure — exported for
+   tests. */
+export function layoutClusters(instances) {
+  const clusters = computeClusters(instances);
+  // FULL-roster name index: all relation resolution inside clusters (forest
+  // parents, sibling edges) must use global scope — see layoutForest's note.
+  const rosterByName = nameIndex((instances || []).filter((i) => i && i.instance));
+  const multi = clusters.filter((c) => c.size > 1);
+  const solo = clusters.filter((c) => c.size === 1);
+
+  const placed = [];
+  let cx = 0, cy = 0, rowH = 0;
+  for (const c of multi) {
+    const lay = layoutForest(c.instances, rosterByName);
+    for (const n of lay.nodes) { n.x += CL_PAD; n.y += CL_HEAD + CL_PAD; }
+    const w = lay.width + CL_PAD * 2;
+    const h = lay.height + CL_HEAD + CL_PAD * 2;
+    if (cx > 0 && cx + w > ROW_MAX) { cx = 0; cy += rowH + CL_GAP; rowH = 0; }
+    placed.push({ cluster: c, nodes: lay.nodes, x: cx, y: cy, w, h,
+                  sibs: siblingEdges(c, rosterByName) });
+    cx += w + CL_GAP;
+    rowH = Math.max(rowH, h);
+  }
+
+  let soloBlock = null;
+  if (solo.length) {
+    const top = placed.length ? cy + rowH + CL_GAP : 0;
+    const perRow = Math.max(1, Math.floor(ROW_MAX / (NODE_W + GAP_X)));
+    const nodes = solo.map((c, i) => ({
+      inst: c.instances[0], id: instanceId(c.instances[0]), children: [],
+      x: (i % perRow) * (NODE_W + GAP_X),
+      y: CL_HEAD + Math.floor(i / perRow) * (NODE_H + SOLO_GAP_Y),
+    }));
+    const rows = Math.ceil(solo.length / perRow);
+    soloBlock = {
+      nodes, x: 0, y: top,
+      w: Math.min(solo.length, perRow) * (NODE_W + GAP_X) - GAP_X,
+      h: CL_HEAD + rows * (NODE_H + SOLO_GAP_Y) - SOLO_GAP_Y,
+    };
+  }
+
+  let width = 0, height = 0;
+  for (const p of placed) { width = Math.max(width, p.x + p.w); height = Math.max(height, p.y + p.h); }
+  if (soloBlock) { width = Math.max(width, soloBlock.w); height = Math.max(height, soloBlock.y + soloBlock.h); }
+  return { placed, soloBlock, clusters, width: Math.max(width, NODE_W), height: Math.max(height, NODE_H) };
+}
+
 const DRAG_THRESHOLD = 5; // px before a node-drag moves its tree (else it's a click)
 
 export function mount(el, ctx) {
@@ -164,7 +251,7 @@ export function mount(el, ctx) {
         <span style="flex:1"></span>
         <button class="act spawnbtn" title="Spawn a new agent instance">✚ Spawn</button>
       </div>
-      <div class="hier-canvas" tabindex="0" role="tree" aria-label="Agent hierarchy">
+      <div class="hier-canvas" tabindex="0" role="tree" aria-label="Active agents by cluster">
         <div class="hier-zoom">
           <button class="zout" title="Zoom out (⌘−)" aria-label="Zoom out">−</button>
           <button class="zfit" title="Fit to screen (f)" aria-label="Fit to screen">◲</button>
@@ -226,7 +313,7 @@ export function mount(el, ctx) {
   // the engine's effective bindings). Disposed on unmount.
   s.viewActions = [
     { id: "hier.fit", defaultChord: "F", label: "Hierarchy: fit to screen", run: () => fit(s) },
-    { id: "hier.terminal", defaultChord: "T", label: "Hierarchy: open terminal of selection", run: () => { if (s.sel) s.ctx.openTerminal(s.sel); } },
+    { id: "hier.terminal", defaultChord: "T", label: "Hierarchy: open terminal of selection", run: () => { if (s.sel) openTerm(s, s.sel); } },
     { id: "hier.brain", defaultChord: "B", label: "Hierarchy: open Brain of selection", run: () => openSelBrain(s) },
     { id: "hier.spawn", defaultChord: "S", label: "Hierarchy: open the Spawn view", run: () => s.ctx.openView?.("spawn") },
     { id: "hier.popover", defaultChord: "O", label: "Hierarchy: open the action popover", run: () => { if (s.sel) openPop(s, s.sel); } },
@@ -294,68 +381,117 @@ function render(s) {
     return;
   }
 
-  // Build parentage from the FULL roster before any visual decoration.
-  // parentInstance may cross agent/workspace roots in a team-scoped panel;
-  // pre-grouping would turn a valid child into an orphan and drop its edge.
-  // Node metadata still identifies its repo/root, and free dragging provides
-  // visual partitioning without corrupting topology.
-  const { nodes, width, height } = layoutForest(list);
+  // Clusters — connected components over the FULL roster's parent/child +
+  // sibling links — are computed before any visual decoration, so a valid
+  // relation crossing agent/workspace roots never turns a child into an
+  // orphan. Node metadata still identifies its repo/root.
+  const { placed, soloBlock, width, height } = layoutClusters(list);
+  const nCl = placed.length + (soloBlock ? soloBlock.nodes.length : 0);
+  s.q("hier-sum").innerHTML =
+    `<b>${running}</b> running · <b>${list.length - running}</b> idle · <b>${nCl}</b> cluster${nCl === 1 ? "" : "s"}`;
   const stage = document.createElement("div");
   stage.className = "hier-stage";
-  const group = document.createElement("div");
-  group.className = "hier-group";
-  group.dataset.ws = "all";
-  group.style.left = "0";
-  group.style.top = "0";
-
-  const BLEED = 2000; // edge svg overdraw so dragged boxes keep their edges
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.classList.add("hier-edges");
-  svg.setAttribute("width", width + BLEED * 2);
-  svg.setAttribute("height", height + NODE_H + BLEED * 2);
-  svg.setAttribute("viewBox", `${-BLEED} ${-BLEED} ${width + BLEED * 2} ${height + NODE_H + BLEED * 2}`);
-  svg.style.left = `${-BLEED}px`; svg.style.top = `${-BLEED}px`;
-  group.append(svg);
 
   s.edgesByNode = new Map(); // instance -> [path els touching it]
   s.bounds = { w: width, h: height };
-  // final position = tidy layout + any user drag offset
-  for (const n of nodes) {
-    const off = s.nodeOffsets.get(n.inst.instance) || { x: 0, y: 0 };
-    n.fx = n.x + off.x; n.fy = n.y + off.y;
-    group.append(nodeEl(s, n, n.inst.workspace || "?"));
-  }
-  for (const n of nodes) {
-    for (const c of n.children) {
-      const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
-      p.dataset.child = c.inst.instance;
-      p.dataset.parent = n.inst.instance;
-      drawEdge(p, n, c);
+
+  const BLEED = 2000; // edge svg overdraw so dragged boxes keep their edges
+  const groupFor = (block, key, ariaLabel, cls) => {
+    const group = document.createElement("div");
+    group.className = "hier-group" + (cls ? " " + cls : "");
+    group.dataset.ws = key;
+    group.style.left = `${block.x}px`;
+    group.style.top = `${block.y}px`;
+    group.style.width = `${block.w}px`;
+    group.style.height = `${block.h}px`;
+    group.setAttribute("role", "group");
+    group.setAttribute("aria-label", ariaLabel);
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.classList.add("hier-edges");
+    svg.setAttribute("width", block.w + BLEED * 2);
+    svg.setAttribute("height", block.h + NODE_H + BLEED * 2);
+    svg.setAttribute("viewBox", `${-BLEED} ${-BLEED} ${block.w + BLEED * 2} ${block.h + NODE_H + BLEED * 2}`);
+    svg.style.left = `${-BLEED}px`; svg.style.top = `${-BLEED}px`;
+    group.append(svg);
+    // final position = tidy layout + any user drag offset
+    for (const n of block.nodes) {
+      const off = s.nodeOffsets.get(n.id) || { x: 0, y: 0 };
+      n.fx = n.x + off.x; n.fy = n.y + off.y;
+      group.append(nodeEl(s, n, key));
+    }
+    const addEdge = (p, a, b) => {
       svg.append(p);
-      for (const nm of [n.inst.instance, c.inst.instance]) {
+      for (const nm of [a, b]) {
         if (!s.edgesByNode.has(nm)) s.edgesByNode.set(nm, []);
         s.edgesByNode.get(nm).push(p);
       }
+    };
+    for (const n of block.nodes) {
+      for (const c of n.children) {
+        const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        p.dataset.child = c.id;
+        p.dataset.parent = n.id;
+        drawEdge(p, n, c);
+        addEdge(p, n.id, c.id);
+      }
     }
+    // sibling links: dashed peer edges, distinct by STYLE (never color alone)
+    const byId = new Map(block.nodes.map((n) => [n.id, n]));
+    for (const { a, b } of block.sibs || []) {
+      const na = byId.get(a), nb = byId.get(b);
+      if (!na || !nb) continue;
+      const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      p.classList.add("sib");
+      p.dataset.parent = a; p.dataset.child = b; // endpoint names for redraw on drag
+      drawSiblingEdge(p, na, nb);
+      addEdge(p, a, b);
+    }
+    return group;
+  };
+
+  // Cluster cards are ANONYMOUS by design (human decision): the header
+  // carries only counts/status — no derived name. c.name remains an
+  // internal, deterministic grouping/ordering key only, never shown.
+  // Cluster naming may return later tied to a task-layer integration.
+  for (const pc of placed) {
+    const c = pc.cluster;
+    const aria = `Cluster of ${c.size} agents, ${c.running} running`;
+    const group = groupFor(pc, c.name, aria, "hier-cluster");
+    const head = document.createElement("div");
+    head.className = "hier-chead";
+    head.innerHTML = `<span class="cct">${c.running}/${c.size} running</span>`;
+    group.prepend(head);
+    stage.append(group);
   }
-  stage.append(group);
+  if (soloBlock) {
+    const group = groupFor({ ...soloBlock, sibs: [] }, "Independent",
+      `Independent agents: ${soloBlock.nodes.length}`, "hier-solo");
+    const head = document.createElement("div");
+    head.className = "hier-chead solo";
+    head.innerHTML = `<span class="cnm">Independent</span>` +
+      `<span class="cct">${soloBlock.nodes.length}</span>`;
+    group.prepend(head);
+    stage.append(group);
+  }
   canvas.append(stage);
   // first paint (or workspace switch): fit the forest to the visible screen
   if (!s.fitted) { s.fitted = true; fit(s); } else applyTransform(s);
-  if (s.sel && !list.some((i) => i.instance === s.sel)) s.sel = null;
+  if (s.sel && !list.some((i) => instanceId(i) === s.sel)) s.sel = null;
   paintSelection(s);
   // keep the popover across the 4s refresh if its instance still exists
-  if (prevPop && list.some((i) => i.instance === prevPop)) openPop(s, prevPop);
+  if (prevPop && list.some((i) => instanceId(i) === prevPop)) openPop(s, prevPop);
 }
 
 function nodeEl(s, n, wsName) {
   const i = n.inst;
+  const id = n.id ?? instanceId(i);
   const d = document.createElement("div");
   d.className = "hnode" + (i.running ? "" : " idle");
   d.style.left = `${n.fx}px`; d.style.top = `${n.fy}px`;
   d.setAttribute("role", "treeitem");
   d.setAttribute("aria-label", `${i.instance}, ${i.running ? "running" : "idle"}`);
   d.dataset.name = i.instance;
+  d.dataset.id = id;
   d.innerHTML = `
     <div class="hname"><span class="hdot ${i.running ? "on" : "off"}" aria-hidden="true"></span><span class="nm">${escapeHtml(i.instance)}</span></div>
     <div class="hmeta">${escapeHtml(i.agent || "")}${i.repoName ? " · " + escapeHtml(i.repoName) : ""}</div>`;
@@ -364,19 +500,28 @@ function nodeEl(s, n, wsName) {
   // follow live); under the threshold it stays a click/dblclick.
   d.addEventListener("mousedown", (e) => {
     e.stopPropagation();
-    const off = s.nodeOffsets.get(i.instance) || { x: 0, y: 0 };
-    s.drag = { name: i.instance, node: d, n, startX: e.clientX, startY: e.clientY, off: { ...off }, moved: false };
+    const off = s.nodeOffsets.get(id) || { x: 0, y: 0 };
+    s.drag = { name: id, node: d, n, startX: e.clientX, startY: e.clientY, off: { ...off }, moved: false };
   });
   d.addEventListener("click", (e) => {
     e.stopPropagation();
     if (s.dragConsumedClick) { s.dragConsumedClick = false; return; }
-    select(s, i.instance);
+    select(s, id);
   });
-  d.addEventListener("dblclick", (e) => { e.stopPropagation(); s.ctx.openTerminal(i.instance); });
-  d.addEventListener("mouseenter", () => litLineage(s, i.instance, true));
-  d.addEventListener("mouseleave", () => litLineage(s, i.instance, false));
-  s.nodeEls.set(i.instance, { el: d, node: n, ws: wsName });
+  d.addEventListener("dblclick", (e) => { e.stopPropagation(); openTerm(s, id); });
+  d.addEventListener("mouseenter", () => litLineage(s, id, true));
+  d.addEventListener("mouseleave", () => litLineage(s, id, false));
+  s.nodeEls.set(id, { el: d, node: n, ws: wsName });
   return d;
+}
+
+/* Open the selected node's terminal with FULL identity (home/agentsRoot),
+   so a duplicate name in another agents root can never hijack the open
+   (identity-aware resolution in the shell; review 46f3fdc). */
+function openTerm(s, id) {
+  const i = (s.panel.instances || []).find((x) => instanceId(x) === id);
+  if (!i) return;
+  s.ctx.openTerminal({ instance: i.instance, home: i.home, agentsRoot: i.agentsRoot });
 }
 
 /* Edge between a parent and child node, from their FINAL (fx/fy) positions. */
@@ -385,6 +530,26 @@ function drawEdge(p, parent, child) {
   const x2 = child.fx + NODE_W / 2, y2 = child.fy;
   const my = (y1 + y2) / 2;
   p.setAttribute("d", `M ${x1} ${y1} C ${x1} ${my}, ${x2} ${my}, ${x2} ${y2}`);
+}
+
+/* Sibling peer edge: a shallow dashed arc between two boxes' vertical
+   midpoints — distinguishable from parent edges by STYLE (dash + flat arc),
+   not color alone. */
+function drawSiblingEdge(p, a, b) {
+  const [l, r] = a.fx <= b.fx ? [a, b] : [b, a];
+  const x1 = l.fx + NODE_W, y1 = l.fy + NODE_H / 2;
+  const x2 = r.fx, y2 = r.fy + NODE_H / 2;
+  const mx = (x1 + x2) / 2;
+  p.setAttribute("d", `M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`);
+}
+
+/* Redraw one edge path from its endpoints' final positions. */
+function redrawEdge(s, p) {
+  const a = s.nodeEls.get(p.dataset.parent)?.node;
+  const b = s.nodeEls.get(p.dataset.child)?.node;
+  if (!a || !b) return;
+  if (p.classList.contains("sib")) drawSiblingEdge(p, a, b);
+  else drawEdge(p, a, b);
 }
 
 function onNodeDragMove(s, e) {
@@ -398,11 +563,7 @@ function onNodeDragMove(s, e) {
   dr.node.style.left = `${dr.n.fx}px`;
   dr.node.style.top = `${dr.n.fy}px`;
   // redraw only the edges touching this box
-  for (const p of s.edgesByNode?.get(dr.name) || []) {
-    const parent = s.nodeEls.get(p.dataset.parent)?.node;
-    const child = s.nodeEls.get(p.dataset.child)?.node;
-    if (parent && child) drawEdge(p, parent, child);
-  }
+  for (const p of s.edgesByNode?.get(dr.name) || []) redrawEdge(s, p);
 }
 
 function onNodeDragEnd(s) {
@@ -439,7 +600,8 @@ function fit(s) {
   let minX = 0, minY = 0, maxX = s.bounds.w, maxY = s.bounds.h + NODE_H;
   for (const { el, node } of s.nodeEls.values()) {
     const gx = Number(el.parentElement?.style.left?.replace("px", "") || 0);
-    const fx = gx + (node.fx ?? node.x), fy = node.fy ?? node.y;
+    const gy = Number(el.parentElement?.style.top?.replace("px", "") || 0);
+    const fx = gx + (node.fx ?? node.x), fy = gy + (node.fy ?? node.y);
     minX = Math.min(minX, fx); minY = Math.min(minY, fy);
     maxX = Math.max(maxX, fx + NODE_W); maxY = Math.max(maxY, fy + NODE_H);
   }
@@ -451,18 +613,31 @@ function fit(s) {
   applyTransform(s);
 }
 
-/* lineage highlight: ancestors + descendants of the hovered node */
-function litLineage(s, name, on) {
-  const byName = new Map((s.panel.instances || []).map((i) => [i.instance, i]));
-  const kin = new Set([name]);
-  let cur = byName.get(name);
-  while (cur && cur.parentInstance && byName.has(cur.parentInstance) && !kin.has(cur.parentInstance)) {
-    kin.add(cur.parentInstance); cur = byName.get(cur.parentInstance);
+/* lineage highlight: ancestors + descendants of the hovered node (by id;
+   parent names resolve through the shared resolver) */
+function litLineage(s, id, on) {
+  const list = s.panel.instances || [];
+  const byId = new Map(list.map((i) => [instanceId(i), i]));
+  const byName = new Map();
+  for (const i of list) {
+    if (!byName.has(i.instance)) byName.set(i.instance, []);
+    byName.get(i.instance).push(i);
   }
-  const grow = (nm) => {
-    for (const i of byName.values()) if (i.parentInstance === nm && !kin.has(i.instance)) { kin.add(i.instance); grow(i.instance); }
+  const parentIdOf = (i) => (i.parentInstance ? resolveLinkId(i, i.parentInstance, byName) : null);
+  const kin = new Set([id]);
+  let cur = byId.get(id);
+  while (cur) {
+    const pid = parentIdOf(cur);
+    if (!pid || kin.has(pid) || !byId.has(pid)) break;
+    kin.add(pid); cur = byId.get(pid);
+  }
+  const grow = (nid) => {
+    for (const i of list) {
+      const iid = instanceId(i);
+      if (parentIdOf(i) === nid && !kin.has(iid)) { kin.add(iid); grow(iid); }
+    }
   };
-  grow(name);
+  grow(id);
   for (const [nm, { el }] of s.nodeEls) el.classList.toggle("lit", on && kin.has(nm) && nm !== s.sel);
   for (const paths of (s.edgesByNode || new Map()).values()) {
     for (const p of paths) {
@@ -487,12 +662,12 @@ function closePop(s) {
   s.popFor = null;
 }
 
-function openPop(s, name) {
+function openPop(s, id) {
   closePop(s);
-  const entry = s.nodeEls.get(name);
-  const i = (s.panel.instances || []).find((x) => x.instance === name);
+  const entry = s.nodeEls.get(id);
+  const i = (s.panel.instances || []).find((x) => instanceId(x) === id);
   if (!entry || !i) return;
-  s.popFor = name;
+  s.popFor = id;
   const pop = document.createElement("div");
   pop.className = "hier-pop";
   pop.style.left = `${entry.node.fx ?? entry.node.x}px`;
@@ -508,16 +683,19 @@ function openPop(s, name) {
       <button class="act pterm"${i.running ? "" : " disabled"}>Terminal</button>
       <button class="act pbrain">Brain</button>
     </div>`;
-  pop.querySelector(".pterm").addEventListener("click", () => s.ctx.openTerminal(name));
+  pop.querySelector(".pterm").addEventListener("click", () => openTerm(s, id));
   pop.querySelector(".pbrain").addEventListener("click", () => s.ctx.openBrain?.(i.agent));
   if (!s.ctx.openBrain) pop.querySelector(".pbrain").style.display = "none";
   // append inside the node's group so the popover sits by its (dragged) box
   (entry.el.parentElement || s.canvas.querySelector(".hier-stage"))?.append(pop);
 }
 
-/* Brain of the current selection (popover parity for the keyboard). */
+/* Brain of the current selection (popover parity for the keyboard).
+   s.sel is a composite instanceId — matching bare x.instance made the
+   Brain key consume-and-do-nothing for every identity-bearing node
+   (review 96b037b). */
 function openSelBrain(s) {
-  const i = (s.panel.instances || []).find((x) => x.instance === s.sel);
+  const i = (s.panel.instances || []).find((x) => instanceId(x) === s.sel);
   if (i) s.ctx.openBrain?.(i.agent);
 }
 
@@ -528,7 +706,26 @@ function onKey(s, e) {
   const list = s.panel.instances || [];
   if (!list.length) return;
   if (e.key === "Escape") { s.sel = null; paintSelection(s); closePop(s); return; }
-  if (e.key === "Enter" && s.sel) { e.preventDefault(); s.ctx.openTerminal(s.sel); return; }
+  // [ / ] hop between clusters (selects the hopped-to cluster's first node)
+  // — structural like the arrows; fit moved to the rebindable hier.fit action
+  if (e.key === "[" || e.key === "]") {
+    e.preventDefault();
+    const groups = [];
+    for (const { node, ws } of s.nodeEls.values()) {
+      let g = groups.find((x) => x.ws === ws);
+      if (!g) { g = { ws, first: node }; groups.push(g); }
+      else if (node.y < g.first.y || (node.y === g.first.y && node.x < g.first.x)) g.first = node;
+    }
+    if (!groups.length) return;
+    const curWs = s.sel ? s.nodeEls.get(s.sel)?.ws : null;
+    const at = groups.findIndex((g) => g.ws === curWs);
+    const next = groups[(at + (e.key === "]" ? 1 : -1) + groups.length) % groups.length]
+      || groups[0];
+    select(s, next.first.id);
+    return;
+  }
+  // Enter opens with FULL identity (openTerm), never the bare selection id
+  if (e.key === "Enter" && s.sel) { e.preventDefault(); openTerm(s, s.sel); return; }
   const hit = resolveViewKey(e, s.viewActions);
   if (hit) {
     e.preventDefault();
@@ -537,21 +734,27 @@ function onKey(s, e) {
   }
   if (!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)) return;
   e.preventDefault();
-  if (!s.sel) { select(s, list[0].instance); return; }
+  if (!s.sel) { select(s, instanceId(list[0])); return; }
   const cur = s.nodeEls.get(s.sel);
   if (!cur) return;
-  const byName = new Map(list.map((i) => [i.instance, i]));
+  const byId = new Map(list.map((i) => [instanceId(i), i]));
+  const byName = new Map();
+  for (const i of list) {
+    if (!byName.has(i.instance)) byName.set(i.instance, []);
+    byName.get(i.instance).push(i);
+  }
   if (e.key === "ArrowUp") {
-    const p = byName.get(s.sel)?.parentInstance;
-    if (p && s.nodeEls.has(p)) select(s, p);
+    const me = byId.get(s.sel);
+    const pid = me?.parentInstance ? resolveLinkId(me, me.parentInstance, byName) : null;
+    if (pid && s.nodeEls.has(pid)) select(s, pid);
   } else if (e.key === "ArrowDown") {
     const kid = cur.node.children[0];
-    if (kid) select(s, kid.inst.instance);
+    if (kid) select(s, kid.id);
   } else {
-    // siblings: same row (y) within the SAME workspace group, ordered by x
+    // peers: same row (y) within the SAME cluster group, ordered by x
     const sibs = [...s.nodeEls.values()].filter((x) => x.node.y === cur.node.y && x.ws === cur.ws).sort((a, b) => a.node.x - b.node.x);
-    const at = sibs.findIndex((x) => x.node.inst.instance === s.sel);
+    const at = sibs.findIndex((x) => x.node.id === s.sel);
     const next = sibs[at + (e.key === "ArrowRight" ? 1 : -1)];
-    if (next) select(s, next.node.inst.instance);
+    if (next) select(s, next.node.id);
   }
 }

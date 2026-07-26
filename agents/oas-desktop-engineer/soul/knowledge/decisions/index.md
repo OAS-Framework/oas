@@ -1,6 +1,7 @@
 # decisions
 
 * [Desktop terminal is a direct tmux attach via node-pty](desktop-terminal-direct-attach.md) - The desktop app's integrated terminal spawns node-pty running `tmux attach-session` against an isolated per-tab tmux viewer session that contains only a link-window to the exact source window and pipes bytes over IPC to xterm.js.
+* [Desktop cluster grouping consumes the final siblingInstance seam](desktop-cluster-grouping-sibling-seam.md) - Desktop cluster grouping computes connected components over parentInstance plus the final root-sibling siblingInstance field, threaded through instanceLinks() and the server projection without changing the grouping algorithm.
 * [Privileged workspace add contract](desktop-workspace-add-privileged-contract.md) - Desktop workspace-add suggestions come only from bounded validated sources, adds are provenance-gated or native-picker-gated, foreign servers fail closed, and add transitions commit only after serialized identity/readiness checks.
 * [One input surface — the terminal's own input line](terminal-input-unification.md) - The panel must not keep a separate chat composer; all typing and pasting goes through raw /api/keys passthrough so the terminal's own input line is the single input surface.
 * [View contract extension — mount() may return a per-mount disposer](view-mount-disposer-contract.md) - The desktop view host prefers a disposer function returned by mount(el, ctx) over module-level unmount() so multi-tab views can clean up independently while older single-tab views keep their original semantics.

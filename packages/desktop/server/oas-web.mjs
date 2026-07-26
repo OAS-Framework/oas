@@ -8,7 +8,7 @@
  * process; the desktop renderer is its only client):
  *   GET  /api/panel                 roster JSON (instances, git, task, tmux state)
  *   GET  /api/agents                available agents (souls) per workspace root
- *   POST /api/spawn                 { agent, agentsRoot, task?, purpose? } → spawn an instance
+ *   POST /api/spawn                 { agent, agentsRoot, task?, purpose?, relation?, relativeTo? } → spawn an instance
  *                                   (mutations require the installed `oas` CLI; see cliUnavailable)
  *   GET  /api/session/<instance>?lines=n   ANSI pane capture of the live session
  *   POST /api/keys/<instance>       { data } → raw key bytes into the session (no Enter)
@@ -105,18 +105,35 @@ function panelData(wsId) {
     team: ws?.team || null,
     generatedAt: new Date().toISOString(),
     running: instances.filter((i) => i.running).length,
-    instances: instances.map((i) => ({
-      instance: i.instance, agent: i.agent, description: i.description,
-      repo: i.repo, work: i.work, branch: i.branch || null, runtime: i.runtime || "pi",
-      model: i.model || null, running: i.running, createdAt: i.createdAt,
-      home: i.home, agentsRoot: i.agentsRoot,
-      workspace: dirname(i.agentsRoot), repoName: (i.repo || dirname(i.agentsRoot)).split("/").pop(),
-      parentInstance: i.parentInstance || null,
-      tmux: i.tmux, git: i.git, task: i.task, next: i.next,
-      team: i.team || null,
-    })),
+    instances: instances.map(projectPanelInstance),
   };
 }
+
+/* OASWEB_PANELPROJ_BEGIN — the /api/panel per-instance contract projection.
+   Extracted by packages/desktop/test/panel-projection.test.mjs via block
+   markers so a dropped/typo'd field fails a real assertion (review
+   2092e0f): the renderer's cluster grouping and ux-designer's overview
+   consume exactly these fields. */
+function projectPanelInstance(i) {
+  return {
+    instance: i.instance, agent: i.agent, description: i.description,
+    repo: i.repo, work: i.work, branch: i.branch || null, runtime: i.runtime || "pi",
+    model: i.model || null, running: i.running, createdAt: i.createdAt,
+    home: i.home, agentsRoot: i.agentsRoot,
+    workspace: dirname(i.agentsRoot), repoName: (i.repo || dirname(i.agentsRoot)).split("/").pop(),
+    parentInstance: i.parentInstance || null,
+    // Agent relations (kernel contract, final): siblingInstance links a
+    // declared sibling to a ROOT anchor; relation/relativeTo record what
+    // was declared at spawn. Forwarded for cluster grouping and the
+    // cluster-first overview (ux-designer reads /api/panel).
+    siblingInstance: i.siblingInstance || null,
+    relation: i.relation || null,
+    relativeTo: i.relativeTo || null,
+    tmux: i.tmux, git: i.git, task: i.task, next: i.next,
+    team: i.team || null,
+  };
+}
+/* OASWEB_PANELPROJ_END */
 
 /** Available agents (souls) of a workspace — what `oas spawn <agent>` could
  * start. Same read-only seams as the reader: listAgents per agents root, plus
@@ -155,7 +172,32 @@ function agentsData(wsId) {
  * Default is NO TASK: the instance comes up awaiting instruction.
  * Validation errors THROW (→ 409); domain/CLI results RESOLVE with the
  * envelope so stable error codes reach the UI. */
-async function spawnAgent({ agent, agentsRoot, task, purpose }) {
+/* OASWEB_SPAWNERR_BEGIN — /api/spawn error shaping. Extracted by
+   packages/desktop/test/panel-projection.test.mjs via block markers; the
+   HTTP boundary itself is covered by test/desktop-cli-integration.test.mjs.
+   Stable code for the degradation UI: cli-unavailable means "install or
+   choose a compatible oas CLI", not "bad request". The 300-char cap guards
+   against unbounded upstream text, but E_RELATIVE_AMBIGUOUS messages
+   legitimately carry multiple absolute instance homes (case-d inherited
+   edges) and the renderer surfaces them VERBATIM — any fixed cap can eat
+   the actionable tail for deeply nested paths (reviews f1e3211, 835a05f).
+   This code's message passes through UNSLICED: it originates from the CLI
+   JSON envelope, which the adapter already bounds (maxBuffer 4 MiB — the
+   real upstream bound), and the renderer assigns it via textContent. */
+function spawnErrorPayload(e) {
+  const status = e.code === "cli-unavailable" ? 503 : 409;
+  const message = String(e.message || e);
+  return {
+    status,
+    body: {
+      error: e.code === "E_RELATIVE_AMBIGUOUS" ? message : message.slice(0, 300),
+      ...(e.code ? { code: e.code } : {}),
+    },
+  };
+}
+/* OASWEB_SPAWNERR_END */
+
+async function spawnAgent({ agent, agentsRoot, task, purpose, relation, relativeTo, relativeRoot, runtime, model }) {
   const name = String(agent || "");
   const root = resolve(String(agentsRoot || ""));
   // agentsRoot must be one of the workspace roots this server was started for —
@@ -172,11 +214,29 @@ async function spawnAgent({ agent, agentsRoot, task, purpose }) {
     err.code = "cli-unavailable";
     throw err;
   }
+  // Relation flags are a NEWER v1 surface: older v1 CLIs ignore unknown
+  // spawn options and report success, silently creating an UNRELATED
+  // instance. Fail closed instead of degrading silently (review f921f7d).
+  const relErr = locator.relationSupportError(cliState, { relation, relativeTo });
+  if (relErr) throw relErr;
+  // Spawn-time relations: pass through to the CLI adapter, which owns the
+  // argv allowlist and pair validation (relation ⇔ relativeTo) — invalid
+  // values resolve as stable E_BAD_ARGS envelopes, never reach the CLI.
   const env = await adapter.cliSpawn(cliState.bin, {
     agent: name,
     workspaceDir: dirname(root),          // the workspace context owning this agents root
     task: task ? String(task) : "",
     purpose: purpose ? String(purpose) : undefined,
+    relation: relation ? String(relation) : undefined,
+    relativeTo: relativeTo ? String(relativeTo) : undefined,
+    // Anchor disambiguation: the renderer picker knows each instance's
+    // agentsRoot; sending the pair makes related spawns unambiguous under
+    // cross-root name shadowing (kernel E_RELATIVE_AMBIGUOUS otherwise).
+    relativeRoot: relativeRoot ? String(relativeRoot) : undefined,
+    // Runtime/model overrides (spawn-modal options): adapter-allowlisted and
+    // shape-validated there; empty means "agent definition default".
+    runtime: runtime ? String(runtime) : undefined,
+    model: model ? String(model) : undefined,
   });
   if (!env.ok) {
     const err = new Error(env.error.message || "spawn failed");
@@ -240,6 +300,11 @@ function cliStatus() {
     version: cliState.version || null,
     source: cliState.source || null,
     required: { desktopApi: locator.DESKTOP_API, range: ">=0.18.0 <0.19.0" },
+    // Capability flag for the spawn form: relation UI renders DISABLED
+    // (never hidden) with the required version when the accepted CLI
+    // predates spawn-time relations.
+    relations: !!cliState.ok && locator.supportsRelations(cliState.version),
+    relationsMin: locator.RELATIONS_MIN.join("."),
     probedAt: cliState.probedAt || null,
     tried: cliState.tried || [],
   };
@@ -283,16 +348,32 @@ function snapshotPanel(wsId) {
   return id ? snapshot.byWs.get(id) : null;
 }
 /* OASWEB_FINDINST_BEGIN — workspace-scoped instance lookup, extracted by tests */
-function findInstance(name, wsId) {
+function findInstance(name, wsId, home) {
   if (!snapshot.byWs.size) snapshot = { at: Date.now(), byWs: collectNow() }; // cold start, once
   // With a ws scope, resolve ONLY in that workspace — same-named instances
   // exist across workspaces and "first match anywhere" picks the wrong one.
-  if (wsId) return snapshot.byWs.get(wsId)?.instances.find((i) => i.instance === name);
-  for (const d of snapshot.byWs.values()) {
-    const hit = d.instances.find((i) => i.instance === name);
-    if (hit) return hit;
-  }
-  return undefined;
+  // Same-named instances also exist across roots WITHIN one workspace, so
+  // "first match in the workspace" is equally wrong for a privileged route:
+  // an exact `home` qualifier resolves precisely; a bare name that matches
+  // MORE THAN ONE instance in scope returns the AMBIGUOUS sentinel and the
+  // route must refuse rather than act on an arbitrary pick (merged-state
+  // review @7dd1e7b).
+  const scope = wsId
+    ? (snapshot.byWs.get(wsId)?.instances || [])
+    : [...snapshot.byWs.values()].flatMap((d) => d.instances);
+  if (home) return scope.find((i) => i.instance === name && i.home === home);
+  const hits = scope.filter((i) => i.instance === name);
+  if (hits.length > 1) return findInstance.AMBIGUOUS;
+  return hits[0];
+}
+findInstance.AMBIGUOUS = Symbol("ambiguous-instance");
+/** Route helper: resolve or produce the 404/409 payload for send(). */
+function resolveInstanceOr(name, wsId, home) {
+  const inst = findInstance(name, wsId, home);
+  if (inst === findInstance.AMBIGUOUS)
+    return { error: { status: 409, body: { error: `instance name "${name}" is ambiguous in this workspace — pass the exact home qualifier`, code: "E_INSTANCE_AMBIGUOUS" } } };
+  if (!inst) return { error: { status: 404, body: { error: `unknown instance "${name}"` } } };
+  return { inst };
 }
 /* OASWEB_FINDINST_END */
 
@@ -590,7 +671,9 @@ function brainData(agentName, wsId) {
     // workspace — unscoped lookup let a same-named instance running in another
     // workspace mark this (possibly stopped) one as running (merged-state
     // review @f889619) and offer a terminal that can't resolve locally.
-    const live = findInstance(name, ws?.id);
+    // The HOME qualifier pins the exact instance — a same-named twin in
+    // another root of THIS workspace must not answer either (@7dd1e7b).
+    const live = findInstance(name, ws?.id, home);
     const notesDir = join(home, "notes");
     instances.push({
       instance: name, home, running: live ? !!live.running : false,
@@ -765,20 +848,16 @@ const server = createServer(async (req, res) => {
       if (typeof body.agent !== "string" || !body.agent || typeof body.agentsRoot !== "string" || !body.agentsRoot)
         return send(res, 400, { error: "body needs { agent, agentsRoot }" });
       try { return send(res, 200, { spawned: true, ...(await spawnAgent(body)) }); }
-      catch (e) {
-        // Stable code for the degradation UI: cli-unavailable means "install
-        // or choose a compatible oas CLI", not "bad request".
-        const status = e.code === "cli-unavailable" ? 503 : 409;
-        return send(res, status, { error: String(e.message || e).slice(0, 300), ...(e.code ? { code: e.code } : {}) });
-      }
+      catch (e) { const { status, body: b } = spawnErrorPayload(e); return send(res, status, b); }
     }
     const hm = path.match(/^\/api\/harvest\/([A-Za-z0-9._-]+)$/);
     if (hm && req.method === "POST") {
       // Desktop v1 mutation 2: `oas okf harvest --json`, cwd FIXED by this
       // privileged backend to the RESOLVED instance home — the caller only
       // names an instance; it can never steer the cwd.
-      const inst = findInstance(hm[1], url.searchParams.get("ws") || undefined);
-      if (!inst) return send(res, 404, { error: `unknown instance "${hm[1]}"` });
+      const r = resolveInstanceOr(hm[1], url.searchParams.get("ws") || undefined, url.searchParams.get("home") || undefined);
+      if (r.error) return send(res, r.error.status, r.error.body);
+      const inst = r.inst;
       if (!cliState.ok) return send(res, 503, { error: "harvest requires a compatible installed oas CLI", code: "cli-unavailable" });
       // SECURITY (review 53a20c7): the roster derives home from the
       // enumerated DIRECTORY (deployment.mjs never lets instance.json
@@ -798,8 +877,9 @@ const server = createServer(async (req, res) => {
     }
     const m = path.match(/^\/api\/(session|keys|interrupt|chat)\/([A-Za-z0-9._-]+)$/);
     if (m) {
-      const inst = findInstance(m[2], url.searchParams.get("ws") || undefined);
-      if (!inst) return send(res, 404, { error: `unknown instance "${m[2]}"` });
+      const r = resolveInstanceOr(m[2], url.searchParams.get("ws") || undefined, url.searchParams.get("home") || undefined);
+      if (r.error) return send(res, r.error.status, r.error.body);
+      const inst = r.inst;
       if (m[1] === "session" && req.method === "GET") {
         if (!inst.running) return send(res, 200, { running: false, text: "" });
         const info = paneInfo(inst);

@@ -69,3 +69,4 @@ fail with `ERR_MODULE_NOT_FOUND`.
 - [Raw key passthrough and the loopback Host/Origin guards](/architecture/raw-key-passthrough-and-host-guard.md)
 - [Guard file-serving paths with admitted canonical roots](/lessons/file-endpoint-realpath-guard.md)
 - [Desktop renderer views port](/architecture/desktop-renderer-views-port.md)
+- [Graph code over roster instances must key by composite identity](/lessons/cluster-composite-identity.md)

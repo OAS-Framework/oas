@@ -5,7 +5,7 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSy
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import {
-  capabilityIntegrity, capabilityManifest, composeInstanceAgentsMd, createAgent, findAgent, resolveOasConfig,
+  capabilityIntegrity, capabilityManifest, composeInstanceAgentsMd, createAgent, findAgent, findInstanceHomes, resolveOasConfig,
   resolveClaudeBinary, resolveWorkMode, retireInstance, runLifecycleHooks, spawnInstance, writeCapabilityLock,
 } from "../lib/core.mjs";
 
@@ -866,6 +866,894 @@ test("--parent accepts capability-defined parent instances homing under local-ag
       core.retireInstance(root, "reviewer-abc", { tmuxSession: "oas-test-nosuch" });
     } finally { process.env.PATH = oldPath; }
   });
+});
+
+test("spawn relations: child/sibling/parent/unrelated, sugar equivalence, validation", () => {
+  const base = temp(); const repo = join(base, "repo"); gitRepo(repo);
+  const root = join(repo, "agents");
+  write(join(root, "dev", "soul", "soul.yaml"), `name: dev\nkind: persistent\nrepo: ${repo}\nwork: checkout\nruntime: pi\n`);
+  write(join(root, "dev", "soul", "AGENTS.md"), "# dev\n");
+  mkdirSync(join(root, "dev", "instances"), { recursive: true });
+  const env = { ...process.env, PATH: fakeRuntimes(base), PI_AGENTS_TMUX_SESSION: "oas-test-nosuch" };
+  delete env.PI_AGENTS_ROOT;
+  const spawn = (...extra) => spawnSync(process.execPath, [CLI, "spawn", "dev", "--no-launch", "--json", ...extra], { cwd: repo, env, encoding: "utf8" });
+  const metaOf = (home) => JSON.parse(readFileSync(join(home, "instance.json"), "utf8"));
+
+  // Root anchor: no relation flags → unrelated (as today).
+  let r = spawn("--purpose", "anchor");
+  assert.equal(r.status, 0, r.stderr);
+  const anchor = jsonResult(r);
+  assert.equal(anchor.parent, null); assert.equal(anchor.relation, null);
+
+  // child: --relation child --relative-to === --parent sugar (same recorded fields).
+  r = spawn("--purpose", "kid", "--relation", "child", "--relative-to", anchor.instance);
+  assert.equal(r.status, 0, r.stderr);
+  const kid = jsonResult(r);
+  assert.equal(kid.parent, anchor.instance);
+  assert.equal(kid.relation, "child");
+  assert.equal(kid.spawnOrigin, "instance");
+  r = spawn("--purpose", "kid-sugar", "--parent", anchor.instance);
+  assert.equal(r.status, 0, r.stderr);
+  const sugar = jsonResult(r);
+  assert.equal(sugar.parent, anchor.instance);
+  assert.equal(sugar.relation, "child", "--parent is sugar for --relation child");
+  const kidMeta = metaOf(kid.home); const sugarMeta = metaOf(sugar.home);
+  assert.equal(kidMeta.parentInstance, sugarMeta.parentInstance);
+  assert.equal(kidMeta.relation, sugarMeta.relation);
+  assert.equal(kidMeta.siblingInstance, undefined);
+
+  // sibling of a CHILD: shares the child's parent (same cluster, same level).
+  r = spawn("--purpose", "peer", "--relation", "sibling", "--relative-to", kid.instance);
+  assert.equal(r.status, 0, r.stderr);
+  const peer = jsonResult(r);
+  assert.equal(peer.parent, anchor.instance, "sibling of a child shares the parent");
+  assert.equal(peer.sibling, null);
+  assert.equal(metaOf(peer.home).relativeTo, kid.instance);
+
+  // sibling of a ROOT: no parent to share → explicit siblingInstance link keeps one cluster.
+  r = spawn("--purpose", "rootpeer", "--relation", "sibling", "--relative-to", anchor.instance);
+  assert.equal(r.status, 0, r.stderr);
+  const rootPeer = jsonResult(r);
+  assert.equal(rootPeer.parent, null);
+  assert.equal(rootPeer.sibling, anchor.instance, "root sibling records siblingInstance");
+  assert.equal(metaOf(rootPeer.home).siblingInstance, anchor.instance);
+
+  // parent: the NEW instance becomes the anchor's parent; anchor lineage re-pointed.
+  r = spawn("--purpose", "boss", "--relation", "parent", "--relative-to", kid.instance);
+  assert.equal(r.status, 0, r.stderr);
+  const boss = jsonResult(r);
+  assert.equal(boss.parent, anchor.instance, "new parent inherits the anchor's old slot");
+  assert.equal(metaOf(kid.home).parentInstance, boss.instance, "anchor re-pointed to the new instance");
+
+  // parent of a ROOT: new instance is top-level, anchor nests under it.
+  r = spawn("--purpose", "rootboss", "--relation", "parent", "--relative-to", anchor.instance);
+  assert.equal(r.status, 0, r.stderr);
+  const rootBoss = jsonResult(r);
+  assert.equal(rootBoss.parent, null);
+  assert.equal(metaOf(anchor.home).parentInstance, rootBoss.instance);
+
+  // unrelated: explicit flag behaves like the default and takes no --relative-to.
+  r = spawn("--purpose", "stranger", "--relation", "unrelated");
+  assert.equal(r.status, 0, r.stderr);
+  const stranger = jsonResult(r);
+  assert.equal(stranger.parent, null); assert.equal(stranger.relation, null);
+  assert.equal(stranger.spawnOrigin, "operator");
+
+  // status --json exposes the lineage fields desktop consumes.
+  r = spawnSync(process.execPath, [CLI, "status", "--json"], { cwd: repo, env, encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  const status = JSON.parse(r.stdout);
+  const insts = status.agents.find((a) => a.name === "dev").instances;
+  const sKid = insts.find((i) => i.instance === kid.instance);
+  assert.equal(sKid.parentInstance, boss.instance);
+  const sPeer = insts.find((i) => i.instance === rootPeer.instance);
+  assert.equal(sPeer.siblingInstance, anchor.instance);
+
+  // Validation errors (E_BAD_ARGS / not-found), all before scaffolding.
+  // JSON mode: failures are a stdout envelope with a stable error code.
+  const fail = (re, ...extra) => {
+    const x = spawn("--purpose", "bad", ...extra);
+    assert.equal(x.status, 1);
+    const env2 = JSON.parse(x.stdout);
+    assert.equal(env2.ok, false);
+    assert.match(env2.error?.message || "", re);
+  };
+  fail(/--relation child requires --relative-to/, "--relation", "child");
+  fail(/--relation sibling requires --relative-to/, "--relation", "sibling");
+  fail(/--relation parent requires --relative-to/, "--relation", "parent");
+  fail(/unknown --relation "boss"/, "--relation", "boss", "--relative-to", anchor.instance);
+  fail(/--relative-to requires --relation/, "--relative-to", anchor.instance);
+  fail(/--relation unrelated takes no --relative-to/, "--relation", "unrelated", "--relative-to", anchor.instance);
+  fail(/use one form, not both/, "--parent", anchor.instance, "--relation", "child", "--relative-to", anchor.instance);
+  fail(/--relation needs a value/, "--relation", "--relative-to", anchor.instance);
+  fail(/does not match any known instance/, "--relation", "sibling", "--relative-to", "no-such-instance");
+
+  // ATTACHED agents are ALWAYS children of the work-tree owner (design
+  // decision): no relation flags → auto-parent from the canonically resolved
+  // owner; non-child relations → rejected; a non-instance work dir requires an
+  // explicit --parent naming the owner.
+  r = spawn("--purpose", "cli-att-un", "--work", "attached", "--work-dir", join(anchor.home, "work"), "--relation", "unrelated");
+  assert.equal(r.status, 1);
+  assert.match(JSON.parse(r.stdout).error?.message || "", /always children/);
+  r = spawn("--purpose", "cli-att-par", "--work", "attached", "--work-dir", join(anchor.home, "work"), "--relation", "parent", "--relative-to", anchor.instance);
+  assert.equal(r.status, 1);
+  assert.match(JSON.parse(r.stdout).error?.message || "", /always children/);
+  r = spawn("--purpose", "cli-att", "--work", "attached", "--work-dir", join(anchor.home, "work"));
+  assert.equal(r.status, 0, r.stderr);
+  const cliAtt = jsonResult(r);
+  assert.equal(cliAtt.parent, anchor.instance, "CLI: attached auto-parents under the work-tree owner");
+  const agentDef = findAgent(root, "dev");
+  const oldPath = process.env.PATH;
+  process.env.PATH = fakeRuntimes(base);
+  try {
+    const att = spawnInstance(root, agentDef, { instance: "dev-att", work: "attached", workDir: join(anchor.home, "work"), launch: false });
+    assert.equal(att.parentInstance, anchor.instance, "attached auto-parents under the work-tree owner");
+    // Kernel enforces the invariant too (covers soul-default attached mode):
+    // contradictory relations rejected; redundant child-of-owner allowed.
+    assert.throws(() => spawnInstance(root, agentDef, { instance: "dev-att-un", work: "attached", workDir: join(anchor.home, "work"), relation: "unrelated", launch: false }), /always children/);
+    assert.throws(() => spawnInstance(root, agentDef, { instance: "dev-att-sib", work: "attached", workDir: join(anchor.home, "work"), relation: "sibling", relativeTo: anchor.instance, launch: false }), /always children/);
+    const attKid = spawnInstance(root, agentDef, { instance: "dev-att-kid", work: "attached", workDir: join(anchor.home, "work"), parent: anchor.instance, launch: false });
+    assert.equal(attKid.parentInstance, anchor.instance, "redundant child-of-owner is accepted");
+    // Ownership is CANONICAL, not lexical: a path merely SHAPED like <owner>/work
+    // never records a nonexistent parent, and a non-instance tree (e.g. a
+    // coordinator's integration worktree) requires an explicit --parent owner.
+    const fakeOwner = join(base, "not-an-instance", "work"); mkdirSync(fakeOwner, { recursive: true });
+    assert.throws(() => spawnInstance(root, agentDef, { instance: "dev-att-fake", work: "attached", workDir: fakeOwner, launch: false }), /not a known instance/);
+    const integ = join(base, "integration-tree"); mkdirSync(integ, { recursive: true });
+    assert.throws(() => spawnInstance(root, agentDef, { instance: "dev-att-integ", work: "attached", workDir: integ, launch: false }), /not a known instance/);
+    const owned = spawnInstance(root, agentDef, { instance: "dev-att-owned", work: "attached", workDir: integ, parent: anchor.instance, launch: false });
+    assert.equal(owned.parentInstance, anchor.instance, "non-instance tree with explicit --parent owner attaches as its child");
+
+    // Direct-kernel rejection happens BEFORE scaffolding and hooks: no home dir remains.
+    const assertNoHome = (name, fn, re) => {
+      assert.throws(fn, re);
+      assert.equal(existsSync(join(root, "dev", "instances", name)), false, `${name}: no instance dir left behind`);
+    };
+    assertNoHome("dev-badrel", () => spawnInstance(root, agentDef, { instance: "dev-badrel", relation: "boss", relativeTo: anchor.instance, launch: false }), /unknown relation/);
+    assertNoHome("dev-norel", () => spawnInstance(root, agentDef, { instance: "dev-norel", relation: "sibling", launch: false }), /needs a relative-to/);
+    assertNoHome("dev-noanchor", () => spawnInstance(root, agentDef, { instance: "dev-noanchor", relation: "sibling", relativeTo: "no-such-instance", launch: false }), /was not found/);
+    // Kernel validates the RAW option combination (programmatic callers bypass
+    // the CLI): contradictory shapes are rejected, never silently normalized.
+    assertNoHome("dev-dangling", () => spawnInstance(root, agentDef, { instance: "dev-dangling", relativeTo: anchor.instance, launch: false }), /needs a relation/);
+    assertNoHome("dev-unrel-rt", () => spawnInstance(root, agentDef, { instance: "dev-unrel-rt", relation: "unrelated", relativeTo: anchor.instance, launch: false }), /takes no relativeTo/);
+    assertNoHome("dev-both", () => spawnInstance(root, agentDef, { instance: "dev-both", parent: anchor.instance, relation: "child", relativeTo: anchor.instance, launch: false }), /one form, not both/);
+    assertNoHome("dev-rr-only", () => spawnInstance(root, agentDef, { instance: "dev-rr-only", relativeRoot: root, launch: false }), /only qualifies/);
+  } finally { process.env.PATH = oldPath; }
+});
+
+test("relation anchors are ambiguity-safe across same-named team instances", () => {
+  const base = temp();
+  const ws = join(base, "ws"); mkdirSync(ws, { recursive: true });
+  write(join(ws, "oas-config.yaml"), "team:\n  name: t\n");
+  const mkMember = (repoName) => {
+    const repo = join(ws, repoName); gitRepo(repo);
+    write(join(repo, "oas-config.yaml"), "capabilities:\n  additive: {}\n");
+    const root = join(repo, "agents");
+    write(join(root, "dev", "soul", "soul.yaml"), `name: dev\nkind: persistent\nrepo: ${repo}\nwork: checkout\nruntime: pi\n`);
+    write(join(root, "dev", "soul", "AGENTS.md"), "# dev\n");
+    mkdirSync(join(root, "dev", "instances"), { recursive: true });
+    return { repo, root };
+  };
+  const a = mkMember("repo-a");
+  const b = mkMember("repo-b");
+  const oldPath = process.env.PATH;
+  process.env.PATH = fakeRuntimes(base);
+  const metaOf = (root2, name2) => JSON.parse(readFileSync(join(root2, "dev", "instances", name2, "instance.json"), "utf8"));
+  try {
+    // Same-named anchor in both repos.
+    const bossA = spawnInstance(a.root, findAgent(a.root, "dev"), { instance: "dev-boss", launch: false });
+    const bossB = spawnInstance(b.root, findAgent(b.root, "dev"), { instance: "dev-boss", launch: false });
+    // From repo A, bare "dev-boss" matches BOTH — kernel resolution is
+    // local-first for the recorded edge, so the LOCAL one wins silently only
+    // when unambiguous... here both exist: without relativeRoot → ambiguous.
+    assert.throws(
+      () => spawnInstance(a.root, findAgent(a.root, "dev"), { instance: "dev-kid-x", relation: "child", relativeTo: "dev-boss", launch: false }),
+      (e) => e.code === "E_RELATIVE_AMBIGUOUS" && /matches multiple instances/.test(e.message),
+      "duplicate anchor names without --relative-root are rejected");
+    assert.equal(existsSync(join(a.root, "dev", "instances", "dev-kid-x")), false, "no stray home");
+    // relativeRoot picks the LOCAL one: round-trips, allowed.
+    const kidA = spawnInstance(a.root, findAgent(a.root, "dev"), { instance: "dev-kid-a", relation: "child", relativeTo: "dev-boss", relativeRoot: a.root, launch: false });
+    assert.equal(metaOf(a.root, kidA.instance).parentInstance, "dev-boss");
+    // relativeRoot picking the FOREIGN same-named one cannot round-trip from
+    // repo A (the local dev-boss shadows it) → rejected, not silently wrong.
+    assert.throws(
+      () => spawnInstance(a.root, findAgent(a.root, "dev"), { instance: "dev-kid-b", relation: "child", relativeTo: "dev-boss", relativeRoot: b.root, launch: false }),
+      (e) => e.code === "E_RELATIVE_AMBIGUOUS" && /shadowed/.test(e.message),
+      "cross-repo anchor shadowed by a same-named local instance is rejected");
+    // relation=parent reverse-edge check: an existing instance in the anchor's
+    // repo with the same name the NEW instance would take → rejected (the
+    // re-pointed anchor edge would resolve to the wrong instance).
+    spawnInstance(b.root, findAgent(b.root, "dev"), { instance: "dev-over", launch: false });
+    assert.throws(
+      () => spawnInstance(a.root, findAgent(a.root, "dev"), { instance: "dev-over", relation: "parent", relativeTo: bossA.instance, relativeRoot: a.root, launch: false }),
+      (e) => e.code === "E_RELATIVE_AMBIGUOUS" && /shadow the new instance/.test(e.message),
+      "parent relation rejects a shadowed reverse edge");
+    assert.equal(metaOf(a.root, bossA.instance).parentInstance, undefined, "anchor NOT re-pointed by the rejected spawn");
+    // Unique names keep working with zero new flags (no breaking change).
+    const uniq = spawnInstance(b.root, findAgent(b.root, "dev"), { instance: "dev-uniq-kid", relation: "child", relativeTo: bossB.instance === "dev-boss" ? "dev-over" : bossB.instance, launch: false });
+    assert.equal(metaOf(b.root, uniq.instance).parentInstance, "dev-over");
+
+    // INHERITED-edge round-trips (the subtle cases): sibling/parent copy names
+    // from the anchor's instance.json — resolved from the ANCHOR's root — and
+    // the new root may resolve those same names elsewhere.
+    // Repo-B anchor "dev-under" is a child of B's dev-boss; repo A also has a
+    // dev-boss. A sibling of dev-under spawned from repo A would record
+    // parentInstance: "dev-boss" — which from repo A resolves to A's boss, not
+    // the anchor's parent. Must be rejected.
+    const under = spawnInstance(b.root, findAgent(b.root, "dev"), { instance: "dev-under", relation: "child", relativeTo: "dev-boss", relativeRoot: b.root, launch: false });
+    assert.throws(
+      () => spawnInstance(a.root, findAgent(a.root, "dev"), { instance: "dev-sib-x", relation: "sibling", relativeTo: under.instance, launch: false }),
+      (e) => e.code === "E_RELATIVE_AMBIGUOUS" && /inherited lineage "dev-boss"/.test(e.message),
+      "sibling inheriting a cross-repo-shadowed parent name is rejected");
+    assert.equal(existsSync(join(a.root, "dev", "instances", "dev-sib-x")), false, "no stray home");
+    // Same inheritance path for relation=parent (new instance takes the
+    // anchor's old parent — also "dev-boss").
+    assert.throws(
+      () => spawnInstance(a.root, findAgent(a.root, "dev"), { instance: "dev-par-x", relation: "parent", relativeTo: under.instance, launch: false }),
+      (e) => e.code === "E_RELATIVE_AMBIGUOUS" && /inherited lineage "dev-boss"/.test(e.message),
+      "parent inheriting a cross-repo-shadowed lineage name is rejected");
+    assert.equal(metaOf(b.root, under.instance).parentInstance, "dev-boss", "anchor untouched by the rejected parent spawn");
+    // Sibling of the same anchor spawned from ITS OWN repo round-trips fine.
+    const sibOk = spawnInstance(b.root, findAgent(b.root, "dev"), { instance: "dev-sib-ok", relation: "sibling", relativeTo: under.instance, launch: false });
+    assert.equal(metaOf(b.root, sibOk.instance).parentInstance, "dev-boss", "same-repo sibling inherits the parent");
+  } finally { process.env.PATH = oldPath; }
+});
+
+test("anchor enumeration sees intra-root duplicates (generated-name collisions)", () => {
+  const base = temp(); const repo = join(base, "repo"); gitRepo(repo);
+  const root = join(repo, "agents");
+  // Two agents whose generated names collide: agent "dev" with purpose "foo-1"
+  // and agent "dev-foo" with purpose "1" both yield instance "dev-foo-1".
+  for (const soul of ["dev", "dev-foo"]) {
+    write(join(root, soul, "soul", "soul.yaml"), `name: ${soul}\nkind: persistent\nrepo: ${repo}\nwork: checkout\nruntime: pi\n`);
+    write(join(root, soul, "soul", "AGENTS.md"), `# ${soul}\n`);
+    mkdirSync(join(root, soul, "instances"), { recursive: true });
+  }
+  const oldPath = process.env.PATH;
+  process.env.PATH = fakeRuntimes(base);
+  try {
+    spawnInstance(root, findAgent(root, "dev"), { instance: "dev-foo-1", launch: false });
+    spawnInstance(root, findAgent(root, "dev-foo"), { instance: "dev-foo-1", launch: false });
+    // findInstanceHomes surfaces both; first-match findInstanceHome sees one.
+    assert.equal(findInstanceHomes(root, "dev-foo-1").length, 2, "both same-named homes enumerated");
+    // A relation anchored on the duplicated name is inherently ambiguous —
+    // --relative-root cannot split two matches under ONE root.
+    assert.throws(
+      () => spawnInstance(root, findAgent(root, "dev"), { instance: "dev-kid-dup", relation: "child", relativeTo: "dev-foo-1", relativeRoot: root, launch: false }),
+      (e) => e.code === "E_RELATIVE_AMBIGUOUS" && /inherently ambiguous/.test(e.message),
+      "intra-root duplicate anchor rejected even with --relative-root");
+    assert.throws(
+      () => spawnInstance(root, findAgent(root, "dev"), { instance: "dev-kid-dup", relation: "child", relativeTo: "dev-foo-1", launch: false }),
+      (e) => e.code === "E_RELATIVE_AMBIGUOUS",
+      "intra-root duplicate anchor rejected without qualifier too");
+    assert.equal(existsSync(join(root, "dev", "instances", "dev-kid-dup")), false, "no stray home");
+  } finally { process.env.PATH = oldPath; }
+});
+
+test("local-soul instances enumerate once and accept relations (no false intra-root ambiguity)", () => {
+  const base = temp(); const repo = join(base, "repo"); gitRepo(repo);
+  const root = join(repo, "agents");
+  write(join(root, "dev", "soul", "soul.yaml"), `name: dev\nkind: persistent\nrepo: ${repo}\nwork: checkout\nruntime: pi\n`);
+  write(join(root, "dev", "soul", "AGENTS.md"), "# dev\n");
+  mkdirSync(join(root, "dev", "instances"), { recursive: true });
+  // Local soul under local-agents/ — visible via BOTH listAgents and the
+  // capability fallback scan; must not double-count.
+  const la = join(repo, "local-agents");
+  write(join(la, "helper", "soul", "soul.yaml"), `name: helper\nkind: local\nrepo: ${repo}\nwork: worktree\nruntime: pi\n`);
+  write(join(la, "helper", "soul", "AGENTS.md"), "# helper\n");
+  mkdirSync(join(la, "helper", "instances"), { recursive: true });
+  const oldPath = process.env.PATH;
+  process.env.PATH = fakeRuntimes(base);
+  try {
+    const anchor = spawnInstance(root, findAgent(root, "helper"), { instance: "helper-anchor", launch: false });
+    assert.equal(findInstanceHomes(root, anchor.instance).length, 1, "local-soul instance enumerated exactly once");
+    // Relations to a local-soul anchor work — with and without --relative-root.
+    const kid = spawnInstance(root, findAgent(root, "dev"), { instance: "dev-la-kid", relation: "child", relativeTo: anchor.instance, launch: false });
+    assert.equal(kid.parentInstance, anchor.instance);
+    const kid2 = spawnInstance(root, findAgent(root, "dev"), { instance: "dev-la-kid2", relation: "child", relativeTo: anchor.instance, relativeRoot: root, launch: false });
+    assert.equal(kid2.parentInstance, anchor.instance);
+    const sib = spawnInstance(root, findAgent(root, "dev"), { instance: "dev-la-sib", relation: "sibling", relativeTo: kid.instance, launch: false });
+    assert.equal(sib.parentInstance, anchor.instance, "sibling inherits the local-soul parent");
+  } finally { process.env.PATH = oldPath; }
+});
+
+test("retire splices lineage: orphans inherit the retiree's links (parent-relation reviewer cycle)", () => {
+  const base = temp(); const repo = join(base, "repo"); gitRepo(repo);
+  const root = join(repo, "agents");
+  write(join(root, "dev", "soul", "soul.yaml"), `name: dev\nkind: persistent\nrepo: ${repo}\nwork: checkout\nruntime: pi\n`);
+  write(join(root, "dev", "soul", "AGENTS.md"), "# dev\n");
+  mkdirSync(join(root, "dev", "instances"), { recursive: true });
+  const oldPath = process.env.PATH;
+  process.env.PATH = fakeRuntimes(base);
+  const metaOf = (name) => JSON.parse(readFileSync(join(root, "dev", "instances", name, "instance.json"), "utf8"));
+  try {
+    const agentDef = findAgent(root, "dev");
+    // coordinator → developer (child) → reviewer (parent relation over the developer).
+    const coord = spawnInstance(root, agentDef, { instance: "dev-coord", launch: false });
+    const developer = spawnInstance(root, agentDef, { instance: "dev-worker", relation: "child", relativeTo: coord.instance, launch: false });
+    const reviewer = spawnInstance(root, agentDef, { instance: "dev-rev", relation: "parent", relativeTo: developer.instance, launch: false });
+    assert.equal(reviewer.parentInstance, coord.instance, "reviewer takes the developer's slot under the coordinator");
+    assert.equal(metaOf(developer.instance).parentInstance, reviewer.instance);
+    // Reviewer retires → the developer returns to the coordinator (no dangling parent).
+    const r = retireInstance(root, reviewer.instance, { keepDir: false });
+    assert.ok(r.relinked?.some((x) => x.instance === developer.instance && x.parentInstance === coord.instance), "retire reports the splice");
+    assert.equal(metaOf(developer.instance).parentInstance, coord.instance, "developer re-pointed to its previous parent");
+    // Root-parent case: reviewer over a ROOT instance → on retire the root becomes a root again.
+    const solo = spawnInstance(root, agentDef, { instance: "dev-solo", launch: false });
+    const rev2 = spawnInstance(root, agentDef, { instance: "dev-rev2", relation: "parent", relativeTo: solo.instance, launch: false });
+    assert.equal(metaOf(solo.instance).parentInstance, rev2.instance);
+    retireInstance(root, rev2.instance, { keepDir: false });
+    assert.equal(metaOf(solo.instance).parentInstance, undefined, "root anchor is a root again after its reviewer retires");
+    // Sibling-link splice: root sibling link to a retiring instance is dropped.
+    // parent-relation anchor rewrite is committed only AFTER a successful
+    // launch: force a launch failure (PATH without tmux) and assert the
+    // anchor's lineage is untouched — no edge to a zombie spawn.
+    const rev4 = (() => {
+      const restore = process.env.PATH;
+      // pi/claude/git available, tmux NOT: which() must fail on tmux only.
+      const noTmux = join(base, "bin-notmux"); mkdirSync(noTmux, { recursive: true });
+      for (const t of ["pi", "claude"]) write(join(noTmux, t), "#!/bin/sh\nexit 0\n");
+      execFileSync("chmod", ["-R", "+x", noTmux]);
+      const gitPath = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+      symlinkSync(gitPath, join(noTmux, "git"));
+      process.env.PATH = noTmux;
+      try {
+        assert.throws(
+          () => spawnInstance(root, agentDef, { instance: "dev-rev4", relation: "parent", relativeTo: solo.instance, launch: true }),
+          /tmux not installed/,
+          "launch failure surfaces");
+      } finally { process.env.PATH = restore; }
+    })();
+    void rev4;
+    assert.equal(metaOf(solo.instance).parentInstance, undefined, "anchor NOT re-pointed by the failed launch");
+    // Anchor-write failure AFTER successful scaffold/launch is COMPENSATED:
+    // make the anchor's instance.json unwritable, spawn a parent relation, and
+    // assert the spawn throws AND the new home is rolled back (no zombie).
+    const soloMetaPath = join(root, "dev", "instances", solo.instance, "instance.json");
+    execFileSync("chmod", ["444", soloMetaPath]);
+    execFileSync("chmod", ["555", dirname(soloMetaPath)]);
+    try {
+      assert.throws(
+        () => spawnInstance(root, agentDef, { instance: "dev-rev5", relation: "parent", relativeTo: solo.instance, launch: false }),
+        /failed to re-point anchor.*rolled back/s,
+        "anchor-write failure is compensated");
+    } finally {
+      execFileSync("chmod", ["755", dirname(soloMetaPath)]);
+      execFileSync("chmod", ["644", soloMetaPath]);
+    }
+    assert.equal(existsSync(join(root, "dev", "instances", "dev-rev5")), false, "rolled-back spawn leaves no home");
+    assert.equal(metaOf(solo.instance).parentInstance, undefined, "anchor unchanged after compensated failure");
+    const peer = spawnInstance(root, agentDef, { instance: "dev-peer", relation: "sibling", relativeTo: solo.instance, launch: false });
+    assert.equal(metaOf(peer.instance).siblingInstance, solo.instance);
+    // Mixed edge types: reviewer R as parent over root-sibling peer absorbs
+    // peer's sibling link (R.siblingInstance = solo). Retiring R must restore
+    // BOTH: peer loses parent AND regains the sibling link — the orphan inherits
+    // the retiree's COMPLETE lineage, not just the same-typed edge.
+    const rev3 = spawnInstance(root, agentDef, { instance: "dev-rev3", relation: "parent", relativeTo: peer.instance, launch: false });
+    assert.equal(rev3.siblingInstance, solo.instance, "parent-relation reviewer absorbs the anchor's sibling link");
+    assert.equal(metaOf(peer.instance).parentInstance, rev3.instance);
+    assert.equal(metaOf(peer.instance).siblingInstance, undefined);
+    retireInstance(root, rev3.instance, { keepDir: false });
+    assert.equal(metaOf(peer.instance).parentInstance, undefined, "peer is a root again");
+    assert.equal(metaOf(peer.instance).siblingInstance, solo.instance, "cross-type splice restores the sibling cluster link");
+    retireInstance(root, solo.instance, { keepDir: false });
+    assert.equal(metaOf(peer.instance).siblingInstance, undefined, "dangling sibling link dropped on retire");
+  } finally { process.env.PATH = oldPath; }
+});
+
+test("parent-relation rollback after LAUNCH kills the window, compensates hooks, and never truncates the anchor", () => {
+  const base = temp(); const repo = join(base, "repo"); gitRepo(repo);
+  const root = join(repo, "agents");
+  write(join(root, "dev", "soul", "soul.yaml"), `name: dev\nkind: persistent\nrepo: ${repo}\nwork: checkout\nruntime: pi\n`);
+  write(join(root, "dev", "soul", "AGENTS.md"), "# dev\n");
+  mkdirSync(join(root, "dev", "instances"), { recursive: true });
+  // Capability whose spawn/retire hooks record every event — compensation must
+  // fire retire for the rolled-back instance.
+  const hookLog = join(base, "hook-events");
+  const script = `import {appendFileSync} from 'node:fs'; appendFileSync(${JSON.stringify(hookLog)}, process.env.OAS_EVENT + ':' + process.env.OAS_INSTANCE + '\\n');`;
+  capability(repo, "comp", { capability: "acme.comp", hooks: { spawn: "hook.mjs", retire: "hook.mjs" } }, { "hook.mjs": script });
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.comp:\n      global: true\n");
+  // STATEFUL fake tmux: tracks window names in a file so list-windows reflects
+  // new-window/kill-window; TMUX_FAKE_STUBBORN names a window that kill-window
+  // silently fails to remove (for truth-telling assertions).
+  const bin = join(base, "bin"); mkdirSync(bin, { recursive: true });
+  const tmuxLog = join(base, "tmux-log");
+  const tmuxWins = join(base, "tmux-windows");
+  write(tmuxWins, "");
+  write(join(bin, "tmux"), [
+    "#!/bin/sh",
+    `echo "$@" >> ${tmuxLog}`,
+    'cmd="$1"',
+    'case "$cmd" in',
+    "  new-window)",
+    `    while [ $# -gt 0 ]; do if [ "$1" = "-n" ]; then echo "$2" >> ${tmuxWins}; fi; shift; done ;;`,
+    "  kill-window)",
+    '    while [ $# -gt 0 ]; do if [ "$1" = "-t" ]; then t="$2"; fi; shift; done',
+    "    name=$(printf '%s' \"$t\" | sed 's/.*:=//')",
+    `    if [ "$name" != "$TMUX_FAKE_STUBBORN" ]; then grep -v -x "$name" ${tmuxWins} > ${tmuxWins}.n || true; mv ${tmuxWins}.n ${tmuxWins}; fi ;;`,
+    "  list-windows)",
+    '    if [ -n "$TMUX_FAKE_LIST_FAIL" ]; then echo "list-windows broken" >&2; exit 1; fi',
+    `    cat ${tmuxWins} ;;`,
+    "esac",
+    "exit 0",
+    "",
+  ].join("\n"));
+  for (const t of ["pi", "claude"]) write(join(bin, t), "#!/bin/sh\nexit 0\n");
+  execFileSync("chmod", ["-R", "+x", bin]);
+  for (const t of ["git", "node", "chmod", "sh", "grep", "sed", "mv", "cat", "printf"]) symlinkSync(execFileSync("which", [t], { encoding: "utf8" }).trim(), join(bin, t));
+  const oldPath = process.env.PATH;
+  process.env.PATH = `${bin}`;
+  try {
+    const agentDef = findAgent(root, "dev");
+    const anchor = spawnInstance(root, agentDef, { instance: "dev-anchor", tmuxSession: "oas-test-fake", launch: false });
+    const anchorMetaPath = join(anchor.home, "instance.json");
+    const before = readFileSync(anchorMetaPath, "utf8");
+    // Force the ATOMIC anchor write to fail AFTER a successful launch: 555 on
+    // the anchor's home blocks the same-directory temp file creation — the
+    // target instance.json is never truncated (rename never happens).
+    execFileSync("chmod", ["555", anchor.home]);
+    try {
+      assert.throws(
+        () => spawnInstance(root, agentDef, { instance: "dev-zomb", relation: "parent", relativeTo: anchor.instance, tmuxSession: "oas-test-fake", launch: true }),
+        /failed to re-point anchor.*rolled back/s);
+    } finally { execFileSync("chmod", ["755", anchor.home]); }
+    // Anchor file NEVER truncated or altered (atomic temp+rename path).
+    assert.equal(readFileSync(anchorMetaPath, "utf8"), before, "anchor instance.json byte-identical");
+    // The launched window was killed with an exact-match target.
+    const tmuxCalls = readFileSync(tmuxLog, "utf8");
+    assert.match(tmuxCalls, /new-window .*dev-zomb/, "window was launched");
+    assert.match(tmuxCalls, /kill-window -t =oas-test-fake:=dev-zomb/, "launched window killed exact-match");
+    // Spawn hooks were compensated with retire for the rolled-back instance.
+    const events = readFileSync(hookLog, "utf8").trim().split("\n");
+    assert.ok(events.includes("spawn:dev-zomb"), "spawn hook ran");
+    assert.ok(events.includes("retire:dev-zomb"), "retire hook compensated the rolled-back spawn");
+    // Scaffold removed; no temp file remains next to the anchor meta.
+    assert.equal(existsSync(join(root, "dev", "instances", "dev-zomb")), false, "no zombie home");
+    assert.ok(!readdirSync(anchor.home).some((f) => f.includes(".tmp-")), "no leftover temp file");
+
+    // Temp-cleanup failure must not abort the rollback: pre-create a NON-EMPTY
+    // DIRECTORY at the deterministic temp path — writeFileSync fails (EISDIR,
+    // the original error) AND rmSync(tmpPath, {force:true}) throws (EISDIR/
+    // ENOTEMPTY without recursive), which previously aborted all remaining
+    // compensation (window kill, hooks, scaffold removal).
+    const tmpDir = `${anchorMetaPath}.tmp-dev-zomb2`;
+    mkdirSync(tmpDir); write(join(tmpDir, "blocker"), "x");
+    try {
+      assert.throws(
+        () => spawnInstance(root, agentDef, { instance: "dev-zomb2", relation: "parent", relativeTo: anchor.instance, tmuxSession: "oas-test-fake", launch: true }),
+        /failed to re-point anchor.*rollback INCOMPLETE.*tmp-dev-zomb2/s,
+        "original anchor-write error surfaces, and the unremovable temp is reported for manual cleanup");
+    } finally { rmSync(tmpDir, { recursive: true, force: true }); }
+    assert.equal(readFileSync(anchorMetaPath, "utf8"), before, "anchor still byte-identical");
+    const tmuxCalls2 = readFileSync(tmuxLog, "utf8");
+    assert.match(tmuxCalls2, /kill-window -t =oas-test-fake:=dev-zomb2/, "window killed despite temp-cleanup failure");
+    const events2 = readFileSync(hookLog, "utf8").trim().split("\n");
+    assert.ok(events2.includes("retire:dev-zomb2"), "hooks compensated despite temp-cleanup failure");
+    assert.equal(existsSync(join(root, "dev", "instances", "dev-zomb2")), false, "scaffold removed despite temp-cleanup failure");
+
+    // Home-removal failure must be REPORTED as incomplete with the failed
+    // path — never claimed as cleaned up. The retire hook (which compensation
+    // runs BEFORE home removal) plants a read-only subdir inside the home so
+    // rmSync(home) fails: the zombie home remains and the message says so.
+    const tmpDir3 = `${anchorMetaPath}.tmp-dev-zomb3`;
+    mkdirSync(tmpDir3); write(join(tmpDir3, "blocker"), "x"); // anchor write fails again
+    write(join(repo, ".agents", "capabilities", "owned", "comp", "hook.mjs"),
+      `import {appendFileSync, mkdirSync, writeFileSync, chmodSync} from 'node:fs';\n` +
+      `appendFileSync(${JSON.stringify(hookLog)}, process.env.OAS_EVENT + ':' + process.env.OAS_INSTANCE + '\\n');\n` +
+      `if (process.env.OAS_EVENT === 'retire' && process.env.OAS_INSTANCE === 'dev-zomb3') {\n` +
+      `  const d = process.env.OAS_HOME + '/locked'; mkdirSync(d); writeFileSync(d + '/pin', 'x'); chmodSync(d, 0o555);\n` +
+      `}\n`);
+    const zombHome = join(root, "dev", "instances", "dev-zomb3");
+    try {
+      assert.throws(
+        () => spawnInstance(root, agentDef, { instance: "dev-zomb3", relation: "parent", relativeTo: anchor.instance, tmuxSession: "oas-test-fake", launch: false }),
+        /failed to re-point anchor.*rollback INCOMPLETE.*instance home/s,
+        "unremovable home reported as incomplete with the failed path");
+      assert.ok(existsSync(zombHome), "zombie home really remains (message told the truth)");
+    } finally {
+      rmSync(tmpDir3, { recursive: true, force: true });
+      if (existsSync(join(zombHome, "locked"))) execFileSync("chmod", ["755", join(zombHome, "locked")]);
+      rmSync(zombHome, { recursive: true, force: true });
+    }
+
+    // Stubborn window: kill-window "succeeds" (exit 0) but the window remains
+    // — the effect check must report it (exit codes are not truth).
+    const tmpDir4 = `${anchorMetaPath}.tmp-dev-zomb4`;
+    mkdirSync(tmpDir4); write(join(tmpDir4, "blocker"), "x");
+    process.env.TMUX_FAKE_STUBBORN = "dev-zomb4";
+    try {
+      assert.throws(
+        () => spawnInstance(root, agentDef, { instance: "dev-zomb4", relation: "parent", relativeTo: anchor.instance, tmuxSession: "oas-test-fake", launch: true }),
+        /rollback INCOMPLETE.*tmux window oas-test-fake:dev-zomb4 still running/s,
+        "unkillable window reported despite kill-window exiting 0");
+    } finally {
+      delete process.env.TMUX_FAKE_STUBBORN;
+      rmSync(tmpDir4, { recursive: true, force: true });
+    }
+
+    // Probe failure is NOT confirmation: when list-windows itself fails, the
+    // rollback must fail CLOSED and report could-not-verify, not success.
+    const tmpDir4b = `${anchorMetaPath}.tmp-dev-zomb4b`;
+    mkdirSync(tmpDir4b); write(join(tmpDir4b, "blocker"), "x");
+    process.env.TMUX_FAKE_LIST_FAIL = "1";
+    try {
+      assert.throws(
+        () => spawnInstance(root, agentDef, { instance: "dev-zomb4b", relation: "parent", relativeTo: anchor.instance, tmuxSession: "oas-test-fake", launch: true }),
+        /rollback INCOMPLETE.*tmux window oas-test-fake:dev-zomb4b: could not verify removal/s,
+        "failed verification probe reported as could-not-verify, never as success");
+    } finally {
+      delete process.env.TMUX_FAKE_LIST_FAIL;
+      rmSync(tmpDir4b, { recursive: true, force: true });
+    }
+
+    // Failing retire hook: runLifecycleHooks catches hook errors internally,
+    // so the rollback must read the structured failures field.
+    const tmpDir5 = `${anchorMetaPath}.tmp-dev-zomb5`;
+    mkdirSync(tmpDir5); write(join(tmpDir5, "blocker"), "x");
+    write(join(repo, ".agents", "capabilities", "owned", "comp", "hook.mjs"),
+      `import {appendFileSync} from 'node:fs';\n` +
+      `appendFileSync(${JSON.stringify(hookLog)}, process.env.OAS_EVENT + ':' + process.env.OAS_INSTANCE + '\\n');\n` +
+      `if (process.env.OAS_EVENT === 'retire' && process.env.OAS_INSTANCE === 'dev-zomb5') process.exit(3);\n`);
+    try {
+      assert.throws(
+        () => spawnInstance(root, agentDef, { instance: "dev-zomb5", relation: "parent", relativeTo: anchor.instance, tmuxSession: "oas-test-fake", launch: false }),
+        /rollback INCOMPLETE.*retire hook acme\.comp/s,
+        "nonzero retire hook reported via structured failures");
+    } finally { rmSync(tmpDir5, { recursive: true, force: true }); }
+
+    // Failed worktree removal: a foreign file inside the worktree with
+    // worktree remove blocked — verify via `git worktree list` effect check.
+    write(join(root, "dev", "soul", "soul.yaml"), `name: dev\nkind: persistent\nrepo: ${repo}\nwork: worktree\nruntime: pi\n`);
+    const tmpDir6 = `${anchorMetaPath}.tmp-dev-zomb6`;
+    mkdirSync(tmpDir6); write(join(tmpDir6, "blocker"), "x");
+    write(join(repo, ".agents", "capabilities", "owned", "comp", "hook.mjs"),
+      `import {appendFileSync, mkdirSync as mk, writeFileSync as wf, chmodSync} from 'node:fs';\n` +
+      `appendFileSync(${JSON.stringify(hookLog)}, process.env.OAS_EVENT + ':' + process.env.OAS_INSTANCE + '\\n');\n` +
+      `if (process.env.OAS_EVENT === 'retire' && process.env.OAS_INSTANCE === 'dev-zomb6') {\n` +
+      `  const d = process.env.OAS_HOME + '/work/pin'; mk(d); wf(d + '/x', 'x'); chmodSync(d, 0o555); chmodSync(process.env.OAS_HOME + '/work', 0o555);\n` +
+      `}\n`);
+    const zomb6Home = join(root, "dev", "instances", "dev-zomb6");
+    try {
+      assert.throws(
+        () => spawnInstance(root, findAgent(root, "dev"), { instance: "dev-zomb6", relation: "parent", relativeTo: anchor.instance, tmuxSession: "oas-test-fake", launch: false }),
+        /rollback INCOMPLETE.*(git worktree .* still registered|instance home)/s,
+        "failed worktree cleanup reported");
+    } finally {
+      rmSync(tmpDir6, { recursive: true, force: true });
+      if (existsSync(join(zomb6Home, "work"))) {
+        execFileSync("chmod", ["-R", "755", join(zomb6Home, "work")]);
+        try { execFileSync("git", ["-C", repo, "worktree", "remove", "--force", join(zomb6Home, "work")], { stdio: "ignore" }); } catch { /* cleanup best-effort */ }
+      }
+      rmSync(zomb6Home, { recursive: true, force: true });
+      try { execFileSync("git", ["-C", repo, "worktree", "prune"], { stdio: "ignore" }); } catch { /* cleanup best-effort */ }
+    }
+
+    // SECURITY regression: branch names may contain valid-but-hostile shell
+    // metacharacters ($(…) passes check-ref-format). The rollback's branch
+    // verification must never interpolate them into a shell.
+    const marker = join(base, "pwn-marker");
+    const evilBranch = `agents/pwn$(touch\${IFS}${marker})`;
+    execFileSync("git", ["check-ref-format", `refs/heads/${evilBranch}`]); // fixture sanity: valid ref
+    const tmpDir7 = `${anchorMetaPath}.tmp-dev-zomb7`;
+    mkdirSync(tmpDir7); write(join(tmpDir7, "blocker"), "x");
+    const zomb7Home = join(root, "dev", "instances", "dev-zomb7");
+    try {
+      assert.throws(
+        () => spawnInstance(root, findAgent(root, "dev"), { instance: "dev-zomb7", relation: "parent", relativeTo: anchor.instance, branch: evilBranch, tmuxSession: "oas-test-fake", launch: false }),
+        /failed to re-point anchor/s,
+        "rollback runs with the hostile branch name");
+      assert.equal(existsSync(marker), false, "no command injection: metacharacter branch never executed");
+    } finally {
+      rmSync(tmpDir7, { recursive: true, force: true });
+      if (existsSync(join(zomb7Home, "work"))) {
+        try { execFileSync("git", ["-C", repo, "worktree", "remove", "--force", join(zomb7Home, "work")], { stdio: "ignore" }); } catch { /* best-effort */ }
+      }
+      rmSync(zomb7Home, { recursive: true, force: true });
+      try { execFileSync("git", ["-C", repo, "worktree", "prune"], { stdio: "ignore" }); } catch { /* best-effort */ }
+      try { execFileSync("git", ["-C", repo, "branch", "-D", evilBranch], { stdio: "ignore" }); } catch { /* best-effort */ }
+    }
+  } finally { process.env.PATH = oldPath; }
+});
+
+test("rollback detects a still-registered canonical worktree through a symlinked agents root", () => {
+  const base = temp(); const repo = join(base, "repo"); gitRepo(repo);
+  const realRoot = join(repo, "agents");
+  write(join(realRoot, "dev", "soul", "soul.yaml"), `name: dev\nkind: persistent\nrepo: ${repo}\nwork: checkout\nruntime: pi\n`);
+  write(join(realRoot, "dev", "soul", "AGENTS.md"), "# dev\n");
+  mkdirSync(join(realRoot, "dev", "instances"), { recursive: true });
+  // Compensation hook can remove one target's worktree directory BEFORE Git
+  // verification, reproducing the canonical-path-loss race from review.
+  const vanishHook = `import {rmSync} from 'node:fs'; if (process.env.OAS_EVENT === 'retire' && process.env.OAS_INSTANCE === 'dev-sym-missing') rmSync(process.env.OAS_HOME + '/work', {recursive:true, force:true});`;
+  capability(repo, "vanish", { capability: "acme.vanish", hooks: { retire: "hook.mjs" } }, { "hook.mjs": vanishHook });
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.vanish:\n      global: true\n");
+  const linkedRoot = join(base, "agents-link"); symlinkSync(realRoot, linkedRoot);
+
+  // Git wrapper delegates normally, but can force selected cleanup/probe operations to fail.
+  const bin = join(base, "bin"); mkdirSync(bin, { recursive: true });
+  const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+  write(join(bin, "git"), `#!/bin/sh\nif [ "$GIT_FAKE_VANISH_AFTER_ADD" = "1" ] && [ "$3" = "worktree" ] && [ "$4" = "add" ]; then ${realGit} "$@"; s=$?; if [ $s -eq 0 ]; then /bin/rm -rf "$5"; fi; exit $s; fi\nif [ "$GIT_FAKE_FAIL_REMOVE" = "1" ] && [ "$3" = "worktree" ] && [ "$4" = "remove" ]; then echo forced-remove-failure >&2; exit 7; fi\nif [ "$GIT_FAKE_FAIL_PRUNE" = "1" ] && [ "$3" = "worktree" ] && [ "$4" = "prune" ]; then echo forced-prune-failure >&2; exit 6; fi\nif [ "$GIT_FAKE_FAIL_LIST" = "1" ] && [ "$3" = "worktree" ] && [ "$4" = "list" ]; then echo forced-list-failure >&2; exit 8; fi\nif [ "$GIT_FAKE_FAIL_REVP" = "1" ] && [ "$3" = "rev-parse" ] && [ "$4" = "--verify" ]; then echo forced-rev-parse-failure >&2; exit 9; fi\nexec ${realGit} "$@"\n`);
+  for (const t of ["pi", "claude"]) write(join(bin, t), "#!/bin/sh\nexit 0\n");
+  execFileSync("chmod", ["-R", "+x", bin]);
+  const oldPath = process.env.PATH;
+  process.env.PATH = `${bin}:${oldPath}`;
+  let branch;
+  try {
+    const agentDef = findAgent(linkedRoot, "dev");
+
+    // Post-add canonicalization failure: wrapper removes the just-added tree
+    // before `realpathSync(wt)`, while remove+prune cleanup also fail. The
+    // error must retain the original canonicalization failure AND report the
+    // stranded Git state as rollback INCOMPLETE (never silently best-effort).
+    const earlyBranch = "agents/dev-early-canon";
+    process.env.GIT_FAKE_VANISH_AFTER_ADD = "1";
+    process.env.GIT_FAKE_FAIL_REMOVE = "1";
+    process.env.GIT_FAKE_FAIL_PRUNE = "1";
+    try {
+      assert.throws(
+        () => spawnInstance(linkedRoot, agentDef, { instance: "dev-early-canon", work: "worktree", branch: earlyBranch, launch: false }),
+        (err) => /git worktree add\/canonicalization failed/.test(err.message)
+          && /rollback INCOMPLETE/.test(err.message)
+          && /remove failed \(forced-remove-failure\)/.test(err.message)
+          && /prune failed \(forced-prune-failure\)/.test(err.message)
+          && /could not verify removal \(canonical path unavailable after add\)/.test(err.message),
+        "post-add canonicalization failure reports incomplete Git cleanup");
+      assert.equal(existsSync(join(linkedRoot, "dev", "instances", "dev-early-canon")), false, "failed spawn home removed");
+    } finally {
+      delete process.env.GIT_FAKE_VANISH_AFTER_ADD;
+      delete process.env.GIT_FAKE_FAIL_REMOVE;
+      delete process.env.GIT_FAKE_FAIL_PRUNE;
+      execFileSync(realGit, ["-C", repo, "worktree", "prune"]);
+      try { execFileSync(realGit, ["-C", repo, "branch", "-D", earlyBranch], { stdio: "ignore" }); } catch { /* cleanup */ }
+    }
+
+    const anchor = spawnInstance(linkedRoot, agentDef, { instance: "dev-sym-anchor", launch: false });
+    const anchorMetaPath = join(anchor.home, "instance.json");
+    const tmpBlock = `${anchorMetaPath}.tmp-dev-sym-child`;
+    mkdirSync(tmpBlock); write(join(tmpBlock, "blocker"), "x");
+    branch = "agents/dev-sym-child";
+    process.env.GIT_FAKE_FAIL_REMOVE = "1";
+    try {
+      assert.throws(
+        () => spawnInstance(linkedRoot, agentDef, { instance: "dev-sym-child", relation: "parent", relativeTo: anchor.instance, work: "worktree", branch, launch: false }),
+        (err) => /rollback INCOMPLETE/.test(err.message)
+          && /git worktree .*dev-sym-child\/work: still registered/.test(err.message)
+          && !err.message.includes(linkedRoot + "/dev/instances/dev-sym-child/work"),
+        "canonical registered path is detected and reported, not the lexical symlink path");
+    } finally {
+      delete process.env.GIT_FAKE_FAIL_REMOVE;
+      rmSync(tmpBlock, { recursive: true, force: true });
+    }
+    // Rollback removed the files but the forced Git failure left registration;
+    // prune after the path is gone clears metadata, then remove the branch.
+    execFileSync(realGit, ["-C", repo, "worktree", "prune"]);
+    try { execFileSync(realGit, ["-C", repo, "branch", "-D", branch], { stdio: "ignore" }); } catch { /* cleanup */ }
+
+    // Canonical path was captured immediately after add. The compensation hook
+    // now REMOVES the directory before rollback; remove and prune are forced to
+    // fail, while list succeeds and still returns Git's canonical registration.
+    // Re-realpath-at-rollback would fail/fall back lexical and miss this record.
+    const missingAnchor = spawnInstance(linkedRoot, agentDef, { instance: "dev-missing-anchor", launch: false });
+    const tmpMissing = `${join(missingAnchor.home, "instance.json")}.tmp-dev-sym-missing`;
+    mkdirSync(tmpMissing); write(join(tmpMissing, "blocker"), "x");
+    const missingBranch = "agents/dev-sym-missing";
+    process.env.GIT_FAKE_FAIL_REMOVE = "1";
+    process.env.GIT_FAKE_FAIL_PRUNE = "1";
+    try {
+      assert.throws(
+        () => spawnInstance(linkedRoot, agentDef, { instance: "dev-sym-missing", relation: "parent", relativeTo: missingAnchor.instance, work: "worktree", branch: missingBranch, launch: false }),
+        (err) => /rollback INCOMPLETE/.test(err.message)
+          && /git worktree .*dev-sym-missing\/work: still registered/.test(err.message)
+          && !err.message.includes(linkedRoot + "/dev/instances/dev-sym-missing/work"),
+        "captured canonical path detects stale registration after the directory vanished");
+    } finally {
+      delete process.env.GIT_FAKE_FAIL_REMOVE;
+      delete process.env.GIT_FAKE_FAIL_PRUNE;
+      rmSync(tmpMissing, { recursive: true, force: true });
+      execFileSync(realGit, ["-C", repo, "worktree", "prune"]);
+      try { execFileSync(realGit, ["-C", repo, "branch", "-D", missingBranch], { stdio: "ignore" }); } catch { /* cleanup */ }
+    }
+
+    // Probe failure is distinct from confirmed absence: let removal/deletion
+    // succeed, but force BOTH verification commands to fail. Rollback must
+    // report could-not-verify for each instead of treating failed probes as
+    // proof that worktree/ref are gone.
+    const anchor2 = spawnInstance(linkedRoot, agentDef, { instance: "dev-probe-anchor", launch: false });
+    const tmpBlock2 = `${join(anchor2.home, "instance.json")}.tmp-dev-sym-probe`;
+    mkdirSync(tmpBlock2); write(join(tmpBlock2, "blocker"), "x");
+    const probeBranch = "agents/dev-sym-probe";
+    process.env.GIT_FAKE_FAIL_LIST = "1";
+    process.env.GIT_FAKE_FAIL_REVP = "1";
+    try {
+      assert.throws(
+        () => spawnInstance(linkedRoot, agentDef, { instance: "dev-sym-probe", relation: "parent", relativeTo: anchor2.instance, work: "worktree", branch: probeBranch, launch: false }),
+        (err) => /rollback INCOMPLETE/.test(err.message)
+          && /git worktree .*could not verify removal \(forced-list-failure\)/s.test(err.message)
+          && /git branch agents\/dev-sym-probe: could not verify deletion \(forced-rev-parse-failure\)/s.test(err.message),
+        "failed Git probes report could-not-verify, never confirmed absence");
+    } finally {
+      delete process.env.GIT_FAKE_FAIL_LIST;
+      delete process.env.GIT_FAKE_FAIL_REVP;
+      rmSync(tmpBlock2, { recursive: true, force: true });
+      execFileSync(realGit, ["-C", repo, "worktree", "prune"]);
+      try { execFileSync(realGit, ["-C", repo, "branch", "-D", probeBranch], { stdio: "ignore" }); } catch { /* cleanup */ }
+    }
+  } finally {
+    delete process.env.GIT_FAKE_VANISH_AFTER_ADD;
+    delete process.env.GIT_FAKE_FAIL_REMOVE;
+    delete process.env.GIT_FAKE_FAIL_PRUNE;
+    delete process.env.GIT_FAKE_FAIL_LIST;
+    delete process.env.GIT_FAKE_FAIL_REVP;
+    process.env.PATH = oldPath;
+    try { execFileSync(realGit, ["-C", repo, "worktree", "prune"], { stdio: "ignore" }); } catch { /* cleanup */ }
+    if (branch) try { execFileSync(realGit, ["-C", repo, "branch", "-D", branch], { stdio: "ignore" }); } catch { /* cleanup */ }
+  }
+});
+
+test("retire splice crosses member repos inside a team deployment", () => {
+  const base = temp();
+  const ws = join(base, "ws"); mkdirSync(ws, { recursive: true });
+  write(join(ws, "oas-config.yaml"), "team:\n  name: t\n");
+  const mkMember = (repoName, soulName) => {
+    const repo = join(ws, repoName); gitRepo(repo);
+    write(join(repo, "oas-config.yaml"), "capabilities:\n  additive: {}\n");
+    const root = join(repo, "agents");
+    write(join(root, soulName, "soul", "soul.yaml"), `name: ${soulName}\nkind: persistent\nrepo: ${repo}\nwork: checkout\nruntime: pi\n`);
+    write(join(root, soulName, "soul", "AGENTS.md"), `# ${soulName}\n`);
+    mkdirSync(join(root, soulName, "instances"), { recursive: true });
+    return { repo, root };
+  };
+  const a = mkMember("repo-a", "dev");
+  const b = mkMember("repo-b", "expert");
+  const oldPath = process.env.PATH;
+  process.env.PATH = fakeRuntimes(base);
+  try {
+    // Anchor lives in repo A; the parent-relation instance homes in repo B
+    // (spawn resolves cross-repo anchors via findTeamInstance).
+    const anchor = spawnInstance(a.root, findAgent(a.root, "dev"), { instance: "dev-anchor", launch: false });
+    const boss = spawnInstance(b.root, findAgent(b.root, "expert"), { instance: "expert-boss", relation: "parent", relativeTo: anchor.instance, launch: false });
+    const anchorMeta = () => JSON.parse(readFileSync(join(a.root, "dev", "instances", anchor.instance, "instance.json"), "utf8"));
+    assert.equal(anchorMeta().parentInstance, boss.instance, "cross-repo parent relation recorded");
+    // Retiring the repo-B instance must repair the repo-A anchor: the splice
+    // scans every team agents root, not just the retiree's.
+    const r = retireInstance(b.root, boss.instance, { keepDir: false });
+    assert.ok(r.relinked?.some((x) => x.instance === anchor.instance), "splice reached the sibling repo");
+    assert.equal(anchorMeta().parentInstance, undefined, "repo-A anchor no longer points at the retired repo-B instance");
+  } finally { process.env.PATH = oldPath; }
+});
+
+test("retire splice is identity-safe: a same-named instance in another repo keeps its links", () => {
+  const base = temp();
+  const ws = join(base, "ws"); mkdirSync(ws, { recursive: true });
+  write(join(ws, "oas-config.yaml"), "team:\n  name: t\n");
+  const mkMember = (repoName) => {
+    const repo = join(ws, repoName); gitRepo(repo);
+    write(join(repo, "oas-config.yaml"), "capabilities:\n  additive: {}\n");
+    const root = join(repo, "agents");
+    write(join(root, "dev", "soul", "soul.yaml"), `name: dev\nkind: persistent\nrepo: ${repo}\nwork: checkout\nruntime: pi\n`);
+    write(join(root, "dev", "soul", "AGENTS.md"), "# dev\n");
+    mkdirSync(join(root, "dev", "instances"), { recursive: true });
+    return { repo, root };
+  };
+  const a = mkMember("repo-a");
+  const b = mkMember("repo-b");
+  const oldPath = process.env.PATH;
+  process.env.PATH = fakeRuntimes(base);
+  try {
+    // SAME instance name in both repos (names are only unique per agent dir).
+    const bossA = spawnInstance(a.root, findAgent(a.root, "dev"), { instance: "dev-boss", launch: false });
+    const bossB = spawnInstance(b.root, findAgent(b.root, "dev"), { instance: "dev-boss", launch: false });
+    assert.equal(bossA.instance, bossB.instance, "fixture: duplicate names across repos");
+    // Each repo's child points at ITS OWN dev-boss (local-first resolution).
+    const kidA = spawnInstance(a.root, findAgent(a.root, "dev"), { instance: "dev-kid", relation: "child", relativeTo: "dev-boss", relativeRoot: a.root, launch: false });
+    const kidB = spawnInstance(b.root, findAgent(b.root, "dev"), { instance: "dev-kid-b", relation: "child", relativeTo: "dev-boss", relativeRoot: b.root, launch: false });
+    const metaOf = (root2, name2) => JSON.parse(readFileSync(join(root2, "dev", "instances", name2, "instance.json"), "utf8"));
+    assert.equal(metaOf(a.root, kidA.instance).parentInstance, "dev-boss");
+    assert.equal(metaOf(b.root, kidB.instance).parentInstance, "dev-boss");
+    // Retiring repo-A's dev-boss must orphan ONLY repo-A's kid: repo-B's edge
+    // resolves (local-first) to the still-live repo-B dev-boss and is untouched.
+    const r = retireInstance(a.root, "dev-boss", { keepDir: false });
+    assert.equal(metaOf(a.root, kidA.instance).parentInstance, undefined, "repo-A kid orphaned to root");
+    assert.equal(metaOf(b.root, kidB.instance).parentInstance, "dev-boss", "repo-B kid keeps its own same-named parent");
+    assert.ok(!(r.relinked || []).some((x) => x.instance === kidB.instance), "repo-B edge not reported as relinked");
+  } finally { process.env.PATH = oldPath; }
+});
+
+test("attached ownership is path-first: a same-named local instance cannot shadow the tree's true owner", () => {
+  const base = temp();
+  const ws = join(base, "ws"); mkdirSync(ws, { recursive: true });
+  write(join(ws, "oas-config.yaml"), "team:\n  name: t\n");
+  const mkMember = (repoName) => {
+    const repo = join(ws, repoName); gitRepo(repo);
+    write(join(repo, "oas-config.yaml"), "capabilities:\n  additive: {}\n");
+    const root = join(repo, "agents");
+    write(join(root, "dev", "soul", "soul.yaml"), `name: dev\nkind: persistent\nrepo: ${repo}\nwork: checkout\nruntime: pi\n`);
+    write(join(root, "dev", "soul", "AGENTS.md"), "# dev\n");
+    mkdirSync(join(root, "dev", "instances"), { recursive: true });
+    return { repo, root };
+  };
+  const a = mkMember("repo-a");
+  const b = mkMember("repo-b");
+  const oldPath = process.env.PATH;
+  process.env.PATH = fakeRuntimes(base);
+  try {
+    // Same instance name in both repos; the trees differ.
+    const bossA = spawnInstance(a.root, findAgent(a.root, "dev"), { instance: "dev-boss", launch: false });
+    spawnInstance(b.root, findAgent(b.root, "dev"), { instance: "dev-boss", launch: false });
+    // Spawning ATTACHED from repo B onto repo A's dev-boss/work: the path-first
+    // match finds A's boss, but from B's root the NAME "dev-boss" resolves to
+    // B's (local-first) — recording it would link the child to the wrong
+    // instance. Reject as ambiguous, both with and without an explicit parent.
+    assert.throws(
+      () => spawnInstance(b.root, findAgent(b.root, "dev"), { instance: "dev-att-x", work: "attached", workDir: join(a.root, "dev", "instances", bossA.instance, "work"), launch: false }),
+      /ambiguous/,
+      "ownership inference rejects the shadowed owner");
+    assert.throws(
+      () => spawnInstance(b.root, findAgent(b.root, "dev"), { instance: "dev-att-y", work: "attached", workDir: join(a.root, "dev", "instances", bossA.instance, "work"), parent: "dev-boss", launch: false }),
+      /ambiguous/,
+      "explicit --parent cannot bypass the shadow check — the tree IS an instance's work");
+    // No stray homes were scaffolded by the rejected spawns.
+    assert.equal(existsSync(join(b.root, "dev", "instances", "dev-att-x")), false);
+    assert.equal(existsSync(join(b.root, "dev", "instances", "dev-att-y")), false);
+    // Unambiguous case still works from the OWNING repo: A's boss tree, A's root.
+    const ok = spawnInstance(a.root, findAgent(a.root, "dev"), { instance: "dev-att-ok", work: "attached", workDir: join(a.root, "dev", "instances", bossA.instance, "work"), launch: false });
+    assert.equal(ok.parentInstance, bossA.instance, "owner resolved by path where the name is unambiguous");
+  } finally { process.env.PATH = oldPath; }
+});
+
+test("attached owner discovery reaches all-local sibling scopes (no agents/ dir)", () => {
+  const base = temp();
+  const ws = join(base, "ws"); mkdirSync(ws, { recursive: true });
+  write(join(ws, "oas-config.yaml"), "team:\n  name: t\n");
+  // Repo A: ALL-LOCAL — no agents/ dir, its soul lives under local-agents/.
+  const repoA = join(ws, "repo-a"); gitRepo(repoA);
+  write(join(repoA, "oas-config.yaml"), "capabilities:\n  additive: {}\n");
+  const laDir = join(repoA, "local-agents");
+  write(join(laDir, "helper", "soul", "soul.yaml"), `name: helper\nkind: local\nrepo: ${repoA}\nwork: worktree\nruntime: pi\n`);
+  write(join(laDir, "helper", "soul", "AGENTS.md"), "# helper\n");
+  mkdirSync(join(laDir, "helper", "instances"), { recursive: true });
+  // Repo B: regular agents/ root; spawns attach onto A's local instance tree.
+  const repoB = join(ws, "repo-b"); gitRepo(repoB);
+  write(join(repoB, "oas-config.yaml"), "capabilities:\n  additive: {}\n");
+  const rootB = join(repoB, "agents");
+  write(join(rootB, "dev", "soul", "soul.yaml"), `name: dev\nkind: persistent\nrepo: ${repoB}\nwork: checkout\nruntime: pi\n`);
+  write(join(rootB, "dev", "soul", "AGENTS.md"), "# dev\n");
+  mkdirSync(join(rootB, "dev", "instances"), { recursive: true });
+  const oldPath = process.env.PATH;
+  process.env.PATH = fakeRuntimes(base);
+  try {
+    const rootA = join(repoA, "agents"); // nonexistent — the all-local case
+    const helperAgent = findAgent(rootA, "helper");
+    assert.ok(helperAgent, "fixture: local soul resolves through the nonexistent agents/ root");
+    const owner = spawnInstance(rootA, helperAgent, { instance: "helper-owner", launch: false });
+    // Owner discovery from repo B must reach A's local-agents instance even
+    // though teamAgentRoots yields A's NONEXISTENT agents/ root for it.
+    const kid = spawnInstance(rootB, findAgent(rootB, "dev"), { instance: "dev-att-la", work: "attached", workDir: join(owner.home, "work"), launch: false });
+    assert.equal(kid.parentInstance, owner.instance, "all-local sibling owner discovered by path");
+    // Shadow + explicit parent must still be rejected: same-named instance in
+    // B's OWN local-agents (names are only unique per agent dir).
+    const laB = join(repoB, "local-agents");
+    write(join(laB, "helper", "soul", "soul.yaml"), `name: helper\nkind: local\nrepo: ${repoB}\nwork: worktree\nruntime: pi\n`);
+    write(join(laB, "helper", "soul", "AGENTS.md"), "# helper\n");
+    mkdirSync(join(laB, "helper", "instances"), { recursive: true });
+    spawnInstance(rootB, findAgent(rootB, "helper"), { instance: owner.instance, launch: false });
+    assert.throws(
+      () => spawnInstance(rootB, findAgent(rootB, "dev"), { instance: "dev-att-sh", work: "attached", workDir: join(owner.home, "work"), parent: owner.instance, launch: false }),
+      /ambiguous/,
+      "shadowed all-local owner rejected even with explicit --parent");
+    assert.equal(existsSync(join(rootB, "dev", "instances", "dev-att-sh")), false, "no stray home scaffolded");
+
+    // Retire-splice must ALSO reach the all-local scope (its nonexistent
+    // agents/ root is in the scan set): an orphan homed under A's
+    // local-agents whose parent lives in repo B gets repaired when that
+    // parent retires — this fails if the splice drops unresolvable roots.
+    const bossB = spawnInstance(rootB, findAgent(rootB, "dev"), { instance: "dev-la-boss", launch: false });
+    const orphanA = spawnInstance(rootA, helperAgent, { instance: "helper-orphan", relation: "child", relativeTo: bossB.instance, launch: false });
+    const orphanMeta = () => JSON.parse(readFileSync(join(orphanA.home, "instance.json"), "utf8"));
+    assert.equal(orphanMeta().parentInstance, bossB.instance, "cross-repo child into the all-local scope");
+    const rr = retireInstance(rootB, bossB.instance, { keepDir: false });
+    assert.ok(rr.relinked?.some((x) => x.instance === orphanA.instance), "splice reports the all-local orphan");
+    assert.equal(orphanMeta().parentInstance, undefined, "all-local orphan repaired to root");
+  } finally { process.env.PATH = oldPath; }
 });
 
 test("lineage is deployment-local: --parent from an unrelated deployment is rejected", () => {

@@ -1,6 +1,20 @@
 # Knowledge Log
 
+## 2026-07-26
+* **Fix**: [final agent-relations kernel contract](/references/agent-relations-kernel-contract.md) resolves the flag clarifier, distinguishes absent explicit relation from attached auto-child topology, records equivalent non-instance attached child syntax, and includes `E_PARENT_NOT_FOUND`/`E_RELATIVE_AMBIGUOUS`.
+* **Update**: [desktop cluster grouping sibling-link seam](/decisions/desktop-cluster-grouping-sibling-seam.md) describes the shipped sidebar and panel projection in present tense without the removed Instances-roster surface.
+
 ## 2026-07-25
+* **Update**: merged the property-assignment attribute breakout note into [assign workspace data to DOM properties, never interpolate it into attributes](/lessons/dom-construction-not-innerhtml-attributes.md): workspace-controlled attribute values must be set through DOM properties, dataset, or createElement, and template audits should catch `${escapeHtml(` inside attribute positions.
+* **Creation**: promoted [verify the committed tree matches the commit message before pushing](/lessons/verify-committed-tree-before-push.md) from the oas-desktop-engineer-agent-relations notes.
+* **Creation**: promoted [build option lists from data with createElement, never innerHTML attributes](/lessons/dom-construction-not-innerhtml-attributes.md) from the oas-desktop-engineer-agent-relations notes.
+* **Update**: linked [no dynamic selectors from data](/lessons/no-dynamic-selectors-from-data.md) and [sanitize markdown before innerHTML](/lessons/sanitize-marked-markdown-before-innerhtml.md) to the DOM construction lesson.
+* **Creation**: promoted [graph code over roster instances must key by composite identity](/lessons/cluster-composite-identity.md) from the oas-desktop-engineer-agent-relations notes.
+* **Creation**: promoted [new CLI mutation flags need a capability gate](/lessons/new-mutation-flags-capability-gate.md) from the oas-desktop-engineer-agent-relations notes.
+* **Creation**: promoted [final kernel contract for spawn-time agent relations](/references/agent-relations-kernel-contract.md) from the oas-desktop-engineer-agent-relations notes.
+* **Update**: updated [desktop cluster grouping sibling-link extractor seam](/decisions/desktop-cluster-grouping-sibling-seam.md) to consume the final `siblingInstance`, `relation`, and `relativeTo` kernel contract.
+* **Creation**: promoted [desktop cluster grouping sibling-link extractor seam](/decisions/desktop-cluster-grouping-sibling-seam.md) from the oas-desktop-engineer-agent-relations notes.
+* **Creation**: promoted [no-CLI desktop server tests must hide the real oas CLI](/lessons/no-cli-desktop-server-tests-real-oas-cli.md) from the oas-desktop-engineer-agent-relations notes.
 * **Creation**: promoted [Crossed mail coordination needs repository verification and single replies](/lessons/crossed-mail-coordination.md) from the oas-desktop-engineer-keybindings-wiring notes.
 * **Creation**: promoted [Keybindings PR 35 follow-up queue](/references/keybindings-pr35-follow-up-queue.md) from the oas-desktop-engineer-keybindings-wiring notes.
 * **Fix**: merged the dispatch-ineligible view-actions note into [First-class view defaults need dispatch-ineligible contexts](/lessons/first-class-view-defaults-window-dispatch-surface.md), [View-local shortcuts resolve chords through the engine keymap](/decisions/view-local-shortcuts-engine-keymap.md), [Dynamic action registrations carry their own default chords](/lessons/dynamic-action-registration-default-chords.md), and [Real keybindings engine integration keeps defaults engine-owned](/lessons/real-keybindings-engine-integration.md): registered view actions must be made window-dispatch-ineligible with never-activated view contexts instead of `run()`-guarded, because `handleKeydown` has already matched and prevented default before `run()` can decline.

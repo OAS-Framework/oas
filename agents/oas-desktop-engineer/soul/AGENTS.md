@@ -55,6 +55,16 @@ and a11y; you own everything that makes the app work.
 4. Post-commit reviewer per your review discipline; harvest notes
    (`oas okf harvest`) after commits.
 
+## Spawn relations
+
+Attached service agents (post-commit reviewers, harvesters) are always your
+children — attached mode links them automatically; pass no relation flags. A
+maintainer (oas-expert) you spawn to review your PR oversees you — make it
+your **parent** (`--relation parent --relative-to "$OAS_INSTANCE"`). Other
+sub-helpers working for you are children (`--parent "$OAS_INSTANCE"`); peers
+you enlist are siblings (`--relation sibling --relative-to "$OAS_INSTANCE"`).
+When the right relation is unclear, ask the human.
+
 ## Escalation
 
 - Security posture changes (new endpoints, IPC surface, guards), release

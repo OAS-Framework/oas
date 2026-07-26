@@ -26,8 +26,26 @@ export async function apiJson(ctx, pathname, opts) {
   if (!r || typeof r.json !== "function") return r; // shell returned parsed data
   let d;
   try { d = await r.json(); } catch { d = {}; }
-  if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+  if (!r.ok) {
+    const err = new Error(d.error || `HTTP ${r.status}`);
+    if (d.code) err.code = d.code; // stable CLI/domain code (e.g. cli-unavailable, E_RELATIVE_AMBIGUOUS)
+    throw err;
+  }
   return d;
+}
+
+/* Error for a RECEIVED non-2xx {ok,status,body} response (the Electron
+   bridge shape) — used by the SHELL's ctx.api so consumers can distinguish
+   HTTP errors (status present) from transport failures. Must carry the
+   server's stable domain CODE: dropping it made doSpawn's
+   E_RELATIVE_AMBIGUOUS branch unreachable in production while fetch-shaped
+   tests stayed green (merged-state review @3e76616). Exported from here —
+   not defined in shell.mjs — so the parsed-path shaping is testable. */
+export function httpError(r, pathname) {
+  const err = new Error(r.body?.error || `HTTP ${r.status} for ${pathname}`);
+  err.status = r.status;
+  if (r.body?.code) err.code = r.body.code;
+  return err;
 }
 export function postJson(ctx, pathname, body) {
   return apiJson(ctx, pathname, {
@@ -84,10 +102,18 @@ export function wsQuery(prefix = "?") {
    the server resolve globally — an Interrupt viewed in workspace B could
    Ctrl-C workspace A's session, and chat could leak A's data. Every
    per-instance call (interrupt, chat, session, keys…) must be built
-   through here. `query` is the extra query string without a leading ?/&. */
+   through here. `instance` may be a bare name (legacy) or a roster object
+   { instance, home } — pass the OBJECT whenever you have it: same-named
+   instances also exist across roots WITHIN a workspace, and the server
+   refuses ambiguous bare names (409 E_INSTANCE_AMBIGUOUS) rather than
+   act on an arbitrary pick (merged-state review @7dd1e7b). `query` is the
+   extra query string without a leading ?/&. */
 export function instanceApiPath(kind, instance, query = "") {
-  const q = query ? `?${query}${wsQuery("&")}` : wsQuery();
-  return `/api/${kind}/${encodeURIComponent(instance)}${q}`;
+  const name = typeof instance === "string" ? instance : instance.instance;
+  const home = typeof instance === "object" && instance.home ? `home=${encodeURIComponent(instance.home)}` : "";
+  const extra = [query, home].filter(Boolean).join("&");
+  const q = extra ? `?${extra}${wsQuery("&")}` : wsQuery();
+  return `/api/${kind}/${encodeURIComponent(name)}${q}`;
 }
 
 /* Render the workspace <select> into an element; hidden when the server
