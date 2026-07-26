@@ -29,6 +29,20 @@ Why this preserved the earned invariants for free:
   panes; workspace switch nulls the split because members are
   workspace-scoped terminal tabs.
 
+# Selection wiring gotcha
+
+Visible split panes are an interaction surface independent of the tab strip.
+Review 8443068 caught a bug where `activeTab` changed only through tab-strip
+triggers: a user could click and type in pane A while tab B stayed selected, so
+`tabs.close` and later split actions targeted the wrong terminal.
+
+`wireSplitPaneSelection` fixes that by installing `pointerdown` and `focusin`
+listeners on every tab pane. When the pane is a visible, non-selected split
+member, those listeners call `activateTab(id)`. This selection must not steal DOM
+focus (`activateTab` does not focus), and `renderSplit` must not re-append panes
+that are already in place: re-inserting a node on pointerdown can tear it out of
+the DOM mid-click.
+
 CSS gotcha: `.tab-pane` is `position:absolute; inset:0` — split cells must
 override with `position:relative; inset:auto; flex:1 1 0; min-width/height:0`
 or flex sizing does nothing.
