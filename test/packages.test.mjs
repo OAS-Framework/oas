@@ -89,6 +89,28 @@ test("package manifest loads, validates, and rejects escapes and bad shapes", ()
   // invalid package id charset (contract: ^[a-z0-9][a-z0-9._-]*$)
   write(join(base, "bad4", "oas-package.json"), JSON.stringify({ package: "Bad_Pkg", version: "1", description: "x" }));
   assert.throws(() => loadPackageManifest(join(base, "bad4")), (e) => e.code === "invalid-package-manifest");
+  // valid JSON that is not an object (null, array) still carries the stable code
+  write(join(base, "bad5", "oas-package.json"), "null");
+  assert.throws(() => loadPackageManifest(join(base, "bad5")), (e) => e.code === "invalid-package-manifest" && /must be a JSON object/.test(e.message));
+  write(join(base, "bad6", "oas-package.json"), "[]");
+  assert.throws(() => loadPackageManifest(join(base, "bad6")), (e) => e.code === "invalid-package-manifest");
+});
+
+test("packageCapabilityIds routes declared-resource failures through invalid-package-manifest", () => {
+  const base = temp();
+  // declared capability dir without oas.json
+  const p1 = fixturePackage(join(base, "p1"), { id: "p1.pkg", capabilities: {} });
+  const m1 = { ...loadPackageManifest(p1), capabilities: ["capabilities/ghost"] };
+  mkdirSync(join(p1, "capabilities", "ghost"), { recursive: true });
+  assert.throws(() => packageCapabilityIds(m1), (e) => e.code === "invalid-package-manifest" && /has no oas\.json/.test(e.message));
+  // malformed capability oas.json
+  write(join(p1, "capabilities", "ghost", "oas.json"), "{not json");
+  assert.throws(() => packageCapabilityIds(m1), (e) => e.code === "invalid-package-manifest" && /invalid JSON/.test(e.message));
+  // valid JSON but null / missing capability id
+  write(join(p1, "capabilities", "ghost", "oas.json"), "null");
+  assert.throws(() => packageCapabilityIds(m1), (e) => e.code === "invalid-package-manifest");
+  write(join(p1, "capabilities", "ghost", "oas.json"), JSON.stringify({ version: "1" }));
+  assert.throws(() => packageCapabilityIds(m1), (e) => e.code === "invalid-package-manifest" && /has no "capability"/.test(e.message));
 });
 
 test("packageSlug: slug equals the identity for the contract charset", () => {
@@ -318,6 +340,15 @@ test("lock v2 packages map is read scope-wise (contract envelope) and supplies c
   assert.deepEqual(r2.packages, {});
   assert.equal(r2.legacy.length, 1);
   assert.ok(r2.legacy[0].capabilities["old.cap"]);
+  // an EMPTY v1 lock still surfaces as legacy — consumers must see the scope
+  // carries a legacy lock even when its capabilities map is empty
+  const ws3 = join(base, "ws3");
+  write(join(ws3, "oas-config.yaml"), "name: ws3\n");
+  write(join(ws3, "oas-lock.json"), JSON.stringify({ lockfileVersion: 1, capabilities: {} }));
+  const r3 = readPackageLocks(ws3);
+  assert.equal(r3.legacy.length, 1, "empty v1 lock must not disappear from the envelope");
+  assert.deepEqual(r3.legacy[0].capabilities, {});
+  assert.equal(r3.legacy[0].level, ws3);
 });
 
 test("resolvePackageSource resolves installed package ids and local paths; unknown ids get a pointed error", () => {
