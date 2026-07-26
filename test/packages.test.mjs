@@ -783,7 +783,9 @@ process.exit(result.ok ? 0 : 1);
   execFileSync("chmod", ["+x", join(evil, "oas")]);
   const spawnArgs = JSON.stringify(["--purpose", "fixture", "--repo", repo, "--parent", owner.instance, "--work", "attached", "--work-dir", join(owner.home, "work"), "--no-launch", "--dir", repo]);
   r = spawnSync(process.execPath, [CLI, "fxsvc", "harvest"], { cwd: repo, encoding: "utf8", env: { ...process.env, PATH: `${evil}:${process.env.PATH}`, FX_SPAWN_ARGS: spawnArgs, PI_AGENT_HOME: "", OAS_HOME: "" } });
-  const henv = JSON.parse(r.stdout.trim().split("\n").pop()); // consumer's ONE envelope
+  const henvLines = r.stdout.trim().split("\n").filter(Boolean);
+  assert.equal(henvLines.length, 1, `exactly ONE envelope line on consumer stdout, got: ${r.stdout}`);
+  const henv = JSON.parse(henvLines[0]); // consumer's ONE envelope
   assert.equal(henv.ok, true, r.stdout + r.stderr);
   assert.equal(henv.instance, "memory-harvest-fixture", "purpose-derived deterministic naming through the consumer");
   assert.equal(henv.model, "test-model-1", "OAS_SETTINGS model reached the spawn");
@@ -1909,5 +1911,39 @@ test("malformed residue CONTAINERS are typed invalid-lock in read and both docto
     const lockErr = dj.lockError || dj.error;
     assert.ok(lockErr && lockErr.code === "invalid-lock", `${label}: ${JSON.stringify(lockErr)}`);
   }
+  rmSync(base, { recursive: true, force: true });
+});
+
+// ---------- reviewer-b671de0 finding: retired flags reject BEFORE any mutation ----------
+
+test("retired spawn flags reject before local-agent upsert — no soul scaffolded or overwritten (reviewer-b671de0)", () => {
+  const base = temp();
+  const ws = join(base, "ws");
+  write(join(ws, "oas-config.yaml"), "name: t\n");
+  const root = join(ws, "agents");
+  mkdirSync(root, { recursive: true });
+  const repo = join(ws, "wsrepo");
+  write(join(repo, "README.md"), "r\n");
+  gitify(repo);
+  const instr = join(base, "scratch.md");
+  write(instr, "# Scratch\n\nDo things.\n");
+  const localSoul = join(ws, "local-agents", "scratch");
+  for (const retired of ["--instance", "--ephemeral"]) {
+    const r = cli(ws, "spawn", "scratch", "--instructions-file", instr, retired, "legacy", "--no-launch", "--dir", ws, "--json");
+    const env = JSON.parse(r.stdout);
+    assert.equal(env.ok, false, retired);
+    assert.equal(env.error.code, "E_BAD_ARGS");
+    assert.ok(!existsSync(localSoul), `${retired}: no local soul scaffolded before the rejection`);
+  }
+  // overwrite protection: pre-existing local soul must be untouched by a rejected spawn
+  const r0 = cli(ws, "spawn", "scratch", "--instructions-file", instr, "--repo", repo, "--no-launch", "--dir", ws, "--json");
+  assert.equal(JSON.parse(r0.stdout).ok, true, r0.stdout);
+  const soulFile = join(localSoul, "soul", "AGENTS.md");
+  const before = readFileSync(soulFile, "utf8");
+  const instr2 = join(base, "scratch2.md");
+  write(instr2, "# Overwritten\n\nDifferent body.\n");
+  const r1 = cli(ws, "spawn", "scratch", "--instructions-file", instr2, "--repo", repo, "--instance", "x", "--no-launch", "--dir", ws, "--json");
+  assert.equal(JSON.parse(r1.stdout).ok, false);
+  assert.equal(readFileSync(soulFile, "utf8"), before, "existing local soul not overwritten by the rejected spawn");
   rmSync(base, { recursive: true, force: true });
 });
