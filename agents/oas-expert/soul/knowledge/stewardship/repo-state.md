@@ -3,7 +3,7 @@ type: Reference
 title: Repo state — the living picture of the OAS repo
 description: Always-current snapshot of what is on main, what is in flight (PRs, features, running instances), recent deliveries, and open threads. Every oas-expert instance updates the relevant subsection whenever it changes that reality (merge, release, spawn, retire, delivery).
 tags: [stewardship, repo-state, living]
-timestamp: 2026-07-25
+timestamp: 2026-07-26
 ---
 # Repo state — the living picture
 
@@ -14,6 +14,8 @@ entries first inside each section; prune entries that stop being true rather
 than letting the file grow stale.
 
 ## On main
+
+- **Agent-relations architecture recorded 2026-07-26** — the canonical [spawn-relations decision](/decisions/spawn-relations-live-lineage.md) accepts sparse explicit child/sibling/parent/unrelated live lineage, ambiguity-safe identity, attached child-of-owner semantics, and the v0.18.6 Desktop gate. Per explicit human direction it does not add a journal/lease subsystem; concurrent same-anchor parent writes and sequential multi-orphan retirement repair remain documented bounded limitations. Feature code is not on main yet (PR #38 is RETURNED below).
 
 - **PR #36 merged 2026-07-25 as `032c7a3`** — knowledge-only oas-desktop-engineer post-PR35 keybindings harvests. Preserves both keybindings developers' stranded post-merge harvests: dispatch-ineligible view-action semantics, crossed-mail coordination, PR35 follow-up queues, modal focus restoration, and the DEFAULT_KEYMAP/defaultChord split plus terminal allowlist delivery follow-ups. Final exact head `1e9980f`; all local gates, strict OKF for all 8 bundles, PR CI, and mergeability passed after two maintainer RETURNs. The remote `harvest/keybindings-wiring` branch is deleted; local branch cleanup is blocked by another worktree at `/private/tmp/harvest-wiring`. No product, release, manifest, package, or framework behavior changes.
 
@@ -156,11 +158,13 @@ than letting the file grow stale.
 
 ## In flight
 
-- (nothing currently recorded) — PR #36 reached terminal MERGED outcome; its
-  remote feature branch is deleted.
+- **PR #38 feature/agent-relations — RETURNED round 1 at `e3f7401` (2026-07-26).** Direction and security pass; the two no-journal/lease limitations are consciously accepted. Executable gates pass and `RELATIONS_MIN=0.18.6` is correct. Before re-review the coordinator must fix three cli-dev OKF reachability warnings plus stale transitional relation concepts, merge latest main while preserving PR #35 keybindings/PR #36 knowledge, resolve Desktop shell/hierarchy/spawn/log conflicts, and hand back a settled exact head with full gates/CI.
 
 ## Recent deliveries
 
+- PR #38 spawn-time agent relations across kernel, CLI, and Desktop: RETURNED
+  round 1 on 2026-07-26 for knowledge correctness and mergeability at
+  `e3f7401`; executable/security gates passed (see delivery-log).
 - (record PR #, one-line scope, verdict, merge/close date)
 - PR #36 oas-desktop-engineer post-PR35 keybindings harvests: MERGED
   2026-07-25 as `032c7a3` after two RETURNs; remote branch deleted

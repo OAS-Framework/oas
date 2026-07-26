@@ -1,5 +1,9 @@
 # Knowledge Log
 
+## 2026-07-26
+* **Creation**: [Spawn relations use sparse live lineage, not a transaction journal](/decisions/spawn-relations-live-lineage.md) records the accepted explicit child/sibling/parent/unrelated contract, attached child-of-owner rule, ambiguity-safe identity posture, v0.18.6 Desktop capability floor, and the human decision to accept bounded concurrent-parent and sequential-retirement-splice limitations instead of adding a lineage journal/lease subsystem.
+* **Update**: [Repo state](/stewardship/repo-state.md) and the [delivery log](/stewardship/delivery-log.md) record PR #38 round 1 RETURN for stale relation knowledge plus merge conflicts; executable/security gates otherwise passed at exact head `e3f7401`.
+
 ## 2026-07-25
 * **Update**: skills/pr-review — added harvest cherry-pick parent-state checks: reviewers must compare source-branch state at the terminal harvest commit against PR head for linked concepts, not only the cherry-picked final diff.
 * **Creation**: [Harvest cherry-picks must preserve source branch state, not only terminal commits](/lessons/harvest-cherrypick-parent-state.md) — terminal harvest commits can depend on semantic knowledge fixes in their parent branch; PR review must verify linked concepts in the PR head match the source-branch state, not only the cherry-picked final diff.
