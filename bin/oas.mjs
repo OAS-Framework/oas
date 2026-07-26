@@ -25,7 +25,7 @@ import {
   readCapabilityLocks, writeCapabilityLock,
   parsePackageSource, acquirePackage, restorePackages, listInstalledPackages, readPackageLocks,
   approveCapability, updatePackage, removePackage, migrateLegacyLock, applyLegacyLockMigration,
-  packageIntegrity, installedPackagesDir,
+  packageIntegrity, packageDepsIntegrity, installedPackagesDir,
   resolveOasConfig, resolveWorkMode, composeInstanceAgentsMd, parseYamlNested, packagedInject, teamAgentRoots,
   findTeamAgent, findTeamInstance, findCapabilityAgent, findInstanceHome, listCapabilityAgents, workspaceOf,
   ensureRoot, findRoot, findAgent, listAgents, listInstances, listAgentDefs, createAgent as coreCreateAgent,
@@ -226,6 +226,10 @@ function doctor(dir) {
     if (p.lockError) console.log(`             ERROR: ${p.lockError} [invalid-lock]`);
     const integ = packageIntegrity(p.dir);
     if (integ !== lock.integrity) console.log(`             ERROR: integrity drift — installed ${integ}, locked ${lock.integrity}; all capability approvals are invalid [integrity-drift]`);
+    // Runtime closure presence/staleness (runtime API addendum §2): node_modules
+    // is derived; deviation from the locked digest is repairable via bare `oas install`.
+    const depsNow = packageDepsIntegrity(p.dir);
+    if ((lock.depsIntegrity || undefined) !== depsNow) console.log(`             ERROR: materialized runtime closure ${depsNow ? "differs from" : "missing vs"} the locked depsIntegrity — run \`oas install\` to re-materialize [integrity-drift]`);
     const have = new Set(p.capabilities.map((c) => c.id));
     for (const c of lock.capabilities || []) if (!have.has(c)) console.log(`             ERROR: locked capability "${c}" is missing from the package manifest [capability-list-mismatch]`);
     for (const c of p.capabilities) {
