@@ -1,7 +1,7 @@
 ---
 type: Lesson
 title: Reconciliation truthfulness — side effects must match reports and exit codes
-description: Workspace reconciliation must control side effects before reporting: restore each lock level once, fail locked-but-uninstalled v2 package entries, and make consented requirement install failures nonzero.
+description: Workspace reconciliation must control side effects before reporting: restore and verify each lock level once across every path, fail locked-but-uninstalled v2 package entries, and make consented requirement install failures nonzero.
 tags: [install, reconciliation, requirements, review, exit-codes]
 timestamp: 2026-07-26
 ---
@@ -18,8 +18,13 @@ same as failing the command.
    restore per descendant, and hides ancestor failures in the descendant report.
    Use exact-level restore (`restoreCapabilities(startDir, { levels })`) plus a
    `restoredLevels` set so the boundary keeps chain semantics while descendants
-   restore only their own not-yet-processed level. This corrects the older
-   filtering-only warning in
+   restore only their own not-yet-processed level. A follow-up review caught the
+   inverse coverage gap: package-lock verification added only inside the
+   boundary/recursive loop missed the ordinary non-team `restore(dir)` chain and
+   the boundary's ancestor lock levels. Keep per-level checks extracted (for
+   example `packageLockReport(level)` plus `lockLevelsUp(dir)`) and call them
+   from both the chain path and the deduplicated reconciliation levels. This
+   corrects the older filtering-only warning in
    [team-boundary workspace discovery](/lessons/team-boundary-scan-pruning.md).
 2. **Locked package entries are obligations, not comments.** v2 `packages`
    entries were consulted as validation metadata, so a scope whose only lock was
@@ -32,9 +37,13 @@ same as failing the command.
    stay non-fatal; only a consented attempt that fails becomes a CI failure.
 
 Regression coverage should assert the observable truth, not only printed text:
-count repeated capability names to prove "once per level", and use fake npm
-shims for both consented-failure modes (manager exits nonzero; manager exits 0
-without dropping the binary on PATH). The broader fixture pattern lives in
+count repeated capability names to prove "once per level", and make restore
+attempts observable when output dedupes can lie. For package/capability restore
+dedupe, use a nested descendant under the locked scope plus a recording `cp`
+shim on `PATH`; a wrong-integrity lock makes each retry visible as copy,
+integrity failure, and cleanup. Use fake npm shims for both consented-failure
+modes (manager exits nonzero; manager exits 0 without dropping the binary on
+PATH). The broader fixture pattern lives in
 [test conventions](/playbooks/test-conventions.md), and requirement argv/PATH
 verification is covered by
 [requirement install recipes](/lessons/requirement-recipes-data-allowlist.md).

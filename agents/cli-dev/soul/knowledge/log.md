@@ -1,6 +1,8 @@
 # Knowledge Log
 
 ## 2026-07-26
+* **Update**: [reconciliation-truthfulness-fixes](/lessons/reconciliation-truthfulness-fixes.md) merges the coverage-parity follow-up: v2 package-lock verification must run from both chain restore and boundary reconciliation paths, including ancestor levels.
+* **Update**: [test-conventions](/playbooks/test-conventions.md) records that dedupe regression tests must count actual side effects with a recording shim and a topology that failed before the fix.
 * **Update**: [frozen-package-engine-contract-alignment](/lessons/frozen-package-engine-contract-alignment.md) merges review follow-ups: empty legacy v1 locks must surface in `readPackageLocks`' `legacy` list, and parsed-but-invalid manifests/resources must fail with `invalid-package-manifest` before dereference.
 * **Creation**: [reconciliation-truthfulness-fixes](/lessons/reconciliation-truthfulness-fixes.md) records the review lesson that reconciliation must restore each lock level once, fail locked-but-uninstalled v2 package locks, and exit nonzero for consented requirement install failures.
 * **Fix**: [team-boundary-scan-pruning](/lessons/team-boundary-scan-pruning.md) replaces after-the-fact restore report filtering with exact-level restore plus processed-level tracking.
