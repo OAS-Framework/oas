@@ -10,7 +10,7 @@ Official [OAS](https://github.com/OAS-Framework/oas) knowledge-layer integration
 
 ## Requirements
 
-The capability has no external host-command requirement. It does require a compatible OAS installation. The final compatibility floor is blocked on the package-engine freeze; see [`SCHEMA-STATUS.md`](SCHEMA-STATUS.md).
+The capability has no external host-command requirement. It does require a compatible OAS installation. The outer package schema is frozen; the final compatibility floor still awaits the lock-v2/runtime-boundary release decision. See [`SCHEMA-STATUS.md`](SCHEMA-STATUS.md).
 
 The extracted harvest command still contains a marked private-kernel import. [`KERNEL-API-NEEDS.md`](KERNEL-API-NEEDS.md) specifies the public runtime services that must replace it before this repository can release independently.
 

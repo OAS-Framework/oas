@@ -7,7 +7,7 @@ Each directory under `packaging/` is staged as the exact root of one future publ
 Every repository contains:
 
 - `oas-package.json`, enumerating package resources explicitly;
-- one self-contained capability directory explicitly enumerated by `oas-package.json` (normally `capabilities/<name>`; a marked flat `.` layout is used only where root skills/dependency locks must remain escape-free and remains gated on engine confirmation);
+- one self-contained capability directory explicitly enumerated by `oas-package.json` (normally `capabilities/<name>`; the frozen schema also permits a flat `.` layout where root skills/dependency locks must remain escape-free);
 - `schemas/oas-package.schema.json` and `schemas/capability-manifest.schema.json`;
 - `scripts/validate-manifests.mjs`, including package-path and symlink-containment checks;
 - standalone tests under `test/`, runnable with `npm test`;
@@ -15,7 +15,7 @@ Every repository contains:
 - package-owned dependency locks where runtime dependencies apply; and
 - no deployment targets, secrets, personal paths, generated dependencies, or kernel-hoisted resources.
 
-The package ID equals the single exported capability ID. Package version starts at the extracted capability version. Until the engine freeze, each `SCHEMA-STATUS.md` records `TODO(engine-freeze)` for the outer schema and the real OAS compatibility floor.
+The package ID equals the single exported capability ID. Package version starts at the extracted capability version. Every package carries the frozen `docs/oas-package.schema.json` from `feature/package-engine` at `1db919b`; each `SCHEMA-STATUS.md` records the still-pending real OAS compatibility floor and M2 consumer fixture gate.
 
 ## Continuous integration
 
@@ -41,7 +41,7 @@ Publication requires a clean fixture that performs the complete consumer flow ag
 6. inspect `instance.json`, exact instance-local skills, generated instructions, layer selection, trust, and hook results; and
 7. run `oas doctor` and retire the probes.
 
-This is `BLOCKED(engine-fixtures)` during staging. A workflow echo is a visible placeholder, not a passing consumer probe.
+This is `BLOCKED(engine-m2-fixtures)` during staging. A workflow echo is a visible placeholder, not a passing consumer probe.
 
 ## Release and provenance
 

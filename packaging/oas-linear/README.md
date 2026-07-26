@@ -23,7 +23,7 @@ The commands use Node's built-in `fetch` and add no external CLI or SDK dependen
 export LINEAR_API_KEY='lin_api_...'
 ```
 
-Start/resume agents from an environment that receives this variable. The spawn hook warns when it is absent; API commands fail with actionable authentication guidance rather than attempting login. The final OAS compatibility floor is blocked on the package-engine freeze; see [`SCHEMA-STATUS.md`](SCHEMA-STATUS.md).
+Start/resume agents from an environment that receives this variable. The spawn hook warns when it is absent; API commands fail with actionable authentication guidance rather than attempting login. The outer package schema is frozen; the final OAS compatibility floor still awaits the lock-v2 release decision. See [`SCHEMA-STATUS.md`](SCHEMA-STATUS.md).
 
 ## Acquire and activate
 

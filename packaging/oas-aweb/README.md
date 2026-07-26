@@ -22,7 +22,7 @@ npm ci --ignore-scripts
 
 This creates package-local `node_modules/@awebai/pi/skills/...`, which satisfies all three skill paths in `oas.json`. OAS package acquisition must use the same script-free materialization contract.
 
-The final OAS compatibility floor and flat dependency layout are blocked on the package-engine freeze; see [`SCHEMA-STATUS.md`](SCHEMA-STATUS.md).
+The frozen schema permits this flat dependency layout. The final OAS compatibility floor still awaits the lock-v2/materialization release decision; see [`SCHEMA-STATUS.md`](SCHEMA-STATUS.md).
 
 ## Acquire and activate
 

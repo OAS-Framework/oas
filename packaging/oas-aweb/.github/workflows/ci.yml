@@ -22,4 +22,4 @@ jobs:
       - name: Validate manifests, package-local skills, and hooks
         run: npm test
       - name: Consumer probe status
-        run: echo "BLOCKED(engine-fixtures) acquire -> lock -> trust -> activate -> spawn"
+        run: echo "BLOCKED(engine-m2-fixtures) acquire -> lock -> trust -> activate -> spawn"

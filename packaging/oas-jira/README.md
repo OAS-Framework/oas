@@ -15,7 +15,7 @@ acli jira auth login --web   # human-run only, when status says unauthorized
 
 Installation guide: <https://developer.atlassian.com/cloud/acli/guides/install-acli/>
 
-The final OAS compatibility floor is blocked on the package-engine freeze; see [`SCHEMA-STATUS.md`](SCHEMA-STATUS.md).
+The outer package schema is frozen. The final OAS compatibility floor still awaits the lock-v2 release decision; see [`SCHEMA-STATUS.md`](SCHEMA-STATUS.md).
 
 ## Acquire and activate
 

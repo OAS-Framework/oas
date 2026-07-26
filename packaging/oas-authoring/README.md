@@ -12,7 +12,7 @@ It claims no fundamental layer and contributes no commands, hooks, host requirem
 
 A compatible OAS deployment must provide the `integrations-expert` soul for the delegation workflow. The skill uses the public `oas spawn` command; it does not locate or import private kernel files.
 
-The final OAS compatibility floor and flat capability-root declaration are blocked on the package-engine freeze; see [`SCHEMA-STATUS.md`](SCHEMA-STATUS.md).
+The frozen schema permits this flat capability-root declaration. The final OAS compatibility floor still awaits the lock-v2 release decision; see [`SCHEMA-STATUS.md`](SCHEMA-STATUS.md).
 
 ## Acquire and activate
 

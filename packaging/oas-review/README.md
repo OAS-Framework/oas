@@ -12,7 +12,7 @@ The reviewer attaches read-only to the developer's worktree, reviews one named c
 
 The package has no host-command requirement and no command/hook executable surface. The reviewer operating loop currently delivers reports with `aw mail`, so deployments using the provided agent need a compatible messaging layer and `aw` available. The package remains additive and does not claim the messaging layer.
 
-The final OAS compatibility floor is blocked on the package-engine freeze; see [`SCHEMA-STATUS.md`](SCHEMA-STATUS.md).
+The outer package schema is frozen. The final OAS compatibility floor still awaits the lock-v2 release decision; see [`SCHEMA-STATUS.md`](SCHEMA-STATUS.md).
 
 ## Acquire and activate
 
