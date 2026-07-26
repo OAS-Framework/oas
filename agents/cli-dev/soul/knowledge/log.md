@@ -1,6 +1,7 @@
 # Knowledge Log
 
 ## 2026-07-26
+* **Creation**: [skill-routing-availability-context](/lessons/skill-routing-availability-context.md) records that bootstrap skill routing must respect ambient versus instance-baseline availability.
 * **Update**: [reconciliation-truthfulness-fixes](/lessons/reconciliation-truthfulness-fixes.md) merges the coverage-parity follow-up: v2 package-lock verification must run from both chain restore and boundary reconciliation paths, including ancestor levels.
 * **Update**: [test-conventions](/playbooks/test-conventions.md) records that dedupe regression tests must count actual side effects with a recording shim and a topology that failed before the fix.
 * **Update**: [frozen-package-engine-contract-alignment](/lessons/frozen-package-engine-contract-alignment.md) merges review follow-ups: empty legacy v1 locks must surface in `readPackageLocks`' `legacy` list, and parsed-but-invalid manifests/resources must fail with `invalid-package-manifest` before dereference.
