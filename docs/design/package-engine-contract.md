@@ -13,6 +13,11 @@ Companion machine-readable schemas:
 - [`docs/oas-package.schema.json`](../oas-package.schema.json) — `oas-package.json`
 - [`docs/oas-lock.schema.json`](../oas-lock.schema.json) — `oas-lock.json` v2 (+ legacy v1)
 
+Addendum (maintainer clarifications on the M1 freeze):
+[`package-runtime-api.md`](./package-runtime-api.md) — the public
+package-runtime CLI boundary, npm runtime closure semantics, incremental
+transaction guarantees, and runtime-validated schema invariants.
+
 ## 1. Package source grammar and normalized identity
 
 A **package source spec** (CLI argument, or an entry in a manifest's
@@ -201,6 +206,7 @@ lifecycle commands):
 | `incompatible-oas` | `compatibility.oas` floor not met by the running kernel |
 | `retired-capability` | a package exports / config references a capability the kernel has retired (existing retirement registry) |
 | `legacy-lock` | operation requires lockfileVersion 2 but the scope has a v1 lock — run the migration command |
+| `invalid-lock` | v2 lock entry violates semantic invariants (trust subset, dependency references, source/commit pairing) — see the runtime API addendum §4 |
 | `unknown-capability` | trust/approval target is not exported by any visible installed package |
 | `remove-blocked` | `oas remove` target is still referenced by config or by a dependent locked package (provenance: the blockers) |
 
