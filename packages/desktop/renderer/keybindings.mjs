@@ -20,6 +20,7 @@ const MOD_ORDER = ["Mod", "Ctrl", "Alt", "Shift"];
 // e.key values normalized so layouts/shift variants land on one spelling.
 const KEY_ALIASES = new Map([
   ["+", "="], // Shift-= / numpad plus both mean the "=" binding (Mod+=)
+  ["|", "\\"], // Shift-\ produces "|" — both mean the "\" binding (Mod+Shift+\)
   ["esc", "escape"],
   [" ", "space"],
   ["spacebar", "space"],

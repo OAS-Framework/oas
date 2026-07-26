@@ -35,7 +35,7 @@ import {
   tabVisibleInContext, canActivateTab,
   fallbackTabForContext, terminalOpenOwnsWorkspace, restoreTerminalTab,
 } from "./workspace-tabs.mjs";
-import { requestSplit, absorbTab, removeSplitTab, isSplitMember } from "./split-layout.mjs";
+import { requestSplit, absorbTab, removeSplitTab, isSplitMember, wireSplitPaneSelection } from "./split-layout.mjs";
 
 const desk = window.oasDesktop;
 initTheme();
@@ -427,12 +427,24 @@ function renderSplit(splitVisible) {
   tabhost.classList.toggle("split-row", on && split.orientation === "row");
   tabhost.classList.toggle("split-col", on && split.orientation === "col");
   if (!on) { splitEmptyEl.remove(); return; }
+  // Append only when the pane is out of position: re-inserting an
+  // already-placed node would tear it out of the DOM mid-interaction
+  // (pane-click selection fires activateTab → renderSplit on pointerdown).
+  let anchor = null; // last correctly-placed element
   for (const id of split.members) {
     const t = tabs.get(id);
-    if (t) tabhost.append(t.paneEl); // visual order = member order
+    if (!t) continue;
+    const inPlace = t.paneEl.parentNode === tabhost && (anchor ? anchor.nextSibling === t.paneEl : true);
+    if (!inPlace) {
+      if (anchor) anchor.after(t.paneEl); else tabhost.append(t.paneEl);
+    }
+    anchor = t.paneEl;
   }
-  if (split.pending > 0) tabhost.append(splitEmptyEl);
-  else splitEmptyEl.remove();
+  if (split.pending > 0) {
+    if (splitEmptyEl.previousSibling !== anchor || splitEmptyEl.parentNode !== tabhost) {
+      if (anchor) anchor.after(splitEmptyEl); else tabhost.append(splitEmptyEl);
+    }
+  } else splitEmptyEl.remove();
 }
 
 function splitPane(orientation) {
@@ -483,6 +495,15 @@ function addTab({ title, key, kind = "artifact", workspace = null, onClose, onSh
   triggerEl.addEventListener("click", () => activateTab(id));
   triggerEl.addEventListener("keydown", (e) => onTabKeydown(e, id));
   closeEl.addEventListener("click", (e) => { e.stopPropagation(); closeTab(id, true); });
+  // Split panes: clicking or focusing INTO a visible non-selected member
+  // pane selects its tab (without moving DOM focus — activateTab never
+  // focuses), so tabs.close / further splits target the terminal the user
+  // is actually interacting with.
+  wireSplitPaneSelection(paneEl, {
+    isMember: () => isSplitMember(split, id),
+    isActive: () => activeTab === id,
+    select: () => activateTab(id),
+  });
   tabs.set(id, { tabEl, triggerEl, closeEl, paneEl, title, key, kind, workspace, onClose, onShow });
   activateTab(id);
   return { id, paneEl };

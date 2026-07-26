@@ -39,6 +39,26 @@ export function isSplitMember(split, id) {
   return !!split && split.members.includes(id);
 }
 
+/** Wire pane-level selection for split cells: pointer or keyboard focus
+ * entering a VISIBLE non-selected member pane must make its tab the active
+ * one — otherwise the user types in pane A while tab B stays selected and
+ * tabs.close / further splits target the wrong terminal. Selection must not
+ * steal focus from the terminal the user just clicked, so `select` is the
+ * shell's activateTab (which never moves DOM focus). Installed once per tab
+ * pane at creation; the guards read live state via callbacks. */
+export function wireSplitPaneSelection(paneEl, { isMember, isActive, select }) {
+  const onEnter = () => {
+    if (!isMember() || isActive()) return;
+    select();
+  };
+  paneEl.addEventListener("pointerdown", onEnter);
+  paneEl.addEventListener("focusin", onEnter);
+  return () => {
+    paneEl.removeEventListener("pointerdown", onEnter);
+    paneEl.removeEventListener("focusin", onEnter);
+  };
+}
+
 /** Offer tab `id` to the pending slot (called on terminal-tab activation).
  * Existing members are never absorbed twice — activating a member just
  * focuses it. Returns { split, absorbed }. */
