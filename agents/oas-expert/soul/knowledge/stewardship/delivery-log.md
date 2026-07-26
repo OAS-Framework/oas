@@ -24,6 +24,11 @@ decisions/ and referenced from here.
 
 ---
 
+## PR #39 — v0.18.6 manifest bump rescue (2026-07-26)
+- verdict: MERGED as squash commit `9fc7c0e`. Release run `30198186842` completed build/test, all three Desktop installer build+smoke legs, both npm publishes, provenance, checksums, and GitHub Release v0.18.6 before the known org policy blocked Actions from creating the bump PR. The workflow-created branch contained exactly the five expected root/pi/Desktop manifest and lockfile changes (0.18.5→0.18.6); manual PR #39 restored the protected-main flow and deleted the branch.
+- owner: oas-expert-pr38 · coordinator: dev-coordinator-parallel
+- taught us: nothing new—the detached-HEAD push remains fixed and the documented org-policy rescue is still required after successful publication.
+
 ## PR #38 (round 3) — spawn-time agent relations across kernel, CLI, and Desktop (2026-07-26)
 - verdict: MERGED as merge commit `dfa0ac0` at exact head `4bbfe8d` after two RETURNs. All four gates PASS. The feature adds explicit child/sibling/parent/unrelated spawn relations, ambiguity-safe root-qualified anchors, attached child-of-owner semantics, retirement splice repair, composite instance identity across Desktop, cluster-first Active/sidebar surfaces, and the relation-aware spawn modal; it also preserves PR #35 keyboard shortcuts and PR #36 knowledge with identity-correct interaction fixes. The human-declined journal/lease subsystem findings remain documented accepted limitations. Final scratch gate passed 507/508 with one expected environment skip after one transient server-start miss passed alone and on full rerun; check/check:pi/validate/all-eight-bundle strict OKF/pack/smoke/diff-check passed; exact-head PR CI and all three installer checks passed. Same-account approval was recorded as a comment; expected-head merge succeeded and the remote feature branch was deleted. Post-merge scaffold-only child-relation probe `oas-expert-pr38-probe` verified the full generated layout, real skill directories, `parentInstance`/`relation`/`relativeTo`, no launch, and clean retirement.
 - owner: feature/agent-relations developers · coordinator: dev-coordinator-parallel

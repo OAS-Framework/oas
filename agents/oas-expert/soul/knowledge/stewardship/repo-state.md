@@ -15,7 +15,9 @@ than letting the file grow stale.
 
 ## On main
 
-- **PR #38 merged 2026-07-26 as `dfa0ac0`** — explicit child/sibling/parent/unrelated spawn relations across kernel, CLI, and Desktop; ambiguity-safe root-qualified anchors; attached child-of-owner semantics; retirement splice repair; composite instance identity; cluster-first Active/sidebar surfaces; and a relation-aware spawn modal. The merge preserves PR #35 editable keybindings and PR #36 knowledge, with reviewed fixes for composite roster parent focus, hierarchy Brain selection, and modal shortcut ownership. Final exact head `4bbfe8d`; all local, strict OKF, PR CI, and three installer checks passed after two RETURNs. The remote feature branch is deleted. Scaffold-only child-relation probe `oas-expert-pr38-probe` verified expected layout, real skill directories, relation metadata, no launch, and clean retirement. The [spawn-relations decision](/decisions/spawn-relations-live-lineage.md) records the human-accepted no-journal/lease limitations. Release impact: source is merged with manifests still v0.18.5; cut exactly v0.18.6 next.
+- **RELEASED v0.18.6 (2026-07-26)** — tag `v0.18.6` on release-notes/stewardship commit `0dd7878`, containing PR #38 agent relations and PR #35 editable keybindings. Published `@oas-framework/oas@0.18.6` + `@oas-framework/pi@0.18.6` and GitHub Release v0.18.6 with all six Desktop installers, SHA256SUMS.txt, and build provenance. Release run `30198186842` passed build/test and macOS arm64/x64 plus Linux x64 installer build+smoke; its only failure was the known org-policy block on Actions-created PRs after publication. Manifests were bumped through manual rescue PR #39 (`9fc7c0e`). The published kernel passed syntax checks and a clean create→root-qualified child relation spawn→metadata/layout inspect→retire probe; canonical soul content stayed unchanged.
+
+- **PR #38 merged 2026-07-26 as `dfa0ac0`** — explicit child/sibling/parent/unrelated spawn relations across kernel, CLI, and Desktop; ambiguity-safe root-qualified anchors; attached child-of-owner semantics; retirement splice repair; composite instance identity; cluster-first Active/sidebar surfaces; and a relation-aware spawn modal. The merge preserves PR #35 editable keybindings and PR #36 knowledge, with reviewed fixes for composite roster parent focus, hierarchy Brain selection, and modal shortcut ownership. Final exact head `4bbfe8d`; all local, strict OKF, PR CI, and three installer checks passed after two RETURNs. The remote feature branch is deleted. Scaffold-only child-relation probe `oas-expert-pr38-probe` verified expected layout, real skill directories, relation metadata, no launch, and clean retirement. The [spawn-relations decision](/decisions/spawn-relations-live-lineage.md) records the human-accepted no-journal/lease limitations. Released exactly as v0.18.6.
 
 - **PR #36 merged 2026-07-25 as `032c7a3`** — knowledge-only oas-desktop-engineer post-PR35 keybindings harvests. Preserves both keybindings developers' stranded post-merge harvests: dispatch-ineligible view-action semantics, crossed-mail coordination, PR35 follow-up queues, modal focus restoration, and the DEFAULT_KEYMAP/defaultChord split plus terminal allowlist delivery follow-ups. Final exact head `1e9980f`; all local gates, strict OKF for all 8 bundles, PR CI, and mergeability passed after two maintainer RETURNs. The remote `harvest/keybindings-wiring` branch is deleted; local branch cleanup is blocked by another worktree at `/private/tmp/harvest-wiring`. No product, release, manifest, package, or framework behavior changes.
 
@@ -32,9 +34,8 @@ than letting the file grow stale.
   worktree at `/private/tmp/integrate-keybindings`. Post-merge scaffold-only
   probe `oas-expert-pr35-probe` created the expected instance layout (AGENTS.md,
   CLAUDE.md, instance.json, STATE/log/notes, soul/work symlinks, .agents and
-  .aw scaffolding) with `launched:false`, then retired cleanly. Release impact:
-  ship in the next Desktop/source release; current published artifacts remain
-  v0.18.5.
+  .aw scaffolding) with `launched:false`, then retired cleanly. Released in
+  v0.18.6.
 
 - **RELEASED v0.18.5 (2026-07-25)** — corrective Desktop patch containing
   PR #32 and PR #33. Tag `v0.18.5` on `a0052bd` (both corrective merges plus
@@ -152,16 +153,18 @@ than letting the file grow stale.
 - Earlier oas.web and Control Pane deliveries remain in the delivery log and
   donor-soul knowledge as migration history; their product surfaces are no
   longer present on main.
-- Framework source and Desktop artifacts are now **0.18.5** (root/pi npm plus
-  GitHub Release installers). Capabilities at: oas.review 1.1.6, oas.okf
+- Framework source and Desktop artifacts are now **0.18.6** (root/pi npm plus
+  GitHub Release installers). Capabilities at: oas.review 1.1.7, oas.okf
   **1.4.0**, oas.aweb 1.5.1, oas.jira 1.0.0.
 
 ## In flight
 
-- **v0.18.6 release in progress.** PR #38 is merged and its post-merge scaffold probe passed. Release notes are being committed before the exact tag; tag-driven CI must publish root/pi 0.18.6 plus the Desktop installer matrix, after which the known org-policy bump-PR rescue may be required.
+- (nothing currently recorded) — PR #38 and the exact v0.18.6 release reached terminal outcomes.
 
 ## Recent deliveries
 
+- PR #39 release: v0.18.6 manifest bump (manual rescue after complete
+  publication): MERGED 2026-07-26 as `9fc7c0e` (see delivery-log).
 - PR #38 spawn-time agent relations across kernel, CLI, and Desktop: MERGED
   2026-07-26 as `dfa0ac0` after two RETURNs; exact head `4bbfe8d`, remote
   branch deleted, scaffold-only relation probe passed, v0.18.6 release pending
@@ -270,10 +273,10 @@ than letting the file grow stale.
   conclusion=failure run whose ONLY failed step is the bump-PR create; npm +
   GitHub Release already succeeded (never retag). Rescue each time: create +
   squash-merge the `release-bump/vX.Y.Z` branch manually (done for v0.18.3 as
-  PR #28, v0.18.4 as PR #31, and v0.18.5 as PR #34). Needs an org admin to
+  PR #28, v0.18.4 as PR #31, v0.18.5 as PR #34, and v0.18.6 as PR #39). Needs an org admin to
   relax the Actions-PR policy to fully automate.
   Rescue procedure is in the git-tag-release skill.
-- Published artifacts are now v0.18.5. The macOS installers retain complete
+- Published artifacts are now v0.18.6. The macOS installers retain complete
   ad-hoc signatures passing strict deep codesign; earlier release assets remain
   untouched.
 - webpanel-dev instance worktrees still hold deleted branches locally
