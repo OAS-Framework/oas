@@ -40,6 +40,19 @@ const flag = (name) => {
   return i >= 0 ? (args[i + 1] && !args[i + 1].startsWith("--") ? args[i + 1] : true) : undefined;
 };
 const die = (msg) => { console.error(`oas: ${msg}`); process.exit(1); };
+/** Resolve the --dir flag with central validation: a value-taking flag given
+ * no value (flag() → true) is E_BAD_ARGS inside the JSON boundary, never an
+ * uncaught resolve(true) TypeError (reviewer-6f0a3bd). */
+function dirFlag() {
+  const v = flag("dir");
+  if (v === undefined) return resolve(process.cwd());
+  if (v === true || !String(v).trim()) {
+    const msg = "--dir needs a directory path";
+    if (JSON_MODE) { console.log(JSON.stringify({ schemaVersion: 1, ok: false, error: { code: "E_BAD_ARGS", message: msg } })); process.exit(1); }
+    die(msg);
+  }
+  return resolve(String(v));
+}
 // Desktop CLI API v1 (JSON mode): every `--json` failure is EXACTLY ONE JSON
 // object on stdout — { schemaVersion: 1, ok: false, error: { code, message } } —
 // with a nonzero exit; progress prose goes to stderr, never stdout.
@@ -396,7 +409,7 @@ function readCapabilitiesModel(file) {
 function use() {
   const requested = args[1];
   if (!requested || requested.startsWith("--")) die("usage: oas use <capability|none> [--global|--type <agent-type>|--soul <name>] [--disable] [--layer <name>] [--settings k=v [k2=v2 ...]] [--dir <dir>]");
-  const dir = resolve(flag("dir") || process.cwd());
+  const dir = dirFlag();
   const level = levelOf(dir);
   const file = join(dir, "oas-config.yaml");
   const layer = flag("layer");
@@ -470,7 +483,7 @@ const cmdFail = (code, msg) => (JSON_MODE ? jsonFail(code, msg) : die(msg));
  * until workstream 3 publishes the official packages. */
 function install() {
   const src = args[1];
-  const dir = resolve(flag("dir") || process.cwd());
+  const dir = dirFlag();
   if (!src || src.startsWith("--")) { restore(dir); return; }
   if (RETIRED_CAPABILITIES[src]) cmdFail("retired-capability", `${RETIRED_CAPABILITIES[src]}`);
   // Package source? (git/path with an oas-package.json, or a catalog id) — otherwise legacy capability acquisition.
@@ -535,13 +548,18 @@ function restore(dir) {
   let pkgReport, report;
   try { pkgReport = restorePackages(dir); report = restoreCapabilities(dir); }
   catch (e) { JSON_MODE ? jsonFail(e.code || "invalid-lock", e.message || e) : die(e.message || e); return; }
-  const failures = [...pkgReport, ...report].filter((r) => r.status === "failed");
+  // EVERY unsuccessful status is a failure (reviewer-6f0a3bd: "unrestorable"
+  // and "retired" must not report ok); each carries an appropriate frozen code.
+  const UNSUCCESSFUL = { failed: undefined, unrestorable: "invalid-source", retired: "retired-capability" };
+  const failures = [...pkgReport, ...report]
+    .filter((r) => Object.hasOwn(UNSUCCESSFUL, r.status))
+    .map((r) => ({ ...r, code: r.code || UNSUCCESSFUL[r.status] || "integrity-drift" }));
   if (JSON_MODE) {
     if (failures.length) {
       // Frozen failure envelope shape EXACTLY { schemaVersion, ok:false, error };
       // propagate the first failure's taxonomy code (per-artifact detail in message).
       const first = failures[0];
-      jsonFail(first.code || "integrity-drift", failures.map((f) => `${f.package || f.id || "(lock)"}: ${f.reason}`).join("; "));
+      jsonFail(first.code, failures.map((f) => `${f.package || f.id || "(lock)"}: ${f.reason}`).join("; "));
       return;
     }
     jsonOk({ packages: pkgReport, capabilities: report });
@@ -568,7 +586,7 @@ function restore(dir) {
 function trust() {
   const id = args[1];
   if (!id || id.startsWith("--")) { cmdFail("E_USAGE", "usage: oas trust <capability> [--dir <dir>] | oas trust <package> --all-capabilities [--dir <dir>]"); return; }
-  const dir = resolve(flag("dir") || process.cwd());
+  const dir = dirFlag();
   const all = args.includes("--all-capabilities");
   // Package-backed approval path (per-capability, or explicit bulk on a package id).
   let pkgs;
@@ -615,7 +633,7 @@ function trust() {
 
 /** oas list — installed packages, exported capabilities, scopes. */
 function listCmd() {
-  const dir = resolve(flag("dir") || process.cwd());
+  const dir = dirFlag();
   // FAIL-CLOSED (maintainer finding 3): list RAISES on invalid locks — an
   // invalid lock must never render as usable/absent data.
   let pkgs, locks;
@@ -646,7 +664,7 @@ function listCmd() {
 function removeCmd() {
   const id = args[1];
   if (!id || id.startsWith("--")) JSON_MODE ? jsonFail("E_USAGE", "usage: oas remove <package> [--dir <dir>]") : die("usage: oas remove <package> [--dir <dir>]");
-  const dir = resolve(flag("dir") || process.cwd());
+  const dir = dirFlag();
   let r;
   try { r = removePackage(dir, id); } catch (e) { cmdFail(e.code || "remove-blocked", e.message || e); return; }
   if (JSON_MODE) { jsonOk(r); return; }
@@ -655,7 +673,7 @@ function removeCmd() {
 
 /** oas migrate — map this scope's v1 marketplace capability locks to package locks. */
 function migrateCmd() {
-  const dir = resolve(flag("dir") || process.cwd());
+  const dir = dirFlag();
   const dryRun = args.includes("--dry-run");
   if (dryRun) {
     let plan, warnings;
@@ -679,7 +697,7 @@ function migrateCmd() {
 
 /** oas update <package> — transactional package update with diff + trust reset. */
 function updatePackageCmd(id) {
-  const dir = resolve(flag("dir") || process.cwd());
+  const dir = dirFlag();
   let r;
   try { r = updatePackage(dir, id); } catch (e) { cmdFail(e.code || "invalid-lock", e.message || e); return; }
   if (JSON_MODE) { jsonOk(r); return; }
@@ -743,7 +761,7 @@ function loadTemplateConfig(spec, dir) {
 
 function init() {
   const raw = args.includes("--raw");
-  const dir = resolve(flag("dir") || process.cwd());
+  const dir = dirFlag();
   const file = join(dir, "oas-config.yaml");
   if (existsSync(file)) die(`${shortPath(file)} already exists — edit it or use \`oas use\``);
 
@@ -891,7 +909,7 @@ function status() {
 }
 
 function statusTeam() {
-  const ctx = resolve(flag("dir") || process.cwd());
+  const ctx = dirFlag();
   const r = resolveOasConfig(ctx);
   if (!r.team) die(`no team declared in the config chain from ${shortPath(ctx)} — add a "team:" block (name, optional id) at the deployment scope`);
   const roots = teamAgentRoots(r.team.scope);
@@ -1168,7 +1186,7 @@ function capabilityCommand() {
 // ---------- agent types ----------
 function typeCmd() {
   const sub = args[1];
-  const dir = resolve(flag("dir") || process.cwd());
+  const dir = dirFlag();
   const file = join(dir, "oas-config.yaml");
   if (sub === "list") {
     const seen = new Map();
@@ -1211,7 +1229,7 @@ function injectCmd() {
   const sub = args[1];
   const target = args[2];
   if (sub !== "eject" || !target || target.startsWith("--")) die("usage: oas inject eject <capability-id|oas> [--dir <dir>]");
-  const dir = resolve(flag("dir") || process.cwd());
+  const dir = dirFlag();
   const file = join(dir, "oas-config.yaml");
   if (!existsSync(file)) die(`no oas-config.yaml at ${shortPath(dir)} — run oas init first`);
   if (["checkout", "worktree", "attached", "workspace"].includes(target)) die("work-mode injection overrides were removed — the packaged briefings are the contract; work modes support only setup: (env bootstrap script)");
