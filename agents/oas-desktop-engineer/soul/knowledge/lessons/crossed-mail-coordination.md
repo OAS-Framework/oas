@@ -28,3 +28,8 @@ repository as the source of truth.
 - **Name heads, not descriptions.** Pin status mail to commit hashes. Phrases
   such as "your fix" or "the converged state" create drift when both sides are
   merging and mailing concurrently.
+- **Treat maintainer handback base SHAs as minimums.** In stewardship-loop
+  handbacks, follow the [maintainer handback race lesson](/lessons/maintainer-handback-stewardship-race.md):
+  merge current `origin/main` when it has advanced past the named base, prove
+  the named base is an ancestor, and report the deviation once with git
+  evidence.
