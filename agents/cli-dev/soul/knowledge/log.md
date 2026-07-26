@@ -1,6 +1,9 @@
 # Knowledge Log
 
 ## 2026-07-26
+* **Creation**: [deps-integrity-trust-binding](/lessons/deps-integrity-trust-binding.md) records the reviewer-caught node_modules trust bypass and the depsIntegrity fix pattern for package approval, restore, and staging materialization.
+* **Update**: [package-engine-implementation-gotchas](/lessons/package-engine-implementation-gotchas.md) corrects package trust carry-over to require depsIntegrity and records contract-signature regression testing against the frozen doc.
+* **Update**: [per-capability-npm-locks](/decisions/per-capability-npm-locks.md) points the node_modules exclusion boundary at the depsIntegrity trust-binding lesson.
 * **Creation**: [strict-curriculum-scoping](/references/strict-curriculum-scoping.md) records launch-path facts for strict instance curriculum enforcement across pi `--no-skills`, Claude Code isolation, spawn-probe sequencing, and `instance.json` provenance.
 * **Creation**: [flat-single-capability-packages](/decisions/flat-single-capability-packages.md) records the package layout decision that `capabilities: ["."]` is supported only as the sole capability entry, with whole-tree package integrity and realpath-deduped npm materialization roots.
 * **Creation**: [per-capability-npm-locks](/decisions/per-capability-npm-locks.md) records the npm materialization decision: package root plus declared capability dirs with both `package.json` and `package-lock.json` run independent `npm ci --ignore-scripts` units.

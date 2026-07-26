@@ -20,7 +20,9 @@ containment boundary.
 # Boundaries
 
 Undeclared directories are never scanned for dependency closures. Every
-`node_modules` directory at any depth is excluded from `packageIntegrity`.
+`node_modules` directory at any depth is excluded from `packageIntegrity`; the
+[depsIntegrity trust-binding lesson](/lessons/deps-integrity-trust-binding.md)
+records the separate digest required for that executable materialization.
 
 A directory qualifies as a materialization root only when it has both
 `package.json` and `package-lock.json`; a package manifest without a lock file is
