@@ -32,10 +32,12 @@ work-tree owner are rejected at both CLI and kernel boundaries. See
 [attached-spawns-child-of-work-owner](/decisions/attached-spawns-child-of-work-owner.md)
 and [path-first resolution](/lessons/path-first-resolution-round-trip.md).
 
-Agent-driven spawn surfaces that target the same deployment pass explicit
-parentage: `oas-okf harvest` spawns pass `parent: inst`; the review injection's
-maintainer spawn example uses `--parent "$OAS_INSTANCE"`; the oas skill
-documents the rule.
+Agent-driven spawn surfaces that target the same deployment express their
+final topology explicitly: `oas-okf harvest` passes its owner as a child parent;
+attached post-commit reviewers inherit child-of-work-owner automatically; and a
+non-attached maintainer spawned to oversee the caller uses
+`--relation parent --relative-to "$OAS_INSTANCE"`. The oas skill and canonical
+soul policies document these rules.
 
 # Cross-deployment boundary
 

@@ -25,21 +25,29 @@ Desktop clusters are connected components over both edge kinds: `parentInstance`
 
 Spawn accepts `--relation child|sibling|parent|unrelated --relative-to <instance>`.
 `--parent X` is sugar for `--relative-to X --relation child`.
+`--relative-root <agents-root>` qualifies a same-named team anchor; the desktop
+picker sends the selected instance's name and agents root together.
 `relation=parent` re-points the anchor under the new instance, so the new instance takes the anchor's old tree slot.
+Attached mode always produces child-of-owner; non-child relation flags are rejected, and a non-instance integration work tree requires explicit `--parent <owner>`.
 `oas spawn --json` adds `sibling` and `relation` next to `parent`.
 
-# Errors and pending clarifier
+# Errors
 
-Known error codes:
+Final error behavior:
 
 - `E_RELATIVE_NOT_FOUND`: bad anchor.
-- `E_BAD_ARGS`: invalid flag matrix.
-
-Pending clarifier from the relay: whether `--relative-to` without `--relation` rejects or ignores. Desktop rejects it; the stricter behavior is safe.
+- `E_RELATIVE_AMBIGUOUS`: the anchor name/root pair cannot produce an unambiguous, round-tripping lineage edge (including inherited-edge ambiguity).
+- `E_BAD_ARGS`: invalid flag matrix. In particular, `--relative-to` without
+  `--relation` is rejected, never ignored; `unrelated` takes no anchor; and
+  `--relative-root` only qualifies `--relative-to`/`--parent`.
 
 # Desktop integration points
 
-Desktop must thread these fields through both:
+Desktop threads these fields through both shipped integration points:
 
-- `instanceLinks()` in `packages/desktop/renderer/instance-tree.mjs`.
-- The `/api/panel` projection in `packages/desktop/server/oas-web.mjs`, which has an explicit allowlist. Kernel fields do not flow through automatically there, though `packages/desktop/server/model.mjs` spreads metadata transparently.
+- `instanceLinks()` in `packages/desktop/renderer/instance-tree.mjs` consumes
+  `parentInstance` plus `siblingInstance` for connected-component clustering.
+- The `/api/panel` projection in `packages/desktop/server/oas-web.mjs`
+  explicitly allowlists `siblingInstance`, `relation`, and `relativeTo` from
+  roster metadata; `packages/desktop/server/model.mjs` spreads the underlying
+  instance metadata transparently.

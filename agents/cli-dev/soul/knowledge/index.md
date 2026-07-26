@@ -12,7 +12,8 @@ read what the current task needs, not everything.
 
 ## Decisions
 
-* [decisions/spawn-lineage-explicit-only.md](decisions/spawn-lineage-explicit-only.md) - parentInstance now comes only from an explicit --parent/o.parent inside the target deployment or the attached-mode workDir-owner fallback; env vars are never consulted, and cross-deployment spawns stay operator-origin.
+* [decisions/spawn-lineage-explicit-only.md](decisions/spawn-lineage-explicit-only.md) - parentInstance now comes only from an explicit relation/--parent inside the target deployment or the attached-mode owner binding; env vars are never consulted, and cross-deployment spawns stay operator-origin.
+* [decisions/attached-spawns-child-of-work-owner.md](decisions/attached-spawns-child-of-work-owner.md) - attached work mode always makes the new agent a child of the verified work-tree owner; contradictory relations are rejected.
 
 ## Architecture
 
@@ -21,6 +22,7 @@ read what the current task needs, not everything.
 * [architecture/work-modes-and-workspace-mode.md](architecture/work-modes-and-workspace-mode.md) - the four work modes, packaged briefings as the contract, and workspace mode's boundary requirement and no-branch semantics.
 * [architecture/capability-defined-agents.md](architecture/capability-defined-agents.md) - manifest `agents:` souls resolving on declaration, and the _dir/_soulDir split for instance homing.
 * [architecture/model-preference-lists.md](architecture/model-preference-lists.md) - comma-separated model preferences probed via `pi --list-models` with first-entry fallback.
+* [architecture/spawn-relations-lineage-fields.md](architecture/spawn-relations-lineage-fields.md) - final child/sibling/parent/unrelated semantics, sparse lineage fields, attached-owner binding, ambiguity validation, and retirement splice behavior.
 
 ## Lessons
 
@@ -28,6 +30,7 @@ read what the current task needs, not everything.
 * [lessons/marketplace-trust-and-hoisted-paths.md](lessons/marketplace-trust-and-hoisted-paths.md) - marketplace-over-bundled migration: trust at acquisition and the lock-sourced hoisted-path exemption.
 * [lessons/init-acquires-before-config-exists.md](lessons/init-acquires-before-config-exists.md) - mid-init the config chain cannot rediscover a just-acquired capability; use the acquisition result directly.
 * [lessons/team-scope-and-cross-repo-spawn.md](lessons/team-scope-and-cross-repo-spawn.md) - team boundary scan, cross-repo spawn as a CLI resolution change, and why instance lookups stay local-first.
+* [lessons/team-agent-roots-nonexistent-roots.md](lessons/team-agent-roots-nonexistent-roots.md) - teamAgentRoots deliberately retains nonexistent agents/ anchors for all-local sibling scopes; deployment-wide scans must not existence-filter them away.
 * [lessons/task-flag-boolean-crash.md](lessons/task-flag-boolean-crash.md) - bin/oas.mjs flag() yields boolean true when the next argv token starts with "--"; oas spawn dev --task --purpose x passed task=true into spawnInstance and crashed mid-scaffold at task.trim(), while task delivery itself was never broken.
 * [lessons/capability-source-edits-require-lock-refresh.md](lessons/capability-source-edits-require-lock-refresh.md) - edits under capabilities/<pkg>/ change capabilityIntegrity, so clean-clone CI fails restore unless the package version and matching oas-lock.json source/version/integrity are refreshed in the same commit.
 * [lessons/json-mode-cli-contract.md](lessons/json-mode-cli-contract.md) - when a CLI command grows a machine-readable --json mode for an external consumer, success and failure must be one stdout JSON envelope with stable error codes, and all human progress prose must move to stderr in JSON mode.

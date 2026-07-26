@@ -79,6 +79,23 @@ may lack an `agents/` directory, so failed realpath checks must fall back to
 [relation-policy lesson](/lessons/relation-policy-migration-and-retire-splice.md),
 and [identity lesson](/lessons/names-are-not-identity.md).
 
+# Accepted concurrency limitations
+
+The retained architecture deliberately uses sparse per-instance JSON rather
+than a deployment transaction/journal subsystem. The human and maintainer
+accepted two limitations for this feature:
+
+- two concurrent `parent` spawns against the same anchor are not serialized;
+  both can read the same old slot and the last anchor rewrite wins, so callers
+  should avoid issuing competing parent spawns for one anchor;
+- retirement repair updates affected instance files one by one and is not a
+  crash-atomic multi-file transaction; retry/manual reconciliation may be
+  needed after an I/O failure partway through a splice.
+
+These are consciously accepted trade-offs, not pending implementation. Do not
+reintroduce lineage journals, leases, or a filesystem transaction engine
+without a new human architecture decision.
+
 # Validation boundary
 
 Relation validation intentionally happens in both surfaces: the CLI returns
