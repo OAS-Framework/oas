@@ -1,6 +1,7 @@
 # Knowledge Log
 
 ## 2026-07-26
+* **Creation**: [strict-curriculum-scoping](/references/strict-curriculum-scoping.md) records launch-path facts for strict instance curriculum enforcement across pi `--no-skills`, Claude Code isolation, spawn-probe sequencing, and `instance.json` provenance.
 * **Creation**: [flat-single-capability-packages](/decisions/flat-single-capability-packages.md) records the package layout decision that `capabilities: ["."]` is supported only as the sole capability entry, with whole-tree package integrity and realpath-deduped npm materialization roots.
 * **Creation**: [per-capability-npm-locks](/decisions/per-capability-npm-locks.md) records the npm materialization decision: package root plus declared capability dirs with both `package.json` and `package-lock.json` run independent `npm ci --ignore-scripts` units.
 * **Update**: [package-engine-implementation-gotchas](/lessons/package-engine-implementation-gotchas.md) records that empty npm closures may create no `node_modules` directory, so materialization probes should test resource path resolvability.
