@@ -2258,3 +2258,52 @@ test("writePackageLock routes through the central parser — all malformed roots
   assert.ok(parsed.capabilities["res.cap"], "residue preserved byte-semantically through the central-parser writer");
   rmSync(base, { recursive: true, force: true });
 });
+
+// ---------- reviewer-c44b73c live findings (3-5; 1-2 fixed in 16acf8c/12af640) ----------
+
+test("configs: null is invalid-package-manifest; non-string packageId rejected by the writer (reviewer-c44b73c)", () => {
+  const base = temp();
+  const d = join(base, "m");
+  write(join(d, "oas-package.json"), JSON.stringify({ package: "x.p", version: "1.0.0", description: "d", compatibility: { oas: ">=0.1.0" }, configs: null }));
+  assert.throws(() => loadPackageManifestAt(d), (e) => e.code === "invalid-package-manifest" && /configs/.test(e.message));
+  const s = scope(base);
+  const sha = "a".repeat(40);
+  const integ = `sha256-${"0".repeat(64)}`;
+  const entry = { source: "git:https://h/x.git@v1", version: "1", commit: sha, integrity: integ, capabilities: [] };
+  for (const badId of [123, true, ["a"], null]) {
+    assert.throws(() => writePackageLock(s, badId, entry), (e) => e.code === "invalid-lock" && /must be a string/.test(e.message), JSON.stringify(badId));
+  }
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("schema-invalid residue entries are typed invalid-lock before migration planning — no coercion (reviewer-c44b73c)", () => {
+  const base = temp();
+  const s = scope(base);
+  writeFileSync(join(s, OAS_LOCK_FILE), JSON.stringify({ lockfileVersion: 1, capabilities: { "x.cap": { source: ["marketplace:x"], version: "1", integrity: `sha256-${"a".repeat(64)}` } } }));
+  assert.throws(() => migrateLegacyLock(s), (e) => e.code === "invalid-lock" && /malformed/.test(e.message), "array source never normalizes into a plan");
+  const r = cli(s, "migrate", "--dry-run", "--dir", s, "--json");
+  const env = JSON.parse(r.stdout);
+  assert.equal(env.ok, false);
+  assert.equal(env.error.code, "invalid-lock");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("non-reader paths validate residue containers and packages shapes (reviewer-c44b73c findings 1-2 pinned at head)", () => {
+  const base = temp();
+  const sha = "a".repeat(40);
+  const integ = `sha256-${"0".repeat(64)}`;
+  const entry = { source: "git:https://h/x.git@v1", version: "1", commit: sha, integrity: integ, capabilities: [] };
+  // v2 with capabilities: null — restore and write both raise
+  const s = scope(base, "s1");
+  writeFileSync(join(s, OAS_LOCK_FILE), JSON.stringify({ lockfileVersion: 2, packages: {}, capabilities: null }));
+  assert.throws(() => restorePackages(s), (e) => e.code === "invalid-lock");
+  assert.throws(() => writePackageLock(s, "x.p", entry), (e) => e.code === "invalid-lock");
+  // falsy/invalid packages containers — writer raises, never silently repairs
+  for (const [label, body] of [["false", JSON.stringify({ lockfileVersion: 2, packages: false })], ["zero", JSON.stringify({ lockfileVersion: 2, packages: 0 })], ["empty-string", JSON.stringify({ lockfileVersion: 2, packages: "" })]]) {
+    const s2 = scope(base, `s-${label}`);
+    writeFileSync(join(s2, OAS_LOCK_FILE), body);
+    assert.throws(() => writePackageLock(s2, "x.p", entry), (e) => e.code === "invalid-lock", label);
+    assert.equal(readFileSync(join(s2, OAS_LOCK_FILE), "utf8"), body, `${label}: never silently repaired`);
+  }
+  rmSync(base, { recursive: true, force: true });
+});
