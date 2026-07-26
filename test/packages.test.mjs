@@ -2499,3 +2499,17 @@ test("malformed retired v1 entry keeps actionable retirement priority in dry-run
   assert.equal(final.capabilities["oas.web"], null, "retired residue retained for explicit deletion guidance");
   rmSync(base, { recursive: true, force: true });
 });
+
+test("prototype-named malformed legacy entries are never misclassified as retired (reviewer-a5ed434)", () => {
+  const base = temp();
+  for (const [i, id] of ["constructor", "toString", "__proto__"].entries()) {
+    const s = join(base, `s${i}`); mkdirSync(s);
+    const file = join(s, OAS_LOCK_FILE);
+    const bytes = JSON.stringify({ lockfileVersion: 1, capabilities: { [id]: null } });
+    writeFileSync(file, bytes);
+    assert.throws(() => migrateLegacyLock(s), (e) => e.code === "invalid-lock" && e.message.includes(id), `${id}: dry-run invalid-lock`);
+    assert.throws(() => applyLegacyLockMigration(s), (e) => e.code === "invalid-lock" && e.message.includes(id), `${id}: apply invalid-lock`);
+    assert.equal(readFileSync(file, "utf8"), bytes, `${id}: apply leaves lock byte-identical`);
+  }
+  rmSync(base, { recursive: true, force: true });
+});

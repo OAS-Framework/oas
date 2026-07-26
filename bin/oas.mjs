@@ -20,7 +20,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { enableTmuxMouse, tmuxConfigPath, tmuxMouseEnabled } from "../lib/tmux-config.mjs";
 import {
-  LAYERS, LEGACY_HOME_CAPABILITIES_DIR, OAS_LOCK_FILE, OAS_VERSION, RETIRED_CAPABILITIES, configChain,
+  LAYERS, LEGACY_HOME_CAPABILITIES_DIR, OAS_LOCK_FILE, OAS_VERSION, RETIRED_CAPABILITIES, retiredCapabilityReason, configChain,
   acquireCapability, restoreCapabilities, marketplaceCapabilities,
   capabilityManifests, capabilityManifest, capabilityMissingRequires, capabilityIntegrity, capabilityTrust, capabilityExecutablePath,
   readCapabilityLocks, writeCapabilityLock,
@@ -148,8 +148,8 @@ function doctorJson(dir) {
     capabilities: r.capabilities.map((c) => ({ id: c.id, layer: c.layer, command: c.command, origin: c.origin, provenance: c.provenance, settings: c.settings, skills: c.skills, inject: c.inject, hooks: Object.keys(c.hooks || {}), trust: c.trust })),
     acquired: Object.fromEntries(Object.entries(mans).map(([n, m]) => [n, { layer: m.layer, command: m.command, version: m.version, dir: m._dir, origin: m._origin, description: m.description }])),
     retiredLocks: (() => { try { return Object.entries(readCapabilityLocks(ctx)) } catch { return []; } })()
-      .filter(([id]) => RETIRED_CAPABILITIES[id])
-      .map(([id, lock]) => ({ id, file: lock._file, reason: RETIRED_CAPABILITIES[id] })),
+      .filter(([id]) => retiredCapabilityReason(id))
+      .map(([id, lock]) => ({ id, file: lock._file, reason: retiredCapabilityReason(id) })),
     ...(() => {
       // Doctor JSON catches the typed fail-closed error and diagnoses (finding 3).
       try {
@@ -172,8 +172,8 @@ function doctorJson(dir) {
       }
     })(),
     retiredArtifacts: Object.entries(mans)
-      .filter(([id]) => RETIRED_CAPABILITIES[id])
-      .map(([id, m]) => ({ id, dir: m._dir, origin: m._origin, reason: RETIRED_CAPABILITIES[id] })),
+      .filter(([id]) => retiredCapabilityReason(id))
+      .map(([id, m]) => ({ id, dir: m._dir, origin: m._origin, reason: retiredCapabilityReason(id) })),
     composedInstructions: composition?.text,
     instructionBlocks: composition?.blocks,
   }, null, 2));
@@ -242,9 +242,10 @@ function doctor(dir) {
   for (const [name, m] of Object.entries(capabilityManifests(ctx))) {
     const missing = capabilityMissingRequires(name, ctx);
     console.log(`  ${name.padEnd(16)} layer: ${(m.layer || "additive").padEnd(10)} origin: ${m._origin}${missing.length ? `  (missing: ${missing.map((x) => x.command).join(", ")})` : ""}`);
-    if (RETIRED_CAPABILITIES[name]) {
+    const retiredReason = retiredCapabilityReason(name);
+    if (retiredReason) {
       const installed = String(m._origin).startsWith("installed:");
-      console.log(`             WARNING: artifact of a retired capability — ${RETIRED_CAPABILITIES[name]}${installed ? `; also delete ${shortPath(m._dir)}` : ` (origin ${m._origin}: remove its declaration; the source tree at ${shortPath(m._dir)} is yours to keep or drop)`}`);
+      console.log(`             WARNING: artifact of a retired capability — ${retiredReason}${installed ? `; also delete ${shortPath(m._dir)}` : ` (origin ${m._origin}: remove its declaration; the source tree at ${shortPath(m._dir)} is yours to keep or drop)`}`);
     }
   }
   // readCapabilityLocks fails closed on invalid legacy entries — doctor is the
@@ -259,7 +260,8 @@ function doctor(dir) {
   }
   const mans = capabilityManifests(ctx);
   for (const [id, lock] of Object.entries(locks)) {
-    if (RETIRED_CAPABILITIES[id]) { console.log(`  WARNING: ${id} is locked in ${shortPath(lock._file)} but ${RETIRED_CAPABILITIES[id]}`); continue; }
+    const retiredReason = retiredCapabilityReason(id);
+    if (retiredReason) { console.log(`  WARNING: ${id} is locked in ${shortPath(lock._file)} but ${retiredReason}`); continue; }
     if (!mans[id]) console.log(`  WARNING: ${id} is locked in ${shortPath(lock._file)} but not acquired — run \`oas install\``);
   }
   for (const [id, m] of Object.entries(mans)) {
@@ -494,7 +496,8 @@ function install() {
   const src = args[1];
   const dir = dirFlag();
   if (!src || src.startsWith("--")) { restore(dir); return; }
-  if (RETIRED_CAPABILITIES[src]) cmdFail("retired-capability", `${RETIRED_CAPABILITIES[src]}`);
+  const retiredReason = retiredCapabilityReason(src);
+  if (retiredReason) cmdFail("retired-capability", retiredReason);
   // Package source? (git/path with an oas-package.json, or a catalog id) — otherwise legacy capability acquisition.
   let parsedSrc;
   try { parsedSrc = parsePackageSource(src); } catch { parsedSrc = undefined; }
