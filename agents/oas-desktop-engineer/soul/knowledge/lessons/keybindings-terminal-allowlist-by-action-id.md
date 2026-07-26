@@ -1,9 +1,9 @@
 ---
 type: Lesson
 title: Keybinding engine terminal allowlist is action-id based, not chord based
-description: On Linux/Windows the keybinding engine allowlists action ids inside .xterm, but xterm consumes claimed chords before bubble-phase window listeners; terminal tabs must intercept them with attachCustomKeyEventHandler before the pty write.
+description: On Linux/Windows the keybinding engine allowlists action ids inside .xterm, but every allowlisted action's resolved non-mac default chord must be checked against terminal control bytes, and claimed chords must be intercepted pre-pty with attachCustomKeyEventHandler.
 tags: [desktop, keybindings, terminal-safety, xterm, design]
-timestamp: 2026-07-25
+timestamp: 2026-07-26
 ---
 
 # Allowlist by action id, not chord
@@ -16,6 +16,20 @@ chord's semantics would be ambiguous. `keybindings.mjs` therefore allowlists
 **action ids** (`TERMINAL_ALLOWLIST = ["app.palette", "tabs.next", "tabs.prev",
 "tabs.close"]`) and checks membership after chord matching, so the policy
 follows the binding wherever the user moves it.
+
+# Action-id allowlists still need resolved-chord collision review
+
+Action-id policy follows user rebinds, but it also means every newly allowlisted
+action brings its default/resolved bindings into the terminal. Before adding an
+action id to `TERMINAL_ALLOWLIST`, resolve its default chord on Linux/Windows
+(`Mod` becomes `Ctrl`) and check that chord against bytes owned by the attached
+program.
+
+Merged-state review 156cbc7 found that allowlisting `sidebar.toggle` would turn
+its default `Mod+B` into non-mac `Ctrl+B` inside xterm, shadowing the tmux
+prefix. Pin this with an event-level `matchEvent` regression: non-mac `Ctrl+B`
+inside xterm must return `null` unless an explicitly terminal-safe action owns
+that chord.
 
 # Deliberate divergence from isPaletteShortcut
 
