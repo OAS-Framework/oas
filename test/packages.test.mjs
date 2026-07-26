@@ -1238,7 +1238,7 @@ test("oas.dev consumer fixture: fresh non-Git source → profile snapshot + comp
   assert.equal(JSON.parse(r4.stdout).result.differingLines, 0);
 });
 
-test("oas.dev end-to-end at a NON-GIT multi-repo team root: overrides, portability, snapshot semantics, nested reconciliation (targeting PROVISIONAL pending engine capability indexing)", () => {
+test("oas.dev end-to-end at a NON-GIT multi-repo team root: targeting, overrides, portability, snapshot semantics, nested reconciliation", () => {
   const base = temp();
   const { root } = oasDevFixture(base);
   // Non-Git multi-repo workspace root — first-class: NO .git anywhere at the boundary.
@@ -1262,19 +1262,10 @@ test("oas.dev end-to-end at a NON-GIT multi-repo team root: overrides, portabili
   // (2) Closure locked; (3) exported capability independently targetable after adoption.
   const locks = JSON.parse(readFileSync(join(ws, "oas-lock.json"), "utf8")).packages;
   assert.deepEqual(Object.keys(locks).sort(), ["oas.dev", "oasdev.knowledge-pkg"]);
-  // PROVISIONAL COVERAGE (reviewer-d5dadab): acceptance point 3 is NOT fully
-  // satisfied on this branch. Capability discovery THROUGH installed package
-  // roots is the engine's `installed-package` origin (frozen contract §3) and
-  // has not merged; the owned-store materialization below is a stand-in that
-  // exercises the config-side semantics (targeting/overrides/snapshot) but
-  // BYPASSES the installed-package boundary — a broken installed-package
-  // integration would not fail this test. The gate-2 teardown replaces this
-  // block with targeting of the capability discovered from the restored
-  // package, which is when point 3 becomes real acceptance coverage.
-  for (const [folder, id, layer] of [["review", "oas.review", undefined], ["knowledge", "oasdev.knowledge", "knowledge"]]) {
-    write(join(ws, ".agents", "capabilities", "owned", folder, "oas.json"), JSON.stringify({ capability: id, version: "1.0.0", description: "x", ...(layer ? { layer } : {}) }));
-  }
-  writeFileSync(join(ws, "oas-config.yaml"), readFileSync(join(ws, "oas-config.yaml"), "utf8").replaceAll("from: installed", "from: owned"));
+  // REAL acceptance coverage (gate-2 teardown of the reviewer-d5dadab
+  // stand-in): capabilities are discovered THROUGH the installed package
+  // roots — the engine's installed-package origin — with no owned-store
+  // materialization and the snapshot's `from: installed` untouched.
   // Retarget oas.review from the profile's agent-type binding to global — ordinary `oas use`.
   const useR = cli(["use", "oas.review", "--global", "--dir", ws]);
   assert.equal(useR.status, 0, useR.stderr);
@@ -1284,7 +1275,7 @@ test("oas.dev end-to-end at a NON-GIT multi-repo team root: overrides, portabili
 
   // (4) Closer child-repo config overrides the workspace assignment.
   const child = join(ws, "member-repo"); mkdirSync(child, { recursive: true });
-  write(join(child, "oas-config.yaml"), "name: member\ncapabilities:\n  layers:\n    knowledge: none\n  additive:\n    oas.review:\n      from: owned\n      global: false\n");
+  write(join(child, "oas-config.yaml"), "name: member\ncapabilities:\n  layers:\n    knowledge: none\n  additive:\n    oas.review:\n      from: installed\n      global: false\n");
   const childResolved = resolveOasConfig(child, undefined);
   assert.equal(childResolved.layers.knowledge, undefined, "child disables the inherited layer");
   assert.equal(childResolved.capabilities.some((c) => c.id === "oas.review"), false, "child excludes the capability");
