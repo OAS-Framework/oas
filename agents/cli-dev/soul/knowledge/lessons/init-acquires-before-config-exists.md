@@ -3,7 +3,7 @@ type: Lesson
 title: Init acquires before the config exists — bypass chain discovery mid-init
 description: During oas init the scope's oas-config.yaml does not exist yet, so capabilityManifests cannot discover a just-acquired capability through the config chain; init must use the acquisition result (destination dir/manifest) directly.
 tags: [cli, init, acquireCapability, capabilityManifests, gotcha]
-timestamp: 2026-07-21
+timestamp: 2026-07-26
 ---
 
 # The gotcha
@@ -23,6 +23,11 @@ not re-discover through the chain. Use what `acquireCapability` returns — the
 destination directory / loaded manifest — directly. Similarly, marketplace-id
 validation at init time needs `marketplaceCapabilities()` (a direct scan of
 `MARKETPLACE_DIR`), because ambient discovery will not know marketplace ids.
+
+The same chain-visibility trap applies to package locks during init: the target
+scope's `oas-lock.json` is invisible to config-chain package lock readers until
+the config exists, so init-adjacent package resolution must read that level
+directly. See [init-time package lock visibility](/lessons/init-lock-visibility-package-twin.md).
 
 # Corollary for tests
 

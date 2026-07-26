@@ -1,6 +1,8 @@
 # Knowledge Log
 
 ## 2026-07-26
+* **Creation**: [init-lock-visibility-package-twin](/lessons/init-lock-visibility-package-twin.md) records that init-adjacent package lock resolution must read the target scope's own oas-lock.json directly when the scope has no config yet.
+* **Update**: [init-acquires-before-config-exists](/lessons/init-acquires-before-config-exists.md) links the package-lock twin of the init-time config-chain visibility gotcha.
 * **Creation**: [skill-routing-availability-context](/lessons/skill-routing-availability-context.md) records that bootstrap skill routing must respect ambient versus instance-baseline availability.
 * **Update**: [reconciliation-truthfulness-fixes](/lessons/reconciliation-truthfulness-fixes.md) merges the coverage-parity follow-up: v2 package-lock verification must run from both chain restore and boundary reconciliation paths, including ancestor levels.
 * **Update**: [test-conventions](/playbooks/test-conventions.md) records that dedupe regression tests must count actual side effects with a recording shim and a topology that failed before the fix.
