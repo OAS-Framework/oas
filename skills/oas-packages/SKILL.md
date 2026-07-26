@@ -26,8 +26,15 @@ codes) and `--dir <scope>`.
 oas install git:github.com/org/repo@v1.0.0    # git shorthand (ref optional; resolved once, exact-locked)
 oas install https://host/org/repo.git@v1.0.0  # raw HTTPS/SSH git URL
 oas install ../my-package                     # local path (dev escape hatch)
-oas install oas.okf                           # official catalog short id (identity only — no auto-trust)
+oas install <catalog-id>                      # official catalog short id (identity only — no auto-trust)
 ```
+
+Interim cutover note: official ids that are still KERNEL-MARKETPLACE
+capabilities (e.g. `oas.okf` today) route through the legacy capability path
+and are trusted at acquisition because they ship with the kernel you already
+installed. Once workstream 3 publishes them as catalog packages, the same id
+acquires as a package with NO automatic executable trust. Doctor's migration
+residue reporting tracks the cutover per scope.
 
 Dependencies declared in `oas-package.json` must be pinnable (official
 selector, tag/commit, or path). The whole closure is exact-locked in the

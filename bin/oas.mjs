@@ -438,6 +438,7 @@ function use() {
 }
 
 // ---------- install / trust / list / remove / migrate ----------
+const cmdFail = (code, msg) => (JSON_MODE ? jsonFail(code, msg) : die(msg));
 /** `oas install <source>`: distribution-package acquisition (exact-lock closure,
  * activates nothing). Marketplace capability ids keep the legacy capability path
  * until workstream 3 publishes the official packages. */
@@ -445,7 +446,7 @@ function install() {
   const src = args[1];
   const dir = resolve(flag("dir") || process.cwd());
   if (!src || src.startsWith("--")) { restore(dir); return; }
-  if (RETIRED_CAPABILITIES[src]) die(`${RETIRED_CAPABILITIES[src]}`);
+  if (RETIRED_CAPABILITIES[src]) cmdFail("retired-capability", `${RETIRED_CAPABILITIES[src]}`);
   // Package source? (git/path with an oas-package.json, or a catalog id) — otherwise legacy capability acquisition.
   let parsedSrc;
   try { parsedSrc = parsePackageSource(src); } catch { parsedSrc = undefined; }
@@ -455,11 +456,12 @@ function install() {
   if (parsedSrc && (parsedSrc.kind === "git" || isLocalPackage || isCatalogPackage)) { installPackage(dir, src); return; }
   const known = capabilityManifest(src, dir);
   if (known) {
+    if (JSON_MODE) { jsonOk({ alreadyAcquired: known.capability, version: known.version || null }); return; }
     console.log(`Already acquired capability ${known.capability} (${known.version || "unversioned"}); not activated or updated.`);
     return;
   }
   let r;
-  try { r = acquireCapability(dir, src); } catch (e) { die(e.message); }
+  try { r = acquireCapability(dir, src); } catch (e) { cmdFail(e.code || "invalid-source", e.message); return; }
   const lock = {
     source: r.source,
     version: r.manifest.version || null,
@@ -474,8 +476,9 @@ function install() {
     // Refused lock write (e.g. legacy-lock: v2 scope rejects NEW residue) must
     // not strand the acquired artifact — compensate before failing.
     rmSync(r.dest, { recursive: true, force: true });
-    die(e.message);
+    cmdFail(e.code || "legacy-lock", e.message); return;
   }
+  if (JSON_MODE) { jsonOk({ capability: r.manifest.capability, version: r.manifest.version || null, integrity: r.integrity, source: r.source, dir: r.dest, lockFile, marketplace: !!r.marketplace, trustedExecutables: !!r.marketplace }); return; }
   console.log(`Acquired ${r.manifest.capability} → ${shortPath(r.dest)}`);
   console.log(`Locked ${r.manifest.version || r.commit || "exact artifact"} (${r.integrity}) in ${shortPath(lockFile)}; not activated.`);
   if (r.marketplace) console.log("Marketplace package: executables trusted at acquisition.");
@@ -483,7 +486,7 @@ function install() {
 }
 
 function installPackage(dir, src) {
-  const bail = (e) => (JSON_MODE ? jsonFail(e.code || "E_INSTALL_FAILED", e.message || e) : die(e.message || e));
+  const bail = (e) => (JSON_MODE ? jsonFail(e.code || "invalid-source", e.message || e) : die(e.message || e));
   let r;
   try { r = acquirePackage(dir, src); } catch (e) { bail(e); return; }
   if (JSON_MODE) { jsonOk({ root: r.root, installed: r.installed, lockFile: r.lockFile, depWarnings: r.depWarnings || [] }); return; }
@@ -503,11 +506,18 @@ function installPackage(dir, src) {
 /** Bare `oas install`: exact restore of the current chain — locked packages
  * (lock v2) plus legacy locked capabilities (v1). NO team-boundary recursion. */
 function restore(dir) {
-  const pkgReport = restorePackages(dir);
-  const report = restoreCapabilities(dir);
-  const failed0 = [...pkgReport, ...report].filter((r) => r.status === "failed").length;
+  let pkgReport, report;
+  try { pkgReport = restorePackages(dir); report = restoreCapabilities(dir); }
+  catch (e) { JSON_MODE ? jsonFail(e.code || "invalid-lock", e.message || e) : die(e.message || e); return; }
+  const failures = [...pkgReport, ...report].filter((r) => r.status === "failed");
   if (JSON_MODE) {
-    if (failed0) { console.log(JSON.stringify({ schemaVersion: 1, ok: false, error: { code: "E_RESTORE_FAILED", message: `${failed0} artifact(s) could not be restored` }, result: { packages: pkgReport, capabilities: report } })); process.exit(1); }
+    if (failures.length) {
+      // Frozen failure envelope shape EXACTLY { schemaVersion, ok:false, error };
+      // propagate the first failure's taxonomy code (per-artifact detail in message).
+      const first = failures[0];
+      jsonFail(first.code || "integrity-drift", failures.map((f) => `${f.package || f.id || "(lock)"}: ${f.reason}`).join("; "));
+      return;
+    }
     jsonOk({ packages: pkgReport, capabilities: report });
     return;
   }
@@ -531,23 +541,27 @@ function restore(dir) {
 /** oas trust <capability> | oas trust <package> --all-capabilities */
 function trust() {
   const id = args[1];
-  if (!id || id.startsWith("--")) die("usage: oas trust <capability> [--dir <dir>] | oas trust <package> --all-capabilities [--dir <dir>]");
+  if (!id || id.startsWith("--")) { cmdFail("E_USAGE", "usage: oas trust <capability> [--dir <dir>] | oas trust <package> --all-capabilities [--dir <dir>]"); return; }
   const dir = resolve(flag("dir") || process.cwd());
   const all = args.includes("--all-capabilities");
   // Package-backed approval path (per-capability, or explicit bulk on a package id).
-  const pkgs = listInstalledPackages(dir);
+  let pkgs;
+  try { pkgs = listInstalledPackages(dir); } catch (e) { cmdFail(e.code || "invalid-lock", e.message || e); return; }
   const backing = all ? pkgs.find((p) => p.package === id) : pkgs.find((p) => p.capabilities.some((c) => c.id === id));
   if (backing) {
-    if (all && !JSON_MODE) {
-      console.log(`Package ${backing.package}@${backing.version} full executable surface:`);
+    if (all) {
+      // Contract-required pre-approval review of the FULL executable surface:
+      // stdout in human mode; stderr in JSON mode (stdout stays one object).
+      const out = JSON_MODE ? console.error : console.log;
+      out(`Package ${backing.package}@${backing.version} full executable surface:`);
       for (const c of backing.capabilities) {
         const cmds = Object.keys(c.manifest.commands || {});
         const hooks = Object.keys(c.manifest.hooks || {});
-        console.log(`  ${c.id}: commands [${cmds.join(", ") || "none"}], hooks [${hooks.join(", ") || "none"}]`);
+        out(`  ${c.id}: commands [${cmds.join(", ") || "none"}], hooks [${hooks.join(", ") || "none"}]`);
       }
     }
     let r;
-    try { r = approveCapability(dir, id, { allCapabilities: all }); } catch (e) { JSON_MODE ? jsonFail(e.code || "E_TRUST_FAILED", e.message || e) : die(e.message); return; }
+    try { r = approveCapability(dir, id, { allCapabilities: all }); } catch (e) { cmdFail(e.code || "invalid-lock", e.message || e); return; }
     if (JSON_MODE) {
       const surface = {};
       for (const c of backing.capabilities) surface[c.id] = { commands: Object.keys(c.manifest.commands || {}), hooks: Object.keys(c.manifest.hooks || {}) };
@@ -558,16 +572,17 @@ function trust() {
     if (r.skipped.length) console.log(`No executable surface (lock integrity suffices, no approval needed): ${r.skipped.join(", ")}`);
     return;
   }
-  if (all) JSON_MODE ? jsonFail("unknown-capability", `no installed package "${id}" — --all-capabilities takes a package identity`) : die(`no installed package "${id}" — --all-capabilities takes a package identity`);
+  if (all) { cmdFail("unknown-capability", `no installed package "${id}" — --all-capabilities takes a package identity`); return; }
   // Legacy standalone capability path.
   const manifest = capabilityManifest(id, dir);
-  if (!manifest) JSON_MODE ? jsonFail("unknown-capability", `unknown capability "${id}"`) : die(`unknown capability "${id}"`);
+  if (!manifest) { cmdFail("unknown-capability", `unknown capability "${id}"`); return; }
   const lock = readCapabilityLocks(dir)[manifest.capability];
-  if (!lock) JSON_MODE ? jsonFail("invalid-lock", `${manifest.capability} is not locked in ${OAS_LOCK_FILE}`) : die(`${manifest.capability} is not locked in ${OAS_LOCK_FILE}`);
+  if (!lock) { cmdFail("invalid-lock", `${manifest.capability} is not locked in ${OAS_LOCK_FILE}`); return; }
   const integrity = capabilityIntegrity(manifest._dir);
-  if (integrity !== lock.integrity) JSON_MODE ? jsonFail("integrity-drift", `integrity changed (${lock.integrity} → ${integrity}); reacquire explicitly before trusting`) : die(`integrity changed (${lock.integrity} → ${integrity}); reacquire explicitly before trusting`);
+  if (integrity !== lock.integrity) { cmdFail("integrity-drift", `integrity changed (${lock.integrity} → ${integrity}); reacquire explicitly before trusting`); return; }
   const { _file, ...clean } = lock;
-  writeCapabilityLock(dirname(_file), manifest.capability, { ...clean, trustedExecutables: true });
+  try { writeCapabilityLock(dirname(_file), manifest.capability, { ...clean, trustedExecutables: true }); }
+  catch (e) { cmdFail(e.code || "invalid-lock", e.message || e); return; }
   if (JSON_MODE) { jsonOk({ capability: manifest.capability, integrity, legacy: true }); return; }
   console.log(`Trusted executable commands/hooks for ${manifest.capability} at ${integrity}.`);
 }
@@ -607,7 +622,7 @@ function removeCmd() {
   if (!id || id.startsWith("--")) JSON_MODE ? jsonFail("E_USAGE", "usage: oas remove <package> [--dir <dir>]") : die("usage: oas remove <package> [--dir <dir>]");
   const dir = resolve(flag("dir") || process.cwd());
   let r;
-  try { r = removePackage(dir, id); } catch (e) { JSON_MODE ? jsonFail(e.code || "E_REMOVE_FAILED", e.message || e) : die(e.message); return; }
+  try { r = removePackage(dir, id); } catch (e) { cmdFail(e.code || "remove-blocked", e.message || e); return; }
   if (JSON_MODE) { jsonOk(r); return; }
   console.log(`Removed package ${r.package} (${shortPath(r.dir)}) and its entry in ${shortPath(r.lockFile)}.`);
 }
@@ -617,7 +632,9 @@ function migrateCmd() {
   const dir = resolve(flag("dir") || process.cwd());
   const dryRun = args.includes("--dry-run");
   if (dryRun) {
-    const { plan, warnings } = migrateLegacyLock(dir);
+    let plan, warnings;
+    try { ({ plan, warnings } = migrateLegacyLock(dir)); }
+    catch (e) { cmdFail(e.code || "invalid-lock", e.message || e); return; }
     if (JSON_MODE) { jsonOk({ dryRun: true, plan, warnings }); return; }
     if (!plan.length) { console.log("Nothing to migrate at this scope."); return; }
     for (const s of plan) console.log(`${s.action.padEnd(10)} ${s.capabilityId}${s.package ? `  → ${s.package.spec}` : ""}`);
@@ -625,7 +642,7 @@ function migrateCmd() {
     return;
   }
   let r;
-  try { r = applyLegacyLockMigration(dir); } catch (e) { JSON_MODE ? jsonFail(e.code || "E_MIGRATE_FAILED", e.message || e) : die(e.message); return; }
+  try { r = applyLegacyLockMigration(dir); } catch (e) { cmdFail(e.code || "legacy-lock", e.message || e); return; }
   if (JSON_MODE) { jsonOk(r); return; }
   for (const m of r.migrated) console.log(`migrated  ${m.capability} → package ${m.package}@${m.version}`);
   for (const c of r.residue) console.log(`residue   ${c}  (kept as a legacy capability lock)`);
@@ -637,7 +654,7 @@ function migrateCmd() {
 function updatePackageCmd(id) {
   const dir = resolve(flag("dir") || process.cwd());
   let r;
-  try { r = updatePackage(dir, id); } catch (e) { JSON_MODE ? jsonFail(e.code || "E_UPDATE_FAILED", e.message || e) : die(e.message); return; }
+  try { r = updatePackage(dir, id); } catch (e) { cmdFail(e.code || "invalid-lock", e.message || e); return; }
   if (JSON_MODE) { jsonOk(r); return; }
   if (!r.changed) { console.log(`${r.package} is already up to date (${r.after.version}, ${r.after.integrity}).`); return; }
   console.log(`Updated ${r.package}: ${r.before.version} (${r.before.commit}) → ${r.after.version} (${r.after.commit})`);
