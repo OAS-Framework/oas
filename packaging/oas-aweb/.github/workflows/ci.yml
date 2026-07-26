@@ -17,6 +17,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: capabilities/oas-aweb/package-lock.json
       - name: Materialize locked runtime dependencies without development or peer packages
         run: npm ci --omit=dev --omit=peer --ignore-scripts --prefix capabilities/oas-aweb
       - name: Audit the materialized runtime closure
