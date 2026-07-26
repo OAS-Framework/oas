@@ -3,7 +3,7 @@
   "version": "1.4.0",
   "description": "Official OAS knowledge integration for Open Knowledge Format bundles and continuous memory harvesting.",
   "compatibility": {
-    "oas": ">=0.6.2"
+    "oas": ">=0.19.0"
   },
   "capabilities": [
     "capabilities/oas-okf"

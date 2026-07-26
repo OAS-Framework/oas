@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "Official additive OAS guidance for capability, skill, and soul authoring.",
   "compatibility": {
-    "oas": ">=0.6.2"
+    "oas": ">=0.19.0"
   },
   "capabilities": [
     "."

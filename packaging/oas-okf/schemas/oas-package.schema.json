@@ -7,7 +7,8 @@
   "required": [
     "package",
     "version",
-    "description"
+    "description",
+    "compatibility"
   ],
   "properties": {
     "package": {
@@ -27,9 +28,9 @@
       "type": "object",
       "properties": {
         "oas": {
-          "description": "OAS kernel compatibility floor, e.g. \">=0.19.0\".",
+          "description": "OAS kernel compatibility floor. Accepted grammar exactly: >=x.y.z, ^x.y.z, or exact x.y.z.",
           "type": "string",
-          "minLength": 1
+          "pattern": "^(>=|\\^)?\\d+\\.\\d+\\.\\d+$"
         }
       },
       "required": [

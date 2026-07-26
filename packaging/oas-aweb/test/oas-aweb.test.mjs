@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join, resolve, sep } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -40,12 +40,14 @@ function run(args = [], env = {}, cwd = ROOT) {
   });
 }
 
-test("all declared skills resolve from package-owned node_modules", () => {
+test("all declared skill paths resolve inside package-owned node_modules", () => {
   const manifest = JSON.parse(readFileSync(join(CAPABILITY, "oas.json"), "utf8"));
+  const dependencyRoot = realpathSync(join(CAPABILITY, "node_modules"));
   assert.equal(manifest.skills.length, 3);
   for (const skill of manifest.skills) {
     assert.match(skill, /^node_modules\/@awebai\/pi\/skills\//);
-    assert.equal(existsSync(join(CAPABILITY, skill, "SKILL.md")), true, `${skill} was not materialized`);
+    const resolvedSkill = realpathSync(join(CAPABILITY, skill, "SKILL.md"));
+    assert.ok(resolvedSkill.startsWith(dependencyRoot + sep), `${skill} resolved outside package-owned node_modules`);
   }
 });
 

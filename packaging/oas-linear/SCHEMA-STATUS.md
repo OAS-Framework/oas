@@ -1,7 +1,6 @@
 # Schema status
 
-- **Frozen schema aligned**: `oas-package.json` validates against the verbatim `docs/oas-package.schema.json` from `feature/package-engine` at `1db919b`; CI runs that validation for every change.
-- `TODO(compatibility-floor)`: replace the inherited `compatibility.oas` value (`>=0.6.2`) in both manifests with the OAS release that ships lockfile v2.
-- `TODO(engine-consumer-fixtures)`: run the acquire → lock → trust → activate → spawn probe when package-engine M2 and its fixtures are available.
+- **Amended schema aligned**: `oas-package.json` validates against the verbatim `docs/oas-package.schema.json` from `feature/package-engine` at `dfa2ae7`; CI runs that validation for every change.
+- `TODO(engine-consumer-fixtures)`: run the released OAS 0.19.0 acquire → lock → trust → activate → spawn probe when WS1 fixtures are available.
 
-No publication tag or catalog entry may be created while these items remain open.
+No publication tag or catalog entry may be created while this item remains open.
