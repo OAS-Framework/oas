@@ -54,3 +54,24 @@ test("terminal.focusActive is a registered rebindable action with NO default cho
   assert.match(src, /function focusActiveTerminal\(\)[\s\S]*?kind === "terminal"\) t\.focusContent\?\.\(\)/,
     "focuses only when the active tab IS a terminal");
 });
+
+test("post-spawn auto-open is QUIET: openTerminalTab failures route through notify, never a bare alert (spawn-modal fix)", () => {
+  const src = read("renderer/shell.mjs");
+  // the quiet option exists and selects console.warn over alert()
+  assert.match(src, /async function openTerminalTab\(ref, \{ quiet = false \} = \{\}\)/,
+    "openTerminalTab accepts a quiet option");
+  assert.match(src, /const notify = quiet \? \(msg\) => console\.warn\(`\[terminal open\] \$\{msg\}`\) : \(msg\) => alert\(msg\);/,
+    "quiet opens warn instead of blocking with alert");
+  // ctx.openTerminal forwards opts so views can request the quiet handoff
+  assert.match(src, /openTerminal: \(instance, opts\) => openTerminalTab\(instance, opts\)/,
+    "shell ctx.openTerminal forwards the options seam");
+  // both user-facing refusals inside the open path go through notify
+  assert.match(src, /return notify\(r\.error === "ambiguous"/,
+    "resolution refusals use notify");
+  assert.match(src, /if \(!inst\.running \|\| !inst\.tmux\?\.session\) return notify\(`"\$\{name\}" has no live tmux session`\);/,
+    "the no-live-tmux refusal uses notify (the original stuck-modal alert)");
+  // and the spawn view's handoff actually asks for quiet + closes the modal first
+  const spawnSrc = read("renderer/views/spawn.mjs");
+  assert.match(spawnSrc, /closeSpawnModal\(s\);\n\s*s\.ctx\.openTerminal\(spawnedRef, \{ quiet: true \}\);/,
+    "doSpawn closes the modal then opens the terminal quietly");
+});

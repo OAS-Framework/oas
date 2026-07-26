@@ -113,7 +113,7 @@ test("Soul roster: delayed switch refresh cannot erase a newer B spawn form", as
   });
   const bodyFor = (pathname, ws) => pathname.startsWith("/api/agents")
     ? { agents: [agent(`${ws}-soul`)] }
-    : { instances: spawned ? [{ instance: "inst-B" }] : [],
+    : { instances: spawned ? [{ instance: "inst-B", running: true, tmux: { session: "pi-agents" } }] : [],
         workspace: { id: ws }, workspaces: [{ id: "wsA", name: "A" }, { id: "wsB", name: "B" }] };
   const ctx = {
     api(pathname, opts = {}) {
@@ -125,7 +125,7 @@ test("Soul roster: delayed switch refresh cannot erase a newer B spawn form", as
       }
       return Promise.resolve(bodyFor(pathname, ws));
     },
-    openTerminal: (name) => opened.push(name),
+    openTerminal: (...args) => opened.push(args),
   };
 
   try {
@@ -152,11 +152,15 @@ test("Soul roster: delayed switch refresh cannot erase a newer B spawn form", as
     assert.equal(ownedButton.disabled, true, "delayed refresh cannot unlock/replace B mutation UI");
 
     releaseBSpawn({ instance: "inst-B", launched: true });
-    spawned = true;            // panel snapshot now includes the new instance
+    spawned = true;            // panel snapshot now includes the new instance (ready: running + tmux)
     await tick(); await tick(); await tick();
     // openTerminal receives the COMPOSITE ref (name + selected root; the
-    // spawn result had no home here) — merged-state review @7dd1e7b
-    assert.deepEqual(opened, [{ instance: "inst-B", agentsRoot: "/wsB-soul/agents" }]);
+    // spawn result had no home here) — merged-state review @7dd1e7b — and
+    // the auto-open is QUIET (never a blocking alert from the handoff path)
+    assert.deepEqual(opened, [[{ instance: "inst-B", agentsRoot: "/wsB-soul/agents" }, { quiet: true }]]);
+    // the modal's job is done — a successful handoff closes it
+    assert.equal(dom.window.document.querySelector(".spawn-dialog"), null,
+      "successful spawn + terminal handoff closes the spawn modal");
   } finally {
     spawn.unmount();
     common.setWorkspace(previousWs);
@@ -305,7 +309,7 @@ test("Soul roster: relation + reference instance pass through POST /api/spawn; u
       }
       return Promise.resolve({ ok: true, status: 200, json: async () => pathname.startsWith("/api/agents")
         ? { agents: [agent] }
-        : { instances: [{ instance: "coord-1", running: true }, { instance: "dev-1" }], workspace: { id: "w" }, workspaces: [] } });
+        : { instances: [{ instance: "coord-1", running: true }, { instance: "dev-1", running: true, tmux: { session: "pi-agents" } }], workspace: { id: "w" }, workspaces: [] } });
     },
     openTerminal: () => {},
   };
@@ -399,7 +403,7 @@ test("Spawn modal: every option always visible; runtime/model pass through; defa
       }
       return Promise.resolve({ ok: true, status: 200, json: async () => pathname.startsWith("/api/agents")
         ? { agents: [agent] }
-        : { instances: [{ instance: "dev-1" }], workspace: { id: "w" }, workspaces: [] } });
+        : { instances: [{ instance: "dev-1", running: true, tmux: { session: "pi-agents" } }], workspace: { id: "w" }, workspaces: [] } });
     },
     openTerminal: () => {},
   };
@@ -583,7 +587,7 @@ test("Spawn modal tracks CLI capability LIVE: relations flip disables/enables co
       if (opts.method === "POST") { posts.push(JSON.parse(opts.body)); return Promise.resolve({ ok: true, status: 200, json: async () => ({ instance: "x" }) }); }
       return Promise.resolve({ ok: true, status: 200, json: async () => pathname.startsWith("/api/agents")
         ? { agents: [agent] }
-        : { instances: [{ instance: "coord-1", running: true }, { instance: "x" }], workspace: { id: "w" }, workspaces: [] } });
+        : { instances: [{ instance: "coord-1", running: true }, { instance: "x", running: true, tmux: { session: "pi-agents" } }], workspace: { id: "w" }, workspaces: [] } });
     },
     openTerminal: () => {},
   };
@@ -650,18 +654,22 @@ test("Spawn modal tracks CLI capability LIVE: relations flip disables/enables co
     assert.equal(posts.length, 1, "unrelated spawn dispatches on the relations-incapable CLI");
     assert.equal(posts[0].relation, undefined, "no relation on the wire");
     assert.equal(posts[0].task, "typed task text", "the preserved task spawns");
-    // restore the related choice for the upgrade leg
+    // the successful spawn hands off and CLOSES the modal (post-spawn UX):
+    // reopen it and re-query the controls for the upgrade leg
+    assert.equal(doc.querySelector(".spawn-dialog"), null, "successful spawn closes the modal");
     await seed(true);
-    rel.value = "child";
-    rel.dispatchEvent(new dom.window.Event("change"));
-    ref.value = "coord-1";
+    doc.querySelector(".spawn-act").click();
+    const rel3 = doc.querySelector(".frelation"), ref3 = doc.querySelector(".frelto");
+    rel3.value = "child";
+    rel3.dispatchEvent(new dom.window.Event("change"));
+    ref3.value = "coord-1";
     await seed(false); await seed(true);
     // UPGRADE flips it back: controls re-enable, note clears, values intact
-    assert.equal(rel.disabled, false, "upgrade re-enables the selector");
-    assert.ok([...rel.querySelectorAll("option")].every((o) => !o.disabled), "all options re-enabled");
-    assert.equal(ref.disabled, false, "picker re-enables (a real relation is selected)");
+    assert.equal(rel3.disabled, false, "upgrade re-enables the selector");
+    assert.ok([...rel3.querySelectorAll("option")].every((o) => !o.disabled), "all options re-enabled");
+    assert.equal(ref3.disabled, false, "picker re-enables (a real relation is selected)");
     assert.equal(doc.querySelector(".frelnote").hidden, true, "note clears");
-    assert.equal(ref.value, "coord-1", "picked reference preserved");
+    assert.equal(ref3.value, "coord-1", "picked reference preserved");
     // after the upgrade the same retained values DO dispatch
     doc.querySelector(".fspawn").click();
     await tick(); await tick(); await tick();
@@ -913,8 +921,8 @@ test("spawn: post-spawn poll and terminal open use COMPOSITE identity — a same
   // twin with the SAME NAME but a different home is already in the panel;
   // a bare-name match would return true on the first poll and the follow-up
   // open would then refuse the ambiguous name
-  const twin = { instance: "dev-1", home: "/ws/local-agents/dev/instances/dev-1", agentsRoot: "/ws/local-agents" };
-  const mine = { instance: "dev-1", home: "/ws/agents/dev/instances/dev-1", agentsRoot: "/ws/agents" };
+  const twin = { instance: "dev-1", home: "/ws/local-agents/dev/instances/dev-1", agentsRoot: "/ws/local-agents", running: true, tmux: { session: "pi-agents" } };
+  const mine = { instance: "dev-1", home: "/ws/agents/dev/instances/dev-1", agentsRoot: "/ws/agents", running: true, tmux: { session: "pi-agents" } };
   let polls = 0;
   const panels = [
     { instances: [twin] },           // roster lag: only the twin yet
@@ -927,10 +935,35 @@ test("spawn: post-spawn poll and terminal open use COMPOSITE identity — a same
   assert.equal(polls, 2, "the twin alone did NOT satisfy the first poll — bare-name early success is the bug");
   // legacy panels without home/agentsRoot fields still match by name
   let polls2 = 0;
-  const s2 = { ctx: { api: () => { polls2++; return Promise.resolve({ ok: true, status: 200, json: async () => ({ instances: [{ instance: "dev-1" }] }) }); } } };
+  const s2 = { ctx: { api: () => { polls2++; return Promise.resolve({ ok: true, status: 200, json: async () => ({ instances: [{ instance: "dev-1", running: true, tmux: { session: "pi-agents" } }] }) }); } } };
   assert.equal(await spawn.waitForInstanceInPanel(s2, ref, () => true, { tries: 2, delayMs: 0, sleep: async () => {} }), true,
     "identity-less roster rows keep matching by name (no regression for old servers)");
   assert.equal(polls2, 1);
+});
+
+test("spawn: post-spawn wait requires TERMINAL READINESS — a listed-but-not-running instance (tmux not registered yet) never satisfies the poll", async () => {
+  const spawn = await import("../renderer/views/spawn.mjs");
+  // The roster snapshot lists a fresh spawn from its instance.json BEFORE
+  // its tmux window registers: running:false, no tmux.session. Opening the
+  // terminal at that point hits the shell's "no live tmux session" refusal
+  // (the original bug — blocking alert + stuck modal). The wait must hold
+  // until the row is running WITH a tmux session.
+  const ref = { instance: "dev-1", home: "/ws/agents/dev/instances/dev-1" };
+  let polls = 0;
+  const panels = [
+    { instances: [{ instance: "dev-1", home: ref.home, running: false, tmux: { session: "pi-agents" } }] }, // present, not running
+    { instances: [{ instance: "dev-1", home: ref.home, running: true }] },                                   // running, tmux unregistered
+    { instances: [{ instance: "dev-1", home: ref.home, running: true, tmux: { session: "pi-agents" } }] },   // READY
+  ];
+  const s = { ctx: { api: () => { const p = panels[Math.min(polls++, 2)]; return Promise.resolve({ ok: true, status: 200, json: async () => p }); } } };
+  const ok = await spawn.waitForInstanceInPanel(s, ref, () => true, { tries: 5, delayMs: 0, sleep: async () => {} });
+  assert.equal(ok, true, "wait succeeds once the instance is terminal-ready");
+  assert.equal(polls, 3, "mere presence (not running / no tmux session) did NOT satisfy earlier polls — early success is the alert bug");
+  // timeout degradation: a never-ready instance returns false (caller
+  // degrades to the sidebar-roster status line — no auto-open, no alert)
+  const s2 = { ctx: { api: () => Promise.resolve({ ok: true, status: 200, json: async () => ({ instances: [{ instance: "dev-1", home: ref.home, running: false }] }) }) } };
+  assert.equal(await spawn.waitForInstanceInPanel(s2, ref, () => true, { tries: 3, delayMs: 0, sleep: async () => {} }), false,
+    "a never-ready instance times out to the graceful degradation path");
 });
 
 test("common: instanceApiPath carries the home qualifier for object refs (merged-state review @7dd1e7b)", async () => {
