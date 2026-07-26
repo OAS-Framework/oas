@@ -424,9 +424,9 @@ function onTabKeydown(e, id) {
   if (activateTab(nextId)) tab.triggerEl.focus();
 }
 
-function addTab({ title, key, kind = "artifact", workspace = null, onClose, onShow }) {
+function addTab({ title, key, kind = "artifact", workspace = null, onClose, onShow, focusContent = null, focusOnActivate = false }) {
   if (key) {
-    for (const [tid, t] of tabs) if (t.key === key) { activateTab(tid); return null; }
+    for (const [tid, t] of tabs) if (t.key === key) { activateTab(tid, { focusContent: focusOnActivate }); return null; }
   }
   const id = nextTabId++;
   const { tabEl, triggerEl, closeEl, paneEl } = createTabChrome(
@@ -437,12 +437,17 @@ function addTab({ title, key, kind = "artifact", workspace = null, onClose, onSh
   triggerEl.addEventListener("click", () => activateTab(id));
   triggerEl.addEventListener("keydown", (e) => onTabKeydown(e, id));
   closeEl.addEventListener("click", (e) => { e.stopPropagation(); closeTab(id, true); });
-  tabs.set(id, { tabEl, triggerEl, closeEl, paneEl, title, key, kind, workspace, onClose, onShow });
+  tabs.set(id, { tabEl, triggerEl, closeEl, paneEl, title, key, kind, workspace, onClose, onShow, focusContent });
   activateTab(id);
   return { id, paneEl };
 }
 
-function activateTab(id) {
+/** Activate a tab. opts.focusContent distinguishes USER-INITIATED jumps
+ * (palette instance jump, roster row Enter/click, quick-open) — which end
+ * with the tab's content focused (a terminal's xterm textarea, via the
+ * tab's focusContent callback) — from side-effect activations (workspace-
+ * switch restoration, close-fallback), which must NOT steal focus. */
+function activateTab(id, { focusContent = false } = {}) {
   const current = tabs.get(id);
   // Hidden is not security: reject cross-workspace terminal activation at
   // the mutation boundary before its pane can become active/receive input.
@@ -469,6 +474,7 @@ function activateTab(id) {
     t.paneEl.hidden = !selected;
   }
   tabs.get(id)?.onShow?.();
+  if (focusContent) tabs.get(id)?.focusContent?.();
   return true;
 }
 
@@ -599,7 +605,10 @@ async function openTerminalTab(ref) {
   }
   const { inst, key } = r;
   await whenKeyFree(key);
-  for (const [tid, t] of tabs) if (t.key === key) { activateTab(tid); return; }
+  // Every jump path through here is user-initiated (palette, roster row,
+  // quick-open, post-spawn open) — activating an existing tab focuses its
+  // terminal input so the user can type into tmux immediately.
+  for (const [tid, t] of tabs) if (t.key === key) { activateTab(tid, { focusContent: true }); return; }
   if (pendingTerms.has(key)) return; // an open for this key is already in flight
   pendingTerms.add(key);
   try {
@@ -667,6 +676,9 @@ async function openTerminalTabInner(inst, ws, key, owns) {
     // actually ran — closeTab reserves the key on this promise.
     onClose: () => { offTheme(); offTypography(); return tab.close(); },
     onShow: () => { requestAnimationFrame(() => { try { fit.fit(); } catch {} }); },
+    // user-initiated activation → keyboard lands in the xterm textarea
+    focusContent: () => { try { term.focus(); } catch {} },
+    focusOnActivate: true, // addTab's own dedup here is a user jump too
   });
   if (!made) { offTheme(); offTypography(); term.dispose(); return; } // lost a race to an identical tab
   made.paneEl.append(wrap);
@@ -729,6 +741,7 @@ const palette = createPalette({
     { label: "Shortcuts: edit keyboard shortcuts…", detail: chordDetail("app.shortcuts"), run: () => openShortcutsEditor() },
     { label: "Workspace: switch…", detail: chordDetail("app.workspaces"), run: () => workspaceLabel.openMenu() },
     { label: "Instances: focus the sidebar roster", detail: chordDetail("sidebar.focusFilter"), run: () => focusRoster() },
+    { label: "Terminal: focus the active terminal input", detail: chordDetail("terminal.focusActive"), run: () => focusActiveTerminal() },
     { label: "Terminal: increase font size", detail: chordDetail("terminal.fontBigger"), run: () => setTerminalFontSize(terminalTypography().fontSize + 1) },
     { label: "Terminal: decrease font size", detail: chordDetail("terminal.fontSmaller"), run: () => setTerminalFontSize(terminalTypography().fontSize - 1) },
     { label: "Terminal: set font family…", run: () => {
@@ -767,6 +780,16 @@ function focusRoster() {
   contextRosterEl?.querySelector(".ctx-filter")?.focus();
 }
 
+/** Focus the ACTIVE terminal tab's xterm input from anywhere in the shell
+ * (explicit action — rebindable, editor-visible). No default chord: every
+ * safe candidate is taken or terminal-hostile (any Ctrl chord belongs to
+ * the pty on Linux/Windows; plain keys are guarded off editables) — users
+ * who want one bind it in the shortcuts editor. */
+function focusActiveTerminal() {
+  const t = activeTab != null ? tabs.get(activeTab) : null;
+  if (t?.kind === "terminal") t.focusContent?.();
+}
+
 function visibleTabEntries() {
   return [...tabs].filter(([, t]) => !t.tabEl.hidden);
 }
@@ -794,6 +817,8 @@ NAV.forEach((v) => registerAction({
 registerAction({ id: "app.themeToggle", label: "Toggle light/dark theme", context: "global", run: () => toggleTheme() });
 registerAction({ id: "app.workspaces", label: "Open the workspace switcher", context: "global", run: () => workspaceLabel.openMenu() });
 registerAction({ id: "sidebar.focusFilter", label: "Focus the instance roster filter", context: "global", run: () => focusRoster() });
+// No defaultChord (documented): safe candidates are exhausted — rebindable in the editor.
+registerAction({ id: "terminal.focusActive", label: "Focus the active terminal input", context: "global", run: () => focusActiveTerminal() });
 registerAction({ id: "terminal.fontBigger", label: "Terminal: increase font size", context: "global", run: () => setTerminalFontSize(terminalTypography().fontSize + 1) });
 registerAction({ id: "terminal.fontSmaller", label: "Terminal: decrease font size", context: "global", run: () => setTerminalFontSize(terminalTypography().fontSize - 1) });
 registerAction({ id: "terminal.fontReset", label: "Terminal: reset typography", context: "global", run: () => { setTerminalFontFamily(""); setTerminalFontSize(13); } });

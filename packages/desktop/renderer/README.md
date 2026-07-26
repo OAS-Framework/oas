@@ -61,6 +61,21 @@ light, WCAG AA); views style themselves against tokens only, scoped under
   actions grouped by context, click-to-record (Esc cancels, Backspace
   unbinds), conflict warnings via `findConflict`, per-row reset + reset-all.
 
+## Terminal focus discipline (shell-level)
+
+Jumping to an instance terminal (palette instance row, sidebar roster row,
+post-spawn open) ends with the xterm textarea focused — on the fresh-open
+path (`term.focus()` inside the terminal tab's `onReady`) AND on the
+already-open activation path: `activateTab(id, { focusContent: true })`
+invokes the tab's `focusContent` callback (a terminal tab's is
+`term.focus()`). `focusContent` defaults to `false`, so side-effect
+activations — workspace-switch restoration, close-fallback — never steal
+focus; only user-initiated jumps pass it. `terminal.focusActive` is a
+rebindable, editor-visible global action that focuses the active terminal's
+input from anywhere; it ships with NO default chord (Ctrl chords belong to
+the pty on Linux/Windows and plain keys are guarded off editables — bind
+one in the shortcuts editor if wanted).
+
 ## Developing without the shell
 
 `harness.html` supplies a stub `ctx` and tab chrome for ALL views — including
