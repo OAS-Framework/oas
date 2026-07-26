@@ -3,36 +3,37 @@ type: Roadmap
 title: Roadmap and open threads
 description: What is planned, in flight, and unresolved for the OAS framework.
 tags: [roadmap]
-timestamp: 2026-07-24
+timestamp: 2026-07-26
 ---
 
 # In flight / next
 
-1. **Publish OAS Desktop v0.18.0**: feature/desktop-dist is implementing the
+1. **Distribution packages and official capability repositories (accepted; implementation launching)**: introduce a locked Git package above independently targetable capabilities, package-carried config profile snapshots, team-boundary workspace reconciliation, and separately consented external-CLI installers; then extract the official capabilities into self-contained OAS-organization repositories. The same release must restore [strict instance curriculum](/decisions/strict-instance-curriculum.md) across Pi and Claude Code so instantiated souls see only selected skills/injections while retaining provider-native tools and workflows. See the [accepted package decision](/decisions/distribution-packages-config-profiles-and-requirements.md).
+2. **Publish OAS Desktop v0.18.0**: feature/desktop-dist is implementing the
    synchronized root/pi npm + Desktop GitHub release. Before tagging, replace
    the adjacent-core bridge with Desktop API v1 installed-CLI mutations,
    preserve observation-only no-OAS operation, build/smoke the explicit
    macOS/Linux installer matrix, prune dormant Diff/Jira, and pass consumer-
    parity plus migration gates. See the [release contract](/decisions/desktop-public-release-contract.md)
    and [succession decision](/decisions/desktop-panel-succession.md).
-2. **Capability registry/npm acquisition**: git/path artifacts are
+3. **Capability registry/npm acquisition**: git/path artifacts are
    exact-locked and restorable via bare `oas install`; add registry/npm source
    resolution and explicit upgrade/remove workflows without weakening
    no-silent-update behavior.
-3. **Selector evolution**: V1 groups are explicit soul lists. Consider tags or
+4. **Selector evolution**: V1 groups are explicit soul lists. Consider tags or
    selectors only after real group maintenance pressure, preserving
    deterministic specificity/conflict rules.
-4. **Claude session-event parity**: file/skill/instruction composition is
+5. **Claude session-event parity**: file/skill/instruction composition is
    already instance-local and harness-neutral. A future thin Claude adapter may
    add resume/compaction memory nudges equivalent to pi; operations remain CLI.
-5. **First-run diagnosis**: no config means no activated layer. Make empty
+6. **First-run diagnosis**: no config means no activated layer. Make empty
    chains and unresolved fundamental layers clearer without silently enabling
    acquired packages.
-6. **Desktop telemetry**: preserve the existing truthful current-state model;
+7. **Desktop telemetry**: preserve the existing truthful current-state model;
    define a runtime-neutral adapter event contract before adding token/cost,
    model, tool, capability/trust, or activity telemetry. Do not inspect one
    harness's internals from the universal desktop UI.
-7. **Layout adapters**: alternative agents-root structures, after package
+8. **Layout adapters**: alternative agents-root structures, after package
    targeting semantics stabilize.
 
 # Watch items

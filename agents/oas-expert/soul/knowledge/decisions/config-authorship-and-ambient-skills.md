@@ -1,14 +1,20 @@
 ---
 type: Decision
 title: Config authorship completeness and ambient skill coexistence
-status: accepted
-description: Amendments to config shape v2 — rename injection to injection-override and forbid it on owned/path capabilities, add CLI verbs (oas type, oas inject eject, use --settings) so mainstream config operations never require hand-editing, and stop restricting harness skill discovery so ambient skills coexist with the OAS-materialized set.
+status: partially-superseded
+description: Config-shape amendments for injection overrides and complete CLI authorship; its ambient-skill coexistence section is superseded by strict curated runtime composition at soul instantiation.
 tags: [config, cli, injections, skills, adoption]
 timestamp: 2026-07-14
 ---
 
 Decided with the founder, 2026-07-14, as follow-ups to
 [config shape v2](config-shape-agent-types-and-injections.md).
+
+**Amended 2026-07-26:** sections 1, 2, and 4 remain accepted. Section 3's
+ambient-skill coexistence behavior is superseded by [strict instance
+curriculum](strict-instance-curriculum.md): instantiated souls receive only
+the selected OAS skill/instruction curriculum while provider-native tools and
+workflows remain available.
 
 # 1. `injection:` → `injection-override:`
 

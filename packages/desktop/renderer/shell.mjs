@@ -16,7 +16,7 @@ import {
 import { createPalette } from "./palette.mjs";
 import { createQuickOpen } from "./quick-open.mjs";
 import {
-  registerAction, setActiveContexts, getBinding, onKeymapChange, formatChord, handleKeydown, matchEvent,
+  registerAction, setActiveContexts, getBinding, onKeymapChange, formatChord, handleKeydown, matchEvent, runAction,
 } from "./keybindings.mjs";
 import { createKeybindingsEditor } from "./keybindings-editor.mjs";
 import { rosterKeyAction, moveTarget } from "./roster-keys.mjs";
@@ -24,7 +24,7 @@ import { createViewLifecycle } from "./view-lifecycle.mjs";
 import { reserveKey, whenKeyFree } from "./tab-keys.mjs";
 import { createTerminalTab, terminalOptions } from "./terminal-tab.mjs";
 import { createTabChrome, tabKeyAction, focusAfterLastTab } from "./tab-a11y.mjs";
-import { createIntentGate, prepareOwnedOpen } from "./open-intent.mjs";
+import { createIntentGate, prepareOwnedOpen, runOpenFlow } from "./open-intent.mjs";
 import { createWorkspaceSwitcher } from "./workspace-switcher.mjs";
 import { NAV, stageSidebarMode, loadStageView } from "./shell-nav.mjs";
 import {
@@ -37,6 +37,8 @@ import {
   fallbackTabForContext, terminalOpenOwnsWorkspace, restoreTerminalTab,
 } from "./workspace-tabs.mjs";
 import { requestSplit, absorbTab, removeSplitTab, isSplitMember, adjacentSplitMember, wireSplitPaneSelection } from "./split-layout.mjs";
+import { splitControlsState } from "./split-controls.mjs";
+import { renderSplitLayout, projectTabStrip } from "./split-dom.mjs";
 
 const desk = window.oasDesktop;
 initTheme();
@@ -51,7 +53,7 @@ async function api(pathname, opts) {
 const ctx = {
   api,
   openFile: (path) => openViewTab("markdown", `≡ ${String(path).split("/").pop()}`, { path }, `file:${path}`),
-  openTerminal: (instance) => openTerminalTab(instance),
+  openTerminal: (instance, opts) => openTerminalTab(instance, opts),
   openBrain: (agent) => openBrainTab(agent),
   // CLI degradation affordances (cli-status.mjs feature-detects both):
   // native binary picker (privileged; main persists the choice) and external
@@ -112,11 +114,12 @@ function setNavActive(name) {
 
 function showTabLayer(on) {
   document.getElementById("tabhost").style.display = on ? "" : "none";
-  tabbar.style.display = on ? "" : "none";
+  document.getElementById("tabstrip").style.display = on ? "" : "none";
   updateActiveContexts(on);
   if (!on) {
     stageHost.style.display = "";
     activeTab = null;
+    updateSplitControls();
     for (const t of tabs.values()) {
       t.tabEl.classList.remove("active");
       t.triggerEl.setAttribute("aria-selected", "false");
@@ -424,28 +427,31 @@ const splitEmptyEl = (() => {
 })();
 
 function renderSplit(splitVisible) {
-  const on = splitVisible && !!split;
-  tabhost.classList.toggle("split-row", on && split.orientation === "row");
-  tabhost.classList.toggle("split-col", on && split.orientation === "col");
-  if (!on) { splitEmptyEl.remove(); return; }
-  // Append only when the pane is out of position: re-inserting an
-  // already-placed node would tear it out of the DOM mid-interaction
-  // (pane-click selection fires activateTab → renderSplit on pointerdown).
-  let anchor = null; // last correctly-placed element
-  for (const id of split.members) {
-    const t = tabs.get(id);
-    if (!t) continue;
-    const inPlace = t.paneEl.parentNode === tabhost && (anchor ? anchor.nextSibling === t.paneEl : true);
-    if (!inPlace) {
-      if (anchor) anchor.after(t.paneEl); else tabhost.append(t.paneEl);
-    }
-    anchor = t.paneEl;
-  }
-  if (split.pending > 0) {
-    if (splitEmptyEl.previousSibling !== anchor || splitEmptyEl.parentNode !== tabhost) {
-      if (anchor) anchor.after(splitEmptyEl); else tabhost.append(splitEmptyEl);
-    }
-  } else splitEmptyEl.remove();
+  // DOM projections (panes as flex cells; the strip grouped to match the
+  // panes — members[0] is the tab the user split FROM) live in
+  // split-dom.mjs so they are testable without booting the shell.
+  renderSplitLayout(tabhost, splitEmptyEl, split, splitVisible, (id) => tabs.get(id)?.paneEl || null);
+  projectTabStrip(paneTabsEl, tabbar, split, splitVisible, [...tabs]);
+}
+
+// ── tab-strip split controls: clickable twins of the split.* actions ──
+// The buttons run the SAME registered actions (runAction is context-gated
+// exactly like chord dispatch); enablement dry-runs the same model
+// transition the actions perform — no duplicated gating logic.
+const tabActionsEl = document.getElementById("tab-actions");
+const paneTabsEl = document.getElementById("pane-tabs");
+for (const [btnId, actionId] of [
+  ["split-right", "split.vertical"], ["split-down", "split.horizontal"], ["split-close", "split.close"],
+]) {
+  document.getElementById(btnId).addEventListener("click", () => runAction(actionId));
+}
+function updateSplitControls() {
+  const t = activeTab != null ? tabs.get(activeTab) : null;
+  const s = splitControlsState(split, activeTab, t?.kind ?? null, tabLayerVisible);
+  tabActionsEl.hidden = !s.visible;
+  document.getElementById("split-right").disabled = !s.splitRow;
+  document.getElementById("split-down").disabled = !s.splitCol;
+  document.getElementById("split-close").disabled = !s.close;
 }
 
 function splitPane(orientation) {
@@ -553,6 +559,7 @@ function activateTab(id, { focusContent = false } = {}) {
     t.paneEl.hidden = !shown;
   }
   renderSplit(splitVisible);
+  updateSplitControls();
   tabs.get(id)?.onShow?.();
   if (focusContent) tabs.get(id)?.focusContent?.();
   return true;
@@ -661,12 +668,25 @@ async function openViewTab(name, title, extra = {}, key = `view:${name}`,
 const pendingTerms = new Set(); // keys with a tab CREATION in flight (post-resolution — dedup for concurrent opens of one resolved identity)
 /** ref: either a bare instance name (views, palette — resolved only when
  * unambiguous) or { instance, home?, agentsRoot? } (sidebar rows — exact).
+ * opts.quiet (post-spawn auto-open): failures report via console.warn
+ * instead of a blocking alert() — an automated handoff must never park a
+ * modal dialog over the app; the user recovers from the sidebar roster.
  * ORDER MATTERS (review 7d740f9): the reference is resolved against the
  * roster FIRST and the dedup key derives from the RESOLVED instance, so a
  * bare-name open and a sidebar open of the same identity share one tab —
  * and an existing tab can never be activated for a name that has since
  * become ambiguous (resolution refuses before dedup can activate). */
-async function openTerminalTab(ref) {
+async function openTerminalTab(ref, { quiet = false } = {}) {
+  const notify = quiet ? (msg) => console.warn(`[terminal open] ${msg}`) : (msg) => alert(msg);
+  // Quiet opens must NEVER reject either (review ff70e1c nit): the refusal
+  // messages route through notify, but transport failures (the panel fetch,
+  // the tab mount) would still escape as an unhandled rejection from an
+  // automated caller that does not await. runOpenFlow catches every quiet
+  // rejection into notify; interactive opens keep throwing.
+  return runOpenFlow(() => openTerminalTabFlow(ref, notify), { quiet, notify });
+}
+
+async function openTerminalTabFlow(ref, notify) {
   // A sidebar-tree selection opens its terminal directly — the persistent
   // sidebar roster IS the instances surface (there is no Instances stage;
   // scope correction of PR #29).
@@ -693,7 +713,7 @@ async function openTerminalTab(ref) {
   // first same-named match could be another agents root's tmux session.
   const r = resolveTerminalOpen(panel.instances, ref, ws);
   if (r.error) {
-    return alert(r.error === "ambiguous"
+    return notify(r.error === "ambiguous"
       ? `several instances are named "${r.name}" — open it from the sidebar tree, which addresses the exact one`
       : `unknown instance "${r.name}"`);
   }
@@ -706,19 +726,19 @@ async function openTerminalTab(ref) {
   if (pendingTerms.has(key)) return; // an open for this key is already in flight
   pendingTerms.add(key);
   try {
-    await openTerminalTabInner(inst, ws, key, owns);
+    await openTerminalTabInner(inst, ws, key, owns, notify);
   } finally {
     pendingTerms.delete(key);
   }
 }
 
-async function openTerminalTabInner(inst, ws, key, owns) {
+async function openTerminalTabInner(inst, ws, key, owns, notify = (msg) => alert(msg)) {
   // inst is the RESOLVED roster instance (openTerminalTab resolves + keys
   // before dedup; review 7d740f9). Re-check ownership here — whenKeyFree
   // may have waited across a workspace switch.
   if (!owns()) return;
   const name = inst.instance;
-  if (!inst.running || !inst.tmux?.session) return alert(`"${name}" has no live tmux session`);
+  if (!inst.running || !inst.tmux?.session) return notify(`"${name}" has no live tmux session`);
 
   const wrap = document.createElement("div");
   wrap.className = "term-wrap";
@@ -894,6 +914,10 @@ function setSidebarHidden(on) {
   } catch { /* storage-less */ }
 }
 function toggleSidebar() { setSidebarHidden(!sidebarHidden()); }
+// Restore-by-mouse must exist while the sidebar is hidden: a thin edge
+// button (CSS shows it only under #app.sidebar-hidden) runs the SAME
+// sidebar.toggle action as the chord/palette/rail-footer button.
+document.getElementById("sidebar-restore").addEventListener("click", () => runAction("sidebar.toggle"));
 try { if (localStorage.getItem(SIDEBAR_HIDDEN_KEY) === "1") setSidebarHidden(true); } catch { /* storage-less */ }
 
 /** Focus the ACTIVE terminal tab's xterm input from anywhere in the shell
@@ -959,7 +983,17 @@ registerAction({ id: "tabs.close", label: "Close the active tab", context: "tabs
 // The engine skips already-consumed (defaultPrevented) events itself.
 window.addEventListener("keydown", (e) => handleKeydown(e));
 
-// rail-footer: Shortcuts button next to Theme
+// rail-footer: Sidebar toggle + Shortcuts button next to Theme
+{
+  const foot = document.getElementById("nav-foot");
+  const b = document.createElement("button");
+  b.className = "nav-item";
+  b.title = "Toggle the sidebar";
+  b.dataset.action = "sidebar.toggle";
+  b.innerHTML = `<span class="icon">◧</span><span class="label">Sidebar</span>`;
+  b.addEventListener("click", () => runAction("sidebar.toggle"));
+  (foot || navEl).append(b);
+}
 {
   const foot = document.getElementById("nav-foot");
   const b = document.createElement("button");

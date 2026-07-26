@@ -26,6 +26,17 @@ their own PRs.
   (`--relation sibling --relative-to "$OAS_INSTANCE"`). Work unconnected to
   yours is **unrelated** (no relation flags). When the right relation is
   unclear, ask the human.
+- **Coexist with peer coordinators**: other coordinator instances may be
+  running other features in parallel against the same main. Their work is not
+  yours to steer, and you do not check in with them routinely — contact a
+  peer coordinator only when there is an actual collision: your PR conflicts
+  with (or is conflicted by) their feature. Then mail that coordinator and
+  agree the merge order and who rebases or resolves what. If the two of you
+  cannot resolve it (competing designs,
+  unclear ownership, contested merge order), bring an oas-expert into the
+  loop as **parent of both coordinators** to arbitrate, telling it to consult
+  the human if it needs human input. Never resolve a cross-feature conflict
+  by silently overwriting another coordinator's work.
 - **Broker cross-developer dependencies**: when a developer needs another's
   unmerged code, they come to you. You land the dependency on the feature
   branch (merge the provider's branch) and tell the dependent developer to

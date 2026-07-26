@@ -43,3 +43,25 @@ test("brain open stale wait/load rejections are discarded; current rejection pro
     /current C/,
   );
 });
+
+test("runOpenFlow: quiet swallows EVERY rejection into notify; interactive rethrows (review ff70e1c nit)", async () => {
+  const { runOpenFlow } = await import("../renderer/open-intent.mjs");
+  // quiet: a rejecting flow (e.g. the /api/panel fetch inside the post-spawn
+  // handoff) must resolve — the caller fires without awaiting, so a rethrow
+  // here would surface as an unhandled rejection, not the promised warn
+  const warned = [];
+  await assert.doesNotReject(
+    runOpenFlow(() => Promise.reject(new Error("panel fetch failed")), { quiet: true, notify: (m) => warned.push(m) }));
+  assert.deepEqual(warned, ["panel fetch failed"], "quiet failures route through notify");
+  // message-less rejections still produce a readable notification
+  await runOpenFlow(() => Promise.reject("raw"), { quiet: true, notify: (m) => warned.push(m) });
+  assert.deepEqual(warned, ["panel fetch failed", "raw"]);
+  // quiet success passes the flow's value through
+  assert.equal(await runOpenFlow(async () => 42, { quiet: true, notify: () => { throw new Error("must not notify on success"); } }), 42);
+  // interactive: rejections rethrow to the caller, notify untouched
+  const alerts = [];
+  await assert.rejects(
+    runOpenFlow(() => Promise.reject(new Error("boom")), { quiet: false, notify: (m) => alerts.push(m) }),
+    /boom/);
+  assert.deepEqual(alerts, [], "interactive failures are the caller's to surface");
+});

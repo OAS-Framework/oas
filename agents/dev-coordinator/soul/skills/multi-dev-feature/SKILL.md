@@ -11,6 +11,11 @@ you go idle — never sleep-poll.
 
 ## 1. Setup
 
+First prove this is actually multi-developer work: scan the relevant repo
+surfaces, the soul roster, and likely owning code paths. If every changed
+surface belongs to one developer soul, collapse to a single-developer feature
+instead of inventing parallel choreography.
+
 ```bash
 git -C ./work fetch origin
 git -C ./work push origin origin/main:refs/heads/feature/<name>
@@ -65,6 +70,13 @@ Push the feature branch when green.
 
 ## 4. Merged-state review
 
+Before each merged-state review, fetch origin and compare the feature against
+current `origin/main`. If main advanced since the feature base, reconcile and
+re-gate before spawning the reviewer or opening the PR; a stale-base green gate
+tests the wrong product. Route behavioral merge conflicts in developer-owned
+feature logic back to that developer with the conflict map; keep only
+trivial/union conflicts yourself.
+
 After ALL developer branches are merged and the gate is green, launch a
 fresh reviewer on the integrated diff:
 
@@ -84,6 +96,32 @@ to the owning developer(s), re-merge, re-gate, re-review.
 
 ## 5. Delivery
 
+- **Check for peer features first**: other coordinator instances may be
+  running parallel features against the same main (`oas status --team` shows
+  live coordinators; `git ls-remote origin 'refs/heads/feature/*'` shows their
+  branches). This check is silent — do not mail peer coordinators to announce
+  yourself or ask about their plans. Contact one only when there is an actual
+  conflict: before or after opening your PR, your feature conflicts with (or
+  is conflicted by) another coordinator's feature or PR. Then:
+  1. Mail that coordinator directly (anchor on exact heads and the specific
+     conflicting paths) and agree the merge order and who rebases/resolves.
+  2. Whoever merges second updates their feature branch from main after the
+     first PR lands, resolves, re-gates, and re-requests review.
+  3. If you two cannot agree (competing designs, contested ownership or
+     order), spawn an oas-expert as **parent of both coordinators** to
+     arbitrate:
+
+     ```bash
+     oas spawn oas-expert --purpose "merge-conflict-<a>-vs-<b>" \
+       --relation parent --relative-to "$OAS_INSTANCE" \
+       --task "Arbitrate the merge conflict between feature/<a> (coordinator <you>) and feature/<b> (coordinator <peer>). You oversee both coordinators for this conflict: decide merge order and resolution ownership, and consult the human if you need product/direction input. Report your ruling to both coordinators by aweb mail."
+     ```
+
+     The relation flag re-points YOUR lineage; agree with the peer
+     coordinator (or have the expert instruct them) that the expert oversees
+     them for this conflict too — the expert's ruling binds both of you.
+     Never resolve the collision by silently overwriting the other feature's
+     changes.
 - `gh pr create` from `feature/<name>` (you own the PR). Summarize scope,
   developer branches merged, review verdict.
 - **Launch the framework expert (oas-expert) for the merge** — main only
@@ -113,6 +151,18 @@ to the owning developer(s), re-merge, re-gate, re-review.
 
 ## Gotchas
 
+- A task can arrive at the coordinator sounding multi-dev but map entirely to
+  one soul after repo/soul ownership scouting. Do the ownership scan before
+  spawning developers, and collapse to a single-developer path when only one
+  soul owns the touched surfaces. See [Scope a coordinator feature to one
+  developer when ownership scan
+  collapses](../knowledge/lessons/scope-feature-before-spawning-developers.md).
+- Before merged-state review and PR delivery, check whether `origin/main`
+  advanced since the feature base. If it did, reconcile first; route behavioral
+  conflicts in developer-owned feature logic back to that developer rather than
+  resolving feature semantics in the coordinator worktree. See [Merged-state
+  reviewers catch stale-base drift against moving
+  main](../knowledge/lessons/stale-base-drift-merged-review.md).
 - In a fast two-developer loop, crossed aweb mail can dominate coordination
   churn. Anchor every mail on exact commit heads, what is already merged, and a
   single next action; once PR-ready, declare a hard freeze where only

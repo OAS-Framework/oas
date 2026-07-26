@@ -671,18 +671,26 @@ function openSpawnModal(s, a) {
    background collector only every ~3s, so the new instance is usually not
    in it yet — and the shell's openTerminal resolves instances from that
    same endpoint, so opening immediately yields "unknown instance". Poll the
-   selected workspace's panel until the instance appears (ownership- and
-   generation-gated), then hand off. Exported for the stale-snapshot
-   regression. delayMs is injectable so tests run without real waits. */
+   selected workspace's panel until the instance appears AND is terminal-
+   ready (ownership- and generation-gated), then hand off. Presence alone is
+   NOT enough: the snapshot lists a freshly spawned instance from its
+   instance.json before its tmux window registers, so an open dispatched at
+   first sight hits the shell's "no live tmux session" refusal — the tmux
+   session typically follows a couple of seconds later. Exported for the
+   stale-snapshot regression. delayMs is injectable so tests run without
+   real waits. */
 export async function waitForInstanceInPanel(s, ref, isCurrent, { tries = 20, delayMs = 700, sleep } = {}) {
   const wait = sleep || ((ms) => new Promise((ok) => setTimeout(ok, ms)));
   // ref: { instance, home?, agentsRoot? }. Match the COMPOSITE identity when
   // the spawn result provides it — with a same-named twin already in the
   // roster, a bare-name wait would succeed early and the follow-up open then
-  // refuse the ambiguous name (merged-state review @7dd1e7b).
+  // refuse the ambiguous name (merged-state review @7dd1e7b) — and require
+  // the readiness the shell's open path checks (running + tmux session), so
+  // the auto-open can never race the tmux registration.
   const matches = (x) => x.instance === ref.instance
     && (!ref.home || !x.home || x.home === ref.home)
-    && (!ref.agentsRoot || !x.agentsRoot || x.agentsRoot === ref.agentsRoot);
+    && (!ref.agentsRoot || !x.agentsRoot || x.agentsRoot === ref.agentsRoot)
+    && !!x.running && !!x.tmux?.session;
   for (let i = 0; i < tries; i++) {
     if (!isCurrent()) return false;          // ws switched / superseded: stop
     try {
@@ -776,8 +784,14 @@ export async function doSpawn(s, ui) {
     const visible = await waitForInstanceInPanel(s, spawnedRef, current, s.waitOpts);
     if (!current()) return;
     if (!visible) { ui.status.textContent = `Spawned ${d.instance} — roster is catching up; open it from the sidebar instance roster.`; return; }
-    ui.status.textContent = `Spawned ${d.instance}${d.launched ? " — session running" : ""}. Opening terminal…`;
-    s.ctx.openTerminal(spawnedRef);
+    // Success is a HANDOFF, not a status line: close the modal (the spawn
+    // form's job is done — leaving it up with "Opening terminal…" reads as
+    // stuck) and land the user in the new instance's terminal. quiet: the
+    // auto-open must never block with an alert() — if the instance vanished
+    // between the readiness poll and the open, the sidebar roster is the
+    // recovery path, same as the timeout degradation above.
+    closeSpawnModal(s);
+    s.ctx.openTerminal(spawnedRef, { quiet: true });
   } catch (e) {
     if (owns()) {
       ui.status.classList?.add("err");
