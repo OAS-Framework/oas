@@ -449,8 +449,10 @@ function install() {
 }
 
 function installPackage(dir, src) {
+  const bail = (e) => (JSON_MODE ? jsonFail(e.code || "E_INSTALL_FAILED", e.message || e) : die(e.message || e));
   let r;
-  try { r = acquirePackage(dir, src); } catch (e) { die(e.message); }
+  try { r = acquirePackage(dir, src); } catch (e) { bail(e); return; }
+  if (JSON_MODE) { jsonOk({ root: r.root, installed: r.installed, lockFile: r.lockFile, depWarnings: r.depWarnings || [] }); return; }
   for (const p of r.installed) {
     console.log(`${p.kept ? "ok       " : "Acquired "}${p.package}@${p.version} → ${shortPath(p.dir)}`);
     console.log(`  locked ${p.commit === "local" ? "local tree" : p.commit} (${p.integrity}); capabilities: ${p.capabilities.join(", ") || "(none)"}`);
@@ -469,6 +471,12 @@ function installPackage(dir, src) {
 function restore(dir) {
   const pkgReport = restorePackages(dir);
   const report = restoreCapabilities(dir);
+  const failed0 = [...pkgReport, ...report].filter((r) => r.status === "failed").length;
+  if (JSON_MODE) {
+    if (failed0) { console.log(JSON.stringify({ schemaVersion: 1, ok: false, error: { code: "E_RESTORE_FAILED", message: `${failed0} artifact(s) could not be restored` }, result: { packages: pkgReport, capabilities: report } })); process.exit(1); }
+    jsonOk({ packages: pkgReport, capabilities: report });
+    return;
+  }
   if (!pkgReport.length && !report.length) { console.log("Nothing to restore — no locked packages or capabilities in the config chain."); return; }
   let failed = 0;
   for (const r of pkgReport) {
@@ -496,7 +504,7 @@ function trust() {
   const pkgs = listInstalledPackages(dir);
   const backing = all ? pkgs.find((p) => p.package === id) : pkgs.find((p) => p.capabilities.some((c) => c.id === id));
   if (backing) {
-    if (all) {
+    if (all && !JSON_MODE) {
       console.log(`Package ${backing.package}@${backing.version} full executable surface:`);
       for (const c of backing.capabilities) {
         const cmds = Object.keys(c.manifest.commands || {});
@@ -505,21 +513,28 @@ function trust() {
       }
     }
     let r;
-    try { r = approveCapability(dir, id, { allCapabilities: all }); } catch (e) { die(e.message); }
+    try { r = approveCapability(dir, id, { allCapabilities: all }); } catch (e) { JSON_MODE ? jsonFail(e.code || "E_TRUST_FAILED", e.message || e) : die(e.message); return; }
+    if (JSON_MODE) {
+      const surface = {};
+      for (const c of backing.capabilities) surface[c.id] = { commands: Object.keys(c.manifest.commands || {}), hooks: Object.keys(c.manifest.hooks || {}) };
+      jsonOk({ package: r.package, integrity: r.integrity, approved: r.approved, skipped: r.skipped, executableSurface: surface, file: r.file });
+      return;
+    }
     if (r.approved.length) console.log(`Trusted executable commands/hooks for ${r.approved.join(", ")} (package ${r.package} at ${r.integrity}).`);
     if (r.skipped.length) console.log(`No executable surface (lock integrity suffices, no approval needed): ${r.skipped.join(", ")}`);
     return;
   }
-  if (all) die(`no installed package "${id}" — --all-capabilities takes a package identity`);
+  if (all) JSON_MODE ? jsonFail("unknown-capability", `no installed package "${id}" — --all-capabilities takes a package identity`) : die(`no installed package "${id}" — --all-capabilities takes a package identity`);
   // Legacy standalone capability path.
   const manifest = capabilityManifest(id, dir);
-  if (!manifest) die(`unknown capability "${id}"`);
+  if (!manifest) JSON_MODE ? jsonFail("unknown-capability", `unknown capability "${id}"`) : die(`unknown capability "${id}"`);
   const lock = readCapabilityLocks(dir)[manifest.capability];
-  if (!lock) die(`${manifest.capability} is not locked in ${OAS_LOCK_FILE}`);
+  if (!lock) JSON_MODE ? jsonFail("invalid-lock", `${manifest.capability} is not locked in ${OAS_LOCK_FILE}`) : die(`${manifest.capability} is not locked in ${OAS_LOCK_FILE}`);
   const integrity = capabilityIntegrity(manifest._dir);
-  if (integrity !== lock.integrity) die(`integrity changed (${lock.integrity} → ${integrity}); reacquire explicitly before trusting`);
+  if (integrity !== lock.integrity) JSON_MODE ? jsonFail("integrity-drift", `integrity changed (${lock.integrity} → ${integrity}); reacquire explicitly before trusting`) : die(`integrity changed (${lock.integrity} → ${integrity}); reacquire explicitly before trusting`);
   const { _file, ...clean } = lock;
   writeCapabilityLock(dirname(_file), manifest.capability, { ...clean, trustedExecutables: true });
+  if (JSON_MODE) { jsonOk({ capability: manifest.capability, integrity, legacy: true }); return; }
   console.log(`Trusted executable commands/hooks for ${manifest.capability} at ${integrity}.`);
 }
 
@@ -553,10 +568,11 @@ function listCmd() {
 /** oas remove <package> — refuses while config or dependent packages reference it. */
 function removeCmd() {
   const id = args[1];
-  if (!id || id.startsWith("--")) die("usage: oas remove <package> [--dir <dir>]");
+  if (!id || id.startsWith("--")) JSON_MODE ? jsonFail("E_USAGE", "usage: oas remove <package> [--dir <dir>]") : die("usage: oas remove <package> [--dir <dir>]");
   const dir = resolve(flag("dir") || process.cwd());
   let r;
-  try { r = removePackage(dir, id); } catch (e) { die(e.message); }
+  try { r = removePackage(dir, id); } catch (e) { JSON_MODE ? jsonFail(e.code || "E_REMOVE_FAILED", e.message || e) : die(e.message); return; }
+  if (JSON_MODE) { jsonOk(r); return; }
   console.log(`Removed package ${r.package} (${shortPath(r.dir)}) and its entry in ${shortPath(r.lockFile)}.`);
 }
 
@@ -566,13 +582,15 @@ function migrateCmd() {
   const dryRun = args.includes("--dry-run");
   if (dryRun) {
     const { plan, warnings } = migrateLegacyLock(dir);
+    if (JSON_MODE) { jsonOk({ dryRun: true, plan, warnings }); return; }
     if (!plan.length) { console.log("Nothing to migrate at this scope."); return; }
     for (const s of plan) console.log(`${s.action.padEnd(10)} ${s.capabilityId}${s.package ? `  → ${s.package.spec}` : ""}`);
     for (const w of warnings) console.log(`WARNING: ${w}`);
     return;
   }
   let r;
-  try { r = applyLegacyLockMigration(dir); } catch (e) { die(e.message); }
+  try { r = applyLegacyLockMigration(dir); } catch (e) { JSON_MODE ? jsonFail(e.code || "E_MIGRATE_FAILED", e.message || e) : die(e.message); return; }
+  if (JSON_MODE) { jsonOk(r); return; }
   for (const m of r.migrated) console.log(`migrated  ${m.capability} → package ${m.package}@${m.version}`);
   for (const c of r.residue) console.log(`residue   ${c}  (kept as a legacy capability lock)`);
   for (const w of r.warnings) console.log(`WARNING: ${w}`);
@@ -583,7 +601,8 @@ function migrateCmd() {
 function updatePackageCmd(id) {
   const dir = resolve(flag("dir") || process.cwd());
   let r;
-  try { r = updatePackage(dir, id); } catch (e) { die(e.message); }
+  try { r = updatePackage(dir, id); } catch (e) { JSON_MODE ? jsonFail(e.code || "E_UPDATE_FAILED", e.message || e) : die(e.message); return; }
+  if (JSON_MODE) { jsonOk(r); return; }
   if (!r.changed) { console.log(`${r.package} is already up to date (${r.after.version}, ${r.after.integrity}).`); return; }
   console.log(`Updated ${r.package}: ${r.before.version} (${r.before.commit}) → ${r.after.version} (${r.after.commit})`);
   console.log(`  integrity ${r.before.integrity} → ${r.after.integrity}`);

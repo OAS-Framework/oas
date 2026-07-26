@@ -224,6 +224,12 @@ package locks, preserving `from: installed` activation. Entries with no
 published package yet remain as legacy residue in the v2 lock (doctor flags
 them); executable approvals are never carried over.
 
+All package operations are agent-callable: every command above supports
+`--json` (one stdout envelope; failures carry the contract's stable error
+codes) and noninteractive operation. Agents never hand-edit `oas-lock.json`
+or the stores — the kernel-owned **oas-packages** skill (composed into every
+instance) teaches the full lifecycle.
+
 ## Acquisition, lock, restore, and trust (single capabilities)
 
 ```bash

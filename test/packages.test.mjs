@@ -927,3 +927,71 @@ test("npm closure: dev+peer omitted from the materialized tree; prod deps presen
   assert.ok(!existsSync(join(dest, "node_modules", "left-pad")), "peer dependency in lock METADATA is absent from the materialized tree");
   rmSync(base, { recursive: true, force: true });
 });
+
+// ---------- kernel oas-packages skill + agent-callable CLI completeness ----------
+
+test("kernel skill oas-packages is composed into every instance", () => {
+  const base = temp();
+  const ws = join(base, "ws");
+  write(join(ws, "oas-config.yaml"), "name: t\n");
+  const repo = join(ws, "repo");
+  write(join(repo, "README.md"), "r\n");
+  gitify(repo);
+  const root = join(ws, "agents");
+  write(join(root, "dev", "soul", "soul.yaml"), `name: dev\nkind: persistent\nrepo: ${repo}\nwork: checkout\nruntime: pi\n`);
+  write(join(root, "dev", "soul", "AGENTS.md"), "# Dev\n");
+  symlinkSync("AGENTS.md", join(root, "dev", "soul", "CLAUDE.md"));
+  mkdirSync(join(root, "dev", "instances"), { recursive: true });
+  const r = spawnInstance(root, findAgent(root, "dev"), { launch: false });
+  assert.ok(existsSync(join(r.home, ".agents", "skills", "oas-packages", "SKILL.md")), "oas-packages kernel skill materialized");
+  const meta = JSON.parse(readFileSync(join(r.home, "instance.json"), "utf8"));
+  assert.ok(meta.skills.some((s) => s.name === "oas-packages" && s.source === "kernel"));
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("agent-callable JSON completeness: install/restore/trust/update/remove/migrate all emit one envelope with taxonomy codes", () => {
+  const base = temp();
+  const s = scope(base);
+  const src = pkgSource(join(base, "src"), { package: "js.p" }, { "cap": { capability: "js.cap", commands: { r: { exec: "r.mjs" } } } });
+  write(join(src, "cap", "r.mjs"), "//\n");
+  gitify(src);
+  // install --json
+  let env = JSON.parse(cli(s, "install", `file://${src}`, "--dir", s, "--json").stdout);
+  assert.equal(env.ok, true);
+  assert.equal(env.result.root, "js.p");
+  assert.equal(env.result.installed[0].package, "js.p");
+  // trust --json (per-capability)
+  env = JSON.parse(cli(s, "trust", "js.cap", "--dir", s, "--json").stdout);
+  assert.equal(env.ok, true);
+  assert.deepEqual(env.result.approved, ["js.cap"]);
+  // bare install (restore) --json
+  rmSync(join(installedPackagesDir(s), "js.p"), { recursive: true, force: true });
+  env = JSON.parse(cli(s, "install", "--dir", s, "--json").stdout);
+  assert.equal(env.ok, true);
+  assert.equal(env.result.packages.find((p) => p.package === "js.p").status, "restored");
+  // update --json (unchanged)
+  env = JSON.parse(cli(s, "update", "js.p", "--dir", s, "--json").stdout);
+  assert.equal(env.ok, true);
+  assert.equal(env.result.changed, false);
+  // migrate --dry-run --json
+  env = JSON.parse(cli(s, "migrate", "--dry-run", "--dir", s, "--json").stdout);
+  assert.equal(env.ok, true);
+  assert.deepEqual(env.result.plan, []);
+  // remove --json failure carries a taxonomy code (unknown package)
+  let r = cli(s, "remove", "ghost.p", "--dir", s, "--json");
+  env = JSON.parse(r.stdout);
+  assert.equal(env.ok, false);
+  assert.equal(env.error.code, "unknown-capability");
+  assert.notEqual(r.status, 0);
+  // remove --json success
+  env = JSON.parse(cli(s, "remove", "js.p", "--dir", s, "--json").stdout);
+  assert.equal(env.ok, true);
+  assert.equal(env.result.package, "js.p");
+  // trust --json failure: integrity drift carries the frozen code
+  cli(s, "install", `file://${src}`, "--dir", s);
+  write(join(installedPackagesDir(s), "js.p", "cap", "r.mjs"), "// tampered\n");
+  env = JSON.parse(cli(s, "trust", "js.cap", "--dir", s, "--json").stdout);
+  assert.equal(env.ok, false);
+  assert.equal(env.error.code, "integrity-drift");
+  rmSync(base, { recursive: true, force: true });
+});
