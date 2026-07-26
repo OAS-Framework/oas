@@ -1,10 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync, chmodSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { resolveOasConfig } from "../lib/core.mjs";
+import { resolveOasConfig, capabilityIntegrity } from "../lib/core.mjs";
 import {
   aggregateMissingRequirements, commandOnPath, diffConfigTexts, discoverWorkspaceScopes,
   loadPackageManifest, lockedPackageCapabilities, normalizeRequirement, packageCapabilityIds,
@@ -48,7 +48,7 @@ function fixturePackage(dir, { id = "example.engineering", configs, capabilities
 
 /** Simulate the engine's install: package store dir + lock v2 entry (phase-1 fixture). */
 function installFixturePackage(scope, pkgDir, { id = "example.engineering", capabilities = ["example.review", "example.delivery"], dependencies = [] } = {}) {
-  const dest = join(installedPackagesDir(scope), packageSlug(id));
+  const dest = join(scope, ".agents", "packages", "installed", packageSlug(id));
   mkdirSync(dirname(dest), { recursive: true });
   execFileSync("cp", ["-R", pkgDir, dest]);
   const lockFile = join(scope, "oas-lock.json");
@@ -56,7 +56,7 @@ function installFixturePackage(scope, pkgDir, { id = "example.engineering", capa
   parsed.lockfileVersion = 2; parsed.packages ||= {};
   parsed.packages[id] = {
     source: `path:${pkgDir}`, version: "1.0.0", commit: "local",
-    integrity: `sha256-${"0".repeat(64)}`,
+    integrity: capabilityIntegrity(dest),
     capabilities, dependencies, trustedCapabilities: [],
   };
   writeFileSync(lockFile, JSON.stringify(parsed, null, 2) + "\n");
@@ -308,10 +308,11 @@ test("oas config diff is report-only: shows drift, never merges or overwrites", 
   assert.match(r.stdout, /differing line/);
   assert.equal(readFileSync(file, "utf8"), adopted + "  # local note\n", "diff must not write");
 
-  // provenance header supplies package/profile defaults
+  // provenance header supplies package/profile defaults — and since Gate 1,
+  // init --package <path> locks the closure, so the id resolves via the lock
   const r2 = cli(["config", "diff", "--dir", ws]);
-  assert.equal(r2.status, 1); // provenance names the package id, which is not locked/installed here
-  assert.match(r2.stderr, /not a locked package id/);
+  assert.equal(r2.status, 0, r2.stderr);
+  assert.match(r2.stdout, /report only/);
 });
 
 test("diffConfigTexts produces a minimal line diff", () => {
@@ -425,25 +426,45 @@ test("bare oas install at a team boundary prints the boundary FIRST, restores ea
   assert.equal(r.stdout.split("ghost.cap").length - 1, 2, `one FAILED line + one failures-by-scope line:\n${r.stdout}`);
 });
 
-test("reconciliation fails clearly when a v2 package lock has no installed artifact, and passes when it does", () => {
+test("reconciliation restores a missing locked package from its exact source and fails clearly on integrity drift", () => {
   const base = temp();
   const pkg = fixturePackage(join(base, "pkg"));
   const ws = join(base, "ws");
   write(join(ws, "oas-config.yaml"), "name: ws\nteam:\n  name: t\n");
-  // package lock WITHOUT the installed store: must FAIL, never exit 0 silently
+  // package lock with a WRONG integrity: restore attempts, verifies, fails — never silent success
   write(join(ws, "oas-lock.json"), JSON.stringify({ lockfileVersion: 2, packages: { "example.engineering": {
     source: `path:${pkg}`, version: "1.0.0", commit: "local", integrity: `sha256-${"0".repeat(64)}`,
     capabilities: ["example.review", "example.delivery"], dependencies: [], trustedCapabilities: [],
   } } }, null, 2));
   const r = cli(["install", "--no-requirements", "--dir", ws], { cwd: ws });
-  assert.equal(r.status, 1, `missing package artifact must fail reconciliation:\n${r.stdout}`);
-  assert.match(r.stdout, /FAILED\s+package example\.engineering\s+locked package is not installed/);
+  assert.equal(r.status, 1, `integrity drift must fail reconciliation:\n${r.stdout}`);
+  assert.match(r.stdout, /FAILED\s+package example\.engineering\s+restored tree .* does not match locked/);
   assert.match(r.stdout, /Failures by scope:/);
-  // with the store present, the same lock reports ok and exits 0
-  installFixturePackage(ws, pkg);
+  assert.equal(existsSync(join(ws, ".agents", "packages", "installed", "example.engineering", "oas-package.json")), false, "failed restore must not leave the artifact");
+  // with the CORRECT locked integrity, the missing artifact restores exactly
+  const trueDest = installFixturePackage(join(base, "probe"), pkg); // compute true integrity via the fixture helper
+  const integrity = JSON.parse(readFileSync(join(base, "probe", "oas-lock.json"), "utf8")).packages["example.engineering"].integrity;
+  void trueDest;
+  write(join(ws, "oas-lock.json"), JSON.stringify({ lockfileVersion: 2, packages: { "example.engineering": {
+    source: `path:${pkg}`, version: "1.0.0", commit: "local", integrity,
+    capabilities: ["example.review", "example.delivery"], dependencies: [], trustedCapabilities: [],
+  } } }, null, 2));
   const r2 = cli(["install", "--no-requirements", "--dir", ws], { cwd: ws });
   assert.equal(r2.status, 0, `${r2.stdout}\n${r2.stderr}`);
-  assert.match(r2.stdout, /ok\s+package example\.engineering/);
+  assert.match(r2.stdout, /restored\s+package example\.engineering/);
+  assert.ok(existsSync(join(ws, ".agents", "packages", "installed", "example.engineering", "oas-package.json")));
+  // present + matching → ok on the next run
+  const r3 = cli(["install", "--no-requirements", "--dir", ws], { cwd: ws });
+  assert.equal(r3.status, 0);
+  assert.match(r3.stdout, /ok\s+package example\.engineering/);
+  // capability-list mismatch fails closed
+  const lock = JSON.parse(readFileSync(join(ws, "oas-lock.json"), "utf8"));
+  lock.packages["example.engineering"].capabilities = ["example.review"]; // wrong list
+  writeFileSync(join(ws, "oas-lock.json"), JSON.stringify(lock, null, 2));
+  rmSync(join(ws, ".agents", "packages"), { recursive: true, force: true });
+  const r4 = cli(["install", "--no-requirements", "--dir", ws], { cwd: ws });
+  assert.equal(r4.status, 1);
+  assert.match(r4.stdout, /disagree with restored manifest/);
 });
 
 test("non-team bare install also verifies v2 package locks (chain path, no boundary)", () => {
@@ -736,10 +757,10 @@ test("doctor --json carries schemaVersion 1 and the WS2 payload with field parit
   assert.equal(r.status, 0, r.stderr);
   const doc = JSON.parse(r.stdout); // exactly one JSON document on stdout
   assert.equal(doc.schemaVersion, 1);
-  // packages: lock v2 entries with provenance
-  assert.deepEqual(doc.packages.map((p) => p.id), ["other.pkg"]);
-  assert.equal(doc.packages[0].version, "1.0.0");
-  assert.deepEqual(doc.packages[0].capabilities, ["example.review", "example.delivery"]);
+  // packages: lock v2 entries with provenance (init --package locked example.engineering per Gate 1)
+  assert.deepEqual(doc.packages.map((p) => p.id).sort(), ["example.engineering", "other.pkg"]);
+  assert.ok(doc.packages.every((p) => p.version === "1.0.0"));
+  assert.deepEqual(doc.packages.find((p) => p.id === "other.pkg").capabilities, ["example.review", "example.delivery"]);
   // profileProvenance: the adopted snapshot
   assert.equal(doc.profileProvenance.length, 1);
   assert.equal(doc.profileProvenance[0].package, "example.engineering");
@@ -1049,6 +1070,116 @@ test("init --package on a configless scope sees same-lock dependency capabilitie
   assert.equal(env.ok, true, JSON.stringify(env));
   assert.equal(env.result.package, "root.pkg");
   assert.deepEqual(env.result.lockedPackages.sort(), ["dep.pkg", "root.pkg"]);
+});
+
+// ---------- oas.dev consumer fixture (primary WS2 acceptance case) ----------
+
+/** The generic oas.dev-shaped consumer package: a multi-capability distribution
+ * package with dependencies and a default workspace profile — contract-fixture
+ * driven (Decision shapes only; no dependence on unpublished WS3 content, no
+ * product special case). Manifest/profile shapes are isolated HERE so aligning
+ * with the amended engine head / WS3 plan is one cheap edit. */
+function oasDevFixture(base) {
+  const dep = join(base, "src", "oas-dev-knowledge");
+  write(join(dep, "capabilities", "knowledge", "oas.json"), JSON.stringify({
+    capability: "oasdev.knowledge", version: "1.0.0", description: "Knowledge layer capability.", layer: "knowledge",
+  }, null, 2));
+  write(join(dep, "oas-package.json"), JSON.stringify({
+    package: "oasdev.knowledge-pkg", version: "1.0.0", description: "oas.dev knowledge dependency.",
+    compatibility: { oas: ">=0.6.2" },
+    capabilities: ["capabilities/knowledge"],
+  }, null, 2));
+  const root = join(base, "src", "oas-dev");
+  write(join(root, "capabilities", "review", "oas.json"), JSON.stringify({
+    capability: "oasdev.review", version: "1.0.0", description: "Review capability.",
+  }, null, 2));
+  write(join(root, "capabilities", "delivery", "oas.json"), JSON.stringify({
+    capability: "oasdev.delivery", version: "1.0.0", description: "Delivery capability.",
+  }, null, 2));
+  write(join(root, "oas-package.json"), JSON.stringify({
+    package: "oasdev.workspace", version: "1.0.0", description: "oas.dev workspace package.",
+    compatibility: { oas: ">=0.6.2" },
+    capabilities: ["capabilities/review", "capabilities/delivery"],
+    configs: {
+      default: { path: "configs/default/oas-config.yaml", description: "Recommended workspace setup", default: true },
+    },
+    dependencies: ["../oas-dev-knowledge"],
+  }, null, 2));
+  write(join(root, "configs", "default", "oas-config.yaml"), [
+    "name: workspace",
+    "",
+    "agent-types:",
+    "  reviewers:",
+    "    description: Agents that review changes",
+    "",
+    "capabilities:",
+    "  layers:",
+    "    knowledge:",
+    "      capability: oasdev.knowledge",
+    "      from: installed",
+    "  additive:",
+    "    oasdev.review:",
+    "      from: installed",
+    "      agent-types:",
+    "        reviewers: true",
+    "    oasdev.delivery:",
+    "      from: installed",
+    "      global: true",
+    "",
+  ].join("\n"));
+  return { root, dep };
+}
+
+test("oas.dev consumer fixture: fresh non-Git source → profile snapshot + complete lock graph + bare restore", () => {
+  const base = temp();
+  const { root } = oasDevFixture(base);
+  const ws = join(base, "workspace"); mkdirSync(ws, { recursive: true });
+
+  // 1. Adopt: oas init --package <fresh local source> — nothing locked or installed yet.
+  const r = cli(["init", "--package", root, "--json", "--dir", ws]);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const env = JSON.parse(r.stdout);
+  assert.equal(env.ok, true, JSON.stringify(env));
+  assert.equal(env.result.package, "oasdev.workspace");
+  assert.equal(env.result.profile, "default");
+  // Gate 1: adoption established the COMPLETE closure lock — root + dependency.
+  assert.equal(env.result.lockFile, join(ws, "oas-lock.json"), "lockFile must be non-null and at the scope");
+  assert.deepEqual(env.result.lockedPackages.sort(), ["oasdev.knowledge-pkg", "oasdev.workspace"]);
+  // snapshot is an ordinary scoped config with provenance
+  const snapshot = readFileSync(join(ws, "oas-config.yaml"), "utf8");
+  assert.match(snapshot, /^# package: oasdev\.workspace@\S+ profile: default \(snapshot/);
+  assert.match(snapshot, /capability: oasdev\.knowledge/);
+  // lock entries are schema-shaped: exact integrity, capabilities metadata, dependencies by id
+  const lock = JSON.parse(readFileSync(join(ws, "oas-lock.json"), "utf8"));
+  assert.equal(lock.lockfileVersion, 2);
+  const rootLock = lock.packages["oasdev.workspace"];
+  assert.match(rootLock.integrity, /^sha256-[0-9a-f]{64}$/);
+  assert.deepEqual(rootLock.capabilities.sort(), ["oasdev.delivery", "oasdev.review"]);
+  assert.deepEqual(rootLock.dependencies, ["oasdev.knowledge-pkg"]);
+  assert.deepEqual(lock.packages["oasdev.knowledge-pkg"].capabilities, ["oasdev.knowledge"]);
+  // both packages materialized in the store
+  assert.ok(existsSync(join(ws, ".agents", "packages", "installed", "oasdev.workspace", "oas-package.json")));
+  assert.ok(existsSync(join(ws, ".agents", "packages", "installed", "oasdev.knowledge-pkg", "oas-package.json")));
+
+  // 2. Clean-checkout simulation: delete the store, keep config + lock, bare restore.
+  rmSync(join(ws, ".agents", "packages"), { recursive: true, force: true });
+  const r2 = cli(["install", "--no-requirements", "--json", "--dir", ws], { cwd: ws });
+  assert.equal(r2.status, 0, r2.stdout);
+  const env2 = JSON.parse(r2.stdout);
+  assert.equal(env2.ok, true, JSON.stringify(env2));
+  const restored = env2.result.scopes.flatMap((s) => s.artifacts).filter((a) => a.kind === "package" && a.status === "restored");
+  assert.deepEqual(restored.map((a) => a.id).sort(), ["oasdev.knowledge-pkg", "oasdev.workspace"]);
+  assert.ok(existsSync(join(ws, ".agents", "packages", "installed", "oasdev.workspace", "oas-package.json")), "restore rematerializes the store");
+
+  // 3. Idempotence: a second bare install reports everything ok.
+  const r3 = cli(["install", "--no-requirements", "--json", "--dir", ws], { cwd: ws });
+  const env3 = JSON.parse(r3.stdout);
+  assert.ok(env3.result.scopes.flatMap((s) => s.artifacts).every((a) => a.kind !== "package" || a.status === "present"), JSON.stringify(env3.result.scopes));
+
+  // 4. Adopter sovereignty survives: config diff via provenance defaults, read-only.
+  const r4 = cli(["config", "diff", "--json", "--dir", ws], { cwd: ws });
+  assert.equal(r4.status, 0, r4.stdout);
+  assert.equal(JSON.parse(r4.stdout).result.differingLines, 0);
 });
 
 // ---------- provenance helpers ----------

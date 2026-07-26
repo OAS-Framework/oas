@@ -29,10 +29,10 @@ import {
   spawnInstance, retireInstance, upsertLocalAgent, defaultRepo, RELATIONS,
 } from "../lib/core.mjs";
 import {
-  aggregateMissingRequirements, diffConfigTexts, discoverWorkspaceScopes, installedPackageDir,
+  acquirePackage, aggregateMissingRequirements, diffConfigTexts, discoverWorkspaceScopes, installedPackageDir,
   loadPackageManifest, lockedPackageCapabilities,
   parseProfileProvenance, profileProvenanceHeader, readPackageLocks, readPackageLocksAt, readProfileText,
-  requirementInstallPlan, resolvePackageSource, runRequirementInstall, selectProfile, validateProfile,
+  requirementInstallPlan, resolvePackageClosure, resolvePackageSource, restorePackages, runRequirementInstall, selectProfile, validateProfile,
   packageCapabilityIds,
 } from "../lib/packages.mjs";
 
@@ -502,18 +502,16 @@ function lockLevelsUp(dir) {
   return levels.reverse();
 }
 
-/** Check one level's v2 package locks against the installed package store.
- * Phase 1: the engine's restorePackages is not merged yet — a locked package
- * whose installed artifact is present reports ok; a missing artifact is a
- * clear FAILURE, never silent success. Returns report items. */
+/** Check/restore one level's v2 package locks against the installed store via
+ * the engine seam (restorePackages — exact restore, no ref advancement). A
+ * missing artifact with a restorable path source is restored; anything else
+ * (git/catalog sources pre-engine, integrity drift, capability-list mismatch)
+ * is a clear FAILURE, never silent success. Returns report items. */
 function packageLockReport(level) {
-  const out = [];
-  for (const [pkgId, lock] of Object.entries(readPackageLocksAt(level))) {
-    const installed = installedPackageDir(lock, pkgId);
-    if (installed) out.push({ id: pkgId, level, status: "present", dir: installed, package: true });
-    else out.push({ id: pkgId, level, status: "failed", package: true, reason: "locked package is not installed and package restore (engine restorePackages) is not available yet — reacquire it explicitly" });
-  }
-  return out;
+  return restorePackages(level, { levels: [level] }).map((r) => ({
+    id: r.package, level: r.level, package: true, dir: r.dir,
+    status: r.status === "ok" ? "present" : r.status, reason: r.reason,
+  }));
 }
 
 /** Bare `oas install`: restore every locked-but-missing capability in the config chain
@@ -808,7 +806,16 @@ function initPackage(src, dir, file) {
     try { profile = selectProfile(manifest, configFlag); }
     catch (e) { bail(e.code || "E_PROFILE_AMBIGUOUS", e.message); }
     let errors;
-    try { errors = validateProfile(manifest, profile, { dependencyCapabilities: dependencyClosureCapabilities(manifest, dir) }); }
+    try {
+      // Dependency-supplied capabilities: from visible locks, plus — for fresh
+      // local sources — the source closure itself (nothing is locked yet).
+      let depCaps = dependencyClosureCapabilities(manifest, dir);
+      if (!tmp && (manifest.dependencies || []).length && manifest._dir) {
+        try { depCaps = [...new Set([...depCaps, ...resolvePackageClosure(manifest._dir).flatMap((e) => e.capabilities)])]; }
+        catch { /* closure errors resurface in acquisition with their own codes */ }
+      }
+      errors = validateProfile(manifest, profile, { dependencyCapabilities: depCaps });
+    }
     catch (e) { bail(e.code || "E_PROFILE_INVALID", e.message); }
     if (errors.length) bail("E_PROFILE_INVALID", `profile "${profile.name}" of package ${manifest.package} failed validation:\n  - ${errors.join("\n  - ")}`);
     let body, capabilities;
@@ -822,9 +829,19 @@ function initPackage(src, dir, file) {
     writeFileSync(file, text);
     note(`Created ${shortPath(file)} (${levelOf(dir)} level) from package profile ${manifest.package}:${profile.name}`);
     note("The snapshot is an ordinary scoped config — edit it, retarget or disable any capability; package updates never rewrite it.");
-    // The scope's own lock is read directly: during init no oas-config.yaml
-    // exists here yet, so configChain cannot see this level (see the
-    // init-acquires-before-config-exists lesson).
+    const locks0 = { ...readPackageLocks(dir).packages, ...readPackageLocksAt(dir) };
+    // Gate 1: adoption must leave the root + dependency closure exact-locked.
+    // A fresh (unlocked) local-path source is acquired through the acquisition
+    // seam (frozen acquirePackage signature; the engine replaces the body in
+    // phase 2). Locked/installed ids are already locked; git URLs await the
+    // engine's acquisition and only warn.
+    const isLocalSource = !tmp && (src.startsWith(".") || src.startsWith("/") || src.startsWith("~") || src.startsWith("path:"));
+    if (!locks0[manifest.package] && isLocalSource) {
+      try {
+        const acq = acquirePackage(dir, src);
+        note(`Acquired + locked package closure: ${acq.installed.map((p) => `${p.package}@${p.version}`).join(", ")} → ${shortPath(acq.lockFile)}`);
+      } catch (e) { bail(e.code || "E_ACQUIRE_FAILED", e.message); }
+    }
     const locks = { ...readPackageLocks(dir).packages, ...readPackageLocksAt(dir) };
     if (!locks[manifest.package]) note(`NOTE: package ${manifest.package} is not locked at this scope yet — acquire it with \`oas install ${src}\` so its capabilities restore.`);
     if (JSON_MODE) {
