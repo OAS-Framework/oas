@@ -38,6 +38,9 @@ layer. General packages omit `layer` and compose additively.
 - Only `soul-scaffold`, `spawn`, and `retire` hooks are accepted.
 - Declare every external command, but never install it implicitly.
 - Never put global/group/soul targets in the manifest.
+- If repository package metadata also enumerates capability resources, validate
+  that cardinality first: local exact-one contracts must fail on zero or
+  multiple entries before identity/version/compatibility invariants run.
 
 ## Instructions and skills
 
@@ -73,6 +76,19 @@ not just “install without scripts.” Run `npm ci --ignore-scripts`, then insp
 complete production closure. Record or escalate advisories instead of applying
 an unreviewed override, and remove generated `node_modules` after proving clean
 materialization so only the checked lock remains.
+
+## Dependency and CI closure
+
+When intentionally omitting an unused npm host peer, materialize and audit the
+same runtime closure, for example `npm ci --omit=dev --omit=peer
+--ignore-scripts` and `npm audit --omit=dev --omit=peer --ignore-scripts`.
+Prove declared resources still exist, the peer is absent from `node_modules`,
+and command/hook entrypoints do not import the omitted peer. If a later runtime
+contract materializes the peer, the advisory gate reactivates.
+
+When a package lockfile lives in a nested capability directory, GitHub Actions
+`actions/setup-node` with `cache: npm` needs `cache-dependency-path` pointing at
+the same nested lock used by the prefixed install command.
 
 ## Targeting belongs to config
 
@@ -120,7 +136,12 @@ denied dispatch.
 6. For external packages, test unlocked, untrusted executable, trusted exact
    integrity, tampered integrity paths, and manifest paths or symlinks that
    escape the locked artifact.
-7. Run `oas doctor <repo> --soul <name>` and retire the probe.
+7. Negative-test package metadata/capability cardinality when the local contract
+   is exact-one; zero or multiple capability resources must fail before
+   cross-resource invariants.
+8. For package CI with nested lockfiles, verify `setup-node`
+   `cache-dependency-path` matches the lock consumed by prefixed npm installs.
+9. Run `oas doctor <repo> --soul <name>` and retire the probe.
 
 Gotcha: `spawnInstance` takes the agent object returned by `findAgent`, not a
 name string.
