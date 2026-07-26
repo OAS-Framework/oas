@@ -1,6 +1,9 @@
 # Knowledge Log
 
 ## 2026-07-26
+* **Fix**: [package-runtime-boundary-structured-cli](/decisions/package-runtime-boundary-structured-cli.md) superseded its pre-ruling draft — the recorded surface (packageRuntimeApi probe field, agent show/upsert, spawn --instance/--ephemeral, config get) was maintainer-REJECTED; the decision now records the ruled minimal surface (capability-defined agents, OAS_SETTINGS dispatch, OAS_CLI_BIN, floor+fixture versioning) and the index entry was corrected (reviewer-3f39f2b finding).
+
+## 2026-07-26
 * **Update**: [strict-curriculum-scoping](/references/strict-curriculum-scoping.md) merges the maintainer ruling ledger for strict-curriculum sequencing, Claude spike evidence, AGENTS.md loading semantics, and parity gates.
 * **Creation**: skills/stale-verification-loop — adds the commit-anchored evidence protocol for coordinator loops that re-verify stale commits and request already-landed work.
 * **Creation**: [coordinator-stale-verification-loop](/lessons/coordinator-stale-verification-loop.md) records that stale-verification coordination loops should be answered with branch-head, ancestry, blob-at-head evidence, and explicit ACK references.
