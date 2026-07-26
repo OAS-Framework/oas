@@ -148,6 +148,10 @@ export const DEFAULT_KEYMAP = Object.freeze({
   "tabs.prev": "Ctrl+Shift+Tab",
   "tabs.close": "Mod+W",
   "sidebar.focusFilter": "Mod+Shift+E",
+  "sidebar.toggle": "Mod+B",
+  "split.vertical": "Mod+\\",
+  "split.horizontal": "Mod+Shift+\\",
+  "split.close": "Mod+Alt+W",
   "terminal.fontBigger": "Mod+=",
   "terminal.fontSmaller": "Mod+-",
   "terminal.fontReset": "Mod+0",
@@ -158,6 +162,7 @@ export const DEFAULT_KEYMAP = Object.freeze({
 // action id (not chord) keeps the policy stable across user rebinds.
 export const TERMINAL_ALLOWLIST = Object.freeze([
   "app.palette", "tabs.next", "tabs.prev", "tabs.close",
+  "sidebar.toggle", "split.vertical", "split.horizontal", "split.close",
 ]);
 
 export const CONTEXTS = Object.freeze([
