@@ -2307,3 +2307,44 @@ test("non-reader paths validate residue containers and packages shapes (reviewer
   }
   rmSync(base, { recursive: true, force: true });
 });
+
+// ---------- reviewer-b875620 blocker: devOptional is production-reachable ----------
+
+test("devOptional entries stay IN scan scope — link entry + devOptional target with os constraint rejects (reviewer-b875620)", () => {
+  const base = temp();
+  const s = scope(base);
+  const integ = "sha512-AAA";
+  // npm-shaped lock (npm 10.9.4 repro shape): node_modules/<name> is a bare
+  // link entry; the TARGET carries devOptional + os — installed by the omit set.
+  const src = pkgSource(join(base, "src"), { package: "dv.p" }, { "cap": { capability: "dv.cap" } });
+  write(join(src, "vendor/nat/package.json"), JSON.stringify({ name: "nat", version: "1.0.0" }));
+  write(join(src, "package.json"), JSON.stringify({ name: "dv-p", version: "1.0.0", optionalDependencies: { nat: "file:vendor/nat" } }));
+  write(join(src, "package-lock.json"), JSON.stringify({
+    name: "dv-p", version: "1.0.0", lockfileVersion: 3, requires: true,
+    packages: {
+      "": { name: "dv-p", version: "1.0.0", optionalDependencies: { nat: "file:vendor/nat" } },
+      "node_modules/nat": { resolved: "vendor/nat", link: true },
+      "vendor/nat": { version: "1.0.0", devOptional: true, os: ["darwin"] },
+    },
+  }));
+  assert.throws(() => acquirePackage(s, src), /os\/cpu\/libc/, "devOptional target with an os constraint must not bypass the scan");
+  // a devOptional PURE entry without platform markers still passes (no over-rejection)
+  const ok = pkgSource(join(base, "ok"), { package: "dvo.p" }, { "cap": { capability: "dvo.cap" } });
+  write(join(ok, "vendor/pj/package.json"), JSON.stringify({ name: "pj", version: "1.0.0" }));
+  write(join(ok, "package.json"), JSON.stringify({ name: "dvo-p", version: "1.0.0", optionalDependencies: { pj: "file:vendor/pj" } }));
+  write(join(ok, "package-lock.json"), JSON.stringify({
+    name: "dvo-p", version: "1.0.0", lockfileVersion: 3, requires: true,
+    packages: {
+      "": { name: "dvo-p", version: "1.0.0", optionalDependencies: { pj: "file:vendor/pj" } },
+      "node_modules/pj": { resolved: "vendor/pj", link: true },
+      "vendor/pj": { version: "1.0.0", devOptional: true },
+    },
+  }));
+  // NOTE: per the maintainer's included-optional ruling, entries flagged
+  // `optional: true` reject; devOptional WITHOUT platform markers or optional
+  // flag on the target passes (dev-and-optional duality is metadata, the
+  // materialized bytes are platform-invariant).
+  const r = acquirePackage(scope(base, "s2"), ok);
+  assert.equal(r.root, "dvo.p");
+  rmSync(base, { recursive: true, force: true });
+});
