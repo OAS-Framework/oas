@@ -35,6 +35,7 @@ import {
   tabVisibleInContext, canActivateTab,
   fallbackTabForContext, terminalOpenOwnsWorkspace, restoreTerminalTab,
 } from "./workspace-tabs.mjs";
+import { requestSplit, absorbTab, removeSplitTab, isSplitMember, wireSplitPaneSelection } from "./split-layout.mjs";
 
 const desk = window.oasDesktop;
 initTheme();
@@ -405,6 +406,64 @@ let activeTab = null;
 const wsActiveTerminal = new Map(); // workspace id -> last-active terminal tab key
 const brainIntents = createIntentGate();
 
+// ── split panes: several terminal tabs shown at once in #tabhost ────────
+// Pure transitions live in split-layout.mjs; the shell owns the DOM: member
+// panes become flex cells of #tabhost (orientation row = side-by-side,
+// col = stacked); an empty slot shows a placeholder until the NEXT terminal
+// tab is opened/activated — splits host tabs, so identity resolution and
+// dedup stay exactly the tab path's. Terminal FitAddon refit is automatic:
+// each tab's ResizeObserver fires when its pane is resized by the layout.
+let split = null; // { orientation, members: [tabId], pending } | null
+const splitEmptyEl = (() => {
+  const el = document.createElement("div");
+  el.className = "split-empty";
+  el.setAttribute("role", "note");
+  el.textContent = "Select an instance from the sidebar (or the palette) to fill this pane";
+  return el;
+})();
+
+function renderSplit(splitVisible) {
+  const on = splitVisible && !!split;
+  tabhost.classList.toggle("split-row", on && split.orientation === "row");
+  tabhost.classList.toggle("split-col", on && split.orientation === "col");
+  if (!on) { splitEmptyEl.remove(); return; }
+  // Append only when the pane is out of position: re-inserting an
+  // already-placed node would tear it out of the DOM mid-interaction
+  // (pane-click selection fires activateTab → renderSplit on pointerdown).
+  let anchor = null; // last correctly-placed element
+  for (const id of split.members) {
+    const t = tabs.get(id);
+    if (!t) continue;
+    const inPlace = t.paneEl.parentNode === tabhost && (anchor ? anchor.nextSibling === t.paneEl : true);
+    if (!inPlace) {
+      if (anchor) anchor.after(t.paneEl); else tabhost.append(t.paneEl);
+    }
+    anchor = t.paneEl;
+  }
+  if (split.pending > 0) {
+    if (splitEmptyEl.previousSibling !== anchor || splitEmptyEl.parentNode !== tabhost) {
+      if (anchor) anchor.after(splitEmptyEl); else tabhost.append(splitEmptyEl);
+    }
+  } else splitEmptyEl.remove();
+}
+
+function splitPane(orientation) {
+  const t = tabs.get(activeTab);
+  if (!t || t.kind !== "terminal") return; // splits are terminal-only
+  const r = requestSplit(split, orientation, activeTab);
+  split = r.split;
+  if (!r.changed) return;
+  activateTab(activeTab);
+  // the empty slot is filled by picking an instance — take the user there
+  if (split?.pending > 0) focusRoster();
+}
+
+function closeSplit() {
+  if (!split) return;
+  split = null;
+  if (activeTab != null) activateTab(activeTab);
+}
+
 /** key: optional dedup key — activating an existing tab instead of opening a
  * twin. View modules keep module-level state (they are singletons by design),
  * so one tab per view/file is also a correctness requirement. Callers of a
@@ -436,6 +495,15 @@ function addTab({ title, key, kind = "artifact", workspace = null, onClose, onSh
   triggerEl.addEventListener("click", () => activateTab(id));
   triggerEl.addEventListener("keydown", (e) => onTabKeydown(e, id));
   closeEl.addEventListener("click", (e) => { e.stopPropagation(); closeTab(id, true); });
+  // Split panes: clicking or focusing INTO a visible non-selected member
+  // pane selects its tab (without moving DOM focus — activateTab never
+  // focuses), so tabs.close / further splits target the terminal the user
+  // is actually interacting with.
+  wireSplitPaneSelection(paneEl, {
+    isMember: () => isSplitMember(split, id),
+    isActive: () => activeTab === id,
+    select: () => activateTab(id),
+  });
   tabs.set(id, { tabEl, triggerEl, closeEl, paneEl, title, key, kind, workspace, onClose, onShow });
   activateTab(id);
   return { id, paneEl };
@@ -447,6 +515,10 @@ function activateTab(id) {
   // the mutation boundary before its pane can become active/receive input.
   if (!canActivateTab(current, currentWorkspace())) return false;
   activeTab = id;
+  if (current?.kind === "terminal") {
+    // a pending split slot absorbs the next terminal tab the user lands on
+    split = absorbTab(split, id).split;
+  }
   if (current?.kind === "terminal" && current.workspace) {
     wsActiveTerminal.set(current.workspace, current.key);
   }
@@ -459,14 +531,21 @@ function activateTab(id) {
     setNavActive("spawn");
   }
   showTabLayer(true);
+  // Split panes stay visible only while the ACTIVE tab is a member —
+  // activating a non-member (file/brain/other terminal) covers the split.
+  const splitVisible = isSplitMember(split, id);
   for (const [tid, t] of tabs) {
     const selected = tid === id;
+    const inSplit = splitVisible && isSplitMember(split, tid);
+    const shown = selected || inSplit;
     t.tabEl.classList.toggle("active", selected);
     t.triggerEl.setAttribute("aria-selected", String(selected));
     t.triggerEl.tabIndex = selected ? 0 : -1;
-    t.paneEl.classList.toggle("active", selected);
-    t.paneEl.hidden = !selected;
+    t.paneEl.classList.toggle("active", shown);
+    t.paneEl.classList.toggle("split-cell", inSplit);
+    t.paneEl.hidden = !shown;
   }
+  renderSplit(splitVisible);
   tabs.get(id)?.onShow?.();
   return true;
 }
@@ -484,6 +563,8 @@ function closeTab(id, restoreFocus = false) {
   t.tabEl.remove();
   t.paneEl.remove();
   tabs.delete(id);
+  const wasSplitMember = isSplitMember(split, id);
+  split = removeSplitTab(split, id); // collapses to single-pane when < 2 remain
   if (activeTab === id) {
     const fallback = fallbackTabForContext(tabs, sidebarMode, currentWorkspace());
     if (fallback) {
@@ -505,6 +586,8 @@ function closeTab(id, restoreFocus = false) {
   } else if (restoreFocus) {
     tabs.get(activeTab)?.triggerEl.focus();
   }
+  // a member closed while another member stayed active: re-render the layout
+  if (wasSplitMember && activeTab != null && activeTab !== id) activateTab(activeTab);
 }
 
 // ── view host: load ./views/<name>.mjs, mount into a tab ─────────────────
@@ -727,6 +810,10 @@ const palette = createPalette({
     { label: "Shortcuts: edit keyboard shortcuts…", detail: chordDetail("app.shortcuts"), run: () => openShortcutsEditor() },
     { label: "Workspace: switch…", detail: chordDetail("app.workspaces"), run: () => workspaceLabel.openMenu() },
     { label: "Instances: focus the sidebar roster", detail: chordDetail("sidebar.focusFilter"), run: () => focusRoster() },
+    { label: "Sidebar: toggle (hide/show)", detail: chordDetail("sidebar.toggle"), run: () => toggleSidebar() },
+    { label: "Split: terminal right (side by side)", detail: chordDetail("split.vertical"), run: () => splitPane("row") },
+    { label: "Split: terminal down (stacked)", detail: chordDetail("split.horizontal"), run: () => splitPane("col") },
+    { label: "Split: close (back to single pane)", detail: chordDetail("split.close"), run: () => closeSplit() },
     { label: "Terminal: increase font size", detail: chordDetail("terminal.fontBigger"), run: () => setTerminalFontSize(terminalTypography().fontSize + 1) },
     { label: "Terminal: decrease font size", detail: chordDetail("terminal.fontSmaller"), run: () => setTerminalFontSize(terminalTypography().fontSize - 1) },
     { label: "Terminal: set font family…", run: () => {
@@ -745,6 +832,24 @@ function openShortcutsEditor() { shortcutsEditor.open(); }
 function focusRoster() {
   contextRosterEl?.querySelector(".ctx-filter")?.focus();
 }
+
+// ── hideable sidebar: full-width terminals on demand ───────────────────
+// Class-driven (display:flex on #sidebar beats the hidden attribute) and
+// persisted like the other shell prefs. Terminal refits ride each tab's
+// ResizeObserver — the panes change width when the sidebar goes away.
+const SIDEBAR_HIDDEN_KEY = "oas-desktop-sidebar-hidden";
+function sidebarHidden() {
+  return document.getElementById("app").classList.contains("sidebar-hidden");
+}
+function setSidebarHidden(on) {
+  document.getElementById("app").classList.toggle("sidebar-hidden", on);
+  try {
+    if (on) localStorage.setItem(SIDEBAR_HIDDEN_KEY, "1");
+    else localStorage.removeItem(SIDEBAR_HIDDEN_KEY);
+  } catch { /* storage-less */ }
+}
+function toggleSidebar() { setSidebarHidden(!sidebarHidden()); }
+try { if (localStorage.getItem(SIDEBAR_HIDDEN_KEY) === "1") setSidebarHidden(true); } catch { /* storage-less */ }
 
 function visibleTabEntries() {
   return [...tabs].filter(([, t]) => !t.tabEl.hidden);
@@ -772,6 +877,12 @@ NAV.forEach((v) => registerAction({
 registerAction({ id: "app.themeToggle", label: "Toggle light/dark theme", context: "global", run: () => toggleTheme() });
 registerAction({ id: "app.workspaces", label: "Open the workspace switcher", context: "global", run: () => workspaceLabel.openMenu() });
 registerAction({ id: "sidebar.focusFilter", label: "Focus the instance roster filter", context: "global", run: () => focusRoster() });
+registerAction({ id: "sidebar.toggle", label: "Toggle the sidebar", context: "global", run: () => toggleSidebar() });
+// splits live on the tab layer (they arrange terminal tabs); the actions
+// are terminal-allowlisted so the chords work inside xterm too.
+registerAction({ id: "split.vertical", label: "Split terminal right (side by side)", context: "tabs", run: () => splitPane("row") });
+registerAction({ id: "split.horizontal", label: "Split terminal down (stacked)", context: "tabs", run: () => splitPane("col") });
+registerAction({ id: "split.close", label: "Close the split (single pane)", context: "tabs", run: () => closeSplit() });
 registerAction({ id: "terminal.fontBigger", label: "Terminal: increase font size", context: "global", run: () => setTerminalFontSize(terminalTypography().fontSize + 1) });
 registerAction({ id: "terminal.fontSmaller", label: "Terminal: decrease font size", context: "global", run: () => setTerminalFontSize(terminalTypography().fontSize - 1) });
 registerAction({ id: "terminal.fontReset", label: "Terminal: reset typography", context: "global", run: () => { setTerminalFontFamily(""); setTerminalFontSize(13); } });
@@ -825,6 +936,7 @@ onWorkspaceChange(() => {
   workspaceLabel.reset();
   contextInstances = [];
   contextWorkspace = currentWorkspace();
+  split = null; // splits are per-workspace arrangements of its terminal tabs
   updateContextTabs();
   if (sidebarMode === "instances") showTerminalContext();
   else refreshContextRoster();

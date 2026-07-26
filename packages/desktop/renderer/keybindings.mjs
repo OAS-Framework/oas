@@ -20,6 +20,7 @@ const MOD_ORDER = ["Mod", "Ctrl", "Alt", "Shift"];
 // e.key values normalized so layouts/shift variants land on one spelling.
 const KEY_ALIASES = new Map([
   ["+", "="], // Shift-= / numpad plus both mean the "=" binding (Mod+=)
+  ["|", "\\"], // Shift-\ produces "|" — both mean the "\" binding (Mod+Shift+\)
   ["esc", "escape"],
   [" ", "space"],
   ["spacebar", "space"],
@@ -148,6 +149,10 @@ export const DEFAULT_KEYMAP = Object.freeze({
   "tabs.prev": "Ctrl+Shift+Tab",
   "tabs.close": "Mod+W",
   "sidebar.focusFilter": "Mod+Shift+E",
+  "sidebar.toggle": "Mod+B",
+  "split.vertical": "Mod+\\",
+  "split.horizontal": "Mod+Shift+\\",
+  "split.close": "Mod+Alt+W",
   "terminal.fontBigger": "Mod+=",
   "terminal.fontSmaller": "Mod+-",
   "terminal.fontReset": "Mod+0",
@@ -158,6 +163,7 @@ export const DEFAULT_KEYMAP = Object.freeze({
 // action id (not chord) keeps the policy stable across user rebinds.
 export const TERMINAL_ALLOWLIST = Object.freeze([
   "app.palette", "tabs.next", "tabs.prev", "tabs.close",
+  "sidebar.toggle", "split.vertical", "split.horizontal", "split.close",
 ]);
 
 export const CONTEXTS = Object.freeze([
