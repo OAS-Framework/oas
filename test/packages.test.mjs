@@ -1167,3 +1167,56 @@ test("manifest schema semantics: numeric version/description, extra profile keys
   assert.throws(() => loadPackageManifestAt(mk({ dependencies: ["dup.spec", "dup.spec"] })), (e) => /"dependencies" contains duplicates/.test(e.message));
   rmSync(base, { recursive: true, force: true });
 });
+
+// ---------- reviewer-526dc31 live findings (3–5; 1–2 moot post-redesign) ----------
+
+test("trust QUERY path validates the lock: malformed trustedCapabilities reads as invalid-lock, never trusted", () => {
+  const base = temp();
+  const s = scope(base);
+  const src = pkgSource(join(base, "src"), { package: "tq.p" }, { "cap": { capability: "tq.cap", commands: { r: { exec: "r.mjs" } } } });
+  write(join(src, "cap", "r.mjs"), "//\n");
+  acquirePackage(s, src);
+  approveCapability(s, "tq.cap");
+  // corrupt: capabilities emptied while trust retains the executable capability
+  const lockFile = join(s, OAS_LOCK_FILE);
+  const parsed = JSON.parse(readFileSync(lockFile, "utf8"));
+  parsed.packages["tq.p"].capabilities = [];
+  writeFileSync(lockFile, JSON.stringify(parsed, null, 2));
+  const t = capabilityTrust(s, "tq.cap");
+  assert.equal(t.trusted, false, "malformed lock must never read as trusted");
+  assert.match(t.reason, /invalid|trustedCapabilities|capabilit/i);
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("validateLockEntry: prototype-named dependency, non-array fields, unknown source scheme all fail invalid-lock", () => {
+  const sha = "a".repeat(40);
+  const integ = `sha256-${"0".repeat(64)}`;
+  const mk = (over = {}) => ({ source: "git:https://h/x.git@v1", version: "1", commit: sha, integrity: integ, capabilities: ["x.c"], ...over });
+  assert.throws(() => validateLockEntry("p", mk({ dependencies: ["constructor"] }), {}, {}), (e) => e.code === "invalid-lock" && /constructor/.test(e.message));
+  assert.throws(() => validateLockEntry("p", mk({ dependencies: "notarray" }), {}, {}), (e) => e.code === "invalid-lock" && /must be an array/.test(e.message));
+  assert.throws(() => validateLockEntry("p", mk({ trustedCapabilities: { evil: 1 } }), {}, {}), (e) => e.code === "invalid-lock" && /must be an array/.test(e.message));
+  assert.throws(() => validateLockEntry("p", mk({ source: "weird:thing" }), {}, {}), (e) => e.code === "invalid-lock" && /unrecognized source/.test(e.message));
+});
+
+test("restore repairs a deleted node_modules closure; doctor probes closure staleness", () => {
+  const base = temp();
+  const s = scope(base);
+  const src = pkgSource(join(base, "src"), { package: "rc.p" }, { "cap": { capability: "rc.cap" } });
+  write(join(src, "vendor/dep/package.json"), JSON.stringify({ name: "dep", version: "1.0.0" }));
+  write(join(src, "package.json"), JSON.stringify({ name: "rc-p", version: "1.0.0", dependencies: { dep: "file:vendor/dep" } }));
+  write(join(src, "package-lock.json"), JSON.stringify({ name: "rc-p", version: "1.0.0", lockfileVersion: 3, requires: true, packages: { "": { name: "rc-p", version: "1.0.0", dependencies: { dep: "file:vendor/dep" } }, "node_modules/dep": { resolved: "vendor/dep", link: true }, "vendor/dep": { version: "1.0.0" } } }));
+  gitify(src);
+  acquirePackage(s, `file://${src}`);
+  const dest = join(installedPackagesDir(s), "rc.p");
+  assert.ok(existsSync(join(dest, "node_modules", "dep")));
+  // delete the derived closure: doctor flags it; bare restore repairs it
+  rmSync(join(dest, "node_modules"), { recursive: true, force: true });
+  let r = cli(s, "doctor", s);
+  assert.match(r.stdout, /materialized runtime closure missing/);
+  const rep = restorePackages(s);
+  assert.equal(rep.find((x) => x.package === "rc.p").status, "restored");
+  assert.ok(existsSync(join(dest, "node_modules", "dep")), "closure re-materialized by restore");
+  r = cli(s, "doctor", s);
+  assert.ok(!/materialized runtime closure/.test(r.stdout), "doctor clean after repair");
+  rmSync(base, { recursive: true, force: true });
+});
