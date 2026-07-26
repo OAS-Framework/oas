@@ -14,6 +14,7 @@ read what the current task needs, not everything.
 
 * [decisions/spawn-lineage-explicit-only.md](decisions/spawn-lineage-explicit-only.md) - parentInstance now comes only from an explicit relation/--parent inside the target deployment or the attached-mode owner binding; env vars are never consulted, and cross-deployment spawns stay operator-origin.
 * [decisions/attached-spawns-child-of-work-owner.md](decisions/attached-spawns-child-of-work-owner.md) - attached work mode always makes the new agent a child of the verified work-tree owner; contradictory relations are rejected.
+* [decisions/package-engine-seam-teardown.md](decisions/package-engine-seam-teardown.md) - After the package engine lands, WS2 package CLI code must route resolver semantics to engine exports, keep only WS2 policy helpers, and preserve engine lock and integrity errors instead of wrapping them as prose.
 
 ## Architecture
 
