@@ -1139,9 +1139,13 @@ test("init --package always acquires local sources: a same-ID lock from a differ
   // v2 of the package at a DIFFERENT source path with different content.
   const v2 = fixturePackage(join(base, "v2"), { id: "same.pkg", configs: { d: { path: "configs/default/oas-config.yaml", default: true } }, extraFiles: { "EXTRA.md": "v2 content\n" } });
   const r = cli(["init", "--package", v2, "--json", "--dir", ws]);
-  // FIXED engine behavior (7b2cd36, corrective item 5): re-acquisition against
-  // an existing same-scope lock with different resolved integrity is
-  // integrity-drift with the oas update pointer — never re-legitimized.
+  // FIXED engine behavior (7b2cd36, corrective item 5). The contract sentence
+  // (agreed dev-to-dev with WS1): "an existing same-scope lock is the
+  // invariant — neither a drifted source nor a drifted/missing artifact may
+  // silently re-lock without oas update." Re-acquisition against an existing
+  // same-scope lock with different resolved integrity is integrity-drift with
+  // the oas update pointer — never re-legitimized. (The CLI surfaces kernel
+  // codes AS the envelope code: error.code === "integrity-drift", no E_ wrapper.)
   assert.equal(r.status, 1, `same-ID different-source init must not bypass acquisition:\n${r.stdout}`);
   const env = JSON.parse(r.stdout);
   assert.equal(env.ok, false);
@@ -1172,6 +1176,43 @@ test("an explicit command: null requirement is malformed, not absent — fail-cl
   const env = JSON.parse(r.stdout);
   assert.equal(env.error.code, "E_RECONCILE_FAILED");
   assert.equal(env.error.details.requirements[0].code, "E_REQUIREMENT_POLICY");
+});
+
+test("configless-scope provider shadowing: own-scope acquired manifests override an outer same-identity package", () => {
+  const base = temp();
+  // OUTER scope: dep.pkg exporting dep.cap with layer KNOWLEDGE.
+  const outer = join(base, "outer");
+  write(join(outer, "oas-config.yaml"), "name: outer\n");
+  const outerSrc = fixturePackage(join(base, "outer-src"), {
+    id: "dep.pkg",
+    capabilities: { "capabilities/dep": { capability: "dep.cap", version: "1.0.0", description: "x", layer: "knowledge", compatibility: { oas: ">=0.6.2" } } },
+    configs: {},
+  });
+  installFixturePackage(outer, outerSrc);
+  // INNER configless scope: freshly acquired dep.pkg whose dep.cap declares MESSAGING,
+  // plus a root package binding dep.cap to knowledge in its profile.
+  const innerDepSrc = fixturePackage(join(base, "inner-dep-src"), {
+    id: "dep.pkg",
+    capabilities: { "capabilities/dep": { capability: "dep.cap", version: "2.0.0", description: "x", layer: "messaging", compatibility: { oas: ">=0.6.2" } } },
+    configs: {},
+  });
+  const rootSrc = fixturePackage(join(base, "root-src"), {
+    id: "root.pkg",
+    capabilities: { "capabilities/root": { capability: "root.cap", version: "1.0.0", description: "x", compatibility: { oas: ">=0.6.2" } } },
+    dependencies: ["../inner-dep-src"],
+    extraFiles: { "configs/k/oas-config.yaml": "name: w\ncapabilities:\n  layers:\n    knowledge:\n      capability: dep.cap\n      from: installed\n" },
+    configs: { k: { path: "configs/k/oas-config.yaml", default: true } },
+  });
+  const ws = join(outer, "member"); mkdirSync(ws, { recursive: true });
+  // Pre-fix: listInstalledPackages returned the OUTER dep.pkg (knowledge) and the
+  // byId.has() guard skipped the inner artifact — the invalid knowledge binding
+  // snapshotted, then config resolution failed on the written file.
+  const r = cli(["init", "--package", rootSrc, "--json", "--dir", ws]);
+  assert.equal(r.status, 1, `inner provider's layer (messaging) must govern:\n${r.stdout}`);
+  const env = JSON.parse(r.stdout);
+  assert.equal(env.error.code, "E_PROFILE_INVALID");
+  assert.match(env.error.message, /layer knowledge binds dep\.cap, but its manifest declares layer "messaging"/);
+  assert.equal(existsSync(join(ws, "oas-config.yaml")), false, "no invalid snapshot written");
 });
 
 // ---------- oas.dev consumer fixture (primary WS2 acceptance case) ----------

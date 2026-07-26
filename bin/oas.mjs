@@ -258,15 +258,13 @@ function doctorJson(dir) {
     retiredLocks: Object.entries(readCapabilityLocks(ctx))
       .filter(([id]) => RETIRED_CAPABILITIES[id])
       .map(([id, lock]) => ({ id, file: lock._file, reason: RETIRED_CAPABILITIES[id] })),
-    // Shared WS2+engine package payload (fix 4: human and JSON doctor derive
-    // from ONE computation; fail-closed reads are diagnosed via lockError).
-    migrationResidue: pkg.migrationResidue,
-    legacyLockFiles: pkg.legacyLockFiles,
-    lockError: pkg.lockError,
     retiredArtifacts: Object.entries(mans)
       .filter(([id]) => RETIRED_CAPABILITIES[id])
       .map(([id, m]) => ({ id, dir: m._dir, origin: m._origin, reason: RETIRED_CAPABILITIES[id] })),
+    // Shared WS2+engine package payload (fix 4: human and JSON doctor derive
+    // from ONE computation; fail-closed reads are diagnosed via lockError).
     packages: pkg.packages,
+    lockError: pkg.lockError,
     legacyLockFiles: pkg.legacyLockFiles,
     migrationResidue: pkg.migrationResidue,
     profileProvenance: pkg.profileProvenance,
@@ -1045,15 +1043,18 @@ function dependencyClosureProviders(rootId, dir) {
   // The scope's own lock is read directly: during init no oas-config.yaml
   // exists there yet, so configChain-based reads cannot see that level.
   const locks = { ...readPackageLocks(dir).packages };
+  const ownLock = {};
   try {
     const parsed = JSON.parse(readFileSync(join(dir, OAS_LOCK_FILE), "utf8"));
-    if (parsed.lockfileVersion === 2) for (const [id, e] of Object.entries(parsed.packages || {})) locks[id] ||= e;
+    if (parsed.lockfileVersion === 2) for (const [id, e] of Object.entries(parsed.packages || {})) { ownLock[id] = e; locks[id] = e; }
   } catch { /* no own lock (or fail-closed raise — init surfaces it at acquire) */ }
   const byId = new Map(listInstalledPackages(dir).map((p) => [p.package, p]));
-  // Own-scope store read directly too (configChain cannot index a level with
-  // no oas-config.yaml yet — the closure was just acquired there).
-  for (const id of Object.keys(locks)) {
-    if (byId.has(id)) continue;
+  // Own-scope store OVERWRITES byId for every identity in the target scope's
+  // OWN lock (reviewer-ea6a77a): listInstalledPackages cannot index a
+  // configless level, so it may have returned an OUTER package with the same
+  // identity — the merged lock graph selects the inner entry, so provider
+  // manifests must come from the own-scope artifact, never the shadowed outer.
+  for (const id of Object.keys(ownLock)) {
     const d = join(installedPackagesDir(dir), id);
     if (!existsSync(join(d, "oas-package.json"))) continue;
     try {
