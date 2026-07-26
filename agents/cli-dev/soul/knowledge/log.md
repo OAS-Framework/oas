@@ -1,6 +1,7 @@
 # Knowledge Log
 
 ## 2026-07-26
+* **Creation**: [frozen-package-engine-contract-alignment](/lessons/frozen-package-engine-contract-alignment.md) records the package-engine frozen-contract alignment points for shared-reader envelopes, schema-verbatim fixtures, and `error.code` taxonomy reuse.
 * **Creation**: [team-boundary-scan-pruning](/lessons/team-boundary-scan-pruning.md) records team-boundary reconciliation discovery pruning by directory name, agent-home structure, nested team declarations, and symlink skipping.
 * **Creation**: [requirement-recipes-data-allowlist](/lessons/requirement-recipes-data-allowlist.md) records the allowlisted, argv-only, consented host-requirement install plan and PATH verification pattern.
 * **Creation**: [package-profile-validation-config-shape](/lessons/package-profile-validation-config-shape.md) records that package config profiles reuse the kernel config-shape validator while package-only checks stay in lib/packages.mjs.
