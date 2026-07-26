@@ -65,7 +65,7 @@ read what the current task needs, not everything.
 ## References
 
 * [references/oas-expert-decisions.md](references/oas-expert-decisions.md) - pointers to the canonical Decision records and docs governing this area.
-* [references/strict-curriculum-scoping.md](references/strict-curriculum-scoping.md) - Key launch-path facts gathered while scoping strict instance curriculum enforcement: pi can combine --no-skills with explicit --skill, Claude Code isolation needs CLAUDE_CONFIG_DIR plus a version-probed allowlist, and enforcement belongs in spawnInstance command-line construction.
+* [references/strict-curriculum-scoping.md](references/strict-curriculum-scoping.md) - Launch-path facts and maintainer rulings for strict instance curriculum enforcement: Pi strict mode is viable, Claude requires a real-runtime spike, repo AGENTS files stay visible but not auto-loaded, and parity acceptance gates README claims.
 
 Grow role-specific sections beyond these as the agent's role demands — list
 them here and log the growth in log.md.

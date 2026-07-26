@@ -1383,3 +1383,80 @@ test("residue collision blocks unrelated acquires when a RETAINED locked package
   assert.throws(() => acquirePackage(s, other), (e) => e.code === "duplicate-capability-id" && /pre\.p/.test(e.message) && e.provenance.some((x) => String(x).startsWith("residue:")));
   rmSync(base, { recursive: true, force: true });
 });
+
+// ---------- reviewer-775b060 findings: complete JSON envelope coverage ----------
+
+test("install --json envelopes every branch: missing path, retired id, legacy success, already-acquired", () => {
+  const base = temp();
+  const s = scope(base);
+  // missing local path → invalid-source envelope
+  let env = JSON.parse(cli(s, "install", "path:/definitely/missing", "--dir", s, "--json").stdout);
+  assert.equal(env.ok, false);
+  assert.equal(env.error.code, "invalid-source");
+  // retired capability id → retired-capability envelope
+  env = JSON.parse(cli(s, "install", "oas.web", "--dir", s, "--json").stdout);
+  assert.equal(env.ok, false);
+  assert.equal(env.error.code, "retired-capability");
+  // legacy capability success → ONE object
+  const legacy = join(base, "cap");
+  write(join(legacy, "oas.json"), JSON.stringify({ capability: "lj.cap", version: "1.0.0", description: "d" }));
+  let r = cli(s, "install", legacy, "--dir", s, "--json");
+  env = JSON.parse(r.stdout); // throws on prose contamination
+  assert.equal(env.ok, true);
+  assert.equal(env.result.capability, "lj.cap");
+  // re-install of the same path → enveloped refusal (never silent update), not prose
+  env = JSON.parse(cli(s, "install", legacy, "--dir", s, "--json").stdout);
+  assert.equal(env.ok, false);
+  assert.equal(env.error.code, "invalid-source");
+  assert.match(env.error.message, /never silently updates/);
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("bare restore --json failure uses a frozen taxonomy code and the exact failure envelope shape", () => {
+  const base = temp();
+  const s = scope(base);
+  // v1 lock naming a missing path source → restore failure
+  writeCapabilityLock(s, "gone.cap", { source: "path:/nope/missing", version: "1", integrity: `sha256-${"a".repeat(64)}` });
+  const r = cli(s, "install", "--dir", s, "--json");
+  const env = JSON.parse(r.stdout);
+  assert.equal(env.ok, false);
+  assert.deepEqual(Object.keys(env).sort(), ["error", "ok", "schemaVersion"], "EXACT failure shape — no extra top-level keys");
+  assert.ok(env.error.code && !env.error.code.startsWith("E_") || ["E_USAGE", "E_BAD_ARGS"].includes(env.error.code), `taxonomy code, got ${env.error.code}`);
+  assert.notEqual(r.status, 0);
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("trust/migrate --json: usage and malformed-lock failures stay enveloped", () => {
+  const base = temp();
+  const s = scope(base);
+  // trust usage error → envelope
+  let env = JSON.parse(cli(s, "trust", "--dir", s, "--json").stdout);
+  assert.equal(env.ok, false);
+  assert.equal(env.error.code, "E_USAGE");
+  // malformed lock JSON → migrate --dry-run --json envelopes invalid-lock (no stack trace)
+  writeFileSync(join(s, OAS_LOCK_FILE), "{ definitely not json");
+  const r = cli(s, "migrate", "--dry-run", "--dir", s, "--json");
+  env = JSON.parse(r.stdout);
+  assert.equal(env.ok, false);
+  assert.equal(env.error.code, "invalid-lock");
+  // trust against the malformed lock also envelopes (unknown target probes first;
+  // both are one-object failures with taxonomy codes)
+  env = JSON.parse(cli(s, "trust", "whatever.cap", "--dir", s, "--json").stdout);
+  assert.equal(env.ok, false);
+  assert.ok(["invalid-lock", "unknown-capability"].includes(env.error.code), env.error.code);
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("bulk trust --json prints the pre-approval surface on stderr, one object on stdout", () => {
+  const base = temp();
+  const s = scope(base);
+  const src = pkgSource(join(base, "src"), { package: "bt.p" }, { "c1": { capability: "bt.a", commands: { x: { exec: "x.mjs" } } } });
+  write(join(src, "c1", "x.mjs"), "//\n");
+  cli(s, "install", src, "--dir", s);
+  const r = cli(s, "trust", "bt.p", "--all-capabilities", "--dir", s, "--json");
+  const env = JSON.parse(r.stdout); // one object
+  assert.equal(env.ok, true);
+  assert.match(r.stderr, /full executable surface/, "pre-approval summary on stderr in JSON mode");
+  assert.match(r.stderr, /bt\.a: commands \[x\]/);
+  rmSync(base, { recursive: true, force: true });
+});
