@@ -1047,17 +1047,14 @@ test("init --package --json: one envelope with lockFile/lockedPackages, stable e
   const w3 = join(base, "w3"); mkdirSync(w3);
   const r5 = cli(["init", "--package", bad, "--json", "--dir", w3]);
   assert.equal(JSON.parse(r5.stdout).error.code, "E_PROFILE_INVALID");
-  // engine code pass-through: broken manifest fails without writing a config.
-  // KNOWN ENGINE GAP (flagged to the coordinator for WS1): a manifest parsing
-  // to JSON null crashes loadPackageManifestAt with an uncoded TypeError
-  // instead of invalid-package-manifest; until WS1 fixes it the CLI surfaces
-  // E_ACQUIRE_FAILED. Tighten to the verbatim engine code when that lands.
+  // engine code pass-through: broken manifest fails without writing a config
+  // (engine gap a is fixed: JSON null manifests carry invalid-package-manifest)
   const broken = join(base, "broken");
   write(join(broken, "oas-package.json"), "null");
   const w4 = join(base, "w4"); mkdirSync(w4);
   const r6 = cli(["init", "--package", broken, "--json", "--dir", w4]);
   assert.equal(r6.status, 1);
-  assert.ok(["invalid-package-manifest", "E_ACQUIRE_FAILED"].includes(JSON.parse(r6.stdout).error.code), r6.stdout);
+  assert.equal(JSON.parse(r6.stdout).error.code, "invalid-package-manifest");
   assert.equal(existsSync(join(w4, "oas-config.yaml")), false, "no failure path may write a config");
 });
 
@@ -1110,13 +1107,13 @@ test("init --package on a configless scope sees same-lock dependency capabilitie
     capabilities: { "capabilities/dep-cap": { capability: "dep.cap", version: "1.0.0", description: "x" } },
     configs: {},
   });
-  // root package whose profile references a capability supplied ONLY by a dependency.
-  // NOTE (engine gap, flagged): relative dependency paths resolve against CWD,
-  // not the depending package root — use an absolute path here.
+  // root package whose profile references a capability supplied ONLY by a
+  // dependency, declared as a PACKAGE-ROOT-RELATIVE path (engine gap b fixed:
+  // relative dependency paths resolve against the depending package's root).
   const root = fixturePackage(join(base, "root"), {
     id: "root.pkg",
     capabilities: { "capabilities/root-cap": { capability: "root.cap", version: "1.0.0", description: "x" } },
-    dependencies: [dep],
+    dependencies: ["../some-repo-dir"],
     extraFiles: { "configs/d/oas-config.yaml": "name: w\ncapabilities:\n  additive:\n    dep.cap:\n      from: installed\n      global: true\n" },
     configs: { d: { path: "configs/d/oas-config.yaml", default: true } },
   });
@@ -1211,10 +1208,10 @@ function oasDevFixture(base) {
     configs: {
       default: { path: "configs/default/oas-config.yaml", description: "OAS project workspace defaults", default: true },
     },
-    // WS3-coordination point: dependency spec form (absolute local path now —
-    // the engine resolves relative dep paths against CWD, flagged; official
-    // catalog selector once WS3's catalog lands).
-    dependencies: [dep],
+    // WS3-coordination point: dependency spec form (package-root-relative
+    // local path now — engine gap b fixed; becomes an official catalog
+    // selector once WS3's catalog lands).
+    dependencies: ["../oas-knowledge"],
   }, null, 2));
   write(join(root, "configs", "default", "oas-config.yaml"), [
     "name: workspace",
