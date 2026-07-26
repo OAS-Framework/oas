@@ -295,6 +295,55 @@ test("preselect during a workspace switch is not consumed against the stale rost
   assert.match(dialog.textContent, /Spawn b-soul/);
 });
 
+test("a deferred preselect dies with the view: defer → unmount → remount opens no modal (review 04584f9)", async (t) => {
+  const dom = new JSDOM("<!doctype html><body><div id=host></div>", { url: "http://localhost" });
+  const oldDoc = globalThis.document, oldWin = globalThis.window;
+  globalThis.document = dom.window.document;
+  globalThis.window = dom.window;
+  const common = await import("../renderer/views/common.mjs");
+  const cliStatus = await import("../renderer/views/cli-status.mjs");
+  const spawn = await import("../renderer/views/spawn.mjs");
+  await cliStatus.refreshCli({ api: async () => ({ ok: true, status: 200, json: async () => CLI_OK }) });
+  let hangAgents = false;
+  let releaseHung;
+  const ctx = {
+    api: async (pathname) => {
+      if (pathname.startsWith("/api/cli")) return { ok: true, status: 200, json: async () => CLI_OK };
+      if (pathname.startsWith("/api/agents")) {
+        if (hangAgents) return { ok: true, status: 200, json: () => new Promise((ok) => { releaseHung = () => ok({ agents: [{ name: "b-soul", work: "worktree", agentsRoot: "/b" }] }); }) };
+        return { ok: true, status: 200, json: async () => ({ agents: [{ name: "b-soul", work: "worktree", agentsRoot: "/b" }] }) };
+      }
+      if (pathname.startsWith("/api/panel")) return { ok: true, status: 200, json: async () => ({ instances: [], workspace: { id: "wsB" }, workspaces: [] }) };
+      throw new Error(`unexpected ${pathname}`);
+    },
+    openTerminal: () => {},
+  };
+  const prevWs = common.currentWorkspace();
+  t.after(() => {
+    spawn.unmount();
+    common.setWorkspace(prevWs || "");
+    globalThis.document = oldDoc; globalThis.window = oldWin;
+    dom.window.close();
+  });
+  common.setWorkspace("wsB");
+  hangAgents = true; // the mount's roster fetch hangs — preselect must DEFER
+  spawn.mount(dom.window.document.getElementById("host"), ctx);
+  await tick();
+  spawn.preselectSoul({ name: "b-soul", agentsRoot: "/b" });
+  assert.equal(dom.window.document.querySelector(".spawn-dialog"), null, "deferred while the roster hangs");
+  // navigate away before the roster resolves — the deferred intent must die
+  spawn.unmount();
+  releaseHung?.();
+  await tick(); await tick();
+  // return to Spawn in the SAME workspace generation
+  hangAgents = false;
+  spawn.mount(dom.window.document.getElementById("host"), ctx);
+  await tick(); await tick();
+  assert.match(dom.window.document.body.textContent, /b-soul/, "remounted roster painted");
+  assert.equal(dom.window.document.querySelector(".spawn-dialog"), null,
+    "a preselect deferred before unmount must never pop a modal on remount");
+});
+
 test("preselect of an attached soul hidden by an active filter clears the filter and focuses the card", async (t) => {
   const { dom, doc, spawn } = await mountSpawn(t);
   const filter = doc.querySelector(".filter");

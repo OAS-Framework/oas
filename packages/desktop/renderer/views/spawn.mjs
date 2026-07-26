@@ -217,6 +217,11 @@ export function mount(el, ctx) {
 
 export function unmount() {
   if (!state) return;
+  // A deferred preselect (Quick Open handoff waiting for the current
+  // workspace's roster paint) dies with the view: leaving it pending would
+  // let a remount minutes later pop a modal the user no longer expects
+  // (review 04584f9 — the consumed-once/stale-intent contract).
+  pendingPreselect = null;
   state.alive = false;
   state.timers.forEach(clearInterval);
   (state.disposers || []).forEach((off) => { try { off(); } catch {} });
