@@ -24,7 +24,7 @@ import { createViewLifecycle } from "./view-lifecycle.mjs";
 import { reserveKey, whenKeyFree } from "./tab-keys.mjs";
 import { createTerminalTab, terminalOptions } from "./terminal-tab.mjs";
 import { createTabChrome, tabKeyAction, focusAfterLastTab } from "./tab-a11y.mjs";
-import { createIntentGate, prepareOwnedOpen } from "./open-intent.mjs";
+import { createIntentGate, prepareOwnedOpen, runOpenFlow } from "./open-intent.mjs";
 import { createWorkspaceSwitcher } from "./workspace-switcher.mjs";
 import { NAV, stageSidebarMode, loadStageView } from "./shell-nav.mjs";
 import {
@@ -671,6 +671,15 @@ const pendingTerms = new Set(); // keys with a tab CREATION in flight (post-reso
  * become ambiguous (resolution refuses before dedup can activate). */
 async function openTerminalTab(ref, { quiet = false } = {}) {
   const notify = quiet ? (msg) => console.warn(`[terminal open] ${msg}`) : (msg) => alert(msg);
+  // Quiet opens must NEVER reject either (review ff70e1c nit): the refusal
+  // messages route through notify, but transport failures (the panel fetch,
+  // the tab mount) would still escape as an unhandled rejection from an
+  // automated caller that does not await. runOpenFlow catches every quiet
+  // rejection into notify; interactive opens keep throwing.
+  return runOpenFlow(() => openTerminalTabFlow(ref, notify), { quiet, notify });
+}
+
+async function openTerminalTabFlow(ref, notify) {
   // A sidebar-tree selection opens its terminal directly — the persistent
   // sidebar roster IS the instances surface (there is no Instances stage;
   // scope correction of PR #29).

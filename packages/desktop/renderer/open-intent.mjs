@@ -29,3 +29,18 @@ export async function prepareOwnedOpen({ owns, waitForKey, load }) {
     throw error;
   }
 }
+
+/** Run an async open flow with a failure policy (review ff70e1c nit):
+ * quiet (automated callers — the post-spawn handoff fires without awaiting)
+ * catches EVERY rejection into notify so an unhandled rejection can never
+ * escape; interactive opens rethrow so their callers surface errors their
+ * own way. Importable so the rejection-path regression exercises this exact
+ * layer (composition-root rule). */
+export async function runOpenFlow(flow, { quiet = false, notify = () => {} } = {}) {
+  if (!quiet) return flow();
+  try {
+    return await flow();
+  } catch (e) {
+    notify(e?.message || String(e));
+  }
+}

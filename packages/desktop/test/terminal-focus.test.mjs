@@ -62,6 +62,13 @@ test("post-spawn auto-open is QUIET: openTerminalTab failures route through noti
     "openTerminalTab accepts a quiet option");
   assert.match(src, /const notify = quiet \? \(msg\) => console\.warn\(`\[terminal open\] \$\{msg\}`\) : \(msg\) => alert\(msg\);/,
     "quiet opens warn instead of blocking with alert");
+  // the WHOLE open flow runs under runOpenFlow so quiet transport failures
+  // (panel fetch, tab mount) can never escape as an unhandled rejection —
+  // behavioral coverage lives in open-intent.test.mjs (review ff70e1c nit)
+  assert.match(src, /return runOpenFlow\(\(\) => openTerminalTabFlow\(ref, notify\), \{ quiet, notify \}\);/,
+    "quiet rejection containment wraps the whole flow via the importable runOpenFlow");
+  assert.match(src, /import \{ createIntentGate, prepareOwnedOpen, runOpenFlow \} from "\.\/open-intent\.mjs";/,
+    "shell imports runOpenFlow from the tested module");
   // ctx.openTerminal forwards opts so views can request the quiet handoff
   assert.match(src, /openTerminal: \(instance, opts\) => openTerminalTab\(instance, opts\)/,
     "shell ctx.openTerminal forwards the options seam");
