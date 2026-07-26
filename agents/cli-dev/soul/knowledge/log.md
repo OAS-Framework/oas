@@ -1,6 +1,8 @@
 # Knowledge Log
 
 ## 2026-07-26
+* **Creation**: [symlink-containment-walker-throws](/lessons/symlink-containment-walker-throws.md) records the recursive symlink walker lesson: broad lstat probe catches can swallow deeper path-escape throws, so guards must be narrowed and real npm `file:` symlink layouts must be tested.
+* **Update**: [test-conventions](/playbooks/test-conventions.md) records the real `npm ci` `file:` symlink fixture shape for symlink-containment walker regressions.
 * **Fix**: [package-runtime-boundary-structured-cli](/decisions/package-runtime-boundary-structured-cli.md) superseded its pre-ruling draft — the recorded surface (packageRuntimeApi probe field, agent show/upsert, spawn --instance/--ephemeral, config get) was maintainer-REJECTED; the decision now records the ruled minimal surface (capability-defined agents, OAS_SETTINGS dispatch, OAS_CLI_BIN, floor+fixture versioning) and the index entry was corrected (reviewer-3f39f2b finding).
 
 ## 2026-07-26
