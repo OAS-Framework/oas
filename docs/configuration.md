@@ -311,6 +311,14 @@ leading `# template:` comment, rewrites `name:`, strips the `templates:` map,
 and runs a restore so declared external capabilities are present. Later
 template edits never propagate silently.
 
+### Package config profiles
+
+When the config and its capability providers travel together, prefer
+`oas init --package <source> [--config <name>]` — it validates and snapshots a
+reference profile shipped by a distribution package, with package/profile/
+commit provenance, and `oas config diff` reports later drift. See
+[Distribution packages](packages.md).
+
 ## Fundamental-layer disable
 
 An inner scope can suppress an inherited integration without selecting a

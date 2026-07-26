@@ -28,6 +28,13 @@ import {
   ensureRoot, findRoot, findAgent, listAgents, listInstances, listAgentDefs, createAgent as coreCreateAgent,
   spawnInstance, retireInstance, upsertLocalAgent, defaultRepo, RELATIONS,
 } from "../lib/core.mjs";
+import {
+  aggregateMissingRequirements, diffConfigTexts, discoverWorkspaceScopes, installedPackageDir,
+  loadPackageManifest, lockedPackageCapabilities,
+  parseProfileProvenance, profileProvenanceHeader, readPackageLocks, readPackageLocksAt, readProfileText,
+  requirementInstallPlan, resolvePackageSource, runRequirementInstall, selectProfile, validateProfile,
+  packageCapabilityIds,
+} from "../lib/packages.mjs";
 
 const args = process.argv.slice(2);
 const cmd = args[0];
@@ -206,6 +213,42 @@ function doctor(dir) {
     if (String(m._origin).startsWith("installed:") && !locks[id]) console.log(`  WARNING: ${id} at ${shortPath(m._dir)} is in installed/ but has no lock entry — reacquire it or move it to owned/`);
   }
   if (existsSync(LEGACY_HOME_CAPABILITIES_DIR)) console.log(`  WARNING: legacy ~/.oas/capabilities exists and is no longer discovered — reinstall its packages at a config scope and remove it`);
+
+  // Distribution packages: profile provenance, available-but-unapplied profiles, missing host commands.
+  const pkgLocks = readPackageLocks(ctx).packages;
+  if (Object.keys(pkgLocks).length) {
+    console.log("\nDistribution packages:");
+    for (const [id, lock] of Object.entries(pkgLocks)) {
+      console.log(`  ${id}  ${lock.version || ""}  [${shortPath(lock._level)}]  source: ${lock.source || "?"}`);
+      if (lock.capabilities?.length) console.log(`             capabilities: ${lock.capabilities.join(", ")}`);
+    }
+  }
+  for (const cfg of chain) {
+    const prov = parseProfileProvenance(readFileSync(cfg._file, "utf8"));
+    if (prov) console.log(`\nConfig profile provenance: ${shortPath(cfg._file)} adopted ${prov.package}${prov.ref ? `@${prov.ref}` : ""} profile "${prov.profile}" (snapshot — compare with \`oas config diff\`)`);
+  }
+  // Available-but-unapplied profile: a locked package exports config profiles but no chain config carries its provenance.
+  const adoptedPackages = new Set(chain.map((c) => parseProfileProvenance(readFileSync(c._file, "utf8"))?.package).filter(Boolean));
+  for (const [id, lock] of Object.entries(pkgLocks)) {
+    if (adoptedPackages.has(id)) continue;
+    const pkgDir = installedPackageDir(lock, id);
+    if (!pkgDir) continue;
+    try {
+      const m = loadPackageManifest(pkgDir);
+      const profiles = Object.keys(m?.configs || {});
+      if (profiles.length) console.log(`\nNOTE: package ${id} exports config profile${profiles.length > 1 ? "s" : ""} (${profiles.join(", ")}) not applied at any scope — adopt one with \`oas init --package ${id}${profiles.length > 1 ? " --config <name>" : ""}\` at a fresh scope`);
+    } catch { /* broken installed package reported through capability paths */ }
+  }
+  const missingReqs = aggregateMissingRequirements([ctx]);
+  if (missingReqs.length) {
+    console.log("\nMissing host commands (active capabilities):");
+    for (const req of missingReqs) {
+      console.log(`  ${req.command} — ${req.why || "required"} (requested by: ${req.requestedBy.map((r) => r.capability).join(", ")})`);
+      if (req.plan && !req.plan.unavailable) console.log(`             install with consent: oas install --accept-requirement ${req.command}  (runs: ${req.plan.argv.join(" ")})`);
+      else if (req.docs) console.log(`             install docs: ${req.docs}`);
+    }
+  }
+
   if (soulName) {
     const composition = doctorComposition(ctx, soulName);
     console.log(`\nFinal composed AGENTS.md for ${soulName}:\n\n${composition.text}`);
@@ -377,7 +420,7 @@ function use() {
 function install() {
   const src = args[1];
   const dir = resolve(flag("dir") || process.cwd());
-  if (!src || src.startsWith("--")) { restore(dir); return; }
+  if (!src || src.startsWith("--")) { reconcile(dir); return; }
   if (RETIRED_CAPABILITIES[src]) die(`${RETIRED_CAPABILITIES[src]}`);
   const known = capabilityManifest(src, dir);
   if (known) {
@@ -401,18 +444,176 @@ function install() {
   else if (r.manifest.commands || r.manifest.hooks) console.log(`Executable surface is blocked until: oas trust ${r.manifest.capability} --dir ${shortPath(dir)}`);
 }
 
-/** Bare `oas install`: restore every locked-but-missing capability in the config chain. */
+/** Lock-file levels from dir upward (closest last — outermost first), like restoreCapabilities' walk. */
+function lockLevelsUp(dir) {
+  const levels = [];
+  for (let d = resolve(dir); ; d = dirname(d)) {
+    if (existsSync(join(d, OAS_LOCK_FILE))) levels.push(d);
+    if (dirname(d) === d) break;
+  }
+  return levels.reverse();
+}
+
+/** Check one level's v2 package locks against the installed package store.
+ * Phase 1: the engine's restorePackages is not merged yet — a locked package
+ * whose installed artifact is present reports ok; a missing artifact is a
+ * clear FAILURE, never silent success. Returns report items. */
+function packageLockReport(level) {
+  const out = [];
+  for (const [pkgId, lock] of Object.entries(readPackageLocksAt(level))) {
+    const installed = installedPackageDir(lock, pkgId);
+    if (installed) out.push({ id: pkgId, level, status: "present", dir: installed, package: true });
+    else out.push({ id: pkgId, level, status: "failed", package: true, reason: "locked package is not installed and package restore (engine restorePackages) is not available yet — reacquire it explicitly" });
+  }
+  return out;
+}
+
+/** Bare `oas install`: restore every locked-but-missing capability in the config chain
+ * and verify every v2 package lock in the chain against the installed store. */
 function restore(dir) {
-  const report = restoreCapabilities(dir);
+  const report = [...restoreCapabilities(dir), ...lockLevelsUp(dir).flatMap(packageLockReport)];
   if (!report.length) { console.log("Nothing to restore — no locked capabilities in the config chain."); return; }
   let failed = 0;
   for (const r of report) {
-    if (r.status === "present") console.log(`ok        ${r.id}  (${shortPath(r.dir)})`);
-    else if (r.status === "restored") console.log(`restored  ${r.id} → ${shortPath(r.dir)}  (${r.integrity})`);
-    else if (r.status === "retired") console.log(`RETIRED   ${r.id}  ${r.reason}`);
-    else { failed++; console.log(`FAILED    ${r.id}  ${r.reason}`); }
+    const what = r.package ? `package ${r.id}` : r.id;
+    if (r.status === "present") console.log(`ok        ${what}  (${shortPath(r.dir)})`);
+    else if (r.status === "restored") console.log(`restored  ${what} → ${shortPath(r.dir)}  (${r.integrity})`);
+    else if (r.status === "retired") console.log(`RETIRED   ${what}  ${r.reason}`);
+    else { failed++; console.log(`FAILED    ${what}  ${r.reason}`); }
   }
-  if (failed) die(`${failed} capabilit${failed > 1 ? "ies" : "y"} could not be restored`);
+  if (failed) die(`${failed} artifact${failed > 1 ? "s" : ""} could not be restored`);
+}
+
+/** Bare `oas install` at a team boundary: reconcile the whole workspace — restore the
+ * boundary scope's graph (its ancestor chain), then every descendant scope's own
+ * lock graph EXACTLY ONCE, in deterministic path order, with pruned discovery;
+ * verify v2 package locks against the installed package store; validate
+ * config-referenced capabilities against visible locked packages; aggregate
+ * missing requirements and failures by scope.
+ * Non-team scopes keep current-chain behavior unless --recursive names a boundary. */
+function reconcile(dir) {
+  const cfgFile = join(dir, "oas-config.yaml");
+  const declaresTeamHere = existsSync(cfgFile) && !!parseYamlNested(readFileSync(cfgFile, "utf8")).team;
+  const recursive = args.includes("--recursive");
+  if (!declaresTeamHere && !recursive) {
+    // Current-chain behavior, plus the requirements gate for this chain's active capabilities.
+    restore(dir);
+    const failed = requirementsGate([dir]);
+    if (failed) die(`${failed} consented requirement install${failed > 1 ? "s" : ""} failed`);
+    return;
+  }
+  const boundary = dir;
+  // The chosen boundary is printed BEFORE any network or host work — always.
+  console.log(`Workspace reconciliation boundary: ${shortPath(boundary)}${declaresTeamHere ? " (team scope)" : " (--recursive)"}`);
+  const scopes = [boundary, ...discoverWorkspaceScopes(boundary)];
+  const failures = [];
+  const reported = [];
+  const restoredLevels = new Set(); // each lock level's graph restores exactly once
+  const packageCheckedLevels = new Set(); // each level's package locks verified exactly once
+  for (const scope of scopes) {
+    // Boundary: full ancestor chain (current-chain semantics). Descendants: their
+    // own level only — every level between boundary and descendant is either the
+    // boundary chain or an earlier discovered scope, so no level repeats and no
+    // failed ancestor restore is retried (or hidden) per descendant.
+    const chainLevels = scope === boundary ? undefined : [scope];
+    const report = restoreCapabilities(scope, chainLevels ? { levels: chainLevels.filter((l) => !restoredLevels.has(resolve(l))) } : undefined)
+      .filter((r) => !restoredLevels.has(resolve(r.level)));
+    // v2 package locks: every lock level this scope covers (the boundary covers
+    // its whole ancestor chain), each verified exactly once.
+    const pkgLevels = (scope === boundary ? lockLevelsUp(boundary) : [scope]).filter((l) => !packageCheckedLevels.has(resolve(l)));
+    for (const l of pkgLevels) { packageCheckedLevels.add(resolve(l)); report.push(...packageLockReport(l)); }
+    for (const r of report) {
+      reported.push({ scope, ...r });
+      const what = r.package ? `package ${r.id}` : r.id;
+      if (r.status === "present") console.log(`ok        ${what}  [${shortPath(r.level)}]`);
+      else if (r.status === "restored") console.log(`restored  ${what} → ${shortPath(r.dir)}  [${shortPath(r.level)}]`);
+      else if (r.status === "retired") console.log(`RETIRED   ${what}  ${r.reason}  [${shortPath(r.level)}]`);
+      else { failures.push({ scope: r.level, id: what, reason: r.reason }); console.log(`FAILED    ${what}  ${r.reason}  [${shortPath(r.level)}]`); }
+    }
+    if (scope === boundary) for (const cfg of configChain(boundary)) restoredLevels.add(resolve(cfg._level));
+    for (const r of report) restoredLevels.add(resolve(r.level));
+    restoredLevels.add(resolve(scope));
+    // Validate: every config-referenced installed capability supplied by a visible locked package/capability lock.
+    if (existsSync(join(scope, "oas-config.yaml"))) {
+      try {
+        const supplied = lockedPackageCapabilities(scope);
+        const capLocks = readCapabilityLocks(scope);
+        for (const cfg of configChain(scope)) {
+          if (resolve(cfg._level) !== resolve(scope)) continue;
+          for (const [slot, entry] of Object.entries(cfg.capabilities?.layers || {})) {
+            if (entry && typeof entry === "object" && entry.from === "installed" && !supplied.has(entry.capability) && !capLocks[entry.capability]) {
+              failures.push({ scope, id: entry.capability, reason: `referenced by capabilities.layers.${slot} but supplied by no visible locked package` });
+            }
+          }
+          for (const [id, entry] of Object.entries(cfg.capabilities?.additive || {})) {
+            if (entry && typeof entry === "object" && entry.from === "installed" && !supplied.has(id) && !capLocks[id]) {
+              failures.push({ scope, id, reason: "referenced in config but supplied by no visible locked package" });
+            }
+          }
+        }
+      } catch (e) { failures.push({ scope, id: "(config)", reason: e.message }); }
+    }
+  }
+  if (!reported.length && scopes.length === 1) console.log("Nothing to restore — no locked capabilities or packages found in the boundary.");
+  const consentFailures = requirementsGate(scopes);
+  if (consentFailures) failures.push({ scope: boundary, id: "(requirements)", reason: `${consentFailures} consented requirement install${consentFailures > 1 ? "s" : ""} failed` });
+  if (failures.length) {
+    console.log("\nFailures by scope:");
+    for (const f of failures) console.log(`  ${shortPath(f.scope)}: ${f.id} — ${f.reason}`);
+    die(`${failures.length} scope failure${failures.length > 1 ? "s" : ""} during workspace reconciliation`);
+  }
+}
+
+/** Host-requirement consent gate. Requirements are considered only for capabilities
+ * activated somewhere in the reconciled scopes, deduplicated by command. Interactive
+ * runs prompt per requirement with the exact command/source/version and state scope;
+ * non-interactive runs NEVER install by default — automation names each accepted
+ * requirement via --accept-requirement <command>; --no-requirements skips entirely.
+ * Skipping leaves an actionable doctor warning (doctor recomputes missing commands).
+ * Returns the number of CONSENTED installs that failed (manager error or the
+ * command still absent from PATH) — the caller exits nonzero on any, so
+ * automation using --accept-requirement can detect installation failure.
+ * Unaccepted/skipped optional requirements stay non-fatal. */
+function requirementsGate(scopes) {
+  if (args.includes("--no-requirements")) return 0;
+  const missing = aggregateMissingRequirements(scopes);
+  if (!missing.length) return 0;
+  const accepted = new Set(flagAll("accept-requirement"));
+  const interactive = process.stdin.isTTY && process.stdout.isTTY;
+  let failed = 0;
+  console.log(`\nMissing host commands for active capabilities (${missing.length}):`);
+  for (const req of missing) {
+    const requesters = req.requestedBy.map((r) => `${r.capability} [${shortPath(r.scope)}]`).join(", ");
+    console.log(`  ${req.command} — ${req.why || "required"} (requested by: ${requesters})`);
+    const plan = req.plan;
+    if (!plan || plan.unavailable) {
+      console.log(`    no safe installer: ${plan?.unavailable || "no recipe"}${req.docs ? ` — install docs: ${req.docs}` : ""}`);
+      continue;
+    }
+    console.log(`    installer: ${plan.argv.join(" ")}  (source: ${plan.source}${plan.version ? `, version ${plan.version}` : ""}; ${plan.scope})`);
+    let consent = accepted.has(req.command);
+    if (!consent && interactive) {
+      process.stdout.write(`    Run this install now? [y/N] `);
+      const buf = Buffer.alloc(64);
+      let answer = "";
+      try { answer = buf.toString("utf8", 0, readSync(process.stdin.fd, buf, 0, 64)).trim().toLowerCase(); } catch { /* EOF */ }
+      consent = answer === "y" || answer === "yes";
+    }
+    if (!consent) {
+      console.log(`    skipped — ${interactive ? "not consented" : "non-interactive; pass --accept-requirement " + req.command + " to install"}; \`oas doctor\` will keep warning until ${req.command} is on PATH`);
+      continue;
+    }
+    try {
+      const r = runRequirementInstall(plan);
+      if (r.onPath) console.log(`    installed — ${req.command} verified on PATH`);
+      else { failed++; console.log(`    FAILED: install ran but ${req.command} is still not on PATH — check your shell PATH/prefix`); }
+    } catch (e) {
+      failed++;
+      console.log(`    FAILED: ${e.message}`);
+    }
+  }
+  console.log("Requirement consent is separate from capability trust — installing a binary does not activate or approve any capability.");
+  return failed;
 }
 
 function trust() {
@@ -428,6 +629,98 @@ function trust() {
   const { _file, ...clean } = lock;
   writeCapabilityLock(dirname(_file), manifest.capability, { ...clean, trustedExecutables: true });
   console.log(`Trusted executable commands/hooks for ${manifest.capability} at ${integrity}.`);
+}
+
+// ---------- package config profiles (oas init --package / oas config diff) ----------
+/** Collect every value of a repeatable flag (e.g. --accept-requirement a --accept-requirement b). */
+function flagAll(name) {
+  const out = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] !== `--${name}`) continue;
+    if (args[i + 1] && !args[i + 1].startsWith("--")) out.push(args[i + 1]);
+    else die(`--${name} needs a value`);
+  }
+  return out;
+}
+
+/** Capability ids supplied by a package's dependency closure, read from visible locks (phase 1). */
+function dependencyClosureCapabilities(manifest, dir) {
+  const locks = readPackageLocks(dir).packages;
+  const out = [];
+  const seen = new Set();
+  const visit = (deps) => {
+    for (const dep of deps || []) {
+      const id = String(dep).split("@")[0].replace(/^git:.*\/|\.git$/g, "");
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const lock = locks[id];
+      if (!lock) continue; // reported by validation when a referenced capability has no provider
+      out.push(...(lock.capabilities || []));
+      visit(lock.dependencies || []);
+    }
+  };
+  visit(manifest.dependencies);
+  return out;
+}
+
+/** oas init --package <source> [--config <name>]: preview, validate, and snapshot one package config profile. */
+function initPackage(src, dir, file) {
+  const configFlag = flag("config");
+  if (configFlag === true) die("--config needs a profile name");
+  let resolved;
+  const tmp = /^(https?:\/\/|git@|ssh:\/\/)/.test(src) ? mkdtempSync(join(tmpdir(), "oas-package-")) : undefined;
+  try {
+    try { resolved = resolvePackageSource(src, dir, { clone: tmp }); } catch (e) { die(e.message); }
+    const { manifest, commit } = resolved;
+    let profile;
+    try { profile = selectProfile(manifest, configFlag); } catch (e) { die(e.message); }
+    const errors = validateProfile(manifest, profile, { dependencyCapabilities: dependencyClosureCapabilities(manifest, dir) });
+    if (errors.length) die(`profile "${profile.name}" of package ${manifest.package} failed validation:\n  - ${errors.join("\n  - ")}`);
+    const body = readProfileText(manifest, profile);
+    // Preview before writing: package, profile, exported capabilities.
+    console.log(`Package ${manifest.package}@${manifest.version} — profile "${profile.name}"${profile.description ? `: ${profile.description}` : ""}`);
+    console.log(`  exports capabilities: ${packageCapabilityIds(manifest).join(", ") || "(none)"}`);
+    const text = `${profileProvenanceHeader({ pkg: manifest.package, version: manifest.version, profile: profile.name, commit })}\n` +
+      body.replace(/^name:.*$/m, `name: ${basename(dir)}`).replace(/\n*$/, "\n");
+    writeFileSync(file, text);
+    console.log(`Created ${shortPath(file)} (${levelOf(dir)} level) from package profile ${manifest.package}:${profile.name}`);
+    console.log("The snapshot is an ordinary scoped config — edit it, retarget or disable any capability; package updates never rewrite it.");
+    if (!readPackageLocks(dir).packages[manifest.package]) console.log(`NOTE: package ${manifest.package} is not locked at this scope yet — acquire it with \`oas install ${src}\` so its capabilities restore.`);
+  } finally { if (tmp) rmSync(tmp, { recursive: true, force: true }); }
+  offerTmuxMouseScrolling();
+}
+
+/** oas config diff --package <id> --config <name>: report-only diff of the local snapshot vs the package's current profile. */
+function configDiffCmd() {
+  if (args[1] !== "diff") die("usage: oas config diff --package <id> --config <name> [--dir <dir>]");
+  const dir = resolve(flag("dir") || process.cwd());
+  const file = join(dir, "oas-config.yaml");
+  if (!existsSync(file)) die(`no oas-config.yaml at ${shortPath(dir)} — nothing to diff`);
+  const localText = readFileSync(file, "utf8");
+  const provenance = parseProfileProvenance(localText);
+  const pkgId = flag("package") || provenance?.package;
+  if (!pkgId || pkgId === true) die("usage: oas config diff --package <id> --config <name> (the snapshot's provenance header supplies defaults when present)");
+  const profileName = flag("config") || provenance?.profile;
+  const tmp = /^(https?:\/\/|git@|ssh:\/\/)/.test(pkgId) ? mkdtempSync(join(tmpdir(), "oas-package-")) : undefined;
+  try {
+    let resolved;
+    try { resolved = resolvePackageSource(pkgId, dir, { clone: tmp }); } catch (e) { die(e.message); }
+    let profile;
+    try { profile = selectProfile(resolved.manifest, profileName === true ? undefined : profileName); } catch (e) { die(e.message); }
+    const packageText = readProfileText(resolved.manifest, profile);
+    // Strip the local provenance header for a meaningful comparison.
+    const localBody = localText.replace(/^# package: .*\n/, "");
+    const diff = diffConfigTexts(localBody, packageText);
+    const changed = diff.filter((d) => d.kind !== "same");
+    console.log(`oas config diff — local ${shortPath(file)} vs ${resolved.manifest.package}@${resolved.manifest.version} profile "${profile.name}" (report only; nothing is merged or overwritten)\n`);
+    if (!changed.length) { console.log("No differences."); return; }
+    for (const d of diff) {
+      if (d.kind === "local") console.log(`+ ${d.line}`);
+      else if (d.kind === "package") console.log(`- ${d.line}`);
+      else console.log(`  ${d.line}`);
+    }
+    console.log(`\n${changed.length} differing line${changed.length > 1 ? "s" : ""} (+ local only, - package profile only). Snapshots deliberately drift; adopt package changes by hand if wanted.`);
+  } finally { if (tmp) rmSync(tmp, { recursive: true, force: true }); }
 }
 
 // ---------- init ----------
@@ -484,6 +777,10 @@ function init() {
   const dir = resolve(flag("dir") || process.cwd());
   const file = join(dir, "oas-config.yaml");
   if (existsSync(file)) die(`${shortPath(file)} already exists — edit it or use \`oas use\``);
+
+  const pkgSrc = flag("package");
+  if (pkgSrc && pkgSrc !== true) { initPackage(pkgSrc, dir, file); return; }
+  if (pkgSrc === true) die("--package needs a package id, local path, or git URL");
 
   const template = flag("template");
   if (template && template !== true) {
@@ -1038,6 +1335,7 @@ else if (cmd === "update") updateCmd();
 else if (cmd === "type") typeCmd();
 else if (cmd === "inject") injectCmd();
 else if (cmd === "install") install();
+else if (cmd === "config") configDiffCmd();
 else if (cmd === "trust") trust();
 else if (cmd === "root") console.log(resolve(new URL("..", import.meta.url).pathname));
 else if (cmd === "init") init();
@@ -1083,8 +1381,17 @@ Usage:
                                             optionally run the update; then run oas doctor
   oas install [<id|git-url|path>] [--dir <d>] acquire + lock into <level>/.agents/
                                             capabilities/installed/; bare \`oas install\`
-                                            restores locked-but-missing artifacts;
+                                            restores locked-but-missing artifacts; at a
+                                            team: scope (or with --recursive) it reconciles
+                                            the whole workspace — descendant scopes restore
+                                            once in path order (pruned discovery), then the
+                                            host-requirement consent gate runs
+      [--recursive] [--no-requirements]     --no-requirements = package-only (CI);
+      [--accept-requirement <cmd> ...]      non-interactive runs never install host tools
+                                            unless each requirement is named explicitly;
                                             acquisition never activates
+  oas config diff --package <id|url|path>   report how the local snapshot differs from the
+      [--config <name>] [--dir <d>]         package's current profile — never merges/overwrites
   oas trust <capability> [--dir <dir>]      approve executable commands/hooks for
                                             the currently locked integrity
   oas use <capability>                      activate for one config-owned target
@@ -1096,10 +1403,12 @@ Usage:
   oas inject eject <cap|work-mode|oas>      copy a packaged injection to the conventional
       [--dir <d>]                           .agents/injections/ path and set injection-override
   oas init [--raw] [--dir <dir>]            create an oas-config.yaml here
-      [--template <name|path|git-url>]      seed from a template config (named via
-      [--knowledge <id|none>]               outer templates: map, a local file, or a
-      [--messaging <id|none>]               git repo's default-branch oas-config.yaml);
-      [--tasks <id|none>]                   or per-layer overrides of the defaults;
+      [--package <id|path|git-url>]         adopt a package config profile as a local
+      [--config <name>]                     snapshot (default profile unless --config;
+      [--template <name|path|git-url>]      refuses to overwrite an existing config);
+      [--knowledge <id|none>]               or seed from a template config (named via
+      [--messaging <id|none>]               outer templates: map, a local file, or a
+      [--tasks <id|none>]                   git repo's default-branch oas-config.yaml);
       [--tmux-mouse|--no-tmux-mouse]        prompts to enable normal tmux scrolling
   oas root                                  print this package's install root
                                             (adapters resolve the kernel from it)

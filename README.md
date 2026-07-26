@@ -332,6 +332,7 @@ your first config and agents.
 - [Knowledge theory](docs/knowledge-theory.md) — what belongs in a soul vs an instance, whatever the format.
 - [Configuration](docs/configuration.md) — scopes, agent types, targeting, exclusions, and examples.
 - [Capability packages](docs/capabilities.md) — distribution, manifests, composition, locks, and trust.
+- [Distribution packages](docs/packages.md) — config profiles, workspace reconciliation, and consented host requirements.
 - [Integrations](docs/integrations.md) — capability packages that satisfy fundamental layers.
 - [Conventions](docs/conventions.md) — canonical files, symlinks, and skill paths.
 

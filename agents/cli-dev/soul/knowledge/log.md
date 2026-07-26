@@ -1,6 +1,16 @@
 # Knowledge Log
 
 ## 2026-07-26
+* **Update**: [reconciliation-truthfulness-fixes](/lessons/reconciliation-truthfulness-fixes.md) merges the coverage-parity follow-up: v2 package-lock verification must run from both chain restore and boundary reconciliation paths, including ancestor levels.
+* **Update**: [test-conventions](/playbooks/test-conventions.md) records that dedupe regression tests must count actual side effects with a recording shim and a topology that failed before the fix.
+* **Update**: [frozen-package-engine-contract-alignment](/lessons/frozen-package-engine-contract-alignment.md) merges review follow-ups: empty legacy v1 locks must surface in `readPackageLocks`' `legacy` list, and parsed-but-invalid manifests/resources must fail with `invalid-package-manifest` before dereference.
+* **Creation**: [reconciliation-truthfulness-fixes](/lessons/reconciliation-truthfulness-fixes.md) records the review lesson that reconciliation must restore each lock level once, fail locked-but-uninstalled v2 package locks, and exit nonzero for consented requirement install failures.
+* **Fix**: [team-boundary-scan-pruning](/lessons/team-boundary-scan-pruning.md) replaces after-the-fact restore report filtering with exact-level restore plus processed-level tracking.
+* **Update**: [requirement-recipes-data-allowlist](/lessons/requirement-recipes-data-allowlist.md) records that consented requirement install failures are fatal while skipped requirements remain non-fatal.
+* **Creation**: [frozen-package-engine-contract-alignment](/lessons/frozen-package-engine-contract-alignment.md) records the package-engine frozen-contract alignment points for shared-reader envelopes, schema-verbatim fixtures, and `error.code` taxonomy reuse.
+* **Creation**: [team-boundary-scan-pruning](/lessons/team-boundary-scan-pruning.md) records team-boundary reconciliation discovery pruning by directory name, agent-home structure, nested team declarations, and symlink skipping.
+* **Creation**: [requirement-recipes-data-allowlist](/lessons/requirement-recipes-data-allowlist.md) records the allowlisted, argv-only, consented host-requirement install plan and PATH verification pattern.
+* **Creation**: [package-profile-validation-config-shape](/lessons/package-profile-validation-config-shape.md) records that package config profiles reuse the kernel config-shape validator while package-only checks stay in lib/packages.mjs.
 * **Fix**: [spawn-lineage-explicit-only](/decisions/spawn-lineage-explicit-only.md) scopes the top-level/no-lineage default to non-attached manual spawns, preserving attached owner auto-binding as the explicit exception.
 * **Fix**: [spawn-lineage-explicit-only](/decisions/spawn-lineage-explicit-only.md) now states the complete child/sibling/parent/unrelated lineage matrix, `--parent` child sugar, and attached auto-binding without a stored relation value.
 * **Update**: [spawn-relations-lineage-fields](/architecture/spawn-relations-lineage-fields.md) records the final human/maintainer-accepted concurrency limitations and the decision not to add a lineage transaction subsystem.
