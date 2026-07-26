@@ -1,6 +1,9 @@
 # Knowledge Log
 
 ## 2026-07-26
+* **Creation**: [flat-single-capability-packages](/decisions/flat-single-capability-packages.md) records the package layout decision that `capabilities: ["."]` is supported only as the sole capability entry, with whole-tree package integrity and realpath-deduped npm materialization roots.
+* **Creation**: [per-capability-npm-locks](/decisions/per-capability-npm-locks.md) records the npm materialization decision: package root plus declared capability dirs with both `package.json` and `package-lock.json` run independent `npm ci --ignore-scripts` units.
+* **Update**: [package-engine-implementation-gotchas](/lessons/package-engine-implementation-gotchas.md) records that empty npm closures may create no `node_modules` directory, so materialization probes should test resource path resolvability.
 * **Creation**: [package-runtime-boundary-structured-cli](/decisions/package-runtime-boundary-structured-cli.md) records the package-runtime boundary decision: official packages use structured `oas` CLI JSON envelopes and a `packageRuntimeApi` probe, not a blessed kernel module export.
 * **Creation**: [package-engine-implementation-gotchas](/lessons/package-engine-implementation-gotchas.md) records package-engine implementation gotchas around dependency-free YAML config shape, file:// local git pins, spawnInstance agent objects, hook meta, package integrity, trust carry-over, and lockfile v2 preservation.
 * **Creation**: [frozen-interface-first-delivery](/lessons/frozen-interface-first-delivery.md) records the package-engine contract lesson: unblock sibling workstreams with a schema-plus-contract-doc commit before implementation.

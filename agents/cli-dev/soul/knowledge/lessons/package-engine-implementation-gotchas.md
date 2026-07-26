@@ -1,7 +1,7 @@
 ---
 type: Lesson
 title: Package engine implementation gotchas in the OAS kernel
-description: Concrete pitfalls hit while implementing distribution packages — YAML subset config shape in tests, path-vs-git source disambiguation via file://, spawnInstance needs an agent object, and hook meta lands in instance.json capabilityMeta.
+description: Concrete pitfalls hit while implementing distribution packages — YAML subset config shape in tests, path-vs-git source disambiguation via file://, spawnInstance needs an agent object, hook meta lands in instance.json capabilityMeta, and empty npm closures create no node_modules.
 tags: [packages, kernel, testing]
 timestamp: 2026-07-26
 ---
@@ -28,3 +28,6 @@ timestamp: 2026-07-26
   gets approval invalidation for free.
 - writeCapabilityLock had to stop force-setting lockfileVersion 1, or legacy
   residue writes would downgrade a v2 lock.
+- An empty npm dependency closure can make `npm ci` create no `node_modules`
+  directory. CI probes for package materialization should test resource path
+  resolvability, not the existence of `node_modules` itself.
