@@ -16,13 +16,43 @@ import { isSplitMember, wireSplitPaneSelection } from "../renderer/split-layout.
 const PKG = join(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (f) => readFileSync(join(PKG, f), "utf8");
 
-test("split + sidebar actions have parseable default chords and terminal allowlisting", () => {
+test("split + sidebar actions have parseable default chords; splits are terminal-allowlisted", () => {
   for (const id of ["sidebar.toggle", "split.vertical", "split.horizontal", "split.close"]) {
     assert.ok(DEFAULT_KEYMAP[id], `${id} has a default chord`);
     assert.ok(parseChord(DEFAULT_KEYMAP[id]), `${id} chord parses`);
+  }
+  for (const id of ["split.vertical", "split.horizontal", "split.close"]) {
     assert.ok(TERMINAL_ALLOWLIST.includes(id),
       `${id} must fire inside xterm on Linux/Windows (the active pane IS a terminal)`);
   }
+  // sidebar.toggle (Mod+B) must NOT be allowlisted: on non-mac its chord is
+  // Ctrl+B — the tmux prefix — which belongs to the attached program.
+  assert.ok(!TERMINAL_ALLOWLIST.includes("sidebar.toggle"),
+    "sidebar.toggle would shadow the tmux prefix (Ctrl+B) inside xterm");
+});
+
+test("non-mac Ctrl+B inside xterm resolves to NO desktop action (tmux prefix passes through)", (t) => {
+  t.after(() => setActiveContexts(new Set()));
+  const offs = [
+    registerAction({ id: "sidebar.toggle", label: "sb", context: "global", run: () => {} }),
+    registerAction({ id: "split.vertical", label: "v", context: "tabs", run: () => {} }),
+  ];
+  t.after(() => offs.forEach((off) => off()));
+  setActiveContexts(new Set(["tabs"]));
+  assert.equal(matchEvent(
+    { key: "b", ctrlKey: true, shiftKey: false, metaKey: false, altKey: false, defaultPrevented: false },
+    { isMac: false, insideTerminal: true, editableTarget: false },
+  ), null, "Ctrl+B reaches tmux, not sidebar.toggle");
+  // outside the terminal the binding works normally
+  assert.equal(matchEvent(
+    { key: "b", ctrlKey: true, shiftKey: false, metaKey: false, altKey: false, defaultPrevented: false },
+    { isMac: false, insideTerminal: false, editableTarget: false },
+  ), "sidebar.toggle");
+  // and on mac, ⌘B inside xterm still fires (⌘-chord rule)
+  assert.equal(matchEvent(
+    { key: "b", metaKey: true, ctrlKey: false, shiftKey: false, altKey: false, defaultPrevented: false },
+    { isMac: true, insideTerminal: true, editableTarget: false },
+  ), "sidebar.toggle");
 });
 
 test("shell registers the split and sidebar actions and exposes them in the palette", () => {
@@ -120,6 +150,14 @@ test("clicking or focusing a visible non-selected split pane selects ITS tab (re
   activeTab = 2;
   paneA.dispatchEvent(new dom.window.Event("pointerdown", { bubbles: true }));
   assert.equal(activeTab, 2, "disposed pane no longer selects");
+});
+
+test("closing the active split member activates an adjacent survivor, not the newest tab", () => {
+  const src = read("renderer/shell.mjs");
+  assert.match(src, /const splitSuccessor = activeTab === id \? adjacentSplitMember\(split, id\) : null/,
+    "successor chosen from the split before removeSplitTab forgets the member");
+  assert.match(src, /if \(splitSuccessor != null && tabs\.has\(splitSuccessor\)\) \{\n\s*activateTab\(splitSuccessor\)/,
+    "split successor wins over fallbackTabForContext");
 });
 
 test("shell wires pane selection on every tab pane through activateTab", () => {

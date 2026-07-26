@@ -161,9 +161,12 @@ export const DEFAULT_KEYMAP = Object.freeze({
 // Action ids allowed to fire inside .xterm on Linux/Windows, where their
 // chords would otherwise belong to the attached program. Allowlisting by
 // action id (not chord) keeps the policy stable across user rebinds.
+// sidebar.toggle is deliberately NOT allowlisted: its default Mod+B would
+// intercept Ctrl+B — the tmux prefix — inside the terminal on non-mac
+// (macOS ⌘B still fires in xterm via the ⌘-chord rule).
 export const TERMINAL_ALLOWLIST = Object.freeze([
   "app.palette", "tabs.next", "tabs.prev", "tabs.close",
-  "sidebar.toggle", "split.vertical", "split.horizontal", "split.close",
+  "split.vertical", "split.horizontal", "split.close",
 ]);
 
 export const CONTEXTS = Object.freeze([

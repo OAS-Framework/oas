@@ -3,6 +3,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   MAX_SPLIT_PANES, requestSplit, absorbTab, removeSplitTab, isSplitMember,
+  adjacentSplitMember,
 } from "../renderer/split-layout.mjs";
 
 test("requestSplit starts a split from the active terminal with one pending slot", () => {
@@ -16,7 +17,7 @@ test("requestSplit without an active terminal is a no-op", () => {
   assert.deepEqual(requestSplit(null, "col", undefined), { split: null, changed: false });
 });
 
-test("requestSplit on an existing split adds a pending slot and re-orients", () => {
+test("requestSplit on an existing split adds ONE pending slot and re-orients", () => {
   const s0 = { orientation: "row", members: [1, 2], pending: 0 };
   const { split, changed } = requestSplit(s0, "col", 1);
   assert.ok(changed);
@@ -24,8 +25,21 @@ test("requestSplit on an existing split adds a pending slot and re-orients", () 
   assert.deepEqual(s0, { orientation: "row", members: [1, 2], pending: 0 }, "input not mutated");
 });
 
+test("a second split request while a slot is still empty does not stack pending slots", () => {
+  // the renderer owns a single empty-slot placeholder — the model must
+  // never record more empty slots than the DOM can show (review 156cbc7)
+  const s = { orientation: "row", members: [1], pending: 1 };
+  const same = requestSplit(s, "row", 1);
+  assert.equal(same.changed, false);
+  assert.equal(same.split, s);
+  // a different orientation still re-orients, without adding a slot
+  const flipped = requestSplit(s, "col", 1);
+  assert.ok(flipped.changed);
+  assert.deepEqual(flipped.split, { orientation: "col", members: [1], pending: 1 });
+});
+
 test("requestSplit is capped at MAX_SPLIT_PANES (members + pending)", () => {
-  let s = { orientation: "row", members: [1, 2, 3], pending: 1 };
+  let s = { orientation: "row", members: [1, 2, 3, 4], pending: 0 };
   assert.equal(s.members.length + s.pending, MAX_SPLIT_PANES);
   const same = requestSplit(s, "row", 1);
   assert.equal(same.changed, false);
@@ -62,6 +76,17 @@ test("removeSplitTab collapses to single-pane when fewer than two panes remain",
   // non-members leave the split untouched
   assert.equal(removeSplitTab(s3, 99), s3);
   assert.equal(removeSplitTab(null, 1), null);
+});
+
+test("adjacentSplitMember prefers the next member, then the previous, else null", () => {
+  const s = { orientation: "row", members: [1, 2, 3], pending: 0 };
+  assert.equal(adjacentSplitMember(s, 1), 2, "right/lower neighbor wins");
+  assert.equal(adjacentSplitMember(s, 2), 3);
+  assert.equal(adjacentSplitMember(s, 3), 2, "last member falls back left/up");
+  assert.equal(adjacentSplitMember(s, 99), null, "non-member");
+  assert.equal(adjacentSplitMember({ orientation: "row", members: [1], pending: 1 }, 1), null,
+    "no other member survives");
+  assert.equal(adjacentSplitMember(null, 1), null);
 });
 
 test("isSplitMember", () => {
