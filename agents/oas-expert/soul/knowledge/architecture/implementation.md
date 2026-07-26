@@ -66,14 +66,19 @@ under `.agents/skills`, records sources/settings/trust in `instance.json`, and k
 fully owned by this spawn-time materialization, not by runtime adapter
 discovery.
 
-Pi launches with the instance's `.agents/skills` as one explicit `--skill`
-path; ambient discovery (user/project/package skills) stays enabled so a
-user's existing skills coexist with the OAS-composed set (a deliberate
-adoption trade decided 2026-07-14 — see the ambient-skills decision;
-determinism of the total surface was traded away, `instance.json` records
-only what OAS composed). Claude sees the same set via the instance's
-`.claude/skills` symlink alongside the user's own configuration.
-`oas-getting-started` is the only pre-workspace ambient bootstrap.
+The accepted [strict instance curriculum](/decisions/strict-instance-curriculum.md)
+requires every runtime adapter to disable ambient skill/instruction discovery
+and expose only this instance-local composition while preserving the runtime's
+built-in tools and native workflows. Pi and Claude Code must enforce the same
+visible curriculum with supported runtime mechanisms; incomplete isolation
+fails closed and doctor reports it. `instance.json` records the complete
+selected skill/injection surface. `oas-getting-started` is the only
+pre-workspace ambient bootstrap.
+
+Current released main still enables harness-ambient coexistence from the
+superseded 2026-07-14 adoption trade; strict adapter enforcement is an accepted
+implementation change and the README must not describe it as shipped until its
+runtime parity gates pass.
 
 # Lifecycle and commands
 
