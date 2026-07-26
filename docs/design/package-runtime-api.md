@@ -292,10 +292,19 @@ constraints:
 5. Doctor (human and `--json` `migrationResidue`) identifies each residue
    entry as `pending-migration` with the exact retry action
    (`oas migrate --dir <level>`) or removal guidance.
-6. Cutover gate: the official-catalog/kernel-marketplace switch requires ZERO
-   residue in the deployment probe. Post-transition, residue is readable only
-   for pointed diagnosis/migration — never a discovery source, never a way to
-   add legacy capabilities.
+6. Cutover gate (two-part, both pinned in the deployment probe): the
+   official-catalog/kernel-marketplace switch requires (a) ZERO
+   lockfileVersion 1 files — INCLUDING empty `{capabilities:{}}` ones — and
+   (b) ZERO nonempty v2 legacy capability residue, across every reconciled
+   scope. Empty v1 files SURFACE in `readPackageLocks().legacy` with
+   file/level/version provenance and convert trivially via `oas migrate`
+   (atomic canonical `{lockfileVersion: 2, packages: {}}`, no residue);
+   doctor reports them as pending LOCK-FORMAT migration — never as
+   capability residue. A v2 `{capabilities:{}}` is NOT residue.
+   Post-transition, residue is readable only for pointed diagnosis/migration
+   — never a discovery source, never a way to add legacy capabilities.
+   Discovery includes lock-owning scopes even when no config or capability
+   entry exists there.
 7. Migration and rollback are atomic: any conversion failure restores the
    original v1 lock byte-identically and removes every package the migration
    installed.
