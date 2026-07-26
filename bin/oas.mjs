@@ -566,6 +566,9 @@ function restore(dir) {
     return;
   }
   if (!pkgReport.length && !report.length) { console.log("Nothing to restore — no locked packages or capabilities in the config chain."); return; }
+  // Human mode uses the SAME unsuccessful-status classification as JSON mode
+  // (reviewer-7b2cd36): retired/unrestorable count as failures for the exit
+  // code while keeping their actionable rendering.
   let failed = 0;
   for (const r of pkgReport) {
     if (r.status === "ok") console.log(`ok        package ${r.package}  (${shortPath(r.dir)})`);
@@ -576,7 +579,8 @@ function restore(dir) {
   for (const r of report) {
     if (r.status === "present") console.log(`ok        ${r.id}  (${shortPath(r.dir)})`);
     else if (r.status === "restored") console.log(`restored  ${r.id} → ${shortPath(r.dir)}  (${r.integrity})`);
-    else if (r.status === "retired") console.log(`RETIRED   ${r.id}  ${r.reason}`);
+    else if (r.status === "retired") { failed++; console.log(`RETIRED   ${r.id}  ${r.reason}`); }
+    else if (r.status === "unrestorable") { failed++; console.log(`FAILED    ${r.id}  ${r.reason}`); }
     else { failed++; console.log(`FAILED    ${r.id}  ${r.reason}`); }
   }
   if (failed) die(`${failed} artifact${failed > 1 ? "s" : ""} could not be restored`);
@@ -892,7 +896,7 @@ function init() {
 // ---------- roster: status / spawn / retire / create ----------
 function status() {
   if (args.includes("--team")) return statusTeam();
-  const root = ensureRoot(flag("dir") || process.cwd());
+  const root = ensureRoot(dirFlag());
   const data = listInstances(root);
   if (args.includes("--json")) { console.log(JSON.stringify({ root, agents: data }, null, 2)); return; }
   console.log(`oas status — agents root ${shortPath(root)}\n`);
@@ -941,14 +945,14 @@ function spawnCmd() {
   if (args.includes("--instance")) bail("E_BAD_ARGS", "--instance was removed by the runtime-boundary ruling — use --purpose <slug> (deterministic <agent>-<purpose> naming)");
   if (args.includes("--ephemeral")) bail("E_BAD_ARGS", "--ephemeral was removed by the runtime-boundary ruling — declare the agent in a capability manifest (agents:) for automatic ephemeral semantics");
   let root;
-  try { root = ensureRoot(flag("dir") || process.cwd()); }
+  try { root = ensureRoot(dirFlag()); }
   catch (e) { bail("E_NO_DEPLOYMENT", e.message || e); throw e; }
   let agent = findAgent(root, name);
   const instrFile = flag("instructions-file");
   const defFile = flag("def-file");
   if (!agent && !instrFile && !defFile) {
     // Capability-defined agent: a package's `agents:` soul, active in this context.
-    const capAgent = findCapabilityAgent(flag("dir") || process.cwd(), root, name);
+    const capAgent = findCapabilityAgent(dirFlag(), root, name);
     if (capAgent) {
       agent = capAgent;
       note(`(capability agent: "${name}" from ${capAgent.capability} — fresh soul, instances home locally)`);
@@ -957,7 +961,7 @@ function spawnCmd() {
   if (!agent && !instrFile && !defFile) {
     // Cross-repo lookup: the soul may live in a sibling repo of the team scope.
     // Unique match wins; the instance homes with its owning repo's agents root.
-    const teamHit = findTeamAgent(flag("dir") || process.cwd(), name);
+    const teamHit = findTeamAgent(dirFlag(), name);
     const remote = (teamHit?.matches || []).filter((m) => resolve(m.root) !== resolve(root));
     if (remote.length > 1) bail("E_AMBIGUOUS_SOUL", `soul "${name}" found in multiple team repos: ${remote.map((m) => shortPath(m.root)).join(", ")} — re-run with --dir <that repo>`);
     if (remote.length === 1) {
@@ -1009,7 +1013,7 @@ function spawnCmd() {
     // findInstanceHome also sees capability-defined agents' instance homes
     // (local-agents/<name>/ without a local soul) — e.g. a reviewer passing
     // --parent "$OAS_INSTANCE" from a capability agent.
-    if (!findInstanceHome(root, relativeTo) && !findTeamInstance(flag("dir") || process.cwd(), relativeTo)) bail(parent ? "E_PARENT_NOT_FOUND" : "E_RELATIVE_NOT_FOUND", `${parent ? "--parent" : "--relative-to"} "${relativeTo}" does not match any known instance`);
+    if (!findInstanceHome(root, relativeTo) && !findTeamInstance(dirFlag(), relativeTo)) bail(parent ? "E_PARENT_NOT_FOUND" : "E_RELATIVE_NOT_FOUND", `${parent ? "--parent" : "--relative-to"} "${relativeTo}" does not match any known instance`);
   }
   const taskText = flag("task");
   if (taskText === true) bail("E_BAD_ARGS", "--task needs a value (use --task-file for long tasks)");
@@ -1053,10 +1057,10 @@ function retireCmd() {
   const isSelf = process.env.PI_AGENT_INSTANCE === name || process.env.OAS_INSTANCE === name;
   if (isSelf && !args.includes("--self")) die(`"${name}" is the calling instance — self-retire is irreversible; if your task is complete and you were told to retire, re-run with --self (finish your memory files FIRST; your session dies ~8s after)`);
   if (!isSelf && args.includes("--self")) die(`--self given but "${name}" is not the calling instance`);
-  let root = ensureRoot(flag("dir") || process.cwd());
+  let root = ensureRoot(dirFlag());
   // Cross-repo: the instance may home in a sibling repo of the team scope.
   if (!listAgents(root).some((a) => existsSync(join(a._dir, "instances", name)))) {
-    const hit = findTeamInstance(flag("dir") || process.cwd(), name);
+    const hit = findTeamInstance(dirFlag(), name);
     if (hit && resolve(hit.root) !== resolve(root)) { root = hit.root; console.log(`(cross-repo: instance homes at ${shortPath(root)})`); }
   }
   const r = retireInstance(root, name, { self: isSelf, deleteBranch: args.includes("--delete-branch"), keepDir: args.includes("--keep-dir") });
@@ -1073,7 +1077,7 @@ function createCmd() {
   const name = args[1];
   if (!name || name.startsWith("--")) die("usage: oas create <name> [--local] [--description <d>] [--type <agent-type>] [--repo <r>] [--work worktree|checkout|attached|workspace] [--runtime pi|claude] [--model <m>] [--instructions-file <f>]");
   const local = args.includes("--local");
-  const startDir = flag("dir") || process.cwd();
+  const startDir = dirFlag();
   // --local can BOOTSTRAP a deployment: with no agents/ or local-agents/ yet,
   // anchor at the enclosing git repo (else the start dir) — people can use OAS
   // with local agents alone.
