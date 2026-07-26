@@ -1798,3 +1798,50 @@ test("cutover gate probe: two-part acceptance and rejection (empty v1 blocks; no
   assert.equal(g.residue, 1);
   rmSync(base, { recursive: true, force: true });
 });
+
+// ---------- reviewer-6f0a3bd findings ----------
+
+test("bare restore reports unrestorable/retired statuses as failures with frozen codes (reviewer-6f0a3bd)", () => {
+  const base = temp();
+  const s = scope(base);
+  writeCapabilityLock(s, "bogus.cap", { source: "bogus:thing", version: "1", integrity: `sha256-${"a".repeat(64)}` });
+  const r = cli(s, "install", "--dir", s, "--json");
+  const env = JSON.parse(r.stdout);
+  assert.equal(env.ok, false, "unrestorable must not report ok");
+  assert.equal(env.error.code, "invalid-source");
+  assert.notEqual(r.status, 0);
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("valueless --dir is E_BAD_ARGS inside the JSON boundary for every lifecycle command (reviewer-6f0a3bd)", () => {
+  const base = temp();
+  const s = scope(base);
+  for (const argv of [["list"], ["install"], ["trust", "x.cap"], ["update", "x.p"], ["remove", "x.p"], ["migrate"]]) {
+    const r = cli(s, ...argv, "--dir", "--json");
+    const env = JSON.parse(r.stdout); // throws on a stack trace / empty stdout
+    assert.equal(env.ok, false, argv.join(" "));
+    assert.equal(env.error.code, "E_BAD_ARGS", argv.join(" "));
+    assert.notEqual(r.status, 0);
+    assert.ok(!r.stderr.includes("TypeError"), "no uncaught stack trace");
+  }
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("typed codes preserved: retired manifest → retired-capability; malformed lock at install → invalid-lock (reviewer-6f0a3bd)", () => {
+  const base = temp();
+  const s = scope(base);
+  // local capability whose oas.json declares the retired oas.web
+  const retired = join(base, "retired-cap");
+  write(join(retired, "oas.json"), JSON.stringify({ capability: "oas.web", version: "1.0.0", description: "d" }));
+  let env = JSON.parse(cli(s, "install", retired, "--dir", s, "--json").stdout);
+  assert.equal(env.ok, false);
+  assert.equal(env.error.code, "retired-capability", "typed retirement code, not catch-all invalid-source");
+  // malformed lock JSON at a package install → invalid-lock, not legacy-lock
+  const s2 = scope(base, "s2");
+  writeFileSync(join(s2, OAS_LOCK_FILE), "{ nope");
+  const pkg = pkgSource(join(base, "pkg"), { package: "ml.p" });
+  env = JSON.parse(cli(s2, "install", pkg, "--dir", s2, "--json").stdout);
+  assert.equal(env.ok, false);
+  assert.equal(env.error.code, "invalid-lock", "malformed JSON is invalid-lock, not legacy-lock");
+  rmSync(base, { recursive: true, force: true });
+});
