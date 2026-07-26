@@ -1,6 +1,8 @@
 # Knowledge Log
 
 ## 2026-07-26
+* **Creation**: skills/stale-verification-loop — adds the commit-anchored evidence protocol for coordinator loops that re-verify stale commits and request already-landed work.
+* **Creation**: [coordinator-stale-verification-loop](/lessons/coordinator-stale-verification-loop.md) records that stale-verification coordination loops should be answered with branch-head, ancestry, blob-at-head evidence, and explicit ACK references.
 * **Creation**: [deps-integrity-trust-binding](/lessons/deps-integrity-trust-binding.md) records the reviewer-caught node_modules trust bypass and the depsIntegrity fix pattern for package approval, restore, and staging materialization.
 * **Update**: [package-engine-implementation-gotchas](/lessons/package-engine-implementation-gotchas.md) corrects package trust carry-over to require depsIntegrity and records contract-signature regression testing against the frozen doc.
 * **Update**: [per-capability-npm-locks](/decisions/per-capability-npm-locks.md) points the node_modules exclusion boundary at the depsIntegrity trust-binding lesson.
