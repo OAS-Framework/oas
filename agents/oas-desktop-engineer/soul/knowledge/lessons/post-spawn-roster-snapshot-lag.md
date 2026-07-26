@@ -36,8 +36,10 @@ workspace changes while waiting, abort the auto-open.
 
 On readiness, close the spawn modal before handing off and open the terminal in a
 quiet mode so automated handoffs route refusals through diagnostics rather than
-`alert()`. If readiness times out, degrade to the existing status that tells the
-operator to open the instance from the sidebar roster, with the modal still open.
+`alert()`. Quiet handoffs must also contain the whole async open promise chain;
+see [Quiet automated opens must contain the whole flow's rejections](/lessons/quiet-open-whole-flow-rejection-containment.md).
+If readiness times out, degrade to the existing status that tells the operator to
+open the instance from the sidebar roster, with the modal still open.
 
 # Test fallout
 
@@ -58,3 +60,4 @@ handles from the previous modal instance.
 - [Workspace-sensitive async results need local tickets and global workspace generations](/lessons/stale-response-race.md)
 - [Shared-form async actions need operation ownership tokens](/lessons/shared-form-operation-token.md)
 - [Release async UI locks only on owned completion paths](/lessons/release-ui-locks-every-exit-path.md)
+- [Quiet automated opens must contain the whole flow's rejections](/lessons/quiet-open-whole-flow-rejection-containment.md)

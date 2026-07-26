@@ -1,6 +1,8 @@
 # Knowledge Log
 
 ## 2026-07-26
+* **Creation**: promoted [Quiet automated opens must contain the whole flow's rejections](/lessons/quiet-open-whole-flow-rejection-containment.md) from the oas-desktop-engineer-spawn-modal-fix notes.
+* **Update**: linked [Wait for terminal readiness before post-spawn terminal handoffs](/lessons/post-spawn-roster-snapshot-lag.md) to the quiet-open rejection-containment lesson: quiet automated terminal handoffs must wrap the whole async open flow, not just explicit refusal branches, before fire-and-forget callers cross the rejection boundary.
 * **Update**: merged the post-spawn readiness note into [Wait for terminal readiness before post-spawn terminal handoffs](/lessons/post-spawn-roster-snapshot-lag.md): terminal auto-open waits must require `running` plus `tmux.session`, close the spawn modal only on readiness success, use quiet automated handoff, and update spawn-flow fixtures for readiness rows plus closed-modal re-querying.
 * **Creation**: promoted [Reconciling split panes with quick-open focusContent semantics](/lessons/split-quickopen-merge-reconciliation.md) from the oas-desktop-engineer-split-panels notes.
 * **Update**: merged the merged-state split review findings from oas-desktop-engineer-split-panels into [terminal allowlist action-id policy](/lessons/keybindings-terminal-allowlist-by-action-id.md) and [split panes flex-cell reprojection](/lessons/split-panes-flex-reprojection.md): check newly allowlisted actions' resolved non-mac chords against terminal-owned bytes, keep pending split state to the single renderer placeholder, and select split-adjacent close fallback before removal.
