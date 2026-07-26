@@ -1,6 +1,7 @@
 # Knowledge Log
 
 ## 2026-07-26
+* **Update**: [strict-curriculum-scoping](/references/strict-curriculum-scoping.md) merges the maintainer ruling ledger for strict-curriculum sequencing, Claude spike evidence, AGENTS.md loading semantics, and parity gates.
 * **Creation**: skills/stale-verification-loop — adds the commit-anchored evidence protocol for coordinator loops that re-verify stale commits and request already-landed work.
 * **Creation**: [coordinator-stale-verification-loop](/lessons/coordinator-stale-verification-loop.md) records that stale-verification coordination loops should be answered with branch-head, ancestry, blob-at-head evidence, and explicit ACK references.
 * **Creation**: [deps-integrity-trust-binding](/lessons/deps-integrity-trust-binding.md) records the reviewer-caught node_modules trust bypass and the depsIntegrity fix pattern for package approval, restore, and staging materialization.
