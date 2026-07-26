@@ -1,0 +1,11 @@
+{
+  "package": "oas.review",
+  "version": "1.1.7",
+  "description": "Official additive OAS post-commit review discipline with an ephemeral capability-defined reviewer.",
+  "compatibility": {
+    "oas": ">=0.16.0"
+  },
+  "capabilities": [
+    "capabilities/oas-review"
+  ]
+}
