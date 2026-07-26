@@ -35,7 +35,7 @@ import {
   tabVisibleInContext, canActivateTab,
   fallbackTabForContext, terminalOpenOwnsWorkspace, restoreTerminalTab,
 } from "./workspace-tabs.mjs";
-import { requestSplit, absorbTab, removeSplitTab, isSplitMember, wireSplitPaneSelection } from "./split-layout.mjs";
+import { requestSplit, absorbTab, removeSplitTab, isSplitMember, adjacentSplitMember, wireSplitPaneSelection } from "./split-layout.mjs";
 
 const desk = window.oasDesktop;
 initTheme();
@@ -564,8 +564,18 @@ function closeTab(id, restoreFocus = false) {
   t.paneEl.remove();
   tabs.delete(id);
   const wasSplitMember = isSplitMember(split, id);
+  // Choose the successor BEFORE the split forgets the closed member: when
+  // the ACTIVE member of a split closes, an adjacent surviving member must
+  // win over the generic most-recent-tab fallback — otherwise an unrelated
+  // newer terminal covers the split (merged-state review 156cbc7).
+  const splitSuccessor = activeTab === id ? adjacentSplitMember(split, id) : null;
   split = removeSplitTab(split, id); // collapses to single-pane when < 2 remain
   if (activeTab === id) {
+    if (splitSuccessor != null && tabs.has(splitSuccessor)) {
+      activateTab(splitSuccessor);
+      if (restoreFocus) tabs.get(splitSuccessor).triggerEl.focus();
+      return;
+    }
     const fallback = fallbackTabForContext(tabs, sidebarMode, currentWorkspace());
     if (fallback) {
       activateTab(fallback[0]);

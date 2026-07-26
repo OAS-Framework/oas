@@ -17,19 +17,22 @@ export const MAX_SPLIT_PANES = 4;
 
 /** Start a split, or add one more empty slot to an existing split (and/or
  * re-orient it). `activeId` must be the currently active terminal tab —
- * callers gate on kind === "terminal". Returns { split, changed }. */
+ * callers gate on kind === "terminal". At most ONE pending slot exists at a
+ * time: the renderer owns a single placeholder element, so a second empty
+ * slot could not be shown — the user fills the open slot before splitting
+ * again. Returns { split, changed }. */
 export function requestSplit(split, orientation, activeId) {
   if (activeId == null) return { split, changed: false };
   if (!split) {
     return { split: { orientation, members: [activeId], pending: 1 }, changed: true };
   }
   const size = split.members.length + split.pending;
-  if (size >= MAX_SPLIT_PANES) {
+  if (split.pending > 0 || size >= MAX_SPLIT_PANES) {
     if (split.orientation === orientation) return { split, changed: false };
     return { split: { ...split, orientation }, changed: true };
   }
   return {
-    split: { orientation, members: [...split.members], pending: split.pending + 1 },
+    split: { orientation, members: [...split.members], pending: 1 },
     changed: true,
   };
 }
@@ -70,6 +73,18 @@ export function absorbTab(split, id) {
     split: { ...split, members: [...split.members, id], pending: split.pending - 1 },
     absorbed: true,
   };
+}
+
+/** The member to activate when split member `id` closes: its right/lower
+ * neighbor, else its left/upper one — a surviving split pane must win over
+ * the shell's generic most-recent-tab fallback (an unrelated newer terminal
+ * would otherwise cover the split). Null when `id` is not a member or no
+ * other member survives. */
+export function adjacentSplitMember(split, id) {
+  if (!split) return null;
+  const at = split.members.indexOf(id);
+  if (at < 0) return null;
+  return split.members[at + 1] ?? split.members[at - 1] ?? null;
 }
 
 /** Remove a (closed) tab from the split. Collapses to null when fewer than
