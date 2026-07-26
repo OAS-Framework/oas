@@ -845,6 +845,85 @@ test("install --json requirements: all four consent outcomes with structured pla
   assert.equal(q4.onPath, false);
 });
 
+test("init --package --json: one envelope with lockFile/lockedPackages, stable error codes, no prompts", () => {
+  const base = temp();
+  const pkg = fixturePackage(join(base, "pkg"));
+  // adopt by locked package id so lockFile/lockedPackages are populated
+  const ws = join(base, "ws");
+  mkdirSync(ws, { recursive: true });
+  installFixturePackage(ws, pkg);
+  const r = cli(["init", "--package", pkg, "--json", "--dir", ws]);
+  assert.equal(r.status, 0, r.stderr);
+  const env = JSON.parse(r.stdout); // exactly one compact document
+  assert.equal(env.schemaVersion, 1);
+  assert.equal(env.ok, true);
+  assert.equal(env.result.package, "example.engineering");
+  assert.equal(env.result.profile, "default");
+  assert.equal(env.result.file, join(ws, "oas-config.yaml"));
+  assert.deepEqual(env.result.capabilities, ["example.review", "example.delivery"]);
+  assert.equal(env.result.lockFile, join(ws, "oas-lock.json"));
+  assert.deepEqual(env.result.lockedPackages, ["example.engineering"]);
+  assert.ok(existsSync(join(ws, "oas-config.yaml")));
+
+  // E_CONFIG_EXISTS on overwrite
+  const r2 = cli(["init", "--package", pkg, "--json", "--dir", ws]);
+  assert.equal(r2.status, 1);
+  assert.equal(JSON.parse(r2.stdout).error.code, "E_CONFIG_EXISTS");
+
+  // E_PROFILE_AMBIGUOUS: multiple unmarked profiles, no --config
+  const multi = fixturePackage(join(base, "multi"), { id: "multi.pkg", configs: {
+    a: { path: "configs/default/oas-config.yaml" }, b: { path: "configs/minimal/oas-config.yaml" },
+  } });
+  const w2 = join(base, "w2"); mkdirSync(w2);
+  const r3 = cli(["init", "--package", multi, "--json", "--dir", w2]);
+  assert.equal(JSON.parse(r3.stdout).error.code, "E_PROFILE_AMBIGUOUS");
+  // E_PROFILE_NOT_FOUND: explicit unknown profile
+  const r4 = cli(["init", "--package", multi, "--config", "nope", "--json", "--dir", w2]);
+  assert.equal(JSON.parse(r4.stdout).error.code, "E_PROFILE_NOT_FOUND");
+  // E_PROFILE_INVALID: unsupplied capability
+  const bad = fixturePackage(join(base, "bad"), { id: "bad.pkg", extraFiles: {
+    "configs/x/oas-config.yaml": "name: w\ncapabilities:\n  additive:\n    ghost.cap:\n      from: installed\n      global: true\n",
+  }, configs: { x: { path: "configs/x/oas-config.yaml", default: true } } });
+  const r5 = cli(["init", "--package", bad, "--json", "--dir", w2]);
+  assert.equal(JSON.parse(r5.stdout).error.code, "E_PROFILE_INVALID");
+  // engine code pass-through: broken manifest → invalid-package-manifest verbatim
+  const broken = join(base, "broken");
+  write(join(broken, "oas-package.json"), "null");
+  const r6 = cli(["init", "--package", broken, "--json", "--dir", w2]);
+  assert.equal(JSON.parse(r6.stdout).error.code, "invalid-package-manifest");
+  assert.equal(existsSync(join(w2, "oas-config.yaml")), false, "no failure path may write a config");
+});
+
+test("config diff --json: envelope with diff array; zero differences exits 0 with differingLines 0; provenance defaults", () => {
+  const base = temp();
+  const pkg = fixturePackage(join(base, "pkg"));
+  const ws = join(base, "workspace"); // matches the profile's `name: workspace` — zero-diff baseline
+  mkdirSync(ws, { recursive: true });
+  installFixturePackage(ws, pkg);
+  assert.equal(cli(["init", "--package", "example.engineering", "--dir", ws, "--no-tmux-mouse"]).status, 0);
+  // provenance-derived defaults: NO --package/--config flags, resolved via the locked id
+  const same = cli(["config", "diff", "--json", "--dir", ws], { cwd: ws });
+  assert.equal(same.status, 0, same.stdout);
+  const e1 = JSON.parse(same.stdout);
+  assert.equal(e1.ok, true);
+  assert.equal(e1.result.differingLines, 0);
+  assert.equal(e1.result.package, "example.engineering");
+  assert.equal(e1.result.profile, "default");
+  // drift shows in the diff array; the file is untouched
+  const file = join(ws, "oas-config.yaml");
+  const before = readFileSync(file, "utf8");
+  writeFileSync(file, before + "  # local note\n");
+  const drift = cli(["config", "diff", "--json", "--dir", ws], { cwd: ws });
+  assert.equal(drift.status, 0);
+  const e2 = JSON.parse(drift.stdout);
+  assert.equal(e2.result.differingLines, 1);
+  assert.deepEqual(e2.result.diff.filter((d) => d.kind !== "same"), [{ kind: "local", line: "  # local note" }]);
+  assert.equal(readFileSync(file, "utf8"), before + "  # local note\n", "diff must not write");
+  // error code: no config at scope
+  const r3 = cli(["config", "diff", "--json", "--dir", join(base, "empty")]);
+  assert.equal(JSON.parse(r3.stdout).error.code, "E_NO_CONFIG");
+});
+
 // ---------- provenance helpers ----------
 
 test("profile provenance header round-trips through the parser", () => {

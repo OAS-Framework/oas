@@ -755,54 +755,96 @@ function dependencyClosureCapabilities(manifest, dir) {
 }
 
 /** oas init --package <source> [--config <name>]: preview, validate, and snapshot one package config profile. */
+/** oas init --package <source> [--config <name>]: preview, validate, and snapshot one package config profile.
+ * JSON mode: one compact envelope; WS2 codes E_PROFILE_INVALID / E_PROFILE_AMBIGUOUS /
+ * E_PROFILE_NOT_FOUND (E_CONFIG_EXISTS is raised by init() before this); engine
+ * error codes (invalid-package-manifest, path-escape, invalid-source, …) pass
+ * through verbatim; fully noninteractive (no tmux prompt). */
 function initPackage(src, dir, file) {
+  const bail = (code, msg) => (JSON_MODE ? jsonFail(code, msg) : die(msg));
+  const note = (msg) => (JSON_MODE ? console.error(msg) : console.log(msg));
   const configFlag = flag("config");
-  if (configFlag === true) die("--config needs a profile name");
+  if (configFlag === true) bail("E_USAGE", "--config needs a profile name");
   let resolved;
   const tmp = /^(https?:\/\/|git@|ssh:\/\/)/.test(src) ? mkdtempSync(join(tmpdir(), "oas-package-")) : undefined;
   try {
-    try { resolved = resolvePackageSource(src, dir, { clone: tmp }); } catch (e) { die(e.message); }
+    try { resolved = resolvePackageSource(src, dir, { clone: tmp }); }
+    catch (e) { bail(e.code || "E_PACKAGE_UNRESOLVED", e.message); }
     const { manifest, commit } = resolved;
     let profile;
-    try { profile = selectProfile(manifest, configFlag); } catch (e) { die(e.message); }
-    const errors = validateProfile(manifest, profile, { dependencyCapabilities: dependencyClosureCapabilities(manifest, dir) });
-    if (errors.length) die(`profile "${profile.name}" of package ${manifest.package} failed validation:\n  - ${errors.join("\n  - ")}`);
-    const body = readProfileText(manifest, profile);
+    try { profile = selectProfile(manifest, configFlag); }
+    catch (e) { bail(configFlag ? "E_PROFILE_NOT_FOUND" : "E_PROFILE_AMBIGUOUS", e.message); }
+    let errors;
+    try { errors = validateProfile(manifest, profile, { dependencyCapabilities: dependencyClosureCapabilities(manifest, dir) }); }
+    catch (e) { bail(e.code || "E_PROFILE_INVALID", e.message); }
+    if (errors.length) bail("E_PROFILE_INVALID", `profile "${profile.name}" of package ${manifest.package} failed validation:\n  - ${errors.join("\n  - ")}`);
+    let body, capabilities;
+    try { body = readProfileText(manifest, profile); capabilities = packageCapabilityIds(manifest); }
+    catch (e) { bail(e.code || "E_PROFILE_INVALID", e.message); }
     // Preview before writing: package, profile, exported capabilities.
-    console.log(`Package ${manifest.package}@${manifest.version} — profile "${profile.name}"${profile.description ? `: ${profile.description}` : ""}`);
-    console.log(`  exports capabilities: ${packageCapabilityIds(manifest).join(", ") || "(none)"}`);
+    note(`Package ${manifest.package}@${manifest.version} — profile "${profile.name}"${profile.description ? `: ${profile.description}` : ""}`);
+    note(`  exports capabilities: ${capabilities.join(", ") || "(none)"}`);
     const text = `${profileProvenanceHeader({ pkg: manifest.package, version: manifest.version, profile: profile.name, commit })}\n` +
       body.replace(/^name:.*$/m, `name: ${basename(dir)}`).replace(/\n*$/, "\n");
     writeFileSync(file, text);
-    console.log(`Created ${shortPath(file)} (${levelOf(dir)} level) from package profile ${manifest.package}:${profile.name}`);
-    console.log("The snapshot is an ordinary scoped config — edit it, retarget or disable any capability; package updates never rewrite it.");
-    if (!readPackageLocks(dir).packages[manifest.package]) console.log(`NOTE: package ${manifest.package} is not locked at this scope yet — acquire it with \`oas install ${src}\` so its capabilities restore.`);
+    note(`Created ${shortPath(file)} (${levelOf(dir)} level) from package profile ${manifest.package}:${profile.name}`);
+    note("The snapshot is an ordinary scoped config — edit it, retarget or disable any capability; package updates never rewrite it.");
+    // The scope's own lock is read directly: during init no oas-config.yaml
+    // exists here yet, so configChain cannot see this level (see the
+    // init-acquires-before-config-exists lesson).
+    const locks = { ...readPackageLocks(dir).packages, ...readPackageLocksAt(dir) };
+    if (!locks[manifest.package]) note(`NOTE: package ${manifest.package} is not locked at this scope yet — acquire it with \`oas install ${src}\` so its capabilities restore.`);
+    if (JSON_MODE) {
+      const lockEntry = locks[manifest.package];
+      jsonOk({
+        package: manifest.package, version: manifest.version, commit: commit || null,
+        profile: profile.name, file, capabilities,
+        lockFile: lockEntry?._file || null,
+        lockedPackages: Object.keys(locks),
+      });
+      return;
+    }
   } finally { if (tmp) rmSync(tmp, { recursive: true, force: true }); }
   offerTmuxMouseScrolling();
 }
 
-/** oas config diff --package <id> --config <name>: report-only diff of the local snapshot vs the package's current profile. */
+/** oas config diff --package <id> --config <name>: report-only diff of the local snapshot vs the package's current profile.
+ * The snapshot's provenance header supplies --package/--config defaults.
+ * JSON mode: one envelope; zero differences = exit 0 with differingLines 0. */
 function configDiffCmd() {
-  if (args[1] !== "diff") die("usage: oas config diff --package <id> --config <name> [--dir <dir>]");
+  const bail = (code, msg) => (JSON_MODE ? jsonFail(code, msg) : die(msg));
+  if (args[1] !== "diff") bail("E_USAGE", "usage: oas config diff --package <id> --config <name> [--dir <dir>] [--json]");
   const dir = resolve(flag("dir") || process.cwd());
   const file = join(dir, "oas-config.yaml");
-  if (!existsSync(file)) die(`no oas-config.yaml at ${shortPath(dir)} — nothing to diff`);
+  if (!existsSync(file)) bail("E_NO_CONFIG", `no oas-config.yaml at ${shortPath(dir)} — nothing to diff`);
   const localText = readFileSync(file, "utf8");
   const provenance = parseProfileProvenance(localText);
   const pkgId = flag("package") || provenance?.package;
-  if (!pkgId || pkgId === true) die("usage: oas config diff --package <id> --config <name> (the snapshot's provenance header supplies defaults when present)");
+  if (!pkgId || pkgId === true) bail("E_USAGE", "usage: oas config diff --package <id> --config <name> (the snapshot's provenance header supplies defaults when present)");
   const profileName = flag("config") || provenance?.profile;
   const tmp = /^(https?:\/\/|git@|ssh:\/\/)/.test(pkgId) ? mkdtempSync(join(tmpdir(), "oas-package-")) : undefined;
   try {
     let resolved;
-    try { resolved = resolvePackageSource(pkgId, dir, { clone: tmp }); } catch (e) { die(e.message); }
+    try { resolved = resolvePackageSource(pkgId, dir, { clone: tmp }); }
+    catch (e) { bail(e.code || "E_PACKAGE_UNRESOLVED", e.message); }
     let profile;
-    try { profile = selectProfile(resolved.manifest, profileName === true ? undefined : profileName); } catch (e) { die(e.message); }
-    const packageText = readProfileText(resolved.manifest, profile);
+    try { profile = selectProfile(resolved.manifest, profileName === true ? undefined : profileName); }
+    catch (e) { bail(profileName && profileName !== true ? "E_PROFILE_NOT_FOUND" : "E_PROFILE_AMBIGUOUS", e.message); }
+    let packageText;
+    try { packageText = readProfileText(resolved.manifest, profile); }
+    catch (e) { bail(e.code || "E_PROFILE_INVALID", e.message); }
     // Strip the local provenance header for a meaningful comparison.
     const localBody = localText.replace(/^# package: .*\n/, "");
     const diff = diffConfigTexts(localBody, packageText);
     const changed = diff.filter((d) => d.kind !== "same");
+    if (JSON_MODE) {
+      jsonOk({
+        package: resolved.manifest.package, profile: profile.name,
+        version: resolved.manifest.version, file,
+        differingLines: changed.length, diff,
+      });
+      return;
+    }
     console.log(`oas config diff — local ${shortPath(file)} vs ${resolved.manifest.package}@${resolved.manifest.version} profile "${profile.name}" (report only; nothing is merged or overwritten)\n`);
     if (!changed.length) { console.log("No differences."); return; }
     for (const d of diff) {
@@ -867,11 +909,15 @@ function init() {
   const raw = args.includes("--raw");
   const dir = resolve(flag("dir") || process.cwd());
   const file = join(dir, "oas-config.yaml");
-  if (existsSync(file)) die(`${shortPath(file)} already exists — edit it or use \`oas use\``);
-
   const pkgSrc = flag("package");
+  if (existsSync(file)) {
+    const msg = `${shortPath(file)} already exists — edit it or use \`oas use\``;
+    if (JSON_MODE && pkgSrc) jsonFail("E_CONFIG_EXISTS", msg);
+    die(msg);
+  }
+
   if (pkgSrc && pkgSrc !== true) { initPackage(pkgSrc, dir, file); return; }
-  if (pkgSrc === true) die("--package needs a package id, local path, or git URL");
+  if (pkgSrc === true) (JSON_MODE ? jsonFail("E_USAGE", "--package needs a package id, local path, or git URL") : die("--package needs a package id, local path, or git URL"));
 
   const template = flag("template");
   if (template && template !== true) {
@@ -1479,10 +1525,14 @@ Usage:
                                             host-requirement consent gate runs
       [--recursive] [--no-requirements]     --no-requirements = package-only (CI);
       [--accept-requirement <cmd> ...]      non-interactive runs never install host tools
-                                            unless each requirement is named explicitly;
-                                            acquisition never activates
-  oas config diff --package <id|url|path>   report how the local snapshot differs from the
-      [--config <name>] [--dir <d>]         package's current profile — never merges/overwrites
+      [--json]                              unless each requirement is named explicitly;
+                                            --json = one envelope (failures carry the full
+                                            report under error.details); never activates
+  oas config diff [--package <id|url|path>] report how the local snapshot differs from the
+      [--config <name>] [--dir <d>] [--json] package's current profile — never merges/overwrites;
+                                            an adopted snapshot's provenance header supplies
+                                            --package/--config defaults; --json emits one
+                                            envelope (differingLines 0 = no drift)
   oas trust <capability> [--dir <dir>]      approve executable commands/hooks for
                                             the currently locked integrity
   oas use <capability>                      activate for one config-owned target
@@ -1495,12 +1545,12 @@ Usage:
       [--dir <d>]                           .agents/injections/ path and set injection-override
   oas init [--raw] [--dir <dir>]            create an oas-config.yaml here
       [--package <id|path|git-url>]         adopt a package config profile as a local
-      [--config <name>]                     snapshot (default profile unless --config;
-      [--template <name|path|git-url>]      refuses to overwrite an existing config);
-      [--knowledge <id|none>]               or seed from a template config (named via
-      [--messaging <id|none>]               outer templates: map, a local file, or a
-      [--tasks <id|none>]                   git repo's default-branch oas-config.yaml);
-      [--tmux-mouse|--no-tmux-mouse]        prompts to enable normal tmux scrolling
+      [--config <name>] [--json]            snapshot (default profile unless --config;
+      [--template <name|path|git-url>]      refuses to overwrite an existing config;
+      [--knowledge <id|none>]               --json = one result envelope, noninteractive);
+      [--messaging <id|none>]               or seed from a template config (named via
+      [--tasks <id|none>]                   outer templates: map, a local file, or a
+      [--tmux-mouse|--no-tmux-mouse]        git repo's default-branch oas-config.yaml)
   oas root                                  print this package's install root
                                             (adapters resolve the kernel from it)
   oas <namespace> <command> [args…]         run an operational command only when its
