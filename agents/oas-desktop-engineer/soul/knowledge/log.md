@@ -1,6 +1,7 @@
 # Knowledge Log
 
 ## 2026-07-26
+* **Fix**: merged the maintainer mergeability hold-discipline note into [Maintainer mergeability loops need live-head verification and a hold discipline](/lessons/maintainer-handback-stewardship-race.md) and [Crossed mail coordination needs repository verification and single replies](/lessons/crossed-mail-coordination.md): current-main handback loops verify against the live PR head, answer stale verdicts once with git evidence, hold when instructed instead of rebasing speculatively, rebase only onto explicitly mailed successor SHAs, union append-only `log.md` conflicts, and fetch main before opening PRs to prevent branch scope drift.
 * **Update**: merged the split-strip alignment correction into [Split tab-strip alignment moves real tab elements into per-pane groups](/lessons/split-tab-strip-real-tab-groups.md): the pane-group flex track must be a dedicated full-width row containing only one flex child per pane, with controls and non-member tabs outside so they cannot skew alignment.
 * **Creation**: promoted [Split tab-strip alignment moves real tab elements into per-pane groups](/lessons/split-tab-strip-real-tab-groups.md) from the oas-desktop-engineer-split-ui notes.
 * **Creation**: promoted [Mouse affordances dispatch registered actions through a context-gated runAction](/lessons/run-action-context-gated-buttons.md) from the oas-desktop-engineer-split-ui notes.

@@ -1,36 +1,41 @@
 ---
 type: Lesson
-title: Maintainer handback loops race the maintainer's own stewardship commits
-description: When maintainer RETURN rounds add stewardship commits to main, treat named base SHAs as minimums: merge current origin/main, prove the named base is an ancestor, report the deviation, and answer duplicate stale crossed verdicts only once with git evidence.
-tags: [delivery, pr-review, crossed-mail, mergeability, stewardship]
+title: Maintainer mergeability loops need live-head verification and a hold discipline
+description: In current-main handback loops, verify each handback against gh pr view's live head, reply once with git evidence to stale verdicts, hold instead of speculatively rebasing when main keeps moving, and rebase only onto the maintainer's explicitly mailed successor SHA.
+tags: [delivery, coordination, git, maintainer]
 timestamp: 2026-07-26
 ---
 
 # Lesson
 
-Maintainer handback loops can become mergeability-only races when the
-maintainer records each RETURN round as a stewardship commit on main. By the
-time a handback lands, `origin/main` may already have advanced again, so a
-GitHub comparison can report the branch as "behind by 1" even after the worker
-merged the maintainer's previously named base.
+Maintainer handback loops can become mergeability-only races when current main
+moves between product-approved handbacks. PR #44 took six mergeability rounds
+after product approval from concurrent PR merges plus the maintainer's own
+stewardship commits advancing main after every return.
 
-This is a narrower delivery case of [crossed mail coordination](/lessons/crossed-mail-coordination.md): treat mail and named heads as evidence to verify against remote refs, not as a fresher source of truth than the repository.
+This is a narrower delivery case of [crossed mail coordination](/lessons/crossed-mail-coordination.md): treat mail and named heads as evidence to verify against the live repository state, and treat explicit hold instructions as coordination constraints rather than invitations to keep chasing `origin/main`.
 
 # Pattern
 
-- **Treat named base SHAs as minimums, not exact targets.** If the maintainer
-  names a base and `origin/main` has already advanced past it, merge current
-  `origin/main`, prove the named SHA with `git merge-base --is-ancestor
-  <named> HEAD`, and report the deviation explicitly in the handback. Merging
-  only the stale named SHA guarantees another round.
+- **Verify every incoming verdict against the live PR head before acting.** Run
+  `gh pr view <n> --json headRefOid`; in PR #44, four maintainer mails
+  described heads already superseded by crossing pushes. Each stale verdict gets
+  exactly one reply with fresh command outputs (`headRefOid`, merge-base,
+  mergeable), not a re-push.
+- **Rebase only onto the exact SHA the maintainer mails.** Do not rebase onto
+  whatever `origin/main` has advanced to beyond that SHA, and never
+  speculatively rebase while a "wait for my follow-up SHA" instruction stands.
+  Holding broke the crossed-round cycle; eager rebasing extended it.
 - **Make each handback self-contained.** Include the new head SHA, merge-base
   with `origin/main`, merge-delta summary, gate result, and any requested
   exact-head CI status in one message.
-- **Answer stale crossed verdicts once.** Check claims with `git fetch`,
-  `rev-parse`, and `merge-base` on remote refs, reply once with the evidence,
-  and do not re-reply to duplicate verdicts about the same stale state.
-- **Honor explicit STOP or hold instructions.** Acknowledge the hold even when
-  local repository evidence says the branch is current.
-- **Gate stewardship-only merges before pushing.** They are mechanical commits
-  that do not need a post-commit reviewer, but still require the full root gate
-  on the committed tree.
+- **Union append-only `log.md` conflicts.** The recurring conflict in PR #44 was
+  soul knowledge `log.md`; resolve by keeping both deliveries' entries
+  newest-first under the same date heading, then run strict `validate:okf` as
+  proof.
+- **Fetch main immediately before opening a PR.** A stale local `origin/main`
+  ref at branch-cut time can make the PR range look like it contains unrelated
+  base commits. Fix branch scope drift with plain `git fetch` plus rebase.
+- **Gate mechanical rebase or stewardship commits before pushing.** They do not
+  need a post-commit reviewer, but still require the expected gate on the
+  committed tree.
