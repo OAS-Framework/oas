@@ -96,6 +96,32 @@ to the owning developer(s), re-merge, re-gate, re-review.
 
 ## 5. Delivery
 
+- **Check for peer features first**: other coordinator instances may be
+  running parallel features against the same main (`oas status --team` shows
+  live coordinators; `git ls-remote origin 'refs/heads/feature/*'` shows their
+  branches). This check is silent — do not mail peer coordinators to announce
+  yourself or ask about their plans. Contact one only when there is an actual
+  conflict: before or after opening your PR, your feature conflicts with (or
+  is conflicted by) another coordinator's feature or PR. Then:
+  1. Mail that coordinator directly (anchor on exact heads and the specific
+     conflicting paths) and agree the merge order and who rebases/resolves.
+  2. Whoever merges second updates their feature branch from main after the
+     first PR lands, resolves, re-gates, and re-requests review.
+  3. If you two cannot agree (competing designs, contested ownership or
+     order), spawn an oas-expert as **parent of both coordinators** to
+     arbitrate:
+
+     ```bash
+     oas spawn oas-expert --purpose "merge-conflict-<a>-vs-<b>" \
+       --relation parent --relative-to "$OAS_INSTANCE" \
+       --task "Arbitrate the merge conflict between feature/<a> (coordinator <you>) and feature/<b> (coordinator <peer>). You oversee both coordinators for this conflict: decide merge order and resolution ownership, and consult the human if you need product/direction input. Report your ruling to both coordinators by aweb mail."
+     ```
+
+     The relation flag re-points YOUR lineage; agree with the peer
+     coordinator (or have the expert instruct them) that the expert oversees
+     them for this conflict too — the expert's ruling binds both of you.
+     Never resolve the collision by silently overwriting the other feature's
+     changes.
 - `gh pr create` from `feature/<name>` (you own the PR). Summarize scope,
   developer branches merged, review verdict.
 - **Launch the framework expert (oas-expert) for the merge** — main only
