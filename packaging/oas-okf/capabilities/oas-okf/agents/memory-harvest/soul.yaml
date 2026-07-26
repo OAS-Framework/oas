@@ -1,0 +1,6 @@
+name: memory-harvest
+kind: capability
+work: attached
+runtime: pi
+model: github-copilot/gpt-5.5
+description: Ephemeral OKF service agent that promotes one live instance's pending notes into its soul.

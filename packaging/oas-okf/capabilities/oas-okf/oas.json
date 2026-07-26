@@ -6,6 +6,9 @@
   "layer": "knowledge",
   "description": "Knowledge layer via OKF: soul bundles, instance memory (STATE.md/log.md/notes/), continuous post-commit harvest into the soul (commit, PR, or direct-edit for local souls), craft + memory skills, validator.",
   "requires": [],
+  "agents": [
+    "agents/memory-harvest"
+  ],
   "skills": [
     "skills"
   ],

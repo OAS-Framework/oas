@@ -10,9 +10,9 @@ Official [OAS](https://github.com/OAS-Framework/oas) knowledge-layer integration
 
 ## Requirements
 
-The capability has no external host-command requirement. It does require a compatible OAS installation. The outer package schema is frozen; the final compatibility floor still awaits the lock-v2/runtime-boundary release decision. See [`SCHEMA-STATUS.md`](SCHEMA-STATUS.md).
+The capability has no external host-command requirement. It requires OAS `>=0.19.0`, whose frozen package-runtime boundary provides schema-v1 `oas spawn ... --json` envelopes and capability-defined agents.
 
-The extracted harvest command still contains a marked private-kernel import. [`KERNEL-API-NEEDS.md`](KERNEL-API-NEEDS.md) specifies the public runtime services that must replace it before this repository can release independently.
+The harvest command invokes only that structured CLI boundary. It never discovers the kernel root or imports private kernel files. [`KERNEL-API-NEEDS.md`](KERNEL-API-NEEDS.md) records the now-satisfied historical inventory.
 
 ## Acquire and activate
 
@@ -31,7 +31,7 @@ A pinned Git source may be used before catalog publication:
 oas install git:https://github.com/OAS-Framework/oas-okf.git@v1.4.0 --dir /path/to/scope
 ```
 
-Do not publish that tag yet: schema, compatibility-floor, runtime-boundary, and consumer-probe gates are still open.
+Do not publish that tag yet: the released-0.19.0 consumer probe gate remains open.
 
 ## Use
 
@@ -41,7 +41,7 @@ Spawned instances receive the selected OKF skills and instructions automatically
 oas okf harvest
 ```
 
-The command skips safely when there are no pending notes or when a harvester for the source instance is already running.
+The command skips safely when there are no pending notes or when a harvester for the source instance is already running. Otherwise it resolves the packaged `memory-harvest` capability agent and spawns through `oas spawn --json`; task instructions use mode-0600 temporary files removed on every outcome.
 
 ## Development
 
