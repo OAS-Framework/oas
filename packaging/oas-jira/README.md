@@ -15,7 +15,7 @@ acli jira auth login --web   # human-run only, when status says unauthorized
 
 Installation guide: <https://developer.atlassian.com/cloud/acli/guides/install-acli/>
 
-The outer package schema is frozen. The final OAS compatibility floor still awaits the lock-v2 release decision; see [`SCHEMA-STATUS.md`](SCHEMA-STATUS.md).
+The amended package schema and OAS `>=0.19.0` compatibility floor are frozen; see [`SCHEMA-STATUS.md`](SCHEMA-STATUS.md) for the remaining released-kernel fixture gate.
 
 ## Acquire and activate
 
@@ -59,4 +59,4 @@ Load the `jira-tasks` skill before reading or changing tickets. Its commands and
 npm test
 ```
 
-This validates both manifests, checks resource containment, and smoke-tests the advisory hook. The full acquire → lock → trust → activate → spawn probe is blocked on engine consumer fixtures.
+This validates both manifests, checks resource containment, and smoke-tests the advisory hook. The full acquire → lock → trust → activate → spawn probe remains pending released OAS 0.19.0 consumer fixtures.

@@ -23,7 +23,7 @@ The commands use Node's built-in `fetch` and add no external CLI or SDK dependen
 export LINEAR_API_KEY='lin_api_...'
 ```
 
-Start/resume agents from an environment that receives this variable. The spawn hook warns when it is absent; API commands fail with actionable authentication guidance rather than attempting login. The outer package schema is frozen; the final OAS compatibility floor still awaits the lock-v2 release decision. See [`SCHEMA-STATUS.md`](SCHEMA-STATUS.md).
+Start/resume agents from an environment that receives this variable. The spawn hook warns when it is absent; API commands fail with actionable authentication guidance rather than attempting login. The amended package schema and OAS `>=0.19.0` compatibility floor are frozen. See [`SCHEMA-STATUS.md`](SCHEMA-STATUS.md) for the remaining released-kernel fixture gate.
 
 ## Acquire and activate
 
@@ -246,4 +246,4 @@ document mutations agents may perform and which remain human-only.
 npm test
 ```
 
-This validates both manifests, checks resource containment, and exercises the GraphQL wrapper and advisory hook against local mock servers. The full acquire → lock → trust → activate → spawn probe remains blocked on engine consumer fixtures.
+This validates both manifests, checks resource containment, and exercises the GraphQL wrapper and advisory hook against local mock servers. The full acquire → lock → trust → activate → spawn probe remains pending released OAS 0.19.0 consumer fixtures.

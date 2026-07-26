@@ -12,7 +12,7 @@ It claims no fundamental layer and contributes no commands, hooks, host requirem
 
 A compatible OAS deployment must provide the `integrations-expert` soul for the delegation workflow. The skill uses the public `oas spawn` command; it does not locate or import private kernel files.
 
-The frozen schema permits this flat capability-root declaration. The final OAS compatibility floor still awaits the lock-v2 release decision; see [`SCHEMA-STATUS.md`](SCHEMA-STATUS.md).
+The frozen addendum supports this flat capability-root declaration. The package requires OAS `>=0.19.0`; see [`SCHEMA-STATUS.md`](SCHEMA-STATUS.md) for the remaining released-kernel fixture gate.
 
 ## Acquire and activate
 
@@ -38,4 +38,4 @@ No `oas trust` step is needed because the manifest exports skills only. Targetin
 npm test
 ```
 
-This validates both manifests, checks that all three skill paths are package-contained, validates skill frontmatter/name contracts, and rejects private-kernel import guidance. The full acquire → lock → activate → spawn probe remains blocked on engine consumer fixtures.
+This validates both manifests, checks that all three skill paths are package-contained, validates skill frontmatter/name contracts, and rejects private-kernel import guidance. The full acquire → lock → activate → spawn probe remains pending released OAS 0.19.0 consumer fixtures.

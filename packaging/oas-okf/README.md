@@ -49,6 +49,6 @@ The command skips safely when there are no pending notes or when a harvester for
 npm test
 ```
 
-This validates `oas-package.json` and the enumerated `oas.json`, checks package-relative resource containment, and exercises the standalone lifecycle behavior. The full acquire → lock → trust → activate → spawn probe is documented in [`SCHEMA-STATUS.md`](SCHEMA-STATUS.md) and remains blocked on engine consumer fixtures.
+This validates `oas-package.json` and the enumerated `oas.json`, checks package-relative resource containment, and exercises the standalone lifecycle behavior. The full acquire → lock → trust → activate → spawn probe is documented in [`SCHEMA-STATUS.md`](SCHEMA-STATUS.md) and remains pending released OAS 0.19.0 consumer fixtures.
 
 Release and checksum conventions are defined by the official-package staging convention in the source staging branch.
