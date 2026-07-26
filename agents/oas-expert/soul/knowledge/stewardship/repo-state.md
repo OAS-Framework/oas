@@ -15,6 +15,8 @@ than letting the file grow stale.
 
 ## On main
 
+- **PR #42 merged 2026-07-26 as `09605c7`** — knowledge-only oas-desktop-engineer quick-open harvest preservation. It carries the retiring `oas-desktop-engineer-quick-open` post-merge memory-harvest commit (`97654ce`, cherry-picked as exact PR head `028a984`) into the canonical soul: deferred module-level Quick Open preselects now explicitly die with the mounted Spawn consumer on unmount, updating both the pending-intent data-currency lesson and the Quick Open → Spawn preselect handoff decision. Final gates passed: targeted Desktop strict OKF `106/0/0`, aggregate strict OKF all 8 bundles with zero warnings, scratch `npm test` `554/555` with the expected node-pty skip after root + Desktop dependency install and copied installed capabilities, `check`, `validate`, `pack:check`, diff-check, and exact-head PR CI. Same-account approval was recorded as a comment; the remote harvest branch is deleted. No product, release, manifest, package, or framework behavior changes.
+
 - **PR #41 merged 2026-07-26 as `c055614`** — Desktop terminal tabs now support bounded side-by-side and stacked split panes with existing tab identity/dedup, pane-level selection, adjacent-member close fallback, resize refits, editable shortcuts, and a pending-slot model kept in parity with the renderer. The sidebar is hideable with a persisted shortcut; non-mac `Ctrl+B` remains tmux-owned. Final exact head `2ff4792`; scratch gates, strict OKF for all 8 bundles, PR CI, and all three installer checks passed. Same-account approval was recorded as a comment; the remote feature branch is deleted, while local cleanup remains with the worktree at `/private/tmp/integrate-split-panels`. Not yet released.
 
 - **PR #40 merged 2026-07-26 as `3da7ce8`** — Desktop Quick Open for souls (`Mod+P`) and terminal focus on user-initiated jumps. Adds shared overlay-picker machinery, fixes the palette fuzzy scorer's negative-prefix no-match bug, routes soul selection through Spawn's consumed-once `preselectSoul()` handoff, keeps `Ctrl+P` in Linux/Windows terminals shell-owned, and makes terminal content focus explicit via `activateTab(id, { focusContent })` plus a chordless `terminal.focusActive` action. Final exact head `9d00985`; scratch gates, strict OKF for all 8 bundles, PR CI, and all three installer verify jobs passed. Same-account approval was recorded as a comment; the remote feature branch is deleted. Not yet released.
@@ -163,10 +165,11 @@ than letting the file grow stale.
 
 ## In flight
 
-- (nothing currently recorded) — PR #41, PR #40, PR #38, and the exact v0.18.6 release reached terminal outcomes.
+- (nothing currently recorded) — PR #42, PR #41, PR #40, PR #38, and the exact v0.18.6 release reached terminal outcomes.
 
 ## Recent deliveries
 
+- PR #42 oas-desktop-engineer quick-open deferred-intent harvest: MERGED 2026-07-26 as `09605c7`; exact head `028a984`, remote branch deleted (see delivery-log).
 - PR #41 Desktop split panes + hideable sidebar: MERGED 2026-07-26 as `c055614`; exact head `2ff4792`, remote branch deleted (see delivery-log).
 - PR #40 Desktop Quick Open for souls + terminal focus on user jumps: MERGED
   2026-07-26 as `3da7ce8`; exact head `9d00985`, remote branch deleted
