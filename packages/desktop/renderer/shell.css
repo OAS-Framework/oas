@@ -12,6 +12,17 @@ body {
    toggle is one line of JS; every terminal tab's ResizeObserver refits xterm
    when the panes change size. */
 #app.sidebar-hidden #sidebar { display: none; }
+/* Restore-by-mouse while hidden: a thin edge button on the window's left,
+   shown only when the sidebar is away (it runs the same sidebar.toggle
+   action as the chord/palette/rail-footer button). */
+#sidebar-restore { display: none; }
+#app.sidebar-hidden #sidebar-restore {
+  display: flex; align-items: center; justify-content: center;
+  width: 14px; min-width: 14px; padding: 0; border: 0; border-right: 1px solid var(--border);
+  background: var(--surface); color: var(--muted); font-size: 13px; cursor: pointer;
+}
+#app.sidebar-hidden #sidebar-restore:hover,
+#app.sidebar-hidden #sidebar-restore:focus-visible { color: var(--fg); background: var(--surface-2); outline: 0; }
 
 /* ── nav rail ── */
 #sidebar {
@@ -159,11 +170,30 @@ body {
 
 /* ── main / tabs ── */
 #main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+#tabstrip { display: flex; flex: none; background: var(--surface); border-bottom: 1px solid var(--border); }
+#tabstrip:has(> #tabbar:empty) { display: none; }
 #tabbar {
-  display: flex; background: var(--surface); border-bottom: 1px solid var(--border);
-  overflow-x: auto; flex: none; height: var(--bar-h);
+  display: flex; flex: 1; min-width: 0;
+  overflow-x: auto; height: var(--bar-h);
 }
-#tabbar:empty { display: none; }
+/* tab-strip split controls (shown while the active tab is a terminal) */
+#tab-actions { display: flex; align-items: center; gap: 2px; padding: 0 6px; flex: none; }
+#tab-actions[hidden] { display: none; }
+#tab-actions button { appearance: none; border: 0; border-radius: 4px; background: none; color: var(--muted);
+                      font: inherit; font-size: 14px; padding: 2px 6px; cursor: pointer; }
+#tab-actions button:hover:not(:disabled), #tab-actions button:focus-visible { color: var(--fg); background: var(--surface-2); }
+#tab-actions button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+#tab-actions button:disabled { color: var(--faint); cursor: default; }
+/* Editor-group strip: while a split is visible the strip is grouped to
+   match the panes — each member's tab sits in a .tab-group sized like its
+   pane (row: groups share the width exactly as the panes do; col: group
+   order left→right = pane order top→bottom — documented mapping), a
+   pending slot keeps an empty spacer group over the placeholder pane, and
+   non-member tabs keep their normal look in the trailing group. */
+#tabbar.split-strip > .tab-group { display: flex; min-width: 0; overflow: hidden; }
+#tabbar.split-strip > .tab-group-pane { flex: 1 1 0; border-right: 1px solid var(--border); }
+#tabbar.split-strip > .tab-group-rest { flex: none; margin-left: auto; }
+#tabbar.split-strip-col > .tab-group-pane { /* stacked panes: same equal-share strip, order = pane order */ }
 .tab {
   display: flex; align-items: center; white-space: nowrap;
   background: var(--surface-2); border-right: 1px solid var(--border);

@@ -61,6 +61,28 @@ light, WCAG AA); views style themselves against tokens only, scoped under
   actions grouped by context, click-to-record (Esc cancels, Backspace
   unbinds), conflict warnings via `findConflict`, per-row reset + reset-all.
 
+## Split panes and the hideable sidebar (shell-level)
+
+Splits reproject existing TERMINAL tabs as flex cells of `#tabhost`
+(`split-layout.mjs` is the pure model; `split-dom.mjs` the DOM projection).
+A split always seeds from the CURRENT tab — `requestSplit` puts the active
+terminal tab in `members[0]`, so the tab you split from stays the first,
+visible, active pane; the pending slot absorbs the next terminal you open.
+Clickable controls mirror the chords with no duplicated logic: the tab-strip
+buttons (`#tab-actions`: split right / split down / close split) and the
+sidebar toggles (rail-footer button + the thin `#sidebar-restore` edge
+button shown while hidden) all dispatch the registered actions through
+`runAction(id)` — context-gated exactly like chord dispatch — and their
+enablement dry-runs the same model transition via
+`split-controls.mjs` `splitControlsState`. While a split is visible the tab
+strip is grouped to match it (editor-group style, `projectTabStrip`): each
+member's real tab element moves into a `.tab-group` sized like its pane in
+pane order (row: groups share the strip width as the panes share the host;
+col: group order left→right = pane order top→bottom), a pending slot keeps
+an empty spacer group, and non-member tabs keep their flat look in a
+trailing group. One chrome per tab means the tab-a11y roving/aria/close
+semantics are untouched; the non-split strip renders exactly as before.
+
 ## Terminal focus discipline (shell-level)
 
 Jumping to an instance terminal (palette instance row, sidebar roster row,
