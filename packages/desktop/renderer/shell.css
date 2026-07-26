@@ -170,12 +170,25 @@ body {
 
 /* ── main / tabs ── */
 #main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-#tabstrip { display: flex; flex: none; background: var(--surface); border-bottom: 1px solid var(--border); }
-#tabstrip:has(> #tabbar:empty) { display: none; }
+#tabstrip { display: flex; flex-direction: column; flex: none; background: var(--surface); border-bottom: 1px solid var(--border); }
+#tabstrip:has(> #tabbar-row > #tabbar:empty):has(> #pane-tabs[hidden]) { display: none; }
+#tabbar-row { display: flex; min-width: 0; }
 #tabbar {
   display: flex; flex: 1; min-width: 0;
   overflow-x: auto; height: var(--bar-h);
 }
+/* Editor-group pane tabs: while a split is visible, the member tabs live in
+   their OWN full-width row whose only flex content is the pane groups — so
+   the groups divide exactly the width the panes divide in #tabhost (the
+   split controls and non-member tabs stay in the ordinary row below and
+   never skew the pane track — review 59fa415). Row orientation: equal
+   shares over equal panes; col: group order left→right = pane order
+   top→bottom (documented mapping). */
+#pane-tabs { display: flex; min-width: 0; height: var(--bar-h); border-bottom: 1px solid var(--border); }
+#pane-tabs[hidden] { display: none; }
+#pane-tabs > .tab-group { display: flex; flex: 1 1 0; min-width: 0; overflow: hidden; }
+#pane-tabs > .tab-group + .tab-group { border-left: 1px solid var(--border); }
+#pane-tabs .tab { flex: 1 1 auto; min-width: 0; max-width: none; }
 /* tab-strip split controls (shown while the active tab is a terminal) */
 #tab-actions { display: flex; align-items: center; gap: 2px; padding: 0 6px; flex: none; }
 #tab-actions[hidden] { display: none; }
@@ -184,16 +197,6 @@ body {
 #tab-actions button:hover:not(:disabled), #tab-actions button:focus-visible { color: var(--fg); background: var(--surface-2); }
 #tab-actions button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 #tab-actions button:disabled { color: var(--faint); cursor: default; }
-/* Editor-group strip: while a split is visible the strip is grouped to
-   match the panes — each member's tab sits in a .tab-group sized like its
-   pane (row: groups share the width exactly as the panes do; col: group
-   order left→right = pane order top→bottom — documented mapping), a
-   pending slot keeps an empty spacer group over the placeholder pane, and
-   non-member tabs keep their normal look in the trailing group. */
-#tabbar.split-strip > .tab-group { display: flex; min-width: 0; overflow: hidden; }
-#tabbar.split-strip > .tab-group-pane { flex: 1 1 0; border-right: 1px solid var(--border); }
-#tabbar.split-strip > .tab-group-rest { flex: none; margin-left: auto; }
-#tabbar.split-strip-col > .tab-group-pane { /* stacked panes: same equal-share strip, order = pane order */ }
 .tab {
   display: flex; align-items: center; white-space: nowrap;
   background: var(--surface-2); border-right: 1px solid var(--border);

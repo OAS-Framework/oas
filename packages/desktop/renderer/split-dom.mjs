@@ -9,15 +9,20 @@
 //  * projectTabStrip — the tab strip visually reflects the split (editor-
 //    group style): each member's REAL tab element (one chrome per tab, so
 //    tab-a11y roving/aria/close semantics are untouched) moves into a
-//    `.tab-group` sized like its pane, in pane order. Mapping: for
-//    orientation "row" the groups share the strip width equally exactly as
-//    the panes share #tabhost, so each group sits over its pane; for "col"
-//    (stacked panes) group order left→right equals pane order top→bottom
-//    (documented mapping — a horizontal strip cannot align with vertical
-//    panes literally). A pending slot renders an empty spacer group over
-//    the placeholder pane; tabs that are NOT split members keep their
-//    normal look in a trailing non-flex group (still clickable — activating
-//    one covers the split). Non-split state never touches the strip.
+//    `.tab-group` inside the dedicated `paneTabs` row, in pane order.
+//    ALIGNMENT INVARIANT (review 59fa415): the pane groups must divide the
+//    SAME width the panes divide — so they live in their own full-width
+//    strip row (`#pane-tabs`, a sibling of #tabhost's column with no other
+//    flex content), never sharing a track with the split-control buttons
+//    or with non-member tabs. For orientation "row" the equal flex shares
+//    of that row match the panes' equal shares of #tabhost exactly; for
+//    "col" (stacked panes) group order left→right equals pane order
+//    top→bottom (documented mapping — a horizontal strip cannot align with
+//    vertical panes literally). A pending slot renders an empty spacer
+//    group over the placeholder pane; tabs that are NOT split members keep
+//    their normal look in the ordinary tabbar row below (still clickable —
+//    activating one covers the split). Non-split state never touches
+//    either row.
 //
 // Both projections are idempotent and move a node only when it is out of
 // place: re-inserting an already-placed element would tear it out of the
@@ -50,62 +55,64 @@ export function renderSplitLayout(host, emptyEl, split, on, getPane) {
   } else emptyEl.remove();
 }
 
-function ensureGroup(tabbar, before, key, className) {
-  let group = tabbar.querySelector(`:scope > .tab-group[data-group="${key}"]`);
+function ensureGroup(paneTabs, before, key, className) {
+  let group = paneTabs.querySelector(`:scope > .tab-group[data-group="${key}"]`);
   if (!group) {
-    group = tabbar.ownerDocument.createElement("div");
+    group = paneTabs.ownerDocument.createElement("div");
     group.className = className;
     group.dataset.group = key;
     group.setAttribute("role", "presentation");
   }
-  if (before ? before.nextSibling !== group : tabbar.firstChild !== group) {
-    if (before) before.after(group); else tabbar.prepend(group);
+  if (before ? before.nextSibling !== group : paneTabs.firstChild !== group) {
+    if (before) before.after(group); else paneTabs.prepend(group);
   }
   return group;
 }
 
 /** Group the strip to match `split` (see module comment), or restore the
- * flat strip. `entries` is the shell's ordered tab list: [id, { tabEl }] in
- * tab-creation order (the flat strip's order). */
-export function projectTabStrip(tabbar, split, on, entries) {
+ * flat strip. `paneTabs` is the dedicated full-width row for member-tab
+ * groups (its width track equals #tabhost's); `tabbar` is the ordinary
+ * strip row where non-members stay. `entries` is the shell's ordered tab
+ * list: [id, { tabEl }] in tab-creation order (the flat strip's order). */
+export function projectTabStrip(paneTabs, tabbar, split, on, entries) {
   const doc = tabbar.ownerDocument;
   const focused = doc.activeElement;
-  const grouped = tabbar.classList.contains("split-strip");
   const active = on && !!split;
   if (!active) {
-    if (!grouped) return; // non-split strip renders exactly as before splits existed
-    tabbar.classList.remove("split-strip", "split-strip-col");
+    if (paneTabs.hidden && !paneTabs.childNodes.length) return; // already flat
+    paneTabs.hidden = true;
+    paneTabs.classList.remove("split-strip-col");
     for (const [, t] of entries) tabbar.append(t.tabEl); // creation order restored
-    for (const g of tabbar.querySelectorAll(":scope > .tab-group")) g.remove();
+    for (const g of paneTabs.querySelectorAll(":scope > .tab-group")) g.remove();
     if (focused && doc.activeElement !== focused && tabbar.contains(focused)) focused.focus();
     return;
   }
-  tabbar.classList.add("split-strip");
-  tabbar.classList.toggle("split-strip-col", split.orientation === "col");
+  paneTabs.hidden = false;
+  paneTabs.classList.toggle("split-strip-col", split.orientation === "col");
   const byId = new Map(entries.map(([id, t]) => [id, t]));
   let anchor = null;
   for (const id of split.members) {
     const t = byId.get(id);
     if (!t) continue;
-    const group = ensureGroup(tabbar, anchor, `pane:${id}`, "tab-group tab-group-pane");
+    const group = ensureGroup(paneTabs, anchor, `pane:${id}`, "tab-group tab-group-pane");
     if (t.tabEl.parentNode !== group) group.append(t.tabEl);
     anchor = group;
   }
-  const pendingGroup = tabbar.querySelector(':scope > .tab-group[data-group="pending"]');
+  const pendingGroup = paneTabs.querySelector(':scope > .tab-group[data-group="pending"]');
   if (split.pending > 0) {
-    ensureGroup(tabbar, anchor, "pending", "tab-group tab-group-pane tab-group-pending")
+    ensureGroup(paneTabs, anchor, "pending", "tab-group tab-group-pane tab-group-pending")
       .setAttribute("aria-hidden", "true");
-    anchor = tabbar.querySelector(':scope > .tab-group[data-group="pending"]');
   } else pendingGroup?.remove();
-  const rest = ensureGroup(tabbar, anchor, "rest", "tab-group tab-group-rest");
+  // non-members keep their flat look in the ordinary tabbar row
   for (const [id, t] of entries) {
     if (split.members.includes(id)) continue;
-    if (t.tabEl.parentNode !== rest) rest.append(t.tabEl);
+    if (t.tabEl.parentNode !== tabbar) tabbar.append(t.tabEl);
   }
   // stale pane groups (member closed) disappear with their member
-  for (const g of tabbar.querySelectorAll(":scope > .tab-group[data-group^='pane:']")) {
+  for (const g of paneTabs.querySelectorAll(":scope > .tab-group[data-group^='pane:']")) {
     const id = Number(g.dataset.group.slice(5));
     if (!split.members.includes(id)) g.remove();
   }
-  if (focused && doc.activeElement !== focused && tabbar.contains(focused)) focused.focus();
+  if (focused && doc.activeElement !== focused
+      && (paneTabs.contains(focused) || tabbar.contains(focused))) focused.focus();
 }

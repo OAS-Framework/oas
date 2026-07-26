@@ -44,14 +44,17 @@
             title="Show the sidebar" aria-label="Show the sidebar">›</button>
     <main id="main">
       <div id="tabstrip">
-        <div id="tabbar" role="tablist" aria-label="Open terminals and artifacts"></div>
-        <div id="tab-actions" hidden>
+        <div id="pane-tabs" role="tablist" aria-label="Split pane tabs" hidden></div>
+        <div id="tabbar-row">
+          <div id="tabbar" role="tablist" aria-label="Open terminals and artifacts"></div>
+          <div id="tab-actions" hidden>
           <button id="split-right" type="button" data-action="split.vertical"
                   title="Split terminal right (side by side)" aria-label="Split terminal right">◭</button>
           <button id="split-down" type="button" data-action="split.horizontal"
                   title="Split terminal down (stacked)" aria-label="Split terminal down">⬓</button>
           <button id="split-close" type="button" data-action="split.close"
                   title="Close the split (back to single pane)" aria-label="Close the split">▣</button>
+          </div>
         </div>
       </div>
       <div id="stagehost"></div>

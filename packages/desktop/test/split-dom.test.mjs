@@ -16,7 +16,7 @@ const PKG = join(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (f) => readFileSync(join(PKG, f), "utf8");
 
 function dom() {
-  return new JSDOM(`<div id="tabbar" role="tablist"></div><div id="tabhost"></div>`);
+  return new JSDOM(`<div id="pane-tabs" hidden></div><div id="tabbar" role="tablist"></div><div id="tabhost"></div>`);
 }
 
 function makeTabs(doc, ids) {
@@ -106,27 +106,55 @@ test("renderSplitLayout off restores nothing split-specific (non-split regressio
 
 // ── requirement 3: the tab strip aligns with the split ──────────────────
 
-test("projectTabStrip groups member tabs in PANE ORDER with a pending spacer and a trailing rest group", () => {
+test("projectTabStrip groups member tabs in PANE ORDER in the dedicated pane row; non-members stay in the tabbar", () => {
   const { window } = dom();
   const doc = window.document;
   const tabs = makeTabs(doc, [1, 2, 3]);
   const tabbar = doc.getElementById("tabbar");
-  // active tab 2 split, pending slot open; tab 1 is a non-member artifact
+  const paneTabs = doc.getElementById("pane-tabs");
+  // active tab 2 split, pending slot open; tabs 1 and 3 are non-members
   const split = { orientation: "row", members: [2], pending: 1 };
-  projectTabStrip(tabbar, split, true, [...tabs]);
-  assert.ok(tabbar.classList.contains("split-strip"));
-  const groups = [...tabbar.querySelectorAll(":scope > .tab-group")];
-  assert.deepEqual(groups.map((g) => g.dataset.group), ["pane:2", "pending", "rest"],
-    "group order mirrors pane order; non-members trail");
+  projectTabStrip(paneTabs, tabbar, split, true, [...tabs]);
+  assert.equal(paneTabs.hidden, false);
+  const groups = [...paneTabs.querySelectorAll(":scope > .tab-group")];
+  assert.deepEqual(groups.map((g) => g.dataset.group), ["pane:2", "pending"],
+    "pane row holds ONLY pane groups, in pane order");
   assert.equal(groups[0].querySelector("#tab-wrap-2"), tabs.get(2).tabEl);
   assert.equal(groups[1].children.length, 0, "pending group is an empty spacer");
   assert.equal(groups[1].getAttribute("aria-hidden"), "true");
-  assert.deepEqual([...groups[2].children], [tabs.get(1).tabEl, tabs.get(3).tabEl]);
+  // non-members keep their flat look in the ordinary tabbar row — they must
+  // NOT share the pane row's width track (alignment invariant, review 59fa415)
+  assert.deepEqual([...tabbar.children], [tabs.get(1).tabEl, tabs.get(3).tabEl]);
   // absorb tab 3: it gets ITS pane group after pane 2's; spacer leaves
   const s2 = absorbTab(split, 3).split;
-  projectTabStrip(tabbar, s2, true, [...tabs]);
-  assert.deepEqual([...tabbar.querySelectorAll(":scope > .tab-group")].map((g) => g.dataset.group),
-    ["pane:2", "pane:3", "rest"]);
+  projectTabStrip(paneTabs, tabbar, s2, true, [...tabs]);
+  assert.deepEqual([...paneTabs.querySelectorAll(":scope > .tab-group")].map((g) => g.dataset.group),
+    ["pane:2", "pane:3"]);
+  assert.deepEqual([...tabbar.children], [tabs.get(1).tabEl]);
+});
+
+test("pane groups divide the SAME width track as the panes — nothing else shares the pane row", () => {
+  // JSDOM has no layout engine, so the alignment invariant is pinned
+  // structurally: with N members + pending the pane row contains exactly
+  // those flex children and nothing else (controls/non-members live in the
+  // tabbar row), and the CSS gives every pane group `flex: 1 1 0` in a row
+  // whose width equals #tabhost's column — equal shares over equal panes.
+  const { window } = dom();
+  const doc = window.document;
+  const tabs = makeTabs(doc, [1, 2, 3, 4]);
+  const paneTabs = doc.getElementById("pane-tabs");
+  const tabbar = doc.getElementById("tabbar");
+  const split = { orientation: "row", members: [2, 4], pending: 1 };
+  projectTabStrip(paneTabs, tabbar, split, true, [...tabs]);
+  const children = [...paneTabs.children];
+  assert.equal(children.length, split.members.length + split.pending,
+    "one pane-row child per pane — no controls, no rest group, no stray nodes");
+  assert.ok(children.every((c) => c.classList.contains("tab-group-pane")));
+  const css = read("renderer/shell.css");
+  assert.match(css, /#pane-tabs > \.tab-group \{ display: flex; flex: 1 1 0;/,
+    "every pane group takes an equal flex share of the full-width row");
+  assert.match(css, /#tab-actions \{ display: flex;[^}]*flex: none/,
+    "split controls are outside the pane track");
 });
 
 test("projectTabStrip 'col' keeps grouping semantics: group order left→right = pane order top→bottom", () => {
@@ -134,10 +162,11 @@ test("projectTabStrip 'col' keeps grouping semantics: group order left→right =
   const doc = window.document;
   const tabs = makeTabs(doc, [1, 2]);
   const tabbar = doc.getElementById("tabbar");
+  const paneTabs = doc.getElementById("pane-tabs");
   const split = { orientation: "col", members: [2, 1], pending: 0 };
-  projectTabStrip(tabbar, split, true, [...tabs]);
-  assert.ok(tabbar.classList.contains("split-strip-col"));
-  const groups = [...tabbar.querySelectorAll(":scope > .tab-group-pane")];
+  projectTabStrip(paneTabs, tabbar, split, true, [...tabs]);
+  assert.ok(paneTabs.classList.contains("split-strip-col"));
+  const groups = [...paneTabs.querySelectorAll(":scope > .tab-group-pane")];
   assert.deepEqual(groups.map((g) => g.dataset.group), ["pane:2", "pane:1"]);
 });
 
@@ -146,20 +175,22 @@ test("ending the split restores the flat strip in tab-creation order (non-split 
   const doc = window.document;
   const tabs = makeTabs(doc, [1, 2, 3]);
   const tabbar = doc.getElementById("tabbar");
+  const paneTabs = doc.getElementById("pane-tabs");
   const flatBefore = [...tabbar.children];
   let split = { orientation: "row", members: [2, 3], pending: 0 };
-  projectTabStrip(tabbar, split, true, [...tabs]);
+  projectTabStrip(paneTabs, tabbar, split, true, [...tabs]);
   // member 3 closes → its group must disappear with it
   split = removeSplitTab(split, 3);
   assert.equal(split, null, "collapses below two panes");
-  projectTabStrip(tabbar, split, true, [...tabs]);
-  assert.ok(!tabbar.classList.contains("split-strip"));
-  assert.equal(tabbar.querySelector(".tab-group"), null, "no groups survive the split");
+  projectTabStrip(paneTabs, tabbar, split, true, [...tabs]);
+  assert.equal(paneTabs.hidden, true);
+  assert.equal(paneTabs.querySelector(".tab-group"), null, "no groups survive the split");
   assert.deepEqual([...tabbar.children], flatBefore, "flat strip renders exactly as before");
   // covering the split (non-member active) also restores the flat strip
-  projectTabStrip(tabbar, { orientation: "row", members: [1, 2], pending: 0 }, true, [...tabs]);
-  projectTabStrip(tabbar, { orientation: "row", members: [1, 2], pending: 0 }, false, [...tabs]);
+  projectTabStrip(paneTabs, tabbar, { orientation: "row", members: [1, 2], pending: 0 }, true, [...tabs]);
+  projectTabStrip(paneTabs, tabbar, { orientation: "row", members: [1, 2], pending: 0 }, false, [...tabs]);
   assert.deepEqual([...tabbar.children], flatBefore);
+  assert.equal(paneTabs.hidden, true);
 });
 
 test("projectTabStrip preserves keyboard focus on the focused tab trigger across regrouping (a11y)", () => {
@@ -167,11 +198,12 @@ test("projectTabStrip preserves keyboard focus on the focused tab trigger across
   const doc = window.document;
   const tabs = makeTabs(doc, [1, 2]);
   const tabbar = doc.getElementById("tabbar");
+  const paneTabs = doc.getElementById("pane-tabs");
   tabs.get(2).triggerEl.focus();
   assert.equal(doc.activeElement, tabs.get(2).triggerEl);
-  projectTabStrip(tabbar, { orientation: "row", members: [2], pending: 1 }, true, [...tabs]);
+  projectTabStrip(paneTabs, tabbar, { orientation: "row", members: [2], pending: 1 }, true, [...tabs]);
   assert.equal(doc.activeElement, tabs.get(2).triggerEl, "moving the tab into its group keeps focus");
-  projectTabStrip(tabbar, null, false, [...tabs]);
+  projectTabStrip(paneTabs, tabbar, null, false, [...tabs]);
   assert.equal(doc.activeElement, tabs.get(2).triggerEl, "restoring the flat strip keeps focus");
 });
 
@@ -217,7 +249,7 @@ test("runAction dispatches a registered action only in an active context (button
 
 test("index.html ships the split buttons, the sidebar restore edge button, and shell wires them through runAction", () => {
   const html = read("renderer/index.html");
-  for (const id of ["tab-actions", "split-right", "split-down", "split-close", "sidebar-restore", "tabstrip"]) {
+  for (const id of ["tab-actions", "split-right", "split-down", "split-close", "sidebar-restore", "tabstrip", "pane-tabs", "tabbar-row"]) {
     assert.match(html, new RegExp(`id="${id}"`), `index.html has #${id}`);
   }
   // buttons carry data-action so applyChordTitles suffixes the live chord
@@ -229,12 +261,12 @@ test("index.html ships the split buttons, the sidebar restore edge button, and s
   assert.match(src, /\["split-right", "split\.vertical"\]/, "split buttons map to the registered actions");
   assert.match(src, /splitControlsState\(split, activeTab/, "button gating derives from the shared model");
   assert.match(src, /renderSplitLayout\(tabhost, splitEmptyEl, split/, "pane projection via split-dom");
-  assert.match(src, /projectTabStrip\(tabbar, split/, "strip grouping via split-dom");
+  assert.match(src, /projectTabStrip\(paneTabsEl, tabbar, split/, "strip grouping via split-dom");
   // rail-footer sidebar toggle exists alongside the edge restore button
   assert.match(src, /label">Sidebar</, "rail-footer Sidebar button");
   // CSS: the restore button only exists while the sidebar is hidden
   const css = read("renderer/shell.css");
   assert.match(css, /#sidebar-restore \{ display: none; \}/);
   assert.match(css, /#app\.sidebar-hidden #sidebar-restore \{/);
-  assert.match(css, /#tabbar\.split-strip > \.tab-group-pane \{ flex: 1 1 0;/);
+  assert.match(css, /#pane-tabs > \.tab-group \{ display: flex; flex: 1 1 0;/);
 });

@@ -431,7 +431,7 @@ function renderSplit(splitVisible) {
   // panes — members[0] is the tab the user split FROM) live in
   // split-dom.mjs so they are testable without booting the shell.
   renderSplitLayout(tabhost, splitEmptyEl, split, splitVisible, (id) => tabs.get(id)?.paneEl || null);
-  projectTabStrip(tabbar, split, splitVisible, [...tabs]);
+  projectTabStrip(paneTabsEl, tabbar, split, splitVisible, [...tabs]);
 }
 
 // ── tab-strip split controls: clickable twins of the split.* actions ──
@@ -439,6 +439,7 @@ function renderSplit(splitVisible) {
 // exactly like chord dispatch); enablement dry-runs the same model
 // transition the actions perform — no duplicated gating logic.
 const tabActionsEl = document.getElementById("tab-actions");
+const paneTabsEl = document.getElementById("pane-tabs");
 for (const [btnId, actionId] of [
   ["split-right", "split.vertical"], ["split-down", "split.horizontal"], ["split-close", "split.close"],
 ]) {
