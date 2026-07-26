@@ -104,11 +104,22 @@ with the acquire → lock → trust → activate → spawn probe from
   package-root lock serves package-wide tooling. One or many locks per
   package are allowed; each is its own `npm ci` unit. Directories not
   enumerated by the manifest are never scanned.
-- **When**: materialization runs at the END of a successful acquire, update,
-  and restore of that package (after integrity verification, before the
-  operation reports success). It is `npm ci --ignore-scripts --no-audit
-  --no-fund` in the package root — **no npm lifecycle scripts ever run**, at
-  any phase.
+- **When and how**: materialization runs at the END of a successful acquire,
+  update, and restore of that package (after integrity verification, before
+  the operation reports success). The command is exactly
+  `npm ci --omit=dev --omit=peer --ignore-scripts` (plus `--no-audit
+  --no-fund` noise suppression) per materialization root — **dev AND host
+  peer dependencies are omitted**; **no npm lifecycle scripts ever run**, at
+  any phase. A package may consume host-provided peer APIs only through an
+  explicit supported host boundary (§1) — never by auto-materializing an
+  unrelated harness peer into its closure.
+- **Closure/integrity/audit scope**: the runtime-closure contract covers the
+  ACTUALLY MATERIALIZED production dependency tree, not the full lock
+  metadata (a lockfile may describe dev/peer subtrees that are never
+  materialized and are out of contract). Vulnerability audit uses the
+  identical scope: `npm audit --omit=dev --omit=peer --ignore-scripts`.
+  Consumer/package CI must include a fixture asserting omitted peer
+  dependencies are ABSENT from the materialized tree.
 - **Integrity coverage**: the lock `integrity` covers the package SOURCE tree
   only — every `node_modules` (at any depth) is excluded from the hash (as
   are `.git` and `oas-lock.json`). The dependency closures' integrity is

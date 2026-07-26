@@ -903,3 +903,27 @@ test("residue: doctor --json lists each residue entry as pending-migration with 
   assert.match(rh.stdout, /re-run `oas migrate/);
   rmSync(base, { recursive: true, force: true });
 });
+
+test("npm closure: dev+peer omitted from the materialized tree; prod deps present (maintainer ruling)", () => {
+  const base = temp();
+  const s = scope(base);
+  const src = pkgSource(join(base, "src"), { package: "peer.p" }, { "cap": { capability: "peer.cap" } });
+  // vendored prod dep (offline-installable) + a peer entry that must NOT materialize
+  write(join(src, "vendor/prod-pkg/package.json"), JSON.stringify({ name: "prod-pkg", version: "1.0.0" }));
+  write(join(src, "package.json"), JSON.stringify({ name: "peer-p", version: "1.0.0", dependencies: { "prod-pkg": "file:vendor/prod-pkg" }, peerDependencies: { "left-pad": "*" } }));
+  // lockfile shaped like `npm install --package-lock-only` output: peer entry present in METADATA
+  write(join(src, "package-lock.json"), JSON.stringify({
+    name: "peer-p", version: "1.0.0", lockfileVersion: 3, requires: true,
+    packages: {
+      "": { name: "peer-p", version: "1.0.0", dependencies: { "prod-pkg": "file:vendor/prod-pkg" }, peerDependencies: { "left-pad": "*" } },
+      "node_modules/left-pad": { version: "1.3.0", resolved: "https://registry.npmjs.org/left-pad/-/left-pad-1.3.0.tgz", integrity: "sha512-XI5MPzVNApjAyhQzphX8BkmKsKUxD4LdyK24iZeQGinBN9yTQT3bFlCBy/aVx2HrNcqQGsdot8ghrjyrvMCoEA==", peer: true },
+      "node_modules/prod-pkg": { resolved: "vendor/prod-pkg", link: true },
+      "vendor/prod-pkg": { version: "1.0.0" },
+    },
+  }));
+  acquirePackage(s, src);
+  const dest = join(installedPackagesDir(s), "peer.p");
+  assert.ok(existsSync(join(dest, "node_modules", "prod-pkg")), "production dependency materialized");
+  assert.ok(!existsSync(join(dest, "node_modules", "left-pad")), "peer dependency in lock METADATA is absent from the materialized tree");
+  rmSync(base, { recursive: true, force: true });
+});
