@@ -1323,3 +1323,63 @@ test("writePackageLock validates the FULL prospective map (finding 3)", () => {
   assert.throws(() => writePackageLock(s, "__proto__", good), (e) => e.code === "invalid-lock");
   rmSync(base, { recursive: true, force: true });
 });
+
+// ---------- reviewer-72f06c7 findings ----------
+
+test("migration rollback removes the FAILING conversion's packages too (reviewer-72f06c7)", () => {
+  const base = temp();
+  const s = scope(base);
+  const good = pkgSource(join(base, "good"), { package: "ok.cap" }, { "cap": { capability: "ok.cap" } });
+  gitify(good);
+  const wrong = pkgSource(join(base, "wrong"), { package: "bad.cap" }, { "cap": { capability: "something.else" } });
+  gitify(wrong);
+  writeCapabilityLock(s, "ok.cap", { source: "marketplace:ok.cap@1.0.0", version: "1.0.0", integrity: "sha256-a" });
+  writeCapabilityLock(s, "bad.cap", { source: "marketplace:bad.cap@1.0.0", version: "1.0.0", integrity: "sha256-b" });
+  const original = readFileSync(join(s, OAS_LOCK_FILE), "utf8");
+  const catalog = (id) => (id === "ok.cap" ? { url: good } : id === "bad.cap" ? { url: wrong } : undefined);
+  assert.throws(() => applyLegacyLockMigration(s, { catalog }), /rolled back/);
+  assert.equal(readFileSync(join(s, OAS_LOCK_FILE), "utf8"), original);
+  assert.ok(!existsSync(join(installedPackagesDir(s), "ok.cap")), "earlier conversion removed");
+  assert.ok(!existsSync(join(installedPackagesDir(s), "bad.cap")), "FAILING conversion's package removed too");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("refused legacy install at a v2 scope leaves lock AND store unchanged (reviewer-72f06c7)", () => {
+  const base = temp();
+  const s = scope(base);
+  // v2 scope with migration residue-capable lock
+  const pkg = pkgSource(join(base, "pkg"), { package: "v2.p" }, { "cap": { capability: "v2.cap" } });
+  acquirePackage(s, pkg);
+  const lockBefore = readFileSync(join(s, OAS_LOCK_FILE), "utf8");
+  // legacy capability source (bare oas.json, no oas-package.json)
+  const legacy = join(base, "legacy-cap");
+  write(join(legacy, "oas.json"), JSON.stringify({ capability: "leg.cap", version: "1.0.0", description: "d" }));
+  const r = cli(s, "install", legacy, "--dir", s);
+  assert.notEqual(r.status, 0, "refused");
+  assert.match(r.stderr, /legacy|migrate/i);
+  assert.equal(readFileSync(join(s, OAS_LOCK_FILE), "utf8"), lockBefore, "lock unchanged");
+  const capStore = join(s, ".agents", "capabilities", "installed");
+  assert.ok(!existsSync(join(capStore, "legacy-cap")), "no stranded artifact in the capability store");
+  // retry does NOT report already-acquired
+  const r2 = cli(s, "install", legacy, "--dir", s);
+  assert.notEqual(r2.status, 0);
+  assert.ok(!r2.stdout.includes("Already acquired"), "retry is a clean refusal, not already-acquired");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("residue collision blocks unrelated acquires when a RETAINED locked package exports the colliding id (reviewer-72f06c7)", () => {
+  const base = temp();
+  const s = scope(base);
+  // pre-existing package exporting col.cap (installed BEFORE any residue exists)
+  const pre = pkgSource(join(base, "pre"), { package: "pre.p" }, { "cap": { capability: "col.cap" } });
+  acquirePackage(s, pre);
+  // simulate a pre-stricter-commit mixed lock: residue entry colliding with the locked package
+  const lockFile = join(s, OAS_LOCK_FILE);
+  const parsed = JSON.parse(readFileSync(lockFile, "utf8"));
+  parsed.capabilities = { "col.cap": { source: "marketplace:col.cap@1.0.0", version: "1.0.0", integrity: "sha256-a" } };
+  writeFileSync(lockFile, JSON.stringify(parsed, null, 2));
+  // an UNRELATED acquire must now fail with both provenances, not succeed past the dual path
+  const other = pkgSource(join(base, "other"), { package: "other.p" }, { "cap": { capability: "other.cap" } });
+  assert.throws(() => acquirePackage(s, other), (e) => e.code === "duplicate-capability-id" && /pre\.p/.test(e.message) && e.provenance.some((x) => String(x).startsWith("residue:")));
+  rmSync(base, { recursive: true, force: true });
+});
