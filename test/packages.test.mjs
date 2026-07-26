@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { resolveOasConfig, capabilityIntegrity } from "../lib/core.mjs";
 import {
-  aggregateMissingRequirements, commandOnPath, diffConfigTexts, discoverWorkspaceScopes,
+  acquirePackage, aggregateMissingRequirements, commandOnPath, diffConfigTexts, discoverWorkspaceScopes,
   loadPackageManifest, lockedPackageCapabilities, normalizeRequirement, packageCapabilityIds,
   parseProfileProvenance, profileProvenanceHeader, readPackageLocks, requirementInstallPlan,
   resolvePackageSource, runRequirementInstall, selectProfile, validateProfile, packageSlug,
@@ -1074,43 +1074,51 @@ test("init --package on a configless scope sees same-lock dependency capabilitie
 
 // ---------- oas.dev consumer fixture (primary WS2 acceptance case) ----------
 
-/** The generic oas.dev-shaped consumer package: a multi-capability distribution
- * package with dependencies and a default workspace profile — contract-fixture
- * driven (Decision shapes only; no dependence on unpublished WS3 content, no
- * product special case). Manifest/profile shapes are isolated HERE so aligning
- * with the amended engine head / WS3 plan is one cheap edit. */
+/** The oas.dev-shaped consumer package per the founder-approved requirement: a
+ * NON-DEFAULT OAS-project development package shipping (a) the config profile
+ * adopted at a non-Git multi-repo OAS workspace root and (b) capability
+ * oas.review, with reusable packages as separate dependencies — contract-
+ * fixture driven (Decision shapes only; no oas.dev special case in production
+ * code). Manifest/profile dependency shapes are isolated HERE: WS3
+ * coordination after the amended engine head may adjust the dependency spec
+ * form (currently a local path per the phase-1 seam; will become an official
+ * catalog selector) and the profile's capability set — one cheap edit. */
 function oasDevFixture(base) {
-  const dep = join(base, "src", "oas-dev-knowledge");
+  // Reusable dependency package (separate, not folded into oas.dev).
+  const dep = join(base, "src", "oas-knowledge");
   write(join(dep, "capabilities", "knowledge", "oas.json"), JSON.stringify({
     capability: "oasdev.knowledge", version: "1.0.0", description: "Knowledge layer capability.", layer: "knowledge",
   }, null, 2));
   write(join(dep, "oas-package.json"), JSON.stringify({
-    package: "oasdev.knowledge-pkg", version: "1.0.0", description: "oas.dev knowledge dependency.",
+    package: "oasdev.knowledge-pkg", version: "1.0.0", description: "Reusable knowledge dependency.",
     compatibility: { oas: ">=0.6.2" },
     capabilities: ["capabilities/knowledge"],
   }, null, 2));
+  // oas.dev itself: ships oas.review + the workspace default profile.
   const root = join(base, "src", "oas-dev");
   write(join(root, "capabilities", "review", "oas.json"), JSON.stringify({
-    capability: "oasdev.review", version: "1.0.0", description: "Review capability.",
-  }, null, 2));
-  write(join(root, "capabilities", "delivery", "oas.json"), JSON.stringify({
-    capability: "oasdev.delivery", version: "1.0.0", description: "Delivery capability.",
+    capability: "oas.review", version: "1.0.0", description: "Post-commit review capability.",
   }, null, 2));
   write(join(root, "oas-package.json"), JSON.stringify({
-    package: "oasdev.workspace", version: "1.0.0", description: "oas.dev workspace package.",
+    package: "oas.dev", version: "1.0.0", description: "OAS-project development package.",
     compatibility: { oas: ">=0.6.2" },
-    capabilities: ["capabilities/review", "capabilities/delivery"],
+    capabilities: ["capabilities/review"],
     configs: {
-      default: { path: "configs/default/oas-config.yaml", description: "Recommended workspace setup", default: true },
+      default: { path: "configs/default/oas-config.yaml", description: "OAS project workspace defaults", default: true },
     },
-    dependencies: ["../oas-dev-knowledge"],
+    // WS3-coordination point: dependency spec form (local path now; official
+    // catalog selector once the amended engine head + catalog land).
+    dependencies: ["../oas-knowledge"],
   }, null, 2));
   write(join(root, "configs", "default", "oas-config.yaml"), [
     "name: workspace",
     "",
+    "team:",
+    "  name: oas-project",
+    "",
     "agent-types:",
-    "  reviewers:",
-    "    description: Agents that review changes",
+    "  developers:",
+    "    description: Agents that build the project",
     "",
     "capabilities:",
     "  layers:",
@@ -1118,13 +1126,10 @@ function oasDevFixture(base) {
     "      capability: oasdev.knowledge",
     "      from: installed",
     "  additive:",
-    "    oasdev.review:",
+    "    oas.review:",
     "      from: installed",
     "      agent-types:",
-    "        reviewers: true",
-    "    oasdev.delivery:",
-    "      from: installed",
-    "      global: true",
+    "        developers: true",
     "",
   ].join("\n"));
   return { root, dep };
@@ -1140,25 +1145,25 @@ test("oas.dev consumer fixture: fresh non-Git source → profile snapshot + comp
   assert.equal(r.status, 0, r.stdout + r.stderr);
   const env = JSON.parse(r.stdout);
   assert.equal(env.ok, true, JSON.stringify(env));
-  assert.equal(env.result.package, "oasdev.workspace");
+  assert.equal(env.result.package, "oas.dev");
   assert.equal(env.result.profile, "default");
   // Gate 1: adoption established the COMPLETE closure lock — root + dependency.
   assert.equal(env.result.lockFile, join(ws, "oas-lock.json"), "lockFile must be non-null and at the scope");
-  assert.deepEqual(env.result.lockedPackages.sort(), ["oasdev.knowledge-pkg", "oasdev.workspace"]);
+  assert.deepEqual(env.result.lockedPackages.sort(), ["oas.dev", "oasdev.knowledge-pkg"]);
   // snapshot is an ordinary scoped config with provenance
   const snapshot = readFileSync(join(ws, "oas-config.yaml"), "utf8");
-  assert.match(snapshot, /^# package: oasdev\.workspace@\S+ profile: default \(snapshot/);
+  assert.match(snapshot, /^# package: oas\.dev@\S+ profile: default \(snapshot/);
   assert.match(snapshot, /capability: oasdev\.knowledge/);
   // lock entries are schema-shaped: exact integrity, capabilities metadata, dependencies by id
   const lock = JSON.parse(readFileSync(join(ws, "oas-lock.json"), "utf8"));
   assert.equal(lock.lockfileVersion, 2);
-  const rootLock = lock.packages["oasdev.workspace"];
+  const rootLock = lock.packages["oas.dev"];
   assert.match(rootLock.integrity, /^sha256-[0-9a-f]{64}$/);
-  assert.deepEqual(rootLock.capabilities.sort(), ["oasdev.delivery", "oasdev.review"]);
+  assert.deepEqual(rootLock.capabilities, ["oas.review"]);
   assert.deepEqual(rootLock.dependencies, ["oasdev.knowledge-pkg"]);
   assert.deepEqual(lock.packages["oasdev.knowledge-pkg"].capabilities, ["oasdev.knowledge"]);
   // both packages materialized in the store
-  assert.ok(existsSync(join(ws, ".agents", "packages", "installed", "oasdev.workspace", "oas-package.json")));
+  assert.ok(existsSync(join(ws, ".agents", "packages", "installed", "oas.dev", "oas-package.json")));
   assert.ok(existsSync(join(ws, ".agents", "packages", "installed", "oasdev.knowledge-pkg", "oas-package.json")));
 
   // 2. Clean-checkout simulation: delete the store, keep config + lock, bare restore.
@@ -1168,8 +1173,8 @@ test("oas.dev consumer fixture: fresh non-Git source → profile snapshot + comp
   const env2 = JSON.parse(r2.stdout);
   assert.equal(env2.ok, true, JSON.stringify(env2));
   const restored = env2.result.scopes.flatMap((s) => s.artifacts).filter((a) => a.kind === "package" && a.status === "restored");
-  assert.deepEqual(restored.map((a) => a.id).sort(), ["oasdev.knowledge-pkg", "oasdev.workspace"]);
-  assert.ok(existsSync(join(ws, ".agents", "packages", "installed", "oasdev.workspace", "oas-package.json")), "restore rematerializes the store");
+  assert.deepEqual(restored.map((a) => a.id).sort(), ["oas.dev", "oasdev.knowledge-pkg"]);
+  assert.ok(existsSync(join(ws, ".agents", "packages", "installed", "oas.dev", "oas-package.json")), "restore rematerializes the store");
 
   // 3. Idempotence: a second bare install reports everything ok.
   const r3 = cli(["install", "--no-requirements", "--json", "--dir", ws], { cwd: ws });
@@ -1180,6 +1185,87 @@ test("oas.dev consumer fixture: fresh non-Git source → profile snapshot + comp
   const r4 = cli(["config", "diff", "--json", "--dir", ws], { cwd: ws });
   assert.equal(r4.status, 0, r4.stdout);
   assert.equal(JSON.parse(r4.stdout).result.differingLines, 0);
+});
+
+test("oas.dev end-to-end at a NON-GIT multi-repo team root: targeting, overrides, portability, snapshot semantics, nested reconciliation", () => {
+  const base = temp();
+  const { root } = oasDevFixture(base);
+  // Non-Git multi-repo workspace root — first-class: NO .git anywhere at the boundary.
+  const ws = join(base, "oas-project"); mkdirSync(ws, { recursive: true });
+
+  // (1) Adoption with an explicit --config at the non-git root.
+  const r = cli(["init", "--package", root, "--config", "default", "--json", "--dir", ws]);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(existsSync(join(ws, ".git")), false, "the boundary must not need git");
+  const snapshot = readFileSync(join(ws, "oas-config.yaml"), "utf8");
+  assert.match(snapshot, /^# package: oas\.dev@\S+ profile: default \(snapshot/);
+
+  // (5) Portability: no machine paths, credentials, or personal/provider account ids in the profile.
+  const profileText = readFileSync(join(root, "configs", "default", "oas-config.yaml"), "utf8");
+  for (const text of [profileText, snapshot.replace(/^# package: .*\n/, "")]) {
+    assert.doesNotMatch(text, /\/Users\/|\/home\/|[A-Z]:\\/, "no machine paths");
+    assert.doesNotMatch(text, /(api[-_]?key|token|secret|password|credential)/i, "no credentials");
+    assert.doesNotMatch(text, /@[a-z0-9.-]+\.[a-z]{2,}/i, "no personal/provider account ids");
+  }
+
+  // (2) Closure locked; (3) exported capability independently targetable after adoption.
+  const locks = JSON.parse(readFileSync(join(ws, "oas-lock.json"), "utf8")).packages;
+  assert.deepEqual(Object.keys(locks).sort(), ["oas.dev", "oasdev.knowledge-pkg"]);
+  // SEAM (WS1 capability indexing): discovery of capability oas.json files
+  // THROUGH installed package roots is the engine's `installed-package` origin
+  // (frozen contract §3 notes). Until it merges, materialize the exported
+  // capabilities in the owned/ store as the stand-in and point the snapshot at
+  // it — the config-side semantics under test (targeting, overrides, snapshot)
+  // are identical. Gate-2 teardown replaces this block with nothing.
+  for (const [folder, id, layer] of [["review", "oas.review", undefined], ["knowledge", "oasdev.knowledge", "knowledge"]]) {
+    write(join(ws, ".agents", "capabilities", "owned", folder, "oas.json"), JSON.stringify({ capability: id, version: "1.0.0", description: "x", ...(layer ? { layer } : {}) }));
+  }
+  writeFileSync(join(ws, "oas-config.yaml"), readFileSync(join(ws, "oas-config.yaml"), "utf8").replaceAll("from: installed", "from: owned"));
+  // Retarget oas.review from the profile's agent-type binding to global — ordinary `oas use`.
+  const useR = cli(["use", "oas.review", "--global", "--dir", ws]);
+  assert.equal(useR.status, 0, useR.stderr);
+  const wsResolved = resolveOasConfig(ws, undefined);
+  assert.ok(wsResolved.capabilities.some((c) => c.id === "oas.review"), "retargeted capability resolves globally");
+  assert.equal(wsResolved.layers.knowledge.id, "oasdev.knowledge");
+
+  // (4) Closer child-repo config overrides the workspace assignment.
+  const child = join(ws, "member-repo"); mkdirSync(child, { recursive: true });
+  write(join(child, "oas-config.yaml"), "name: member\ncapabilities:\n  layers:\n    knowledge: none\n  additive:\n    oas.review:\n      from: owned\n      global: false\n");
+  const childResolved = resolveOasConfig(child, undefined);
+  assert.equal(childResolved.layers.knowledge, undefined, "child disables the inherited layer");
+  assert.equal(childResolved.capabilities.some((c) => c.id === "oas.review"), false, "child excludes the capability");
+  assert.ok(resolveOasConfig(ws, undefined).capabilities.some((c) => c.id === "oas.review"), "workspace scope unaffected");
+
+  // (7) Bare install at the team boundary reconciles nested repos.
+  // The child repo carries its own lock for an ADDITIONAL package (multi-repo shape).
+  const extra = join(base, "src", "extra");
+  write(join(extra, "capabilities", "extra", "oas.json"), JSON.stringify({ capability: "oasdev.extra", version: "1.0.0", description: "x" }));
+  write(join(extra, "oas-package.json"), JSON.stringify({ package: "oasdev.extra-pkg", version: "1.0.0", description: "Extra member package.", capabilities: ["capabilities/extra"] }));
+  // acquire at a probe scope (engine seam) to produce a schema-true lock entry, then reuse it at the child
+  const probe = join(base, "probe"); mkdirSync(probe, { recursive: true });
+  acquirePackage(probe, extra);
+  const childLock = { lockfileVersion: 2, packages: { "oasdev.extra-pkg": JSON.parse(readFileSync(join(probe, "oas-lock.json"), "utf8")).packages["oasdev.extra-pkg"] } };
+  write(join(child, "oas-lock.json"), JSON.stringify(childLock, null, 2));
+  rmSync(join(ws, ".agents", "packages"), { recursive: true, force: true });
+  const rec = cli(["install", "--no-requirements", "--json", "--dir", ws], { cwd: ws });
+  assert.equal(rec.status, 0, rec.stdout);
+  const env = JSON.parse(rec.stdout);
+  assert.equal(env.result.boundaryKind, "team", "the adopted profile's team: declares the boundary");
+  const arts = env.result.scopes.flatMap((s) => s.artifacts).filter((a) => a.kind === "package");
+  assert.deepEqual(arts.filter((a) => a.status === "restored").map((a) => a.id).sort(), ["oas.dev", "oasdev.extra-pkg", "oasdev.knowledge-pkg"], JSON.stringify(arts));
+  assert.ok(existsSync(join(child, ".agents", "packages", "installed", "oasdev.extra-pkg", "oas-package.json")), "nested repo's own package restored at its scope");
+
+  // (6) Snapshot, not live inheritance: mutate the SOURCE package profile; local config resolution is unchanged.
+  // (After reconciliation — a drifted source must NOT restore, which is its own contract.)
+  write(join(root, "configs", "default", "oas-config.yaml"), "name: workspace\nteam:\n  name: hijacked\ncapabilities:\n  layers:\n    knowledge: none\n");
+  const afterMutation = resolveOasConfig(ws, undefined);
+  assert.equal(afterMutation.team.name, "oas-project", "package edits never rewrite the snapshot");
+  assert.equal(afterMutation.layers.knowledge.id, "oasdev.knowledge");
+  // … but config diff REPORTS the drift (read-only, against the INSTALLED locked copy).
+  const drift = cli(["config", "diff", "--json", "--dir", ws], { cwd: ws });
+  assert.equal(drift.status, 0, drift.stdout);
+  // The installed locked copy has not drifted (snapshots + locks pin exactly); local edits (from: owned + oas use) show as local drift.
+  assert.ok(JSON.parse(drift.stdout).result.differingLines > 0, "diff reports local drift, read-only");
 });
 
 // ---------- provenance helpers ----------
