@@ -21,8 +21,9 @@ ruled out.
 
 **Rule: independently released packages MUST NOT import kernel-private
 `lib/core.mjs` (including via `oas root` + dynamic import).** Package
-commands/hooks invoke the `oas` binary already on PATH in their execution
-environment.
+commands/hooks execute the CLI at the exact absolute path the dispatcher
+provides in `OAS_CLI_BIN` (§1 item 4) — never by resolving `oas` from PATH,
+which is untrusted inside worktrees.
 
 ### Envelope and versioning
 
