@@ -31,7 +31,7 @@ import {
 import {
   aggregateMissingRequirements, diffConfigTexts, discoverWorkspaceScopes, installedPackageDir,
   loadPackageManifest, lockedPackageCapabilities,
-  parseProfileProvenance, profileProvenanceHeader, readPackageLocks, readProfileText,
+  parseProfileProvenance, profileProvenanceHeader, readPackageLocks, readPackageLocksAt, readProfileText,
   requirementInstallPlan, resolvePackageSource, runRequirementInstall, selectProfile, validateProfile,
   packageCapabilityIds,
 } from "../lib/packages.mjs";
@@ -459,9 +459,11 @@ function restore(dir) {
 }
 
 /** Bare `oas install` at a team boundary: reconcile the whole workspace — restore the
- * boundary scope's graph, then every descendant scope's graph once, in deterministic
- * path order, with pruned discovery; validate config-referenced capabilities against
- * visible locked packages; aggregate missing requirements and failures by scope.
+ * boundary scope's graph (its ancestor chain), then every descendant scope's own
+ * lock graph EXACTLY ONCE, in deterministic path order, with pruned discovery;
+ * verify v2 package locks against the installed package store; validate
+ * config-referenced capabilities against visible locked packages; aggregate
+ * missing requirements and failures by scope.
  * Non-team scopes keep current-chain behavior unless --recursive names a boundary. */
 function reconcile(dir) {
   const cfgFile = join(dir, "oas-config.yaml");
@@ -470,7 +472,8 @@ function reconcile(dir) {
   if (!declaresTeamHere && !recursive) {
     // Current-chain behavior, plus the requirements gate for this chain's active capabilities.
     restore(dir);
-    requirementsGate([dir]);
+    const failed = requirementsGate([dir]);
+    if (failed) die(`${failed} consented requirement install${failed > 1 ? "s" : ""} failed`);
     return;
   }
   const boundary = dir;
@@ -479,14 +482,36 @@ function reconcile(dir) {
   const scopes = [boundary, ...discoverWorkspaceScopes(boundary)];
   const failures = [];
   const reported = [];
+  const restoredLevels = new Set(); // each lock level's graph restores exactly once
   for (const scope of scopes) {
-    const report = restoreCapabilities(scope).filter((r) => resolve(r.level) === resolve(scope));
+    // Boundary: full ancestor chain (current-chain semantics). Descendants: their
+    // own level only — every level between boundary and descendant is either the
+    // boundary chain or an earlier discovered scope, so no level repeats and no
+    // failed ancestor restore is retried (or hidden) per descendant.
+    const chainLevels = scope === boundary ? undefined : [scope];
+    const report = restoreCapabilities(scope, chainLevels ? { levels: chainLevels.filter((l) => !restoredLevels.has(resolve(l))) } : undefined)
+      .filter((r) => !restoredLevels.has(resolve(r.level)));
     for (const r of report) {
       reported.push({ scope, ...r });
-      if (r.status === "present") console.log(`ok        ${r.id}  [${shortPath(scope)}]`);
-      else if (r.status === "restored") console.log(`restored  ${r.id} → ${shortPath(r.dir)}  [${shortPath(scope)}]`);
-      else if (r.status === "retired") console.log(`RETIRED   ${r.id}  ${r.reason}  [${shortPath(scope)}]`);
-      else { failures.push({ scope, id: r.id, reason: r.reason }); console.log(`FAILED    ${r.id}  ${r.reason}  [${shortPath(scope)}]`); }
+      if (r.status === "present") console.log(`ok        ${r.id}  [${shortPath(r.level)}]`);
+      else if (r.status === "restored") console.log(`restored  ${r.id} → ${shortPath(r.dir)}  [${shortPath(r.level)}]`);
+      else if (r.status === "retired") console.log(`RETIRED   ${r.id}  ${r.reason}  [${shortPath(r.level)}]`);
+      else { failures.push({ scope: r.level, id: r.id, reason: r.reason }); console.log(`FAILED    ${r.id}  ${r.reason}  [${shortPath(r.level)}]`); }
+    }
+    if (scope === boundary) for (const cfg of configChain(boundary)) restoredLevels.add(resolve(cfg._level));
+    for (const r of report) restoredLevels.add(resolve(r.level));
+    restoredLevels.add(resolve(scope));
+    // v2 package locks: the engine's restorePackages is not merged yet (phase 1).
+    // A locked package whose installed artifact is present reports ok; a missing
+    // artifact is a clear FAILURE, never silent success.
+    for (const [pkgId, lock] of Object.entries(readPackageLocksAt(scope))) {
+      const installed = installedPackageDir(lock, pkgId);
+      reported.push({ scope, id: pkgId, status: installed ? "present" : "failed" });
+      if (installed) console.log(`ok        package ${pkgId}  (${shortPath(installed)})  [${shortPath(scope)}]`);
+      else {
+        failures.push({ scope, id: pkgId, reason: "locked package is not installed and package restore (engine restorePackages) is not available yet — reacquire it explicitly" });
+        console.log(`FAILED    package ${pkgId}  not installed (engine restore pending)  [${shortPath(scope)}]`);
+      }
     }
     // Validate: every config-referenced installed capability supplied by a visible locked package/capability lock.
     if (existsSync(join(scope, "oas-config.yaml"))) {
@@ -510,7 +535,8 @@ function reconcile(dir) {
     }
   }
   if (!reported.length && scopes.length === 1) console.log("Nothing to restore — no locked capabilities or packages found in the boundary.");
-  requirementsGate(scopes);
+  const consentFailures = requirementsGate(scopes);
+  if (consentFailures) failures.push({ scope: boundary, id: "(requirements)", reason: `${consentFailures} consented requirement install${consentFailures > 1 ? "s" : ""} failed` });
   if (failures.length) {
     console.log("\nFailures by scope:");
     for (const f of failures) console.log(`  ${shortPath(f.scope)}: ${f.id} — ${f.reason}`);
@@ -523,13 +549,18 @@ function reconcile(dir) {
  * runs prompt per requirement with the exact command/source/version and state scope;
  * non-interactive runs NEVER install by default — automation names each accepted
  * requirement via --accept-requirement <command>; --no-requirements skips entirely.
- * Skipping leaves an actionable doctor warning (doctor recomputes missing commands). */
+ * Skipping leaves an actionable doctor warning (doctor recomputes missing commands).
+ * Returns the number of CONSENTED installs that failed (manager error or the
+ * command still absent from PATH) — the caller exits nonzero on any, so
+ * automation using --accept-requirement can detect installation failure.
+ * Unaccepted/skipped optional requirements stay non-fatal. */
 function requirementsGate(scopes) {
-  if (args.includes("--no-requirements")) return;
+  if (args.includes("--no-requirements")) return 0;
   const missing = aggregateMissingRequirements(scopes);
-  if (!missing.length) return;
+  if (!missing.length) return 0;
   const accepted = new Set(flagAll("accept-requirement"));
   const interactive = process.stdin.isTTY && process.stdout.isTTY;
+  let failed = 0;
   console.log(`\nMissing host commands for active capabilities (${missing.length}):`);
   for (const req of missing) {
     const requesters = req.requestedBy.map((r) => `${r.capability} [${shortPath(r.scope)}]`).join(", ");
@@ -555,12 +586,14 @@ function requirementsGate(scopes) {
     try {
       const r = runRequirementInstall(plan);
       if (r.onPath) console.log(`    installed — ${req.command} verified on PATH`);
-      else console.log(`    WARNING: install ran but ${req.command} is still not on PATH — check your shell PATH/prefix`);
+      else { failed++; console.log(`    FAILED: install ran but ${req.command} is still not on PATH — check your shell PATH/prefix`); }
     } catch (e) {
+      failed++;
       console.log(`    FAILED: ${e.message}`);
     }
   }
   console.log("Requirement consent is separate from capability trust — installing a binary does not activate or approve any capability.");
+  return failed;
 }
 
 function trust() {

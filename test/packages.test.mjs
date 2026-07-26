@@ -385,6 +385,31 @@ test("bare oas install at a team boundary prints the boundary FIRST, restores ea
   assert.match(r.stdout, /FAILED\s+ghost\.cap/);
   assert.match(r.stdout, /Failures by scope:/);
   assert.match(r.stdout, /member.*ghost\.cap/);
+  // Each lock level's graph is processed once: the failing member lock reports
+  // exactly one FAILED line even though the boundary and the member scope are
+  // both reconciled (restoreCapabilities' ancestor walk must not repeat levels).
+  assert.equal(r.stdout.split("ghost.cap").length - 1, 2, `one FAILED line + one failures-by-scope line:\n${r.stdout}`);
+});
+
+test("reconciliation fails clearly when a v2 package lock has no installed artifact, and passes when it does", () => {
+  const base = temp();
+  const pkg = fixturePackage(join(base, "pkg"));
+  const ws = join(base, "ws");
+  write(join(ws, "oas-config.yaml"), "name: ws\nteam:\n  name: t\n");
+  // package lock WITHOUT the installed store: must FAIL, never exit 0 silently
+  write(join(ws, "oas-lock.json"), JSON.stringify({ lockfileVersion: 2, packages: { "example.engineering": {
+    source: `path:${pkg}`, version: "1.0.0", commit: "local", integrity: `sha256-${"0".repeat(64)}`,
+    capabilities: ["example.review", "example.delivery"], dependencies: [], trustedCapabilities: [],
+  } } }, null, 2));
+  const r = cli(["install", "--no-requirements", "--dir", ws], { cwd: ws });
+  assert.equal(r.status, 1, `missing package artifact must fail reconciliation:\n${r.stdout}`);
+  assert.match(r.stdout, /FAILED\s+package example\.engineering\s+not installed/);
+  assert.match(r.stdout, /Failures by scope:/);
+  // with the store present, the same lock reports ok and exits 0
+  installFixturePackage(ws, pkg);
+  const r2 = cli(["install", "--no-requirements", "--dir", ws], { cwd: ws });
+  assert.equal(r2.status, 0, `${r2.stdout}\n${r2.stderr}`);
+  assert.match(r2.stdout, /ok\s+package example\.engineering/);
 });
 
 test("workspace reconciliation validates config-referenced installed capabilities against visible locked packages", () => {
@@ -524,6 +549,36 @@ test("noninteractive installs are fail-safe: never install by default, --accept-
   assert.equal(existsSync(join(base, "ran.txt")), true, "consented install ran");
   assert.match(r3.stdout, /installed — wanted-cli verified on PATH/);
   assert.match(r3.stdout, /consent is separate from capability trust/);
+});
+
+test("a consented requirement install that fails makes oas install exit nonzero (manager error and PATH-verify failure)", () => {
+  const base = temp();
+  const bin = join(base, "bin"); mkdirSync(bin, { recursive: true });
+  const mkWs = (name, cmd) => {
+    const ws = join(base, name);
+    write(join(ws, ".agents", "capabilities", "owned", "needy", "oas.json"), JSON.stringify({
+      capability: "needy.cap", version: "1.0.0", description: "x",
+      requires: [{ command: cmd, why: "testing", install: { methods: [{ platform: process.platform, manager: "npm-global", package: `${cmd}@1.0.0` }] } }],
+    }));
+    write(join(ws, "oas-config.yaml"), "name: ws\nteam:\n  name: t\ncapabilities:\n  additive:\n    needy.cap:\n      from: owned\n      global: true\n");
+    return ws;
+  };
+  // manager exits nonzero
+  write(join(bin, "npm"), "#!/bin/sh\nexit 3\n"); chmodSync(join(bin, "npm"), 0o755);
+  const env = { ...process.env, PATH: `${bin}:${process.env.PATH}` };
+  const r1 = cli(["install", "--accept-requirement", "never-cli", "--dir", mkWs("ws1", "never-cli")], { env });
+  assert.equal(r1.status, 1, `manager failure must exit nonzero:\n${r1.stdout}`);
+  assert.match(r1.stdout, /FAILED/);
+  assert.match(r1.stdout, /consented requirement install.*failed/);
+  // manager succeeds but the command never lands on PATH
+  write(join(bin, "npm"), "#!/bin/sh\nexit 0\n"); chmodSync(join(bin, "npm"), 0o755);
+  const r2 = cli(["install", "--accept-requirement", "never-cli", "--dir", mkWs("ws2", "never-cli")], { env });
+  assert.equal(r2.status, 1, `PATH-verify failure must exit nonzero:\n${r2.stdout}`);
+  assert.match(r2.stdout, /FAILED: install ran but never-cli is still not on PATH/);
+  // unaccepted (skipped) requirements stay non-fatal
+  const r3 = cli(["install", "--dir", mkWs("ws3", "never-cli")], { env });
+  assert.equal(r3.status, 0, `skipped requirement must stay non-fatal:\n${r3.stdout}\n${r3.stderr}`);
+  assert.match(r3.stdout, /skipped — non-interactive/);
 });
 
 // ---------- doctor ----------

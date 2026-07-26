@@ -139,7 +139,10 @@ Rules (all enforced):
   report names which capabilities requested each command.
 - **Noninteractive runs never install by default.** Automation names each
   accepted requirement: `oas install --accept-requirement example-cli`.
-  `--no-requirements` restores packages only (CI).
+  `--no-requirements` restores packages only (CI). A **consented** install
+  that fails (manager error, or the command still absent from PATH) makes
+  `oas install` exit nonzero so automation can detect it; unaccepted/skipped
+  requirements stay non-fatal.
 - **PATH verification** runs after each install; a tool that does not land on
   PATH is reported honestly.
 - **Skipping is safe**: `oas doctor` keeps an actionable warning (the consent
