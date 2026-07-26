@@ -2,7 +2,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import {
@@ -784,11 +784,38 @@ test("materializePackageDeps: per-capability lock placement — deps land beside
   const before = packageIntegrity(src);
   // root selection: the per-capability dir is a materialization root
   const rep = materializePackageDeps(src);
-  assert.deepEqual(rep.roots, [join(src, "capabilities/aweb")], "per-capability lock detected as its own npm ci root");
+  assert.deepEqual(rep.roots.map((r) => realpathSync(r)), [realpathSync(join(src, "capabilities/aweb"))], "per-capability lock detected as its own npm ci root");
   assert.equal(rep.error, undefined);
   acquirePackage(s, src);
   const dest = join(installedPackagesDir(s), "aw.p");
   assert.ok(!existsSync(join(dest, "capabilities/aweb", "PWNED")), "postinstall suppressed in per-capability materialization");
   assert.equal(readPackageLocks(s).packages["aw.p"].integrity, before, "nested node_modules excluded from integrity");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("flat single-capability package: capabilities: [\".\"] — acquire/discover/trust/restore; \".\" exclusive with other paths", () => {
+  const base = temp();
+  const s = scope(base);
+  const src = join(base, "flat");
+  write(join(src, "oas.json"), JSON.stringify({ capability: "flat.cap", version: "1.0.0", description: "c", commands: { go: { exec: "go.mjs" } } }));
+  write(join(src, "go.mjs"), "//\n");
+  write(join(src, "oas-package.json"), JSON.stringify({ package: "flat.p", version: "1.0.0", description: "p", capabilities: ["."] }));
+  gitify(src);
+  acquirePackage(s, `file://${src}`);
+  const m = capabilityManifests(s)["flat.cap"];
+  assert.ok(m, "flat capability discovered");
+  assert.equal(m._dir, m._packageDir, "capability dir IS the package root");
+  approveCapability(s, "flat.cap");
+  assert.equal(capabilityTrust(capabilityManifests(s)["flat.cap"], s).trusted, true);
+  // restore round-trip at exact integrity
+  rmSync(join(installedPackagesDir(s), "flat.p"), { recursive: true, force: true });
+  const rep = restorePackages(s);
+  assert.equal(rep.find((r) => r.package === "flat.p").status, "restored");
+  // "." combined with another capability path is rejected
+  const bad = join(base, "bad");
+  write(join(bad, "oas.json"), JSON.stringify({ capability: "b.cap", version: "1", description: "c" }));
+  write(join(bad, "sub", "oas.json"), JSON.stringify({ capability: "b.sub", version: "1", description: "c" }));
+  write(join(bad, "oas-package.json"), JSON.stringify({ package: "b.p", version: "1", description: "p", capabilities: [".", "sub"] }));
+  assert.throws(() => loadPackageManifestAt(bad), (e) => e.code === "invalid-package-manifest" && /must be the only entry/.test(e.message));
   rmSync(base, { recursive: true, force: true });
 });

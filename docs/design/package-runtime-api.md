@@ -168,3 +168,29 @@ complete:
     `commit`; `path:` sources require `commit: "local"`.
 
 `invalid-lock` joins the error taxonomy of the main contract (§4).
+
+## 5. Flat single-capability packages (`capabilities: ["."]`)
+
+**Supported.** A capability directory may BE the package root:
+`oas-package.json` and `oas.json` side by side with `capabilities: ["."]`.
+Semantics:
+
+- **One integrity.** The package lock `integrity` covers the whole root tree —
+  including `oas-package.json` itself and every capability file. There is no
+  separate capability hash, so nothing double-counts; trust binds to the
+  package integrity exactly as for nested layouts.
+- **Store/slug unchanged**: the root installs at
+  `.agents/packages/installed/<package-id>/` keyed by the package identity;
+  the capability's directory equals the package root, and the containment
+  boundary is that same root.
+- **Resource indexing**: only the manifest-declared `.` is indexed; `oas.json`
+  loads from the root with normal capability validation. `oas-package.json`
+  living inside the capability's file set is harmless — each file has exactly
+  one loader (`oas-package.json` → package manifest, `oas.json` → capability
+  manifest), so no manifest-kind ambiguity can arise.
+- **Constraint**: `.` implies a SINGLE-capability package. Listing `.`
+  together with any other capability path would nest one capability inside
+  another and is rejected as `invalid-package-manifest`.
+- Per-capability npm closures (§2) degenerate to the package root: a root
+  `package.json` + `package-lock.json` pair is the capability's closure (it is
+  detected once, not twice).
