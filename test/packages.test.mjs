@@ -136,7 +136,10 @@ test("profile selection: marked default, single profile, explicit name, multiple
   assert.throws(() => selectProfile(multi), /none marked default.*--config/s);
 
   const none = loadPackageManifest(fixturePackage(join(base, "none"), { configs: {} }));
-  assert.throws(() => selectProfile(none), /exports no config profiles/);
+  assert.throws(() => selectProfile(none), (e) => e.code === "E_NO_PROFILES" && /exports no config profiles/.test(e.message));
+  // typed codes on the other selection failures
+  assert.throws(() => selectProfile(multi), (e) => e.code === "E_PROFILE_AMBIGUOUS");
+  assert.throws(() => selectProfile(m, "nope"), (e) => e.code === "E_PROFILE_NOT_FOUND");
 });
 
 // ---------- profile validation ----------
@@ -922,6 +925,41 @@ test("config diff --json: envelope with diff array; zero differences exits 0 wit
   // error code: no config at scope
   const r3 = cli(["config", "diff", "--json", "--dir", join(base, "empty")]);
   assert.equal(JSON.parse(r3.stdout).error.code, "E_NO_CONFIG");
+  // valueless --config is usage error, not silent default selection
+  const r4 = cli(["config", "diff", "--config", "--json", "--dir", ws], { cwd: ws });
+  assert.equal(r4.status, 1);
+  assert.equal(JSON.parse(r4.stdout).error.code, "E_USAGE");
+  // zero-profile package reports E_NO_PROFILES, not ambiguity
+  const bare = fixturePackage(join(base, "bare"), { id: "bare.pkg", configs: {} });
+  const r5 = cli(["config", "diff", "--package", bare, "--json", "--dir", ws], { cwd: ws });
+  assert.equal(JSON.parse(r5.stdout).error.code, "E_NO_PROFILES");
+});
+
+test("init --package on a configless scope sees same-lock dependency capabilities in the closure", () => {
+  const base = temp();
+  // root package whose profile references a capability supplied ONLY by a dependency
+  const root = fixturePackage(join(base, "root"), {
+    id: "root.pkg",
+    capabilities: { "capabilities/root-cap": { capability: "root.cap", version: "1.0.0", description: "x" } },
+    dependencies: ["dep.pkg"],
+    extraFiles: { "configs/d/oas-config.yaml": "name: w\ncapabilities:\n  additive:\n    dep.cap:\n      from: installed\n      global: true\n" },
+    configs: { d: { path: "configs/d/oas-config.yaml", default: true } },
+  });
+  const dep = fixturePackage(join(base, "dep"), {
+    id: "dep.pkg",
+    capabilities: { "capabilities/dep-cap": { capability: "dep.cap", version: "1.0.0", description: "x" } },
+    configs: {},
+  });
+  // configless scope: ONLY an oas-lock.json carrying root + dependency
+  const ws = join(base, "ws"); mkdirSync(ws, { recursive: true });
+  installFixturePackage(ws, root, { id: "root.pkg", capabilities: ["root.cap"], dependencies: ["dep.pkg"] });
+  installFixturePackage(ws, dep, { id: "dep.pkg", capabilities: ["dep.cap"] });
+  const r = cli(["init", "--package", "root.pkg", "--json", "--dir", ws]);
+  assert.equal(r.status, 0, r.stdout);
+  const env = JSON.parse(r.stdout);
+  assert.equal(env.ok, true, JSON.stringify(env));
+  assert.equal(env.result.package, "root.pkg");
+  assert.deepEqual(env.result.lockedPackages.sort(), ["dep.pkg", "root.pkg"]);
 });
 
 // ---------- provenance helpers ----------

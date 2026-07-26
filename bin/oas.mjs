@@ -734,9 +734,11 @@ function flagAll(name) {
   return out;
 }
 
-/** Capability ids supplied by a package's dependency closure, read from visible locks (phase 1). */
+/** Capability ids supplied by a package's dependency closure, read from visible locks (phase 1).
+ * The scope's own lock is merged in directly: during init no oas-config.yaml exists
+ * there yet, so configChain-based reading cannot see same-lock dependencies. */
 function dependencyClosureCapabilities(manifest, dir) {
-  const locks = readPackageLocks(dir).packages;
+  const locks = { ...readPackageLocks(dir).packages, ...readPackageLocksAt(dir) };
   const out = [];
   const seen = new Set();
   const visit = (deps) => {
@@ -773,7 +775,7 @@ function initPackage(src, dir, file) {
     const { manifest, commit } = resolved;
     let profile;
     try { profile = selectProfile(manifest, configFlag); }
-    catch (e) { bail(configFlag ? "E_PROFILE_NOT_FOUND" : "E_PROFILE_AMBIGUOUS", e.message); }
+    catch (e) { bail(e.code || "E_PROFILE_AMBIGUOUS", e.message); }
     let errors;
     try { errors = validateProfile(manifest, profile, { dependencyCapabilities: dependencyClosureCapabilities(manifest, dir) }); }
     catch (e) { bail(e.code || "E_PROFILE_INVALID", e.message); }
@@ -821,15 +823,17 @@ function configDiffCmd() {
   const provenance = parseProfileProvenance(localText);
   const pkgId = flag("package") || provenance?.package;
   if (!pkgId || pkgId === true) bail("E_USAGE", "usage: oas config diff --package <id> --config <name> (the snapshot's provenance header supplies defaults when present)");
-  const profileName = flag("config") || provenance?.profile;
+  const configFlag = flag("config");
+  if (configFlag === true) bail("E_USAGE", "--config needs a profile name");
+  const profileName = configFlag || provenance?.profile;
   const tmp = /^(https?:\/\/|git@|ssh:\/\/)/.test(pkgId) ? mkdtempSync(join(tmpdir(), "oas-package-")) : undefined;
   try {
     let resolved;
     try { resolved = resolvePackageSource(pkgId, dir, { clone: tmp }); }
     catch (e) { bail(e.code || "E_PACKAGE_UNRESOLVED", e.message); }
     let profile;
-    try { profile = selectProfile(resolved.manifest, profileName === true ? undefined : profileName); }
-    catch (e) { bail(profileName && profileName !== true ? "E_PROFILE_NOT_FOUND" : "E_PROFILE_AMBIGUOUS", e.message); }
+    try { profile = selectProfile(resolved.manifest, profileName); }
+    catch (e) { bail(e.code || "E_PROFILE_AMBIGUOUS", e.message); }
     let packageText;
     try { packageText = readProfileText(resolved.manifest, profile); }
     catch (e) { bail(e.code || "E_PROFILE_INVALID", e.message); }
