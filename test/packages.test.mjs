@@ -1611,7 +1611,10 @@ test("platform-variant closures are rejected at materialization (v1 MUST, findin
   }));
   assert.throws(() => acquirePackage(s, src), /platform-variant runtime closure.*os\/cpu\/libc/);
   assert.ok(!existsSync(join(installedPackagesDir(s), "pv.p")), "nothing installed");
-  // install-script marker also rejected
+  // hasInstallScript ALONE is NOT variance (inert under --ignore-scripts;
+  // reviewer-11752b2 corrected the earlier over-rejection) — the entry passes
+  // the scan; here npm ci fails only because the registry tarball is fake,
+  // which is the ordinary materialization failure path, not a policy one.
   const src2 = pkgSource(join(base, "src2"), { package: "pv2.p" }, { "cap": { capability: "pv2.cap" } });
   write(join(src2, "package.json"), JSON.stringify({ name: "pv2-p", version: "1.0.0", dependencies: { "gyp-dep": "1.0.0" } }));
   write(join(src2, "package-lock.json"), JSON.stringify({
@@ -1621,7 +1624,7 @@ test("platform-variant closures are rejected at materialization (v1 MUST, findin
       "node_modules/gyp-dep": { version: "1.0.0", resolved: "https://registry.npmjs.org/gyp-dep/-/gyp-dep-1.0.0.tgz", integrity: "sha512-BBB", hasInstallScript: true },
     },
   }));
-  assert.throws(() => acquirePackage(s, src2), /install script/);
+  assert.throws(() => acquirePackage(s, src2), /materialization failed/); // scan passed; fake tarball fails npm ci itself
   // pure-JS closures still pass (regression: the vendored prod-dep fixture pattern)
   const ok = pkgSource(join(base, "ok"), { package: "pi.p" }, { "cap": { capability: "pi.cap" } });
   write(join(ok, "vendor/dep/package.json"), JSON.stringify({ name: "dep", version: "1.0.0" }));
@@ -1945,5 +1948,69 @@ test("retired spawn flags reject before local-agent upsert — no soul scaffolde
   const r1 = cli(ws, "spawn", "scratch", "--instructions-file", instr2, "--repo", repo, "--instance", "x", "--no-launch", "--dir", ws, "--json");
   assert.equal(JSON.parse(r1.stdout).ok, false);
   assert.equal(readFileSync(soulFile, "utf8"), before, "existing local soul not overwritten by the rejected spawn");
+  rmSync(base, { recursive: true, force: true });
+});
+
+// ---------- reviewer-11752b2 findings: scan scope, reachability, preflight ----------
+
+test("platform scan: dev/peer entries ignored, pure-JS install scripts accepted, v1 lockfile fails closed (reviewer-11752b2)", () => {
+  const base = temp();
+  const s = scope(base);
+  const integ = "sha512-AAA";
+  // dev-native and peer-native entries are OUTSIDE the omit closure → accepted
+  const okSrc = pkgSource(join(base, "ok"), { package: "sc.ok" }, { "cap": { capability: "sc.okcap" } });
+  write(join(okSrc, "vendor/dep/package.json"), JSON.stringify({ name: "dep", version: "1.0.0" }));
+  write(join(okSrc, "package.json"), JSON.stringify({ name: "sc-ok", version: "1.0.0", dependencies: { dep: "file:vendor/dep" } }));
+  write(join(okSrc, "package-lock.json"), JSON.stringify({
+    name: "sc-ok", version: "1.0.0", lockfileVersion: 3, requires: true,
+    packages: {
+      "": { name: "sc-ok", version: "1.0.0", dependencies: { dep: "file:vendor/dep" } },
+      "node_modules/dep": { resolved: "vendor/dep", link: true },
+      "vendor/dep": { version: "1.0.0" },
+      "node_modules/dev-native": { version: "1.0.0", resolved: "https://x/d.tgz", integrity: integ, dev: true, os: ["darwin"] },
+      "node_modules/peer-native": { version: "1.0.0", resolved: "https://x/p.tgz", integrity: integ, peer: true, cpu: ["arm64"] },
+      "node_modules/pure-js-scripted": { version: "1.0.0", resolved: "vendor/dep", link: true, hasInstallScript: true },
+    },
+  }));
+  const r = acquirePackage(s, okSrc);
+  assert.equal(r.root, "sc.ok", "dev/peer natives and inert install scripts do not block");
+  // production os/cpu constraint still rejects
+  const bad = pkgSource(join(base, "bad"), { package: "sc.bad" });
+  write(join(bad, "package.json"), JSON.stringify({ name: "sc-bad", version: "1.0.0", dependencies: { n: "1.0.0" } }));
+  write(join(bad, "package-lock.json"), JSON.stringify({ name: "sc-bad", version: "1.0.0", lockfileVersion: 3, requires: true, packages: { "": { name: "sc-bad", version: "1.0.0", dependencies: { n: "1.0.0" } }, "node_modules/n": { version: "1.0.0", resolved: "https://x/n.tgz", integrity: integ, os: ["linux"] } } }));
+  assert.throws(() => acquirePackage(scope(base, "s2"), bad), /os\/cpu\/libc/);
+  // lockfile v1 (nested dependencies, no packages map) fails closed
+  const v1 = pkgSource(join(base, "v1"), { package: "sc.v1" });
+  write(join(v1, "package.json"), JSON.stringify({ name: "sc-v1", version: "1.0.0", dependencies: { n: "1.0.0" } }));
+  write(join(v1, "package-lock.json"), JSON.stringify({ name: "sc-v1", version: "1.0.0", lockfileVersion: 1, requires: true, dependencies: { n: { version: "1.0.0", resolved: "https://x/n.tgz", integrity: integ, os: ["linux"] } } }));
+  assert.throws(() => acquirePackage(scope(base, "s3"), v1), /unsupported npm lockfileVersion/);
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("platform scan is a transaction-wide preflight incl. kept/no-op paths (reviewer-11752b2)", () => {
+  const base = temp();
+  const s = scope(base);
+  const integ = "sha512-AAA";
+  // package with CLEAN root lock + PROHIBITED per-capability lock: nothing materializes
+  const src = pkgSource(join(base, "src"), { package: "pf.p" }, { "capdir": { capability: "pf.cap" } });
+  write(join(src, "vendor/dep/package.json"), JSON.stringify({ name: "dep", version: "1.0.0" }));
+  write(join(src, "package.json"), JSON.stringify({ name: "pf-root", version: "1.0.0", dependencies: { dep: "file:vendor/dep" } }));
+  write(join(src, "package-lock.json"), JSON.stringify({ name: "pf-root", version: "1.0.0", lockfileVersion: 3, requires: true, packages: { "": { name: "pf-root", version: "1.0.0", dependencies: { dep: "file:vendor/dep" } }, "node_modules/dep": { resolved: "vendor/dep", link: true }, "vendor/dep": { version: "1.0.0" } } }));
+  write(join(src, "capdir", "package.json"), JSON.stringify({ name: "pf-cap", version: "1.0.0", dependencies: { n: "1.0.0" } }));
+  write(join(src, "capdir", "package-lock.json"), JSON.stringify({ name: "pf-cap", version: "1.0.0", lockfileVersion: 3, requires: true, packages: { "": { name: "pf-cap", version: "1.0.0", dependencies: { n: "1.0.0" } }, "node_modules/n": { version: "1.0.0", resolved: "https://x/n.tgz", integrity: integ, os: ["linux"] } } }));
+  assert.throws(() => acquirePackage(s, src), /platform-variant/);
+  assert.ok(!existsSync(join(installedPackagesDir(s), "pf.p")), "nothing installed");
+  // kept/no-op path: a pre-existing installed package whose lock is prohibited fails the no-op acquire
+  const s2 = scope(base, "s2");
+  const clean = pkgSource(join(base, "clean"), { package: "np.p" });
+  acquirePackage(s2, clean);
+  const dest = join(installedPackagesDir(s2), "np.p");
+  // inject a prohibited closure into BOTH source and installed trees (same bytes → keep-path)
+  for (const d of [clean, dest]) {
+    write(join(d, "package.json"), JSON.stringify({ name: "np-p", version: "1.0.0", dependencies: { n: "1.0.0" } }));
+    write(join(d, "package-lock.json"), JSON.stringify({ name: "np-p", version: "1.0.0", lockfileVersion: 3, requires: true, packages: { "": { name: "np-p", version: "1.0.0", dependencies: { n: "1.0.0" } }, "node_modules/n": { version: "1.0.0", resolved: "https://x/n.tgz", integrity: integ, os: ["linux"] } } }));
+  }
+  // (the recorded-lock-integrity guard fires first for the drift — use replace to reach the keep/scan path)
+  assert.throws(() => acquirePackage(s2, clean, { replace: true }), /platform-variant/);
   rmSync(base, { recursive: true, force: true });
 });
