@@ -2,11 +2,13 @@
 name: oas-config
 description: >-
   How to configure OAS deployments with oas-config.yaml and the oas CLI.
-  Use for capability acquisition/activation/trust, fundamental-layer
-  integrations, agent types, targeting souls, binding settings, injection
-  overrides, or config scopes. Triggers: "install a capability", "bind a
-  layer", "target these souls", "agent type", "override an injection",
-  "oas use", "oas init", "configure OAS", "oas-config.yaml".
+  Use for capability activation, fundamental-layer integrations, agent
+  types, targeting souls, binding settings, injection overrides, config
+  scopes, or adopting a package config profile. Triggers: "bind a layer",
+  "target these souls", "agent type", "override an injection", "oas use",
+  "oas init", "configure OAS", "oas-config.yaml", "adopt a profile".
+  For package acquisition/update/remove, locks, restore, and trust
+  mechanics, use the oas-packages skill.
 ---
 
 # Configuring OAS
@@ -87,25 +89,40 @@ edit `.agents/capabilities/owned/<id>/injects/` directly.
 
 ## Acquire, trust, activate
 
-These are separate steps:
+These are separate steps. **Acquisition, locks, restore, and trust are the
+package supply chain — load the `oas-packages` skill for those operations**
+(`oas install`, `oas trust`, lock/migration mechanics, workspace restore,
+requirements/package diagnosis). This skill covers the config side:
+activation and targeting of already-acquired capabilities.
 
 ```bash
-oas install [<git-url|path>] [--dir <level>]  # acquire + exact lock into the scope's
-                                              # .agents/capabilities/installed/; bare form
-                                              # restores locked-but-missing artifacts; inactive
-oas trust <capability> [--dir <level>]        # approve locked commands/hooks
 oas use <capability> --global [--dir <level>]
 oas use <capability> --type <agent-type> [--disable]
 oas use <capability> --soul <name> [--settings k=v [k2=v2 ...]]
 ```
 
-External `oas-lock.json` entries pin source, exact version/commit, and
-integrity. OAS never silently pulls. Executable approval is tied to integrity;
-changed artifacts block. Skill/instruction-only packages still need a lock but
-not executable approval.
+Key invariants (details in oas-packages): OAS never silently pulls; approval
+is tied to exact integrity; acquired or marketplace availability never
+implies activation. Never hand-edit `oas-lock.json` or the installed stores
+— the CLI owns them.
 
-`oas init` creates config and activates only explicit defaults. Acquired or
-marketplace availability does not imply acquisition or activation.
+`oas init` creates config and activates only explicit defaults.
+
+## Package config profiles
+
+A distribution package can ship reference config profiles. Adopting one
+snapshots it as this scope's ordinary `oas-config.yaml` — with provenance,
+never live inheritance:
+
+```bash
+oas init --package <id|path|git-url> [--config <name>]  # preview, validate, snapshot
+oas config diff [--package <id> --config <name>]        # report drift; never merges
+```
+
+The snapshot is yours: retarget, disable, re-set, or replace anything the
+profile enabled; nested repository configs override it per the normal
+cascade; package updates never rewrite it. See docs/packages.md for the
+full adoption/reconciliation UX.
 
 ## Fundamental layers
 
