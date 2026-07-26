@@ -3,7 +3,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import {
   acquirePackage, applyLegacyLockMigration, approveCapability, capabilityManifests, capabilityManifest, capabilityTrust,
@@ -2346,5 +2346,34 @@ test("devOptional entries stay IN scan scope — link entry + devOptional target
   // materialized bytes are platform-invariant).
   const r = acquirePackage(scope(base, "s2"), ok);
   assert.equal(r.root, "dvo.p");
+  rmSync(base, { recursive: true, force: true });
+});
+
+// ---------- reviewer-3626ef2 blocker: tilde expansion reaches $HOME from remote manifests ----------
+
+test("tilde dependency spellings from git parents are rejected — no ambient $HOME resolution (reviewer-3626ef2)", () => {
+  const base = temp();
+  const s = scope(base);
+  // valid bait package under $HOME (the reviewer's repro shape)
+  const baitName = `.oas-test-bait-${process.pid}`;
+  const bait = join(homedir(), baitName);
+  pkgSource(bait, { package: "hbait.p" }, { "cap": { capability: "hbait.cap" } });
+  try {
+    for (const spelling of [`~/${baitName}`, `path:~/${baitName}`]) {
+      const g = pkgSource(join(base, `g-${spelling.replace(/[^a-z0-9]/gi, "")}`), { package: "gt.rel", dependencies: [spelling] });
+      gitify(g);
+      const lockBefore = existsSync(join(s, OAS_LOCK_FILE)) ? readFileSync(join(s, OAS_LOCK_FILE), "utf8") : null;
+      assert.throws(() => acquirePackage(s, `file://${g}`), (e) => e.code === "invalid-source" && /relative path/.test(e.message), spelling);
+      assert.ok(!existsSync(join(installedPackagesDir(s), "hbait.p")), `${spelling}: $HOME bait not installed`);
+      assert.ok(!existsSync(join(installedPackagesDir(s), "gt.rel")), `${spelling}: whole-transaction failure`);
+      const lockAfter = existsSync(join(s, OAS_LOCK_FILE)) ? readFileSync(join(s, OAS_LOCK_FILE), "utf8") : null;
+      assert.equal(lockAfter, lockBefore, `${spelling}: lock unchanged`);
+    }
+    // CLI-level tilde use (operator-provided root spec) still resolves home-anchored
+    const r = acquirePackage(s, `~/${baitName}`);
+    assert.equal(r.root, "hbait.p", "operator tilde spec still works at the CLI root level");
+  } finally {
+    rmSync(bait, { recursive: true, force: true });
+  }
   rmSync(base, { recursive: true, force: true });
 });
