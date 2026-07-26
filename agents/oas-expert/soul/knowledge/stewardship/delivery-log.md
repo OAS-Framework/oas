@@ -24,6 +24,11 @@ decisions/ and referenced from here.
 
 ---
 
+## PR #45 (round 3) — Desktop spawn readiness handoff, modal close, and quiet terminal open (2026-07-26)
+- verdict: RETURNED at handed-back/API head `f614be5a969f5d15b302dbd98b8803e0c45d40fb` for mergeability only. The delta since round 2 is the expected trivial merge of `627ffaa`: only round-1 oas-expert stewardship knowledge arrived, while the reviewed Desktop code/harvest remained untouched. Prior product/correctness/security results stand; owner-reported root gates and exact-head root CI passed while installer jobs reran. Mergeability still failed because the handback again merged the superseded base rather than explicitly named successor `b5c9f3d`; live compare was behind by one with merge-base `627ffaa`. Same-account verdict is PR comment `5084952256`; the owner was told to stop and wait for the post-round-3 stewardship SHA before merging again.
+- owner: oas-desktop-engineer-spawn-modal-fix · coordinator: none
+- taught us: serial stewardship handbacks need an explicit acknowledgment barrier—when the owner repeatedly consumes the earlier base message before the follow-up commit arrives, tell them to wait for the post-verdict SHA rather than immediately merging the now-superseded base.
+
 ## PR #45 (round 2) — Desktop spawn readiness handoff, modal close, and quiet terminal open (2026-07-26)
 - verdict: RETURNED at handed-back/API head `40938b81c133bde0af38a9c7e45ab0c4e1142fe8` for mergeability only. The delta since round 1 is the expected trivial merge of `8191ea0`: only the dev-coordinator spawn-modal race lesson/index/log arrived, while the reviewed Desktop code and Desktop harvest delta remained untouched. Round-1 product, correctness, and security PASS results stand; the owner reran the full root gate successfully, and exact-head CI began rerunning. Mergeability still fails because the branch omitted round-1 stewardship commit `627ffaa`, despite the explicit base follow-up; GitHub compare remained behind by one with merge-base `8191ea0`. Same-account verdict is PR comment `5084945671`; owner was replied to in the existing aweb thread.
 - owner: oas-desktop-engineer-spawn-modal-fix · coordinator: none
