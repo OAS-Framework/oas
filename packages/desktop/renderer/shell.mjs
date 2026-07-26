@@ -13,7 +13,12 @@ import {
   initTheme, toggleTheme, xtermTheme, onThemeChange,
   terminalTypography, setTerminalFontSize, setTerminalFontFamily, onTerminalTypographyChange,
 } from "./theme.mjs";
-import { createPalette, isPaletteShortcut } from "./palette.mjs";
+import { createPalette } from "./palette.mjs";
+import {
+  registerAction, setActiveContexts, getBinding, onKeymapChange, formatChord, handleKeydown, matchEvent,
+} from "./keybindings.mjs";
+import { createKeybindingsEditor } from "./keybindings-editor.mjs";
+import { rosterKeyAction, moveTarget } from "./roster-keys.mjs";
 import { createViewLifecycle } from "./view-lifecycle.mjs";
 import { reserveKey, whenKeyFree } from "./tab-keys.mjs";
 import { createTerminalTab, terminalOptions } from "./terminal-tab.mjs";
@@ -91,6 +96,10 @@ async function showStage(name) {
   stageHost.innerHTML = "";
   stageHost.append(el);
   stage = { name, life, el };
+  // Re-derive contexts from the CURRENT layer state: the user may have
+  // activated a tab while this stage was loading — a late mount completion
+  // must not replace the live "tabs" context with a hidden stage context.
+  updateActiveContexts();
   try { await life.mounted(el, ctx); }
   catch (e) { el.innerHTML = `<div class="placeholder"><h2>${v?.title || name}</h2><div>mount failed: ${e.message}</div></div>`; }
 }
@@ -102,6 +111,7 @@ function setNavActive(name) {
 function showTabLayer(on) {
   document.getElementById("tabhost").style.display = on ? "" : "none";
   tabbar.style.display = on ? "" : "none";
+  updateActiveContexts(on);
   if (!on) {
     stageHost.style.display = "";
     activeTab = null;
@@ -143,6 +153,20 @@ const workspaceLabel = createWorkspaceSwitcher({
   addWorkspace: desktopBridge.workspaceAdd || unavailableWorkspaceService,
   pickWorkspace: desktopBridge.workspacePick || unavailableWorkspaceService,
 });
+
+// ── keybinding contexts ──────────────────────────────────────────────────────────
+// The engine dispatches an action only when its context is active. "tabs"
+// is live while the tab layer covers the stage; "stage:<name>" while that
+// stage is the visible surface. Views register their own view-local actions
+// (context stage:<name>) in mount and dispose them in unmount.
+let tabLayerVisible = false;
+function updateActiveContexts(tabLayerOn = tabLayerVisible) {
+  tabLayerVisible = tabLayerOn;
+  const set = new Set();
+  if (tabLayerOn) set.add("tabs");
+  else if (stage) set.add(`stage:${stage.name}`);
+  setActiveContexts(set);
+}
 
 function initContextRoster() {
   contextRosterEl = document.getElementById("instance-roster");
@@ -282,12 +306,75 @@ function renderContextRoster(instances) {
         // pass the FULL reference: same-named instances in other agents
         // roots must open THEIR tmux session, not the first name match
         row.addEventListener("click", () => openTerminalTab({ instance: i.instance, home: i.home, agentsRoot: i.agentsRoot }));
+        // full keyboard tree operability (roving tabindex; policy in
+        // roster-keys.mjs). Enter is the button's native activation.
+        row.dataset.rosterChildren = hasChildren ? "1" : "0";
+        row.dataset.rosterCollapsed = collapsed ? "1" : "0";
+        row.tabIndex = -1;
+        row.addEventListener("keydown", onRosterRowKey);
         rowWrap.append(guides, disclosure, row);
         listEl.append(rowWrap);
       }
     }
   }
   restoreTreeState();
+  // roving tabindex: exactly one row enters the tab order — the focused row
+  // when it survived the rebuild, else the first enabled one
+  const rowsAfter = [...listEl.querySelectorAll(".ctx-inst")];
+  const focusedRow = rowsAfter.find((r) => r === listEl.ownerDocument.activeElement);
+  const tabbable = focusedRow || rowsAfter.find((r) => !r.disabled);
+  if (tabbable) tabbable.tabIndex = 0;
+}
+
+/* Keyboard walk over the rendered roster rows. Disabled (idle) rows stay
+   visible but focus skips them; expanding/collapsing re-renders and the
+   focused instance is restored by captureTreeRenderState. */
+function onRosterRowKey(e) {
+  const btn = e.currentTarget;
+  const action = rosterKeyAction(e, {
+    hasChildren: btn.dataset.rosterChildren === "1",
+    collapsed: btn.dataset.rosterCollapsed === "1",
+  });
+  if (!action) return;
+  e.preventDefault();
+  const listEl = contextRosterEl.querySelector(".ctx-list");
+  const rows = [...listEl.querySelectorAll(".ctx-inst")];
+  const at = rows.indexOf(btn);
+  const name = btn.dataset.treeInstance;
+  const ws = contextWorkspace || currentWorkspace();
+  const focusInstance = (inst) => {
+    const target = [...listEl.querySelectorAll(".ctx-inst")]
+      .find((r) => r.dataset.treeInstance === inst && !r.disabled);
+    if (target) setRovingRow(listEl, target);
+    return !!target;
+  };
+  if (action.type === "expand" || action.type === "collapse") {
+    const key = collapseKey(ws, name);
+    if (action.type === "expand") collapsedInstances.delete(key); else collapsedInstances.add(key);
+    renderContextRoster(contextInstances);
+    focusInstance(name);
+    return;
+  }
+  if (action.type === "parent") {
+    const parent = contextInstances.find((i) => i.instance === name)?.parentInstance;
+    if (parent) focusInstance(parent);
+    return;
+  }
+  const to = moveTarget(action, at, rows.length);
+  if (to < 0 || to === at) return;
+  // skip idle (disabled) rows: delta moves keep travelling in their
+  // direction; Home/End jumps fall back inward toward the focused row.
+  const step = action.to ? (to > at ? -1 : 1) : (to > at ? 1 : -1);
+  let cursor = to;
+  while (cursor >= 0 && cursor < rows.length && cursor !== at && rows[cursor].disabled) cursor += step;
+  if (cursor >= 0 && cursor < rows.length && cursor !== at && !rows[cursor].disabled) setRovingRow(listEl, rows[cursor]);
+}
+
+/* Move focus AND the single tab-order slot to `row` (roving tabindex). */
+function setRovingRow(listEl, row) {
+  for (const r of listEl.querySelectorAll('.ctx-inst[tabindex="0"]')) r.tabIndex = -1;
+  row.tabIndex = 0;
+  row.focus();
 }
 
 function showTerminalContext() {
@@ -554,6 +641,17 @@ async function openTerminalTabInner(inst, ws, key, owns) {
     wrap,
     isActive: () => made.paneEl.classList.contains("active"),
     fit: () => fit.fit(),
+    // Terminal-allowlisted shortcuts (engine policy: app.palette, tabs.*)
+    // must be intercepted BEFORE xterm writes to the pty — its capture-phase
+    // handler consumes e.g. Ctrl+K, so the bubble-phase window listener
+    // never sees it. matchEvent applies the allowlist (insideTerminal);
+    // the action runs once on keydown, and every phase of a matched chord
+    // is claimed so no control byte leaks to the attached program.
+    interceptKey: (ev) => {
+      if (!matchEvent(ev, { insideTerminal: true })) return false;
+      if (ev.type === "keydown") handleKeydown(ev, { insideTerminal: true });
+      return true;
+    },
   });
 
   const made = addTab({
@@ -585,6 +683,7 @@ for (const v of NAV) {
   b.className = "nav-item";
   b.title = v.title;
   b.dataset.view = v.name;
+  b.dataset.action = `stage.${v.name}`;
   b.innerHTML = `<span class="icon"></span><span class="label"></span>`;
   b.querySelector(".icon").textContent = v.icon;
   b.querySelector(".label").textContent = v.label;
@@ -598,12 +697,18 @@ for (const v of NAV) {
   const b = document.createElement("button");
   b.className = "nav-item";
   b.title = "Toggle light/dark theme";
+  b.dataset.action = "app.themeToggle";
   b.innerHTML = `<span class="icon">◐</span><span class="label">Theme</span>`;
   b.addEventListener("click", () => toggleTheme());
   (foot || navEl).append(b);
 }
 
-// ── command palette (⌘K): jump to an instance or run a command ───────────
+// ── command palette (⌘K): jump to an instance or run a command ─────────
+const isMac = navigator.platform.includes("Mac");
+const chordDetail = (id) => () => {
+  const b = getBinding(id);
+  return b ? formatChord(b, isMac) : "";
+};
 const palette = createPalette({
   loadInstances: async () => {
     const ws = currentWorkspace();
@@ -614,25 +719,99 @@ const palette = createPalette({
   commands: [
     // View commands derive from the nav manifest so a new rail destination
     // can never be palette-invisible (review 8441961 nit).
-    ...NAV.map((v) => ({ label: `View: ${v.label}`, run: () => showStage(v.name) })),
-    { label: "Theme: toggle light/dark", run: () => toggleTheme() },
-    { label: "Terminal: increase font size", run: () => setTerminalFontSize(terminalTypography().fontSize + 1) },
-    { label: "Terminal: decrease font size", run: () => setTerminalFontSize(terminalTypography().fontSize - 1) },
+    ...NAV.map((v) => ({ label: `View: ${v.label}`, detail: chordDetail(`stage.${v.name}`), run: () => showStage(v.name) })),
+    { label: "Theme: toggle light/dark", detail: chordDetail("app.themeToggle"), run: () => toggleTheme() },
+    { label: "Shortcuts: edit keyboard shortcuts…", detail: chordDetail("app.shortcuts"), run: () => openShortcutsEditor() },
+    { label: "Workspace: switch…", detail: chordDetail("app.workspaces"), run: () => workspaceLabel.openMenu() },
+    { label: "Instances: focus the sidebar roster", detail: chordDetail("sidebar.focusFilter"), run: () => focusRoster() },
+    { label: "Terminal: increase font size", detail: chordDetail("terminal.fontBigger"), run: () => setTerminalFontSize(terminalTypography().fontSize + 1) },
+    { label: "Terminal: decrease font size", detail: chordDetail("terminal.fontSmaller"), run: () => setTerminalFontSize(terminalTypography().fontSize - 1) },
     { label: "Terminal: set font family…", run: () => {
       const current = terminalTypography().fontFamily;
       const next = window.prompt("Terminal font family (CSS font-family value)", current);
       if (next !== null) setTerminalFontFamily(next);
     } },
-    { label: "Terminal: reset typography", run: () => { setTerminalFontFamily(""); setTerminalFontSize(13); } },
+    { label: "Terminal: reset typography", detail: chordDetail("terminal.fontReset"), run: () => { setTerminalFontFamily(""); setTerminalFontSize(13); } },
   ],
 });
-window.addEventListener("keydown", (e) => {
-  const insideTerminal = !!e.target?.closest?.(".xterm");
-  if (isPaletteShortcut(e, insideTerminal)) {
-    e.preventDefault();
-    palette.toggle();
+
+// ── shortcuts editor (rail-footer button + palette + Mod+,) ────────────
+const shortcutsEditor = createKeybindingsEditor({ doc: document, isMac });
+function openShortcutsEditor() { shortcutsEditor.open(); }
+
+function focusRoster() {
+  contextRosterEl?.querySelector(".ctx-filter")?.focus();
+}
+
+function visibleTabEntries() {
+  return [...tabs].filter(([, t]) => !t.tabEl.hidden);
+}
+
+function cycleTab(delta) {
+  const vis = visibleTabEntries();
+  if (!vis.length) return;
+  const at = Math.max(0, vis.findIndex(([tid]) => tid === activeTab));
+  const [nextId] = vis[(at + delta + vis.length) % vis.length];
+  activateTab(nextId);
+}
+
+// ── action registry: every mouse affordance, one keyboard action ────────
+// Default chords live in the engine's DEFAULT_KEYMAP (keybindings.mjs);
+// user overrides persist in localStorage via the shortcuts editor.
+registerAction({ id: "app.palette", label: "Open the command palette", context: "global", run: () => palette.toggle() });
+registerAction({ id: "app.shortcuts", label: "Edit keyboard shortcuts", context: "global", run: () => openShortcutsEditor() });
+// stage-switch actions derive from the nav manifest (same rule as the
+// palette): a new rail destination can never be shortcut-invisible.
+NAV.forEach((v) => registerAction({
+  id: `stage.${v.name}`, label: `View: ${v.label}`, context: "global",
+  run: () => showStage(v.name),
+}));
+registerAction({ id: "app.themeToggle", label: "Toggle light/dark theme", context: "global", run: () => toggleTheme() });
+registerAction({ id: "app.workspaces", label: "Open the workspace switcher", context: "global", run: () => workspaceLabel.openMenu() });
+registerAction({ id: "sidebar.focusFilter", label: "Focus the instance roster filter", context: "global", run: () => focusRoster() });
+registerAction({ id: "terminal.fontBigger", label: "Terminal: increase font size", context: "global", run: () => setTerminalFontSize(terminalTypography().fontSize + 1) });
+registerAction({ id: "terminal.fontSmaller", label: "Terminal: decrease font size", context: "global", run: () => setTerminalFontSize(terminalTypography().fontSize - 1) });
+registerAction({ id: "terminal.fontReset", label: "Terminal: reset typography", context: "global", run: () => { setTerminalFontFamily(""); setTerminalFontSize(13); } });
+// tabs: cycle + close work whether or not a tab trigger has focus (the
+// tab-a11y roving arrows stay as focus keys on the strip itself).
+registerAction({ id: "tabs.next", label: "Next tab", context: "tabs", run: () => cycleTab(1) });
+registerAction({ id: "tabs.prev", label: "Previous tab", context: "tabs", run: () => cycleTab(-1) });
+registerAction({ id: "tabs.close", label: "Close the active tab", context: "tabs", run: () => { if (activeTab != null) closeTab(activeTab, true); } });
+
+// THE one window keydown listener. The engine owns the terminal policy
+// (⌘ chords on mac; the action-id allowlist on Linux/Windows — Ctrl+K now
+// opens the palette inside xterm there, superseding the legacy
+// isPaletteShortcut pass-through). View-local handlers (hierarchy canvas,
+// roster rows, palette input) preventDefault the keys they consume; the
+// engine must not double-dispatch them.
+// The engine skips already-consumed (defaultPrevented) events itself.
+window.addEventListener("keydown", (e) => handleKeydown(e));
+
+// rail-footer: Shortcuts button next to Theme
+{
+  const foot = document.getElementById("nav-foot");
+  const b = document.createElement("button");
+  b.className = "nav-item";
+  b.title = "Edit keyboard shortcuts";
+  b.dataset.action = "app.shortcuts";
+  b.innerHTML = `<span class="icon">⌨</span><span class="label">Shortcuts</span>`;
+  b.addEventListener("click", () => openShortcutsEditor());
+  (foot || navEl).append(b);
+}
+
+// Chord-suffixed tooltips, live against the keymap: any control that
+// declares data-action gets “ … (chord)” appended to its base title.
+const baseTitles = new WeakMap();
+function applyChordTitles() {
+  for (const el of document.querySelectorAll("[data-action]")) {
+    if (!baseTitles.has(el)) baseTitles.set(el, el.title || "");
+    const chord = getBinding(el.dataset.action);
+    const base = baseTitles.get(el);
+    el.title = chord ? `${base} (${formatChord(chord, isMac)})` : base;
   }
-});
+}
+onKeymapChange(() => applyChordTitles());
+applyChordTitles();
 
 // Persistent recursive instance tree: always available below the three nav
 // surfaces, with no second/contextual sidebar and no width jump.

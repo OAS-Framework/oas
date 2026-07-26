@@ -30,7 +30,10 @@ copies or clicks away. User-initiated renders such as selection switches or
 
 This is the transcript-copy sibling of [the open-form repaint barrier](/lessons/poll-repaint-wipes-form-input.md):
 forms protect DOM-held typed input; selected transcript text protects DOM-held
-browser selection state.
+browser selection state. The modal-focus sibling is [modal innerHTML rerenders
+must restore focus by stable key](/lessons/modal-rerender-focus-restoration.md):
+there the destroyed browser state is `document.activeElement`, and losing it can
+break the dialog containment contract.
 
 # Related desktop copy plumbing
 

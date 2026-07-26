@@ -15,6 +15,25 @@ than letting the file grow stale.
 
 ## On main
 
+- **PR #36 merged 2026-07-25 as `032c7a3`** — knowledge-only oas-desktop-engineer post-PR35 keybindings harvests. Preserves both keybindings developers' stranded post-merge harvests: dispatch-ineligible view-action semantics, crossed-mail coordination, PR35 follow-up queues, modal focus restoration, and the DEFAULT_KEYMAP/defaultChord split plus terminal allowlist delivery follow-ups. Final exact head `1e9980f`; all local gates, strict OKF for all 8 bundles, PR CI, and mergeability passed after two maintainer RETURNs. The remote `harvest/keybindings-wiring` branch is deleted; local branch cleanup is blocked by another worktree at `/private/tmp/harvest-wiring`. No product, release, manifest, package, or framework behavior changes.
+
+- **PR #35 merged 2026-07-25 as `7f1e5a7`** — Desktop user-editable
+  keyboard shortcuts for all panel actions. Adds a central keybinding engine
+  with localStorage overrides and sanitized explicit unbinds, a `Mod+,`
+  shortcuts editor, action-id terminal allowlist interception before PTY writes,
+  rebindable app/stage/tab/sidebar/terminal typography/view-local actions,
+  full keyboard operation for roster/spawn/hierarchy surfaces, live chord labels
+  and tooltips, and renderer syntax coverage. Final exact head `039458f`; all
+  local gates, strict OKF for all 8 bundles, PR CI, and macOS arm64/x64 plus
+  Linux x64 installer verify checks passed after two maintainer RETURNs. The
+  remote feature branch is deleted; local branch cleanup is blocked by another
+  worktree at `/private/tmp/integrate-keybindings`. Post-merge scaffold-only
+  probe `oas-expert-pr35-probe` created the expected instance layout (AGENTS.md,
+  CLAUDE.md, instance.json, STATE/log/notes, soul/work symlinks, .agents and
+  .aw scaffolding) with `launched:false`, then retired cleanly. Release impact:
+  ship in the next Desktop/source release; current published artifacts remain
+  v0.18.5.
+
 - **RELEASED v0.18.5 (2026-07-25)** — corrective Desktop patch containing
   PR #32 and PR #33. Tag `v0.18.5` on `a0052bd` (both corrective merges plus
   release notes). Published `@oas-framework/oas@0.18.5` +
@@ -137,12 +156,29 @@ than letting the file grow stale.
 
 ## In flight
 
-- (nothing currently recorded) — PR #33 reached terminal MERGED outcome; its
+- (nothing currently recorded) — PR #36 reached terminal MERGED outcome; its
   remote feature branch is deleted.
 
 ## Recent deliveries
 
 - (record PR #, one-line scope, verdict, merge/close date)
+- PR #36 oas-desktop-engineer post-PR35 keybindings harvests: MERGED
+  2026-07-25 as `032c7a3` after two RETURNs; remote branch deleted
+  (see delivery-log).
+- PR #36 round 2 oas-desktop-engineer post-PR35 keybindings harvests: RETURNED
+  2026-07-25 for mergeability only after correctness/security/full gates passed
+  at `617241c` (see delivery-log).
+- PR #36 round 1 oas-desktop-engineer post-PR35 keybindings harvest: RETURNED
+  2026-07-25 for missing semantic parent harvest `5543ac5` (see delivery-log).
+- PR #35 Desktop user-editable keyboard shortcuts for all panel actions: MERGED
+  2026-07-25 as `7f1e5a7` after two RETURNs; remote feature branch deleted
+  (see delivery-log).
+- PR #35 round 2 Desktop keybindings: RETURNED 2026-07-25 for mergeability
+  only after all code/knowledge/security gates passed at `b5651b6`; branch must
+  merge latest main (see delivery-log).
+- PR #35 round 1 Desktop keybindings: RETURNED 2026-07-25 for one
+  knowledge-correctness fix after all code/security/mergeability gates passed
+  (see delivery-log).
 - PR #34 release: v0.18.5 manifest bump (manual rescue after complete
   publication): MERGED 2026-07-25 (`8f5af90`; see delivery-log).
 - PR #33 Desktop Shift+Enter whole-chord suppression + modifier-forced terminal

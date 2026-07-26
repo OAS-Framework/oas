@@ -23,6 +23,14 @@ import { createTermLifecycle } from "./term-lifecycle.mjs";
  * @param {(el: Element) => void} [deps.observe]  install a resize observer on
  *        wrap, return handled via the returned disposer (defaults to a real
  *        ResizeObserver; injectable for tests)
+ * @param {(ev: KeyboardEvent) => boolean} [deps.interceptKey]  shell-provided
+ *        shortcut interception hook, called BEFORE xterm handles a key event
+ *        (i.e. before any byte reaches the pty). Return true to claim the
+ *        event: it is suppressed in xterm for EVERY phase of the chord
+ *        (keydown/keypress/keyup) and never written to the pty. The shell
+ *        wires this to the keybinding engine's terminal-allowlist match —
+ *        without it, xterm's capture-phase handler consumes allowlisted
+ *        chords (e.g. Ctrl+K) before the bubble-phase window listener runs.
  * @param {(e: unknown) => void} [deps.onError]
  * @returns {{ start: () => Promise<void>, close: () => Promise<void> }}
  */
@@ -75,7 +83,21 @@ export function terminalOptions({ fontSize, fontFamily, theme }) {
   };
 }
 
-export function createTerminalTab({ desk, term, tmux, wrap, isActive, fit, observe, onError = (e) => console.error(e) }) {
+/* Compose the per-event decision for xterm's custom key handler: the
+   Shift+Enter newline translation wins first (it must WRITE a byte, not
+   just suppress), then the shell's shortcut interception (terminal-
+   allowlisted chords must never reach the pty). Returns
+   { handled, byte } — handled=true means xterm must NOT process the event
+   (return false from the handler); byte is written to the pty (keydown
+   only). Pure — exported for tests. */
+export function terminalKeyDecision(ev, interceptKey) {
+  const { suppress, byte } = shiftEnterAction(ev);
+  if (suppress) return { handled: true, byte };
+  if (interceptKey && interceptKey(ev)) return { handled: true, byte: null };
+  return { handled: false, byte: null };
+}
+
+export function createTerminalTab({ desk, term, tmux, wrap, isActive, fit, observe, interceptKey, onError = (e) => console.error(e) }) {
   let offData = null, offExit = null;
   let unobserve = null;
 
@@ -132,12 +154,14 @@ export function createTerminalTab({ desk, term, tmux, wrap, isActive, fit, obser
           banner("session ended — close this tab");
         });
         term.onData((data) => { if (life.ptyId() !== null) desk.termWrite(life.ptyId(), data); });
-        // Shift+Enter → newline (Ctrl+J alias); returning false suppresses
-        // xterm's handling for EVERY event of the chord — keydown (would
-        // send \r) and keypress (would ALSO send \r; see shiftEnterAction).
+        // Custom key handler: Shift+Enter → newline (Ctrl+J alias), then
+        // shell shortcut interception (terminal-allowlisted chords, e.g.
+        // Ctrl+K palette). Returning false suppresses xterm's handling for
+        // EVERY event of a claimed chord — keydown AND keypress (either
+        // would otherwise write to the pty; see shiftEnterAction).
         term.attachCustomKeyEventHandler?.((ev) => {
-          const { suppress, byte } = shiftEnterAction(ev);
-          if (!suppress) return true;
+          const { handled, byte } = terminalKeyDecision(ev, interceptKey);
+          if (!handled) return true;
           if (byte !== null && life.ptyId() !== null) desk.termWrite(life.ptyId(), byte);
           return false;
         });

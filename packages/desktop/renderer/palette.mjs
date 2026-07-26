@@ -101,7 +101,10 @@ export function createPalette({ loadInstances, openTerminal, commands = [] }) {
       for (const c of commands) {
         const sc = q ? score(c.label, q) : 0;
         if (sc < 0) continue;
-        rows.push({ sc: sc + (cmdMode ? 0 : 50), label: c.label, detail: "", dot: null, run: c.run });
+        // detail may be a function so chord labels stay live against the
+        // current keymap (rebinding in the editor updates the next render).
+        const detail = typeof c.detail === "function" ? c.detail() : (c.detail || "");
+        rows.push({ sc: sc + (cmdMode ? 0 : 50), label: c.label, detail, dot: null, run: c.run });
       }
       rows.sort((a, b) => a.sc - b.sc);
       items = rows.slice(0, 12);

@@ -1,6 +1,9 @@
 # Knowledge Log
 
 ## 2026-07-25
+* **Creation**: added [Integration worktrees need packages/desktop npm install before the gate](/lessons/integration-worktree-desktop-npm-install.md) from dev-coordinator-parallel-2 note.
+* **Creation**: added [Merged-state review fixes can overreach scope — validate new user-facing surfaces with the human](/lessons/review-fix-scope-overreach.md) from dev-coordinator-parallel-2 note.
+* **Update**: skills/multi-dev-feature — added gotchas for desktop package installs in fresh integration worktrees and human validation before new user-facing surfaces from merged-state review fixes.
 * **Creation**: added [Electron linker signatures are not complete ad-hoc app-bundle signatures](/lessons/electron-builder-complete-adhoc-signing.md) from dev-coordinator-1 note.
 * **Creation**: added [electron-builder skips macOS signing in pull-request CI unless explicitly enabled](/lessons/electron-builder-pr-signing.md) from dev-coordinator-1 note.
 * **Creation**: added [Global capability presence can block repo-scoped lock restoration](/lessons/restore-capabilities-global-shadow.md) from dev-coordinator-1 note.
