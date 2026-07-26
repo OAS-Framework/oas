@@ -468,7 +468,13 @@ function use() {
 function install() {
   const src = args[1];
   const dir = resolve(flag("dir") || process.cwd());
-  if (!src || src.startsWith("--")) { reconcile(dir); return; }
+  if (!src || src.startsWith("--")) {
+    // Usage errors surface BEFORE any restore/network side effect: a malformed
+    // --accept-requirement must not mutate the deployment and then report E_USAGE.
+    flagAll("accept-requirement");
+    reconcile(dir);
+    return;
+  }
   if (RETIRED_CAPABILITIES[src]) die(`${RETIRED_CAPABILITIES[src]}`);
   const known = capabilityManifest(src, dir);
   if (known) {

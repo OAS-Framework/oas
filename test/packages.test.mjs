@@ -836,6 +836,66 @@ test("doctor --json carries schemaVersion 1 and the WS2 payload with field parit
   assert.match(human.stdout, /oas install --accept-requirement json-doctor-missing-cmd --dir /);
 });
 
+test("malformed requirement commands reach the fail-closed policy: empty and non-string commands, canonical sort", () => {
+  const base = temp();
+  const ws = join(base, "ws");
+  write(join(ws, ".agents", "capabilities", "owned", "broken", "oas.json"), JSON.stringify({
+    capability: "broken.cap", version: "1.0.0", description: "x",
+    requires: [
+      { command: "", why: "empty" },
+      { command: 42, why: "number" },
+      { command: { x: 1 }, why: "object" },
+    ],
+  }));
+  write(join(ws, "oas-config.yaml"), "name: ws\nteam:\n  name: t\ncapabilities:\n  additive:\n    broken.cap:\n      from: owned\n      global: true\n");
+  // aggregation flags all three as invalid without throwing (canonical sort keys)
+  const missing = aggregateMissingRequirements([ws]);
+  assert.equal(missing.length, 3, JSON.stringify(missing));
+  assert.ok(missing.every((m) => m.invalid && m.plan === null), "all malformed commands are typed invalid records");
+  // CLI JSON: envelope with E_RECONCILE_FAILED + E_REQUIREMENT_POLICY entries, no stack trace
+  const r = cli(["install", "--json", "--no-requirements", "--dir", ws], { cwd: ws });
+  assert.equal(r.status, 1);
+  const env = JSON.parse(r.stdout);
+  assert.equal(env.error.code, "E_RECONCILE_FAILED");
+  assert.equal(env.error.details.requirements.filter((q) => q.code === "E_REQUIREMENT_POLICY").length, 3);
+});
+
+test("conflict provenance covers three-plus requesters", () => {
+  const base = temp();
+  const ws = join(base, "ws");
+  const cap3 = (id, folder, pkg) => write(join(ws, ".agents", "capabilities", "owned", folder, "oas.json"), JSON.stringify({
+    capability: id, version: "1.0.0", description: "x",
+    requires: [{ command: "shared-cli", why: "x", install: { methods: [{ platform: process.platform, manager: "npm-global", package: pkg }] } }],
+  }));
+  cap3("a.cap", "a", "shared-cli@1.0.0");
+  cap3("b.cap", "b", "shared-cli@2.0.0");
+  cap3("c.cap", "c", "shared-cli@3.0.0");
+  write(join(ws, "oas-config.yaml"), "name: ws\nteam:\n  name: t\ncapabilities:\n  additive:\n    a.cap:\n      from: owned\n      global: true\n    b.cap:\n      from: owned\n      global: true\n    c.cap:\n      from: owned\n      global: true\n");
+  const missing = aggregateMissingRequirements([ws]);
+  assert.equal(missing.length, 1);
+  assert.ok(missing[0].conflict);
+  assert.deepEqual(missing[0].conflict.plans.map((p) => p.capability).sort(), ["a.cap", "b.cap", "c.cap"], "ALL requesters appear in the conflict provenance");
+  assert.ok(missing[0].conflict.plans.every((p) => p.argv), "each conflicting plan carries its argv");
+});
+
+test("usage validation precedes reconciliation side effects: malformed --accept-requirement never restores", () => {
+  const base = temp();
+  const src = join(base, "src");
+  write(join(src, "oas.json"), JSON.stringify({ capability: "acme.cap", version: "1.0.0", description: "x", compatibility: { oas: ">=0.6.2" } }));
+  const ws = join(base, "ws");
+  write(join(ws, "oas-config.yaml"), "name: ws\nteam:\n  name: t\n");
+  // restorable lock — pre-fix, the restore ran BEFORE flagAll rejected usage
+  const scratch = join(base, "scratch");
+  write(join(scratch, "oas-config.yaml"), "name: scratch\n");
+  assert.equal(cli(["install", src, "--dir", scratch]).status, 0);
+  const integrity = JSON.parse(readFileSync(join(scratch, "oas-lock.json"), "utf8")).capabilities["acme.cap"].integrity;
+  write(join(ws, "oas-lock.json"), JSON.stringify({ lockfileVersion: 1, capabilities: { "acme.cap": { source: `path:${src}`, version: "1.0.0", integrity } } }));
+  const r = cli(["install", "--json", "--accept-requirement", "--dir", ws], { cwd: ws });
+  assert.equal(r.status, 1);
+  assert.equal(JSON.parse(r.stdout).error.code, "E_USAGE");
+  assert.equal(existsSync(join(ws, ".agents", "capabilities", "installed", "src", "oas.json")), false, "usage errors must not mutate the deployment");
+});
+
 test("requirement identity fails closed: unsafe command tokens are never consentable and fail reconciliation", () => {
   const base = temp();
   const mkWs = (name, cmd) => {
