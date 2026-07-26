@@ -92,7 +92,7 @@ edit `.agents/capabilities/owned/<id>/injects/` directly.
 These are separate steps. **Acquisition, locks, restore, and trust are the
 package supply chain — they belong to the `oas-packages` skill (shipping
 with the package engine); until it is available use docs/packages.md and
-`oas install`/`oas trust` `--help`** (`oas install`, `oas trust`,
+the top-level `oas help` output** (`oas install`, `oas trust`,
 lock/migration mechanics, workspace restore, requirements/package
 diagnosis). This skill covers the config side:
 activation and targeting of already-acquired capabilities.

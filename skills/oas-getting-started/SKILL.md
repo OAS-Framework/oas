@@ -123,7 +123,7 @@ hand-edit `oas-lock.json` or installed stores — the CLI owns them. Anything
 beyond this bootstrap (updates, removal, lock restore/migration,
 requirements, package diagnosis) belongs to the `oas-packages` skill
 (shipping with the package engine); until it is available use
-docs/packages.md and `oas install`/`oas trust` `--help`.
+docs/packages.md and the top-level `oas help` output.
 
 ## 5. Verify
 
