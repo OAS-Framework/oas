@@ -1,3 +1,4 @@
 # Decisions
 
+* [Desktop keybindings — editable keymap architecture](desktop-keybindings-architecture.md) - Why the keybindings feature uses a central action registry, chord engine with localStorage overrides, and a strict terminal-safety policy.
 * [Desktop succession direction — maintainer positions](desktop-succession-maintainer-positions.md) - Adopted architecture and sunset positions for desktop-app succession that bind follow-up briefs for desktop distribution, web/TUI sunset, and soul succession.

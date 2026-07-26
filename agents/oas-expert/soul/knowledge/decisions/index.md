@@ -1,5 +1,6 @@
 # Decisions
 
+* [Spawn relations use sparse live lineage, not a transaction journal](spawn-relations-live-lineage.md) - OAS records explicit child, sibling, parent, or unrelated spawn relations as sparse current-state lineage, fails closed on ambiguous names, and accepts bounded non-atomic concurrency tradeoffs rather than adding a journal or lease subsystem.
 * [First public OAS Desktop release contract](desktop-public-release-contract.md) - OAS Desktop launches publicly in the synchronized v0.18.0 release with an explicit installer matrix, Desktop CLI API v1, observation-only no-CLI mode, installed-artifact parity gates, and split CLI/Desktop ownership.
 * [Desktop succeeds the web and terminal panels as a standalone product](desktop-panel-succession.md) - The Electron desktop app becomes OAS's sole panel, owns its bundled backend outside the kernel, degrades to observation without an installed OAS CLI, and removes oas.web and oas pane in the pre-release desktop migration as a documented breaking change.
 * [OAS development team — PR-only flow, review capability, capability-defined agents, model preference lists](dev-team-and-review-flow.md) - the repo's dev team (3 developers + coordinator + maintainer gate via pr-review), oas.review with a fresh capability-defined reviewer agent, and the two kernel contracts that enable it.
