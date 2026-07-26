@@ -514,7 +514,7 @@ test("executable and nested skill paths cannot escape the package integrity boun
   });
   write(join(repo, "outside.mjs"), "console.log('outside lock')\n");
   writeCapabilityLock(repo, "acme.escape", {
-    source: "path:escape", integrity: capabilityIntegrity(dir), trustedExecutables: true,
+    source: "path:escape", version: "1.0.0", integrity: capabilityIntegrity(dir), trustedExecutables: true,
   });
   write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.escape:\n      global: true\n");
   assert.throws(() => resolveOasConfig(repo, "dev"), /path escapes its integrity boundary/);
