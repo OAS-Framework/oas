@@ -57,6 +57,13 @@ const capabilitySchema = readJson(capabilitySchemaPath);
 
 if (packageManifest && packageSchema) validateSchema(packageManifest, packageSchema, "oas-package.json");
 
+const configs = packageManifest?.configs && typeof packageManifest.configs === "object" ? packageManifest.configs : {};
+const defaultConfigs = Object.entries(configs).filter(([, spec]) => spec?.default === true);
+if (defaultConfigs.length > 1) report("oas-package.json.configs", "at most one config profile may be marked default");
+for (const [name, spec] of Object.entries(configs)) {
+  if (spec?.path) safeResource(root, spec.path, `oas-package.json.configs.${name}.path`, "config profile");
+}
+
 const declaredCapabilities = Array.isArray(packageManifest?.capabilities) ? packageManifest.capabilities : [];
 if (declaredCapabilities.length !== 1) {
   report("oas-package.json.capabilities", `official single-capability package must enumerate exactly one capability directory (found ${declaredCapabilities.length})`);
@@ -83,8 +90,15 @@ for (const [index, capabilityDir] of declaredCapabilities.entries()) {
 
 if (capabilities.length === 1 && packageManifest) {
   const capability = capabilities[0];
-  if (packageManifest.package !== capability.capability) report("oas-package.json.package", "single-capability official package ID must equal its capability ID");
-  if (packageManifest.version !== capability.version) report("oas-package.json.version", "must start at the extracted capability version");
+  if (packageManifest.package === "oas.dev") {
+    if (packageManifest.version !== "1.0.0") report("oas-package.json.version", "oas.dev distribution must start at 1.0.0");
+    if (capability.capability !== "oas.review" || capability.version !== "1.1.7") {
+      report("oas-package.json.capabilities[0]", "oas.dev must export capability oas.review@1.1.7");
+    }
+  } else {
+    if (packageManifest.package !== capability.capability) report("oas-package.json.package", "single-capability official package ID must equal its capability ID");
+    if (packageManifest.version !== capability.version) report("oas-package.json.version", "must start at the extracted capability version");
+  }
   if (packageManifest.compatibility?.oas !== capability.compatibility?.oas) report("oas-package.json.compatibility.oas", "must match the staged capability compatibility floor");
 }
 

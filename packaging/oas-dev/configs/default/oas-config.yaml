@@ -1,0 +1,32 @@
+name: oas-development
+team:
+  name: oas-development
+
+agent-types:
+  framework-authors:
+    description: Experts that design and evolve the OAS framework.
+  developers:
+    description: Developers that implement and verify OAS changes.
+  package-maintainers:
+    description: Experts that own an official OAS package's vision, implementation, maintenance, releases, and support.
+
+capabilities:
+  layers:
+    knowledge:
+      capability: oas.okf
+      from: installed
+    messaging:
+      capability: oas.aweb
+      from: installed
+    tasks: none
+  additive:
+    oas.authoring:
+      from: installed
+      agent-types:
+        framework-authors: true
+        package-maintainers: true
+    oas.review:
+      from: installed
+      agent-types:
+        developers: true
+        package-maintainers: true
