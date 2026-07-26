@@ -1,6 +1,7 @@
 # Knowledge Log
 
 ## 2026-07-26
+* **Creation**: [frozen-interface-first-delivery](/lessons/frozen-interface-first-delivery.md) records the package-engine contract lesson: unblock sibling workstreams with a schema-plus-contract-doc commit before implementation.
 * **Fix**: [spawn-lineage-explicit-only](/decisions/spawn-lineage-explicit-only.md) scopes the top-level/no-lineage default to non-attached manual spawns, preserving attached owner auto-binding as the explicit exception.
 * **Fix**: [spawn-lineage-explicit-only](/decisions/spawn-lineage-explicit-only.md) now states the complete child/sibling/parent/unrelated lineage matrix, `--parent` child sugar, and attached auto-binding without a stored relation value.
 * **Update**: [spawn-relations-lineage-fields](/architecture/spawn-relations-lineage-fields.md) records the final human/maintainer-accepted concurrency limitations and the decision not to add a lineage transaction subsystem.
