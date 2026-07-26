@@ -1,5 +1,6 @@
 # Lessons
 
+* [Desktop spawn-modal race — roster appearance ≠ terminal readiness](desktop-spawn-modal-tmux-race.md) - The desktop panel roster lists a freshly spawned instance before its tmux session registers, so post-spawn auto-open must gate on running plus tmux readiness, not mere presence.
 * [`--relation parent` re-points only the anchor's lineage](relation-parent-repoints-only-anchor.md) - When spawning an overseer for multiple instances, the relation flag binds only the spawning instance; the other party must be brought under the new parent separately.
 * [Scope a coordinator feature to one developer when ownership scan collapses](scope-feature-before-spawning-developers.md) - A coordinator task that sounds multi-dev can map entirely to one soul; scan repo surfaces and the soul roster before spawning developers so parallel choreography does not get invented.
 * [Merged-state reviewers catch stale-base drift against moving main](stale-base-drift-merged-review.md) - A feature branch cut early can silently regress freshly-shipped main work; check origin/main movement before each review round, and route behavioral merge conflicts to the owning developer.
