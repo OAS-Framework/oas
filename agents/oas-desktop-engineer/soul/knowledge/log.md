@@ -1,6 +1,7 @@
 # Knowledge Log
 
 ## 2026-07-26
+* **Creation**: promoted [Reconciling split panes with quick-open focusContent semantics](/lessons/split-quickopen-merge-reconciliation.md) from the oas-desktop-engineer-split-panels notes.
 * **Update**: merged the merged-state split review findings from oas-desktop-engineer-split-panels into [terminal allowlist action-id policy](/lessons/keybindings-terminal-allowlist-by-action-id.md) and [split panes flex-cell reprojection](/lessons/split-panes-flex-reprojection.md): check newly allowlisted actions' resolved non-mac chords against terminal-owned bytes, keep pending split state to the single renderer placeholder, and select split-adjacent close fallback before removal.
 * **Creation**: promoted [default chords with shifted punctuation must alias the shifted character](/lessons/shifted-punctuation-default-chords.md) from the oas-desktop-engineer-split-panels notes.
 * **Update**: merged the split-pane selection-wiring note into [split panes as flex-cell reprojection of existing tab panes](/lessons/split-panes-flex-reprojection.md): visible split panes need pointerdown/focusin activation without DOM focus stealing or re-appending already-in-place panes.
