@@ -119,11 +119,11 @@ oas use vendor.code-review --type developers --dir /path/to/workspace
 ```
 
 Acquisition never means activation and never silently updates a lock. Never
-hand-edit `oas-lock.json` or installed stores — the CLI owns them. For
-anything beyond this bootstrap (updates, removal, lock restore/migration,
-requirements, package diagnosis), spawned instances load the `oas-packages`
-skill — it is part of the kernel baseline inside instances, not available
-in this pre-workspace context.
+hand-edit `oas-lock.json` or installed stores — the CLI owns them. Anything
+beyond this bootstrap (updates, removal, lock restore/migration,
+requirements, package diagnosis) belongs to the `oas-packages` skill
+(shipping with the package engine); until it is available use
+docs/packages.md and `oas install`/`oas trust` `--help`.
 
 ## 5. Verify
 
@@ -152,7 +152,7 @@ that instance. Do not put deployment-specific package prose into the soul.
 
 Create/spawn only when asked. Suggest a team shape, then let the user decide.
 For operations load the `oas` skill; for local deployment policy and profile
-adoption use `oas-config`; for package acquisition/locks/trust beyond the
-bootstrap above use `oas-packages` (available inside spawned instances); for
-custom layer/package work use `integration-authoring`; for deep architecture
-or bugs use `oas-support`.
+adoption use `oas-config`; package acquisition/locks/trust beyond the
+bootstrap above belong to `oas-packages` (shipping with the package engine —
+until then, docs/packages.md); for custom layer/package work use
+`integration-authoring`; for deep architecture or bugs use `oas-support`.
