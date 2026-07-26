@@ -2143,3 +2143,40 @@ test("empty-v1 conversion is atomic: a failed replace leaves the original lock b
   assert.deepEqual(JSON.parse(readFileSync(join(s, OAS_LOCK_FILE), "utf8")), { lockfileVersion: 2, packages: {} });
   rmSync(base, { recursive: true, force: true });
 });
+
+// ---------- reviewer-038b6cb findings ----------
+
+test("malformed lock roots are typed invalid-lock on install paths — package and legacy (reviewer-038b6cb)", () => {
+  const base = temp();
+  const pkg = pkgSource(join(base, "pkg"), { package: "mr.p" });
+  const legacy = join(base, "legacy-cap");
+  write(join(legacy, "oas.json"), JSON.stringify({ capability: "mr.cap", version: "1.0.0", description: "d" }));
+  for (const [label, body] of [["null-root", "null"], ["array-root", "[]"], ["scalar-root", "42"]]) {
+    const s = scope(base, `s-${label}`);
+    writeFileSync(join(s, OAS_LOCK_FILE), body);
+    // package install path
+    let env = JSON.parse(cli(s, "install", pkg, "--dir", s, "--json").stdout);
+    assert.equal(env.ok, false, `pkg ${label}`);
+    assert.equal(env.error.code, "invalid-lock", `pkg ${label}: ${env.error.message}`);
+    assert.ok(!/Cannot read properties/.test(env.error.message), `pkg ${label}: no TypeError leak`);
+    // legacy capability install path (writeCapabilityLock guard)
+    env = JSON.parse(cli(s, "install", legacy, "--dir", s, "--json").stdout);
+    assert.equal(env.ok, false, `legacy ${label}`);
+    assert.equal(env.error.code, "invalid-lock", `legacy ${label}: ${env.error.message}`);
+  }
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("restoreCapabilities preserves e.code — retired manifest in a locked path source reports retired-capability (reviewer-038b6cb)", () => {
+  const base = temp();
+  const s = scope(base);
+  // a locked path source whose manifest declares retired oas.web
+  const retiredSrc = join(base, "retired-src");
+  write(join(retiredSrc, "oas.json"), JSON.stringify({ capability: "oas.web", version: "1.0.0", description: "d" }));
+  writeCapabilityLock(s, "some.cap", { source: `path:${retiredSrc}`, version: "1.0.0", integrity: `sha256-${"a".repeat(64)}` });
+  const r = cli(s, "install", "--dir", s, "--json");
+  const env = JSON.parse(r.stdout);
+  assert.equal(env.ok, false);
+  assert.equal(env.error.code, "retired-capability", `expected typed retirement code, got ${env.error.code}: ${env.error.message}`);
+  rmSync(base, { recursive: true, force: true });
+});
