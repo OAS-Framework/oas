@@ -2066,3 +2066,37 @@ test("lock entries enforce additionalProperties: false (reviewer-5f1188d)", () =
   assert.equal(env.error.code, "invalid-lock");
   rmSync(base, { recursive: true, force: true });
 });
+
+// ---------- reviewer-2a4adec blocker: path:sub / whitespace relative-dep bypass ----------
+
+test("relative-dep rejection classifies from the parsed payload — path:sub and whitespace variants cannot resolve via CWD (reviewer-2a4adec)", () => {
+  const base = temp();
+  const s = scope(base);
+  // CWD contains a VALID matching package dir — the bait the bypass would install
+  const elsewhere = join(base, "cwd");
+  pkgSource(join(elsewhere, "sub"), { package: "bait.p" }, { "cap": { capability: "bait.cap" } });
+  const prevCwd = process.cwd();
+  try {
+    process.chdir(elsewhere);
+    for (const spelling of ["path:sub", " ./sub "]) {
+      const g = pkgSource(join(base, `g-${spelling.replace(/[^a-z]/g, "")}`), { package: "gp.rel", dependencies: [spelling] });
+      gitify(g);
+      const lockBefore = existsSync(join(s, OAS_LOCK_FILE)) ? readFileSync(join(s, OAS_LOCK_FILE), "utf8") : null;
+      assert.throws(() => acquirePackage(s, `file://${g}`), (e) => e.code === "invalid-source" && /relative path/.test(e.message), spelling);
+      assert.ok(!existsSync(join(installedPackagesDir(s), "bait.p")), `${spelling}: CWD bait not installed`);
+      assert.ok(!existsSync(join(installedPackagesDir(s), "gp.rel")), `${spelling}: remote package not installed either (transaction failed whole)`);
+      const lockAfter = existsSync(join(s, OAS_LOCK_FILE)) ? readFileSync(join(s, OAS_LOCK_FILE), "utf8") : null;
+      assert.equal(lockAfter, lockBefore, `${spelling}: lock unchanged`);
+    }
+    // legitimate co-located local packages still work with path:sub spelling
+    const localRoot = join(base, "local");
+    pkgSource(join(localRoot, "sub"), { package: "loc.sub" });
+    pkgSource(localRoot, { package: "loc.root", dependencies: ["path:sub"] });
+    const r = acquirePackage(s, localRoot);
+    assert.deepEqual(r.installed.map((p) => p.package).sort(), ["loc.root", "loc.sub"]);
+    assert.match(readPackageLocks(s).packages["loc.sub"].source, /path:.*\/local\/sub$/, "resolved against the depending package root, not CWD");
+  } finally {
+    process.chdir(prevCwd);
+  }
+  rmSync(base, { recursive: true, force: true });
+});
