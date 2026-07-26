@@ -342,3 +342,36 @@ test("full-roster scope covers SIBLING edges too: globally-ambiguous sibling nam
   assert.deepEqual(cl.sibs, [],
     "ambiguous sibling name stays dropped — no false arc from cluster-local uniqueness");
 });
+
+test("keyboard Brain key matches the composite selection id — selecting a node and pressing B opens its Brain (review 96b037b)", async () => {
+  const { JSDOM } = await import("jsdom");
+  const dom = new JSDOM(`<div id="root"></div>`, { pretendToBeVisual: true });
+  const g = globalThis;
+  const prev = { window: g.window, document: g.document, localStorage: g.localStorage };
+  g.window = dom.window; g.document = dom.window.document;
+  g.localStorage = { getItem: () => null, setItem: () => {} };
+  try {
+    const panel = { instances: [
+      { instance: "dev", agent: "dev-soul", agentsRoot: "/a/agents", home: "/a/agents/dev/i/dev", running: true },
+    ], workspaces: [], workspace: null };
+    const brains = [];
+    const ctx = { api: async () => ({ ok: true, status: 200, json: async () => panel }),
+                  openTerminal: () => {}, openBrain: (agent) => brains.push(agent) };
+    const el = dom.window.document.getElementById("root");
+    const un = hier.mount(el, ctx);
+    await new Promise((r) => setTimeout(r, 30));
+    const node = el.querySelector(".hnode");
+    assert.ok(node, "node rendered");
+    // select the node (its dataset.id is the COMPOSITE instanceId — home)
+    node.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+    // dispatch the Brain default chord on the canvas (the keydown host):
+    // pre-fix, the bare-name lookup (x.instance === s.sel) missed the
+    // composite id and the key was consumed doing nothing
+    const canvas = el.querySelector(".hier-canvas");
+    canvas.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "B", bubbles: true, cancelable: true }));
+    assert.deepEqual(brains, ["dev-soul"], "Brain opens for the selected composite-id node");
+    un();
+  } finally {
+    g.window = prev.window; g.document = prev.document; g.localStorage = prev.localStorage;
+  }
+});

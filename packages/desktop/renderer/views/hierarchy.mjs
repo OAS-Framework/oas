@@ -16,7 +16,8 @@
    switches; each agent box can be grabbed and moved freely (drag past the
    click threshold — spawn edges follow live, and offsets persist across the
    4s refresh).
-   Keyboard: arrows walk the tree, Enter opens, f fits, Escape clears.
+   Keyboard: arrows walk the tree, Enter/t opens the terminal, b Brain,
+   s Spawn view, o action popover, +/- zoom, f fits, Escape clears.
    Contract: mount(el, ctx) / unmount(); data from GET /api/panel only. */
 import { computeClusters, siblingEdges } from "./clusters.mjs";
 import { instanceId, resolveLinkId } from "../instance-tree.mjs";
@@ -25,6 +26,8 @@ import {
   currentWorkspace, setWorkspace, adoptWorkspace, onWorkspaceChange,
   renderWorkspaceSelect, wsQuery, workspaceGeneration,
 } from "./common.mjs";
+import { registerAction } from "../keybindings.mjs";
+import { resolveViewKey } from "../view-keys.mjs";
 
 const CSS = `
 .hier { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--bg); color: var(--fg);
@@ -299,6 +302,28 @@ export function mount(el, ctx) {
   // keyboard: walk the tree, Enter opens terminal, f fits, Escape clears
   s.canvas.addEventListener("keydown", (e) => onKey(s, e));
 
+  // Register the canvas keys as actions. Their DEFAULT chords ride the
+  // registration (engine addendum 3: defaultChord) so the shortcuts editor
+  // shows them honestly and Backspace/reset behave. The context is a VIEW
+  // context the shell never activates (review afd2114): these actions are
+  // editor-visible and conflict-checked but window-dispatch-INELIGIBLE —
+  // matchEvent skips them before selecting/preventDefault, so an outside
+  // rail/sidebar keypress is not swallowed and colliding global actions
+  // still run. ALL dispatch is view-local (onKey → resolveViewKey against
+  // the engine's effective bindings). Disposed on unmount.
+  s.viewActions = [
+    { id: "hier.fit", defaultChord: "F", label: "Hierarchy: fit to screen", run: () => fit(s) },
+    { id: "hier.terminal", defaultChord: "T", label: "Hierarchy: open terminal of selection", run: () => { if (s.sel) openTerm(s, s.sel); } },
+    { id: "hier.brain", defaultChord: "B", label: "Hierarchy: open Brain of selection", run: () => openSelBrain(s) },
+    { id: "hier.spawn", defaultChord: "S", label: "Hierarchy: open the Spawn view", run: () => s.ctx.openView?.("spawn") },
+    { id: "hier.popover", defaultChord: "O", label: "Hierarchy: open the action popover", run: () => { if (s.sel) openPop(s, s.sel); } },
+    { id: "hier.zoomIn", defaultChord: "=", label: "Hierarchy: zoom in", run: () => zoomBy(s, 1.2) },
+    { id: "hier.zoomOut", defaultChord: "-", label: "Hierarchy: zoom out", run: () => zoomBy(s, 1 / 1.2) },
+  ];
+  s.disposers = s.viewActions.map((a) => registerAction({
+    id: a.id, label: a.label, context: "view:hierarchy", run: a.run, defaultChord: a.defaultChord,
+  }));
+
   s.unsubWs = onWorkspaceChange(() => { s.sel = null; s.fitted = false; s.nodeOffsets.clear(); refresh(s); });
   refresh(s);
   s.timers.push(setInterval(() => refresh(s), 4000));
@@ -312,6 +337,7 @@ function teardown(s) {
   if (!s.alive) return;
   s.alive = false;
   s.timers.forEach(clearInterval);
+  (s.disposers || []).forEach((off) => { try { off(); } catch {} });
   if (s.unsubWs) s.unsubWs();
   window.removeEventListener("mousemove", s.onMove);
   window.removeEventListener("mouseup", s.onUp);
@@ -664,13 +690,24 @@ function openPop(s, id) {
   (entry.el.parentElement || s.canvas.querySelector(".hier-stage"))?.append(pop);
 }
 
-/* keyboard tree-walk over the laid-out nodes */
+/* Brain of the current selection (popover parity for the keyboard).
+   s.sel is a composite instanceId — matching bare x.instance made the
+   Brain key consume-and-do-nothing for every identity-bearing node
+   (review 96b037b). */
+function openSelBrain(s) {
+  const i = (s.panel.instances || []).find((x) => instanceId(x) === s.sel);
+  if (i) s.ctx.openBrain?.(i.agent);
+}
+
+/* keyboard tree-walk over the laid-out nodes. Escape/Enter/arrows are the
+   tree's structural keys (not rebindable); everything else resolves through
+   the engine keymap so shortcut-editor rebinds take effect here. */
 function onKey(s, e) {
   const list = s.panel.instances || [];
   if (!list.length) return;
   if (e.key === "Escape") { s.sel = null; paintSelection(s); closePop(s); return; }
-  if (e.key === "f") { e.preventDefault(); fit(s); return; }
   // [ / ] hop between clusters (selects the hopped-to cluster's first node)
+  // — structural like the arrows; fit moved to the rebindable hier.fit action
   if (e.key === "[" || e.key === "]") {
     e.preventDefault();
     const groups = [];
@@ -687,7 +724,14 @@ function onKey(s, e) {
     select(s, next.first.id);
     return;
   }
+  // Enter opens with FULL identity (openTerm), never the bare selection id
   if (e.key === "Enter" && s.sel) { e.preventDefault(); openTerm(s, s.sel); return; }
+  const hit = resolveViewKey(e, s.viewActions);
+  if (hit) {
+    e.preventDefault();
+    s.viewActions.find((a) => a.id === hit)?.run();
+    return;
+  }
   if (!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)) return;
   e.preventDefault();
   if (!s.sel) { select(s, instanceId(list[0])); return; }

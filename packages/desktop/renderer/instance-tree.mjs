@@ -455,3 +455,21 @@ export function rosterResponseOwns({ dispatchWorkspace, responseWorkspace, curre
   return currentWorkspace === dispatchWorkspace
     || (!dispatchWorkspace && currentWorkspace === responseWorkspace);
 }
+
+/** Resolve the roster keyboard handler's ArrowLeft target: the parent
+ * instanceId of the row whose data-tree-instance is `id`, or null.
+ * Identity-aware end to end (review 96b037b): the current row is found by
+ * instanceId — rows carry composite ids, so a bare-name lookup never
+ * matches — and the parent edge resolves through resolveLinkId, so a
+ * duplicate parent name in another root (or intra-root) can never steal
+ * focus: ambiguity yields null and the key is a no-op. */
+export function rosterParentId(instances, id) {
+  const me = instances.find((i) => instanceId(i) === id);
+  if (!me?.parentInstance) return null;
+  const byName = new Map();
+  for (const i of instances) {
+    if (!byName.has(i.instance)) byName.set(i.instance, []);
+    byName.get(i.instance).push(i);
+  }
+  return resolveLinkId(me, me.parentInstance, byName);
+}

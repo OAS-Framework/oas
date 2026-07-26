@@ -10,6 +10,8 @@ import {
   escapeHtml, apiJson, postJson, ensureTheme,
   setWorkspace, onWorkspaceChange, renderWorkspaceSelect, wsQuery, workspaceGeneration,
 } from "./common.mjs";
+import { registerAction } from "../keybindings.mjs";
+import { resolveViewKey } from "../view-keys.mjs";
 import { cliAvailable, cliKnownUnavailable, cliStatus, refreshCli, onCliChange, cliCard, cliRelationsAvailable } from "./cli-status.mjs";
 import { distinguishingRootTags } from "../instance-tree.mjs";
 
@@ -92,6 +94,40 @@ export function mount(el, ctx) {
     </div>`;
   s.q = (cls) => el.querySelector("." + cls);
   s.q("filter").addEventListener("input", (e) => { s.filterText = e.target.value; renderGrid(s); });
+  // Keyboard operability (task: keybindings wiring): `/` focuses the filter,
+  // arrows rove the card grid, Enter opens the focused card's spawn form,
+  // b opens its brain, Esc cancels an open form. spawn.filter/spawn.brain
+  // are registered stage:spawn actions; their keys resolve through the
+  // engine keymap (view-keys.mjs) so editor rebinds take effect, while
+  // dispatch stays view-local and editable-guarded.
+  s.q("souls-grid").addEventListener("keydown", (e) => onGridKey(s, e));
+  s.viewActions = [
+    { id: "spawn.filter", defaultChord: "/", run: () => s.q("filter").focus() },
+    { id: "spawn.brain", defaultChord: "B", run: () => brainOfFocusedCard(s) },
+  ];
+  const viewRoot = el.querySelector(".souls");
+  viewRoot.addEventListener("keydown", (e) => {
+    // Esc cancels the open spawn form from anywhere inside it (incl. the
+    // task textarea — cancel is safe; submit stays click/button-only there).
+    if (e.key === "Escape" && s.sel) { e.preventDefault(); s.sel = null; s.selAgent = null; renderGrid(s); return; }
+    // view-local keys (never stolen from editable fields), engine-resolved.
+    // The MODAL owns all its keys (selects/buttons are interactive controls
+    // outside any .soul-card — review 96b037b): '/' from the relation
+    // selector must not focus the filter behind the open dialog, and 'B'
+    // must not open a card's Brain underneath it.
+    const editable = e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.isContentEditable;
+    if (editable || e.target.closest?.(".soul-card") || e.target.closest?.(".spawn-modal")) return; // card keys are onGridKey's
+    const hit = resolveViewKey(e, s.viewActions);
+    if (hit) { e.preventDefault(); s.viewActions.find((a) => a.id === hit)?.run(); }
+  });
+  // Context "view:spawn" is never activated by the shell (review afd2114):
+  // editor-visible + conflict-checked, but window-dispatch-ineligible —
+  // matchEvent skips these before preventDefault, so outside keypresses
+  // are not swallowed and colliding globals still run; dispatch is local.
+  s.disposers = [
+    registerAction({ id: "spawn.filter", label: "Soul roster: focus the filter", context: "view:spawn", defaultChord: "/", run: () => s.q("filter").focus() }),
+    registerAction({ id: "spawn.brain", label: "Soul roster: open Brain of focused card", context: "view:spawn", defaultChord: "B", run: () => brainOfFocusedCard(s) }),
+  ];
   // CLI degradation: refresh once on mount and re-render the grid whenever
   // availability flips — spawn buttons disable consistently with the card.
   refreshCli(ctx);
@@ -128,6 +164,7 @@ export function unmount() {
   if (!state) return;
   state.alive = false;
   state.timers.forEach(clearInterval);
+  (state.disposers || []).forEach((off) => { try { off(); } catch {} });
   if (state.unsubWs) state.unsubWs();
   if (state.unsubCli) state.unsubCli();
   if (state.cliCardHandle) { state.cliCardHandle.dispose(); state.cliCardHandle = null; }
@@ -176,6 +213,10 @@ function renderGrid(s) {
   // repaint:false — this very renderGrid call is already painting the grid;
   // a nested repaint from the close would render twice for nothing.
   if (noCli && s.sel) closeSpawnModal(s, { repaint: false });
+  // (main's in-card soul-form early-return does not apply: the spawn form
+  // lives in the modal on this branch, so grid repaints never touch it)
+  // capture the focused card's identity before the rebuild wipes the DOM
+  const focusedAgent = s.el?.ownerDocument?.activeElement?.closest?.(".soul-card")?.dataset?.agent || null;
   grid.innerHTML = "";
   const list = s.souls.agents.filter((a) => matches(s, a));
   const spawnable = s.souls.agents.filter((a) => a.work !== "attached").length;
@@ -216,6 +257,68 @@ function renderGrid(s) {
     }
     grid.append(soulCard(s, a));
   }
+  // Roving tabindex across the rebuilt grid: keep the previously focused
+  // card's identity tabbable (and focused) when it survives the repaint,
+  // else the first card enters the tab order.
+  const rebuilt = [...grid.querySelectorAll(".soul-card")];
+  if (rebuilt.length) {
+    const focused = focusedAgent && rebuilt.find((c) => c.dataset.agent === focusedAgent);
+    (focused || rebuilt[0]).tabIndex = 0;
+    if (focused) focused.focus({ preventScroll: true });
+  }
+}
+
+/* ── grid keyboard: roving focus over cards ──────────────────────── */
+function gridCards(s) { return [...s.q("souls-grid").querySelectorAll(".soul-card")]; }
+
+function focusedCard(s) {
+  const active = s.el.ownerDocument.activeElement;
+  return active?.closest?.(".soul-card") || null;
+}
+
+function brainOfFocusedCard(s) {
+  const card = focusedCard(s) || gridCards(s)[0];
+  const a = card && s.souls.agents.find((x) => x.name === card.dataset.agent);
+  if (a) s.ctx.openBrain?.(a.name);
+}
+
+function onGridKey(s, e) {
+  // Keys inside the open form belong to the form (Esc handled above).
+  if (e.target.closest?.(".soul-form")) return;
+  const cards = gridCards(s);
+  if (!cards.length) return;
+  const cur = focusedCard(s);
+  const at = cur ? cards.indexOf(cur) : -1;
+  if (["ArrowRight", "ArrowDown"].includes(e.key)) {
+    e.preventDefault();
+    focusCard(s, cards, Math.min(cards.length - 1, at + 1));
+  } else if (["ArrowLeft", "ArrowUp"].includes(e.key)) {
+    e.preventDefault();
+    focusCard(s, cards, Math.max(0, at - 1));
+  } else if (e.key === "Enter" && cur && e.target === cur) {
+    e.preventDefault();
+    cur.querySelector(".spawn-act:not([disabled])")?.click();
+  } else if (cur && e.target === cur) {
+    // ALL view actions resolve from a focused card — the primary
+    // non-editable surface (review 93ff03d: '/' must reach the filter
+    // from the roving card, not just 'b').
+    const hit = resolveViewKey(e, s.viewActions);
+    if (hit === "spawn.brain") {
+      e.preventDefault();
+      cur.querySelector(".brain-act:not([disabled])")?.click();
+    } else if (hit) {
+      e.preventDefault();
+      s.viewActions.find((a) => a.id === hit)?.run();
+    }
+  }
+}
+
+/* Roving tabindex: exactly one card in the tab order — the focused one. */
+function focusCard(s, cards, index) {
+  const target = cards[index];
+  if (!target) return;
+  for (const c of cards) c.tabIndex = c === target ? 0 : -1;
+  target.focus();
 }
 
 function soulCard(s, a) {
@@ -224,6 +327,9 @@ function soulCard(s, a) {
   const card = document.createElement("div");
   card.className = "soul-card" + (attached ? " attached" : "") + (s.sel === a.name ? " open" : "");
   card.dataset.agent = a.name;
+  card.tabIndex = -1; // roving tabindex — renderGrid elects the tabbable card
+  card.setAttribute("role", "group");
+  card.setAttribute("aria-label", a.name);
   card.innerHTML = `
     <div class="sname"><span class="glyph" aria-hidden="true">✦</span>${escapeHtml(a.name)}</div>
     ${a.description ? `<div class="sdesc">${escapeHtml(a.description)}</div>` : '<div class="sdesc"></div>'}

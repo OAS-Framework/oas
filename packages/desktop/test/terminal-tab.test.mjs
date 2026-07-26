@@ -227,3 +227,58 @@ test("shell.mjs constructs its Terminal through terminalOptions", () => {
   const src = readFileSync(join(here, "..", "renderer", "shell.mjs"), "utf8");
   assert.match(src, /new Terminal\(terminalOptions\(/, "shell must build xterm options via terminalOptions()");
 });
+
+// ── shortcut interception before the pty (review d64daeb important) ──────
+// xterm's capture-phase textarea handler consumes allowlisted chords (e.g.
+// Ctrl+K) — preventDefault + stopPropagation — so the shell's bubble-phase
+// window listener NEVER sees them and a control byte goes to the attached
+// program instead. The composition's interceptKey hook runs inside xterm's
+// custom key handler (before any pty write): a claimed chord is suppressed
+// for every phase and its byte never reaches the pty.
+import { terminalKeyDecision } from "../renderer/terminal-tab.mjs";
+
+test("terminalKeyDecision: Shift+Enter wins, then interception, else pass-through", () => {
+  const ev = (o) => ({ type: "keydown", key: "k", shiftKey: false, ctrlKey: false, altKey: false, metaKey: false, ...o });
+  // Shift+Enter translation takes precedence and carries its byte
+  assert.deepEqual(terminalKeyDecision(ev({ key: "Enter", shiftKey: true }), () => true), { handled: true, byte: "\n" });
+  // intercepted chord: handled, no byte
+  assert.deepEqual(terminalKeyDecision(ev({ ctrlKey: true }), () => true), { handled: true, byte: null });
+  // not intercepted: xterm processes normally
+  assert.deepEqual(terminalKeyDecision(ev({ ctrlKey: true }), () => false), { handled: false, byte: null });
+  assert.deepEqual(terminalKeyDecision(ev({}), undefined), { handled: false, byte: null }, "no hook, no claim");
+});
+
+test("wired handler: an intercepted chord is suppressed in every phase and writes nothing to the pty", async () => {
+  const d = makeDoubles(Promise.resolve(9));
+  let handler = null;
+  const writes = [];
+  const intercepted = [];
+  d.term.attachCustomKeyEventHandler = (h) => { handler = h; };
+  d.desk.termWrite = (id, data) => writes.push([id, data]);
+  // stand-in for the engine's terminal-allowlist match: claims Ctrl+K
+  const interceptKey = (ev) => {
+    const hit = ev.key === "k" && ev.ctrlKey && !ev.metaKey && !ev.altKey && !ev.shiftKey;
+    if (hit && ev.type === "keydown") intercepted.push(ev.type);
+    return hit;
+  };
+  const tab = mk(d, { interceptKey });
+  await tab.start();
+  const ev = (o) => ({ type: "keydown", key: "k", shiftKey: false, ctrlKey: false, altKey: false, metaKey: false, ...o });
+  assert.equal(handler(ev({ ctrlKey: true })), false, "keydown claimed — xterm must not write the control byte");
+  assert.equal(handler(ev({ ctrlKey: true, type: "keypress" })), false, "keypress claimed too (no byte leak)");
+  assert.equal(handler(ev({ ctrlKey: true, type: "keyup" })), false, "keyup claimed");
+  assert.deepEqual(writes, [], "nothing written to the pty for an intercepted chord");
+  assert.deepEqual(intercepted, ["keydown"], "action dispatch observed once, on keydown");
+  assert.equal(handler(ev({})), true, "plain k left to xterm (types into the terminal)");
+  assert.equal(handler(ev({ key: "Enter", shiftKey: true })), false, "Shift+Enter still composes");
+  assert.deepEqual(writes, [[9, "\n"]], "Shift+Enter newline still written");
+  await tab.close();
+});
+
+test("shell wires interceptKey through the engine's terminal policy", () => {
+  const here2 = dirname(fileURLToPath(import.meta.url));
+  const src = readFileSync(join(here2, "..", "renderer", "shell.mjs"), "utf8");
+  assert.match(src, /interceptKey: \(ev\) => \{/, "shell provides the interception hook");
+  assert.match(src, /matchEvent\(ev, \{ insideTerminal: true \}\)/, "hook consults the engine allowlist");
+  assert.match(src, /if \(ev\.type === "keydown"\) handleKeydown\(ev, \{ insideTerminal: true \}\)/, "action runs once, on keydown");
+});

@@ -26,6 +26,26 @@ No frameworks, no dependencies; data comes from the bundled backend HTTP API.
 light, WCAG AA); views style themselves against tokens only, scoped under
 `.oas-view` so shell chrome is unaffected.
 
+## Keybindings (shell-level)
+
+- **keybindings.mjs** — the keymap engine: action registry
+  (`registerAction`/`setActiveContexts`; a registration may carry a
+  `defaultChord` that folds into the effective keymap like a
+  `DEFAULT_KEYMAP` entry — override wins, explicit unbind kills it),
+  `DEFAULT_KEYMAP`, user overrides
+  persisted under `localStorage["oas-desktop-keymap"]`, chord
+  parse/format/match, and dispatch (`matchEvent`/`handleKeydown`). The engine
+  skips already-consumed (`defaultPrevented`) events, and unmodified/
+  shift-only chords never fire while an editable field (input, textarea,
+  select, contenteditable) has focus. Terminal
+  policy: inside `.xterm`, on macOS only ⌘-resolved chords fire; on
+  Linux/Windows only `TERMINAL_ALLOWLIST` action ids (palette, tab
+  next/prev/close) may fire — all other Ctrl chords belong to the attached
+  program.
+- **keybindings-editor.mjs** — the shortcuts editor dialog (`Mod+,`):
+  actions grouped by context, click-to-record (Esc cancels, Backspace
+  unbinds), conflict warnings via `findConflict`, per-row reset + reset-all.
+
 ## Developing without the shell
 
 `harness.html` supplies a stub `ctx` and tab chrome for ALL views — including
