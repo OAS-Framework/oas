@@ -750,14 +750,103 @@ test("doctor --json carries schemaVersion 1 and the WS2 payload with field parit
   const req = doc.missingHostRequirements.find((x) => x.command === "json-doctor-missing-cmd");
   assert.ok(req, JSON.stringify(doc.missingHostRequirements));
   assert.deepEqual(req.plan.argv, ["brew", "install", "json-doctor-missing-cmd"]);
-  assert.equal(req.consentCommand, "oas install --accept-requirement json-doctor-missing-cmd");
+  assert.equal(req.consentCommand, `oas install --accept-requirement json-doctor-missing-cmd --dir ${ws}`);
   assert.deepEqual(req.requestedBy.map((x) => x.capability), ["example.review"]);
   // field parity: every WS2 fact in the human report is present in JSON
   const human = cli(["doctor", ws], { cwd: ws });
   assert.match(human.stdout, /other\.pkg/);
   assert.match(human.stdout, /profile "default"/);
   assert.match(human.stdout, /json-doctor-missing-cmd/);
-  assert.match(human.stdout, /oas install --accept-requirement json-doctor-missing-cmd/);
+  assert.match(human.stdout, /oas install --accept-requirement json-doctor-missing-cmd --dir /);
+});
+
+test("requirement identity fails closed: unsafe command tokens are never consentable and fail reconciliation", () => {
+  const base = temp();
+  const mkWs = (name, cmd) => {
+    const ws = join(base, name);
+    write(join(ws, ".agents", "capabilities", "owned", "needy", "oas.json"), JSON.stringify({
+      capability: "needy.cap", version: "1.0.0", description: "x",
+      requires: [{ command: cmd, why: "testing", install: { methods: [{ platform: process.platform, manager: "brew", formula: "whatever" }] } }],
+    }));
+    write(join(ws, "oas-config.yaml"), "name: ws\nteam:\n  name: t\ncapabilities:\n  additive:\n    needy.cap:\n      from: owned\n      global: true\n");
+    return ws;
+  };
+  for (const evil of ["rm -rf /", "../sneaky", "-rf", "a;b", "$(x)", "a/b"]) {
+    const missing = aggregateMissingRequirements([mkWs(`w${Buffer.from(evil).toString("hex")}`, evil)]);
+    assert.equal(missing.length, 1, evil);
+    assert.ok(missing[0].invalid, `unsafe token must be flagged: ${evil}`);
+    assert.equal(missing[0].plan, null, `no plan for unsafe token: ${evil}`);
+  }
+  // CLI: invalid requirement fails reconciliation with the policy code, EVEN with --accept-requirement and --no-requirements
+  const ws = mkWs("wcli", "evil;rm");
+  const r = cli(["install", "--json", "--no-requirements", "--dir", ws], { cwd: ws });
+  assert.equal(r.status, 1, r.stdout);
+  const env = JSON.parse(r.stdout);
+  assert.equal(env.error.code, "E_RECONCILE_FAILED");
+  const q = env.error.details.requirements.find((x) => x.command === "evil;rm");
+  assert.equal(q.outcome, "failed");
+  assert.equal(q.code, "E_REQUIREMENT_POLICY");
+  assert.equal(q.plan, null);
+});
+
+test("same-command conflicting plans: deterministic provenance-rich conflict, no consent; identical plans merge requestedBy", () => {
+  const base = temp();
+  const ws = join(base, "ws");
+  const req = (pkg) => ({ command: "shared-cli", why: "x", install: { methods: [{ platform: process.platform, manager: "npm-global", package: pkg }] } });
+  const cap = (id, folder, pkg) => write(join(ws, ".agents", "capabilities", "owned", folder, "oas.json"), JSON.stringify({ capability: id, version: "1.0.0", description: "x", requires: [req(pkg)] }));
+  cap("a.cap", "a", "shared-cli@1.0.0");
+  cap("b.cap", "b", "shared-cli@2.0.0"); // NON-identical plan
+  write(join(ws, "oas-config.yaml"), "name: ws\nteam:\n  name: t\ncapabilities:\n  additive:\n    a.cap:\n      from: owned\n      global: true\n    b.cap:\n      from: owned\n      global: true\n");
+  const missing = aggregateMissingRequirements([ws]);
+  assert.equal(missing.length, 1);
+  assert.ok(missing[0].conflict, "non-identical plans must conflict");
+  assert.equal(missing[0].plan, null, "no installable plan under conflict");
+  assert.deepEqual(missing[0].conflict.plans.map((p) => p.capability).sort(), ["a.cap", "b.cap"]);
+  assert.ok(missing[0].conflict.plans.every((p) => p.argv), "conflict carries each plan's argv provenance");
+  // consent cannot force through a conflict
+  const r = cli(["install", "--json", "--accept-requirement", "shared-cli", "--dir", ws], { cwd: ws });
+  assert.equal(r.status, 1);
+  const env = JSON.parse(r.stdout);
+  assert.equal(env.error.code, "E_RECONCILE_FAILED");
+  const q = env.error.details.requirements.find((x) => x.command === "shared-cli");
+  assert.equal(q.code, "E_REQUIREMENT_POLICY");
+  assert.equal(q.outcome, "failed");
+  assert.ok(q.conflict.plans.length === 2);
+  // identical plans: merged requestedBy, single consentable entry
+  const ws2 = join(base, "ws2");
+  for (const [id, folder] of [["a.cap", "a"], ["b.cap", "b"]]) {
+    write(join(ws2, ".agents", "capabilities", "owned", folder, "oas.json"), JSON.stringify({ capability: id, version: "1.0.0", description: "x", requires: [req("shared-cli@1.0.0")] }));
+  }
+  write(join(ws2, "oas-config.yaml"), "name: ws\nteam:\n  name: t\ncapabilities:\n  additive:\n    a.cap:\n      from: owned\n      global: true\n    b.cap:\n      from: owned\n      global: true\n");
+  const merged = aggregateMissingRequirements([ws2]);
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].conflict, undefined);
+  assert.ok(merged[0].plan);
+  assert.deepEqual(merged[0].requestedBy.map((x) => x.capability).sort(), ["a.cap", "b.cap"]);
+});
+
+test("--accept-requirement without a value emits the single E_USAGE envelope in JSON mode", () => {
+  const base = temp();
+  const ws = join(base, "ws");
+  write(join(ws, ".agents", "capabilities", "owned", "needy", "oas.json"), JSON.stringify({
+    capability: "needy.cap", version: "1.0.0", description: "x",
+    requires: [{ command: "wanted-cli", why: "x", install: { methods: [{ platform: process.platform, manager: "npm-global", package: "wanted-cli" }] } }],
+  }));
+  write(join(ws, "oas-config.yaml"), "name: ws\nteam:\n  name: t\ncapabilities:\n  additive:\n    needy.cap:\n      from: owned\n      global: true\n");
+  // valueless at end of argv
+  const r1 = cli(["install", "--json", "--dir", ws, "--accept-requirement"], { cwd: ws });
+  assert.equal(r1.status, 1);
+  const e1 = JSON.parse(r1.stdout); // single envelope, no die() prose on stdout
+  assert.equal(e1.ok, false);
+  assert.equal(e1.error.code, "E_USAGE");
+  // valueless because the next token is a flag
+  const r2 = cli(["install", "--json", "--accept-requirement", "--no-requirements", "--dir", ws], { cwd: ws });
+  assert.equal(r2.status, 1);
+  assert.equal(JSON.parse(r2.stdout).error.code, "E_USAGE");
+  // human mode keeps die() on stderr
+  const r3 = cli(["install", "--accept-requirement", "--dir", ws], { cwd: ws });
+  assert.equal(r3.status, 1);
+  assert.match(r3.stderr, /--accept-requirement needs a value/);
 });
 
 test("install --json: full success emits ONE compact ok envelope; failures emit E_RECONCILE_FAILED with the complete report in error.details", () => {

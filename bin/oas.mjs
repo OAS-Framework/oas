@@ -64,6 +64,11 @@ function shortPath(p) {
   return p.startsWith(home) ? "~" + p.slice(home.length) : p;
 }
 
+/** Shell-safe single-quoting for copyable human commands (paths may contain spaces/metacharacters). */
+function shellQuote(s) {
+  return /^[A-Za-z0-9._/~-]+$/.test(s) ? s : `'${String(s).replace(/'/g, `'\\''`)}'`;
+}
+
 function offerTmuxMouseScrolling() {
   if (args.includes("--no-tmux-mouse")) return;
   const configPath = tmuxConfigPath();
@@ -138,8 +143,15 @@ function doctorPackagesData(ctx, chain) {
     plan: req.plan && !req.plan.unavailable
       ? { manager: req.plan.manager, argv: req.plan.argv, source: req.plan.source, version: req.plan.version || null, scope: req.plan.scope }
       : null,
+    invalid: req.invalid || null,
+    conflict: req.conflict || null,
     unavailable: req.plan?.unavailable || null,
-    consentCommand: req.plan && !req.plan.unavailable ? `oas install --accept-requirement ${req.command}` : null,
+    // Context-complete + shell-safe: the copyable command pins the resolved
+    // scope with --dir so it cannot target another deployment from a
+    // different cwd. Command and ctx are validated/quoted for safe copying.
+    consentCommand: req.plan && !req.plan.unavailable && !req.invalid && !req.conflict
+      ? `oas install --accept-requirement ${req.command} --dir ${shellQuote(ctx)}`
+      : null,
   }));
   return { packages, profileProvenance, unappliedProfiles, missingHostRequirements };
 }
@@ -656,6 +668,9 @@ function reconcile(dir) {
  * JSON plan data equals the human prompt plan (argv/source/version/scope/requestedBy;
  * never shell text). In JSON mode all prose goes to stderr. */
 function requirementsGate(scopes) {
+  // Malformed repeatable flags are usage errors regardless of which branch
+  // runs — validate up front so --no-requirements cannot mask them.
+  const accepted = new Set(flagAll("accept-requirement"));
   const missing = aggregateMissingRequirements(scopes);
   if (!missing.length) return [];
   const note = (msg) => (JSON_MODE ? console.error(msg) : console.log(msg));
@@ -666,12 +681,27 @@ function requirementsGate(scopes) {
       : null,
     requestedBy: req.requestedBy, docs: req.docs || null, outcome, ...extra,
   });
-  if (args.includes("--no-requirements")) return missing.map((req) => entryOf(req, "skipped", { reason: "--no-requirements" }));
-  const accepted = new Set(flagAll("accept-requirement"));
-  const interactive = !JSON_MODE && process.stdin.isTTY && process.stdout.isTTY;
-  const out = [];
-  note(`\nMissing host commands for active capabilities (${missing.length}):`);
+  // Fail-closed identity/conflict policy (E_REQUIREMENT_POLICY): invalid command
+  // tokens and same-command conflicting plans are NEVER consentable or installable
+  // — they fail reconciliation deterministically with provenance, even under
+  // --no-requirements (skipping consent does not skip safety validation).
+  const policyEntries = [];
   for (const req of missing) {
+    if (req.invalid) {
+      note(`  INVALID requirement command ${JSON.stringify(req.command)} — ${req.invalid} (requested by: ${req.requestedBy.map((r) => `${r.capability} [${shortPath(r.scope)}]`).join(", ")})`);
+      policyEntries.push(entryOf(req, "failed", { reason: req.invalid, code: "E_REQUIREMENT_POLICY" }));
+    } else if (req.conflict) {
+      note(`  CONFLICT for command "${req.command}": capabilities request non-identical install plans — no install is offered`);
+      for (const p of req.conflict.plans) note(`      ${p.capability} [${shortPath(p.scope)}]: ${p.argv ? p.argv.join(" ") : p.unavailable || "no plan"}`);
+      policyEntries.push(entryOf(req, "failed", { reason: "conflicting install plans for the same command", code: "E_REQUIREMENT_POLICY", conflict: req.conflict }));
+    }
+  }
+  const consentable = missing.filter((req) => !req.invalid && !req.conflict);
+  if (args.includes("--no-requirements")) return [...policyEntries, ...consentable.map((req) => entryOf(req, "skipped", { reason: "--no-requirements" }))];
+  const interactive = !JSON_MODE && process.stdin.isTTY && process.stdout.isTTY;
+  const out = [...policyEntries];
+  if (consentable.length) note(`\nMissing host commands for active capabilities (${consentable.length}):`);
+  for (const req of consentable) {
     const requesters = req.requestedBy.map((r) => `${r.capability} [${shortPath(r.scope)}]`).join(", ");
     note(`  ${req.command} — ${req.why || "required"} (requested by: ${requesters})`);
     const plan = req.plan;
@@ -723,13 +753,14 @@ function trust() {
 }
 
 // ---------- package config profiles (oas init --package / oas config diff) ----------
-/** Collect every value of a repeatable flag (e.g. --accept-requirement a --accept-requirement b). */
+/** Collect every value of a repeatable flag (e.g. --accept-requirement a --accept-requirement b).
+ * A missing or flag-shaped value is a usage error — one E_USAGE envelope in JSON mode. */
 function flagAll(name) {
   const out = [];
   for (let i = 0; i < args.length; i++) {
     if (args[i] !== `--${name}`) continue;
     if (args[i + 1] && !args[i + 1].startsWith("--")) out.push(args[i + 1]);
-    else die(`--${name} needs a value`);
+    else (JSON_MODE ? jsonFail("E_USAGE", `--${name} needs a value`) : die(`--${name} needs a value`));
   }
   return out;
 }
