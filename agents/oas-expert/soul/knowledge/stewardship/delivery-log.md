@@ -24,6 +24,11 @@ decisions/ and referenced from here.
 
 ---
 
+## PR #45 (round 4) — Desktop spawn readiness handoff, modal close, and quiet terminal open (2026-07-26)
+- verdict: RETURNED at handed-back/API head `0b6853a23a2ffdf8788f99d9b1910364a07e42a6` for mergeability only. This head correctly contained required main `9f703c1`; its post-review delta was only the known coordinator lesson plus PR #45 stewardship/merge commits, leaving the focused Desktop code/harvest untouched. Prior product/correctness/security/full-gate results stand; owner reported the committed-tree gate green and exact-head CI restarted. During final handback, main advanced to `9ad504f` with PR #44 stewardship only, leaving the branch behind by one with merge-base `9f703c1`. Same-account verdict is PR comment `5084963883`; owner was told to stop and wait for the post-round-4 stewardship SHA.
+- owner: oas-desktop-engineer-spawn-modal-fix · coordinator: none
+- taught us: fast concurrent maintainer stewardship can move main even after an ancestry-verified final handback; the next retry must merge one explicitly named post-verdict base after all concurrent stewardship known at that moment.
+
 ## PR #45 (round 3) — Desktop spawn readiness handoff, modal close, and quiet terminal open (2026-07-26)
 - verdict: RETURNED at handed-back/API head `f614be5a969f5d15b302dbd98b8803e0c45d40fb` for mergeability only. The delta since round 2 is the expected trivial merge of `627ffaa`: only round-1 oas-expert stewardship knowledge arrived, while the reviewed Desktop code/harvest remained untouched. Prior product/correctness/security results stand; owner-reported root gates and exact-head root CI passed while installer jobs reran. Mergeability still failed because the handback again merged the superseded base rather than explicitly named successor `b5c9f3d`; live compare was behind by one with merge-base `627ffaa`. Same-account verdict is PR comment `5084952256`; the owner was told to stop and wait for the post-round-3 stewardship SHA before merging again.
 - owner: oas-desktop-engineer-spawn-modal-fix · coordinator: none

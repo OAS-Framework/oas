@@ -165,7 +165,7 @@ than letting the file grow stale.
 
 ## In flight
 
-- **PR #45 Desktop spawn readiness handoff + modal close + quiet terminal open (RETURNED round 3, 2026-07-26)** — handed-back/API head `f614be5` merged superseded base `627ffaa` but again omitted explicitly named successor `b5c9f3d`; only stewardship knowledge changed and the reviewed Desktop delta remains untouched, so prior product/correctness/security/gate results stand. Same-account verdict is PR comment `5084952256`. The owner was given an acknowledgment barrier: wait for the post-round-3 stewardship SHA, then fetch and merge that exact current-main commit before handback. No product/code correction is requested.
+- **PR #45 Desktop spawn readiness handoff + modal close + quiet terminal open (RETURNED round 4, 2026-07-26)** — handed-back/API head `0b6853a` correctly contained required `9f703c1` and left the reviewed Desktop delta untouched, but main advanced during final handback to PR #44 stewardship commit `9ad504f`, leaving the branch behind by one. Prior product/correctness/security/full-gate results stand. Same-account verdict is PR comment `5084963883`; owner must wait for and merge the post-round-4 stewardship SHA before one settled final handback. No product/code correction is requested.
 
 - **PR #44 Desktop split/sidebar UI buttons + active-tab split seeding + split-aligned tab strip (RETURNED round 2, 2026-07-26)** — maintainer `oas-expert-pr44` passed product/correctness/security at rebuilt exact head `defa48d`: scope is now only `packages/desktop/**` plus directly relevant Desktop knowledge harvests; scratch root/desktop tests, check, check:pi, validate, all-eight-bundle strict OKF, pack, smoke, diff-check, exact-head PR CI, and all three installer checks are green. Mergeability alone failed because current GitHub `main` advanced to `b5c9f3d` while PR #44's merge-base remained `8191ea0`; `origin/main` is not an ancestor. Same-account verdict is PR comment `5084954174` plus in-thread aweb mail to `oas-desktop-engineer-split-ui`. Waiting for owner to merge/rebase current main and hand back a settled exact head; if only ancestry changes, next review is mergeability/exact-head verification.
 
@@ -176,6 +176,7 @@ than letting the file grow stale.
 
 ## Recent deliveries
 
+- PR #45 Desktop spawn readiness handoff + modal close + quiet terminal open: RETURNED round 4 on 2026-07-26 at handed-back/API head `0b6853a` for mergeability only after PR #44 stewardship advanced main to `9ad504f` during handback (see delivery-log).
 - PR #45 Desktop spawn readiness handoff + modal close + quiet terminal open: RETURNED round 3 on 2026-07-26 at handed-back/API head `f614be5` for mergeability only; it merged `627ffaa` but missed explicit successor `b5c9f3d` (see delivery-log).
 - PR #45 Desktop spawn readiness handoff + modal close + quiet terminal open: RETURNED round 2 on 2026-07-26 at handed-back/API head `40938b8` for mergeability only; it merged `8191ea0` but missed explicit stewardship base `627ffaa` (see delivery-log).
 - PR #45 Desktop spawn readiness handoff + modal close + quiet terminal open: RETURNED round 1 on 2026-07-26 at exact head `67d865c` for mergeability only; all other gates passed, waiting for a current-main merge and settled handback (see delivery-log).
