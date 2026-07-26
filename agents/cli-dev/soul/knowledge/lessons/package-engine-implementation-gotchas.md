@@ -1,7 +1,7 @@
 ---
 type: Lesson
 title: Package engine implementation gotchas in the OAS kernel
-description: Concrete pitfalls hit while implementing distribution packages — YAML subset config shape in tests, path-vs-git source disambiguation via file://, spawnInstance needs an agent object, hook meta lands in instance.json capabilityMeta, depsIntegrity closes the node_modules trust gap, and empty npm closures create no node_modules.
+description: Concrete pitfalls hit while implementing distribution packages — YAML subset config shape in tests, path-vs-git source disambiguation via file://, spawnInstance needs an agent object, hook meta lands in instance.json capabilityMeta, depsIntegrity closes the node_modules trust gap, empty npm closures create no node_modules, and restore preflight must parse the full visible lock chain.
 tags: [packages, kernel, testing, trust]
 timestamp: 2026-07-26
 ---
@@ -39,6 +39,10 @@ timestamp: 2026-07-26
   need support.
 - writeCapabilityLock had to stop force-setting lockfileVersion 1, or legacy
   residue writes would downgrade a v2 lock.
+- Restore must parse and cache the full visible lock-owning chain before any
+  artifact mutation, not parse one scope and immediately restore it; otherwise
+  a valid outer lock can mutate artifacts before an inner malformed lock fails.
+  See the [restore preflight visible-chain lesson](/lessons/restore-preflight-visible-chain.md).
 - An empty npm dependency closure can make `npm ci` create no `node_modules`
   directory. CI probes for package materialization should test resource path
   resolvability, not the existence of `node_modules` itself.
