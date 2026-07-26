@@ -973,6 +973,11 @@ function spawnCmd() {
   const relativeRoot = flag("relative-root");
   if (relativeRoot !== undefined && (relativeRoot === true || !String(relativeRoot).trim())) bail("E_BAD_ARGS", "--relative-root needs an agents-root path");
   if (relativeRoot && !relativeTo) bail("E_BAD_ARGS", "--relative-root only qualifies --relative-to/--parent");
+  // Retired boundary flags (maintainer transport ruling): fail LOUDLY before
+  // any side effect — an old consumer must not appear to succeed with
+  // different semantics (silent name/ephemerality divergence).
+  if (args.includes("--instance")) bail("E_BAD_ARGS", "--instance was removed by the runtime-boundary ruling — use --purpose <slug> (deterministic <agent>-<purpose> naming)");
+  if (args.includes("--ephemeral")) bail("E_BAD_ARGS", "--ephemeral was removed by the runtime-boundary ruling — declare the agent in a capability manifest (agents:) for automatic ephemeral semantics");
   let r;
   try {
     r = spawnInstance(root, agent, {

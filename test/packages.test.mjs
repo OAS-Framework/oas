@@ -727,11 +727,41 @@ test("runtime API consumer fixture: capability-defined harvester spawned through
   const capDir = join(repo, ".agents", "capabilities", "owned", "fixture-svc");
   write(join(capDir, "oas.json"), JSON.stringify({
     capability: "fx.svc", version: "1.0.0", description: "fixture service", command: "fxsvc",
-    agents: ["agents/memory-harvest"], commands: { settings: "bin/settings.mjs" },
+    agents: ["agents/memory-harvest"], commands: { settings: "bin/settings.mjs", harvest: "bin/harvest.mjs" },
   }));
   write(join(capDir, "agents", "memory-harvest", "soul.yaml"), "name: memory-harvest\nkind: capability\nwork: attached\nruntime: pi\n");
   write(join(capDir, "agents", "memory-harvest", "AGENTS.md"), "# Memory harvester\n\nHarvest notes.\n");
   write(join(capDir, "bin", "settings.mjs"), "console.log(JSON.stringify({ ok: true, settings: JSON.parse(process.env.OAS_SETTINGS || \"{}\") }));\n");
+  // Consumer-fidelity command (the ruled pattern end-to-end): reads OAS_SETTINGS,
+  // writes a 0600 task tempfile, execFiles the CLI at OAS_CLI_BIN (never PATH),
+  // parses the one spawn envelope, re-emits ITS OWN single envelope, removes the
+  // tempfile in finally.
+  write(join(capDir, "bin", "harvest.mjs"), `
+import { execFileSync } from "node:child_process";
+import { writeFileSync, statSync, unlinkSync, existsSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+const settings = JSON.parse(process.env.OAS_SETTINGS || "{}");
+const bin = process.env.OAS_CLI_BIN;
+const taskFile = join(tmpdir(), \`fx-task-\${process.pid}.md\`);
+let result;
+try {
+  if (!bin) throw new Error("no OAS_CLI_BIN");
+  writeFileSync(taskFile, "# Harvest\\n\\nprobe\\n", { mode: 0o600 });
+  const mode = statSync(taskFile).mode & 0o777;
+  const argv = JSON.parse(process.env.FX_SPAWN_ARGS); // test-provided flags (owner/work-dir)
+  const out = execFileSync(process.execPath, [bin, "spawn", "memory-harvest", "--task-file", taskFile, "--json", ...argv, ...(settings["harvest-model"] ? ["--model", settings["harvest-model"]] : [])], { encoding: "utf8" });
+  const env = JSON.parse(out); // one spawn envelope
+  result = { ok: env.ok, instance: env.result?.instance || null, model: env.result?.model || null, taskFileMode: mode.toString(8) };
+} catch (e) {
+  result = { ok: false, error: String(e.message || e) };
+} finally {
+  try { unlinkSync(taskFile); } catch {}
+  result.taskFileRemoved = !existsSync(taskFile);
+}
+console.log(JSON.stringify(result));
+process.exit(result.ok ? 0 : 1);
+`);
   write(join(repo, "oas-config.yaml"), "name: fixture\ncapabilities:\n  additive:\n    fx.svc:\n      global:\n        enabled: true\n        settings:\n          harvest-model: test-model-1\n");
   gitify(repo);
   const root = join(ws, "agents");
@@ -744,19 +774,25 @@ test("runtime API consumer fixture: capability-defined harvester spawned through
   let r = spawnSync(process.execPath, [CLI, "fxsvc", "settings"], { cwd: repo, encoding: "utf8", env: { ...process.env, PI_AGENT_HOME: "", OAS_HOME: "" } });
   const out = JSON.parse(r.stdout.trim().split("\n").pop());
   assert.equal(out.settings["harvest-model"], "test-model-1", "dispatched command reads effective settings from OAS_SETTINGS");
-  // 2. capability-defined agent resolves + spawns through oas spawn --json with
-  //    purpose-derived naming and automatic ephemeral (capability kind) semantics
-  const task = join(base, "task.md");
-  write(task, "# Harvest\n\nprobe\n");
-  r = cli(repo, "spawn", "memory-harvest", "--purpose", "fixture", "--repo", repo,
-    "--parent", owner.instance, "--work", "attached", "--work-dir", join(owner.home, "work"),
-    "--task-file", task, "--no-launch", "--dir", repo, "--json");
-  const env = JSON.parse(r.stdout);
-  assert.equal(env.ok, true, r.stdout);
-  assert.equal(env.result.instance, "memory-harvest-fixture", "purpose-derived deterministic naming");
-  assert.equal(env.result.parent, owner.instance);
-  const meta = JSON.parse(readFileSync(join(env.result.home, "instance.json"), "utf8"));
+  // 2. FULL consumer fidelity: the capability's own command execFiles OAS_CLI_BIN
+  //    (never PATH), writes a 0600 task file, spawns via --purpose naming, parses
+  //    the one envelope, re-emits its own envelope, and cleans up in finally —
+  //    with a malicious earlier-PATH oas planted to prove no PATH resolution.
+  const evil = join(base, "evilbin");
+  write(join(evil, "oas"), "#!/bin/sh\necho INTERCEPTED; exit 99\n");
+  execFileSync("chmod", ["+x", join(evil, "oas")]);
+  const spawnArgs = JSON.stringify(["--purpose", "fixture", "--repo", repo, "--parent", owner.instance, "--work", "attached", "--work-dir", join(owner.home, "work"), "--no-launch", "--dir", repo]);
+  r = spawnSync(process.execPath, [CLI, "fxsvc", "harvest"], { cwd: repo, encoding: "utf8", env: { ...process.env, PATH: `${evil}:${process.env.PATH}`, FX_SPAWN_ARGS: spawnArgs, PI_AGENT_HOME: "", OAS_HOME: "" } });
+  const henv = JSON.parse(r.stdout.trim().split("\n").pop()); // consumer's ONE envelope
+  assert.equal(henv.ok, true, r.stdout + r.stderr);
+  assert.equal(henv.instance, "memory-harvest-fixture", "purpose-derived deterministic naming through the consumer");
+  assert.equal(henv.model, "test-model-1", "OAS_SETTINGS model reached the spawn");
+  assert.equal(henv.taskFileMode, "600", "task tempfile created 0600");
+  assert.equal(henv.taskFileRemoved, true, "task tempfile removed in finally");
+  assert.ok(!r.stdout.includes("INTERCEPTED"), "PATH-shadowed oas never executed");
+  const meta = JSON.parse(readFileSync(join(installedHomeOf(root, "memory-harvest-fixture"), "instance.json"), "utf8"));
   assert.equal(meta.kind, "capability", "capability-defined agent is ephemeral without any override flag");
+  assert.equal(meta.parentInstance, owner.instance);
   // 3. no dropped public surfaces: agent/config are not kernel commands
   for (const argv of [["agent", "show", "memory-harvest"], ["config", "get", "name"]]) {
     const rr = cli(repo, ...argv, "--dir", repo, "--json");
@@ -764,8 +800,20 @@ test("runtime API consumer fixture: capability-defined harvester spawned through
     assert.equal(e.ok, false, argv.join(" "));
     assert.equal(e.error.code, "E_UNKNOWN_COMMAND");
   }
+  // 4. retired flags fail LOUDLY with E_BAD_ARGS and no side effects
+  for (const retired of ["--instance", "--ephemeral"]) {
+    const rr = cli(repo, "spawn", "memory-harvest", retired, "x", "--no-launch", "--dir", repo, "--json");
+    const e = JSON.parse(rr.stdout);
+    assert.equal(e.ok, false, retired);
+    assert.equal(e.error.code, "E_BAD_ARGS");
+    assert.match(e.error.message, /removed by the runtime-boundary ruling/);
+  }
   rmSync(base, { recursive: true, force: true });
 });
+function installedHomeOf(root, instance) {
+  // capability-defined agents home under <workspace>/local-agents/<agent>/instances/<instance>
+  return join(dirname(root), "local-agents", "memory-harvest", "instances", instance);
+}
 
 test("materializePackageDeps: per-capability lock placement — deps land beside the inner manifest, integrity unchanged", () => {
   const base = temp();
