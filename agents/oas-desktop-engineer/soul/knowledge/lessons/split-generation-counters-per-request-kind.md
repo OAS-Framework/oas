@@ -27,3 +27,4 @@ Hold `/api/agents` during a workspace switch, fire a change event on the still-s
 - [Guard async render completions on both success and error paths](/lessons/guard-both-completion-paths.md) covers the per-selection Brain load guard.
 - [Release async UI locks only on owned completion paths](/lessons/release-ui-locks-every-exit-path.md) covers owned unlocks for roster-refresh disabled controls.
 - [Workspace-sensitive async results need local tickets and global workspace generations](/lessons/stale-response-race.md) covers workspace-level invalidation and per-path request tickets.
+- [Consumed-once pending intents must gate on data currency](/lessons/pending-intent-data-currency.md) covers intent consumption that must defer when a loaded roster belongs to an older workspace generation.
