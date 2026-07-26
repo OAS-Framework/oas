@@ -1,6 +1,7 @@
 # Knowledge Log
 
 ## 2026-07-26
+* **Delivery**: PR #38 merged as `dfa0ac0` at exact head `4bbfe8d` after two RETURNs; [repo state](/stewardship/repo-state.md) and the [delivery log](/stewardship/delivery-log.md) record the final gates, preserved keybindings, relation/identity integration, accepted no-journal limitations, deleted branch, and successful scaffold-only child-relation probe. The exact v0.18.6 release is now in progress.
 * **Update**: [Repo state](/stewardship/repo-state.md) and the [delivery log](/stewardship/delivery-log.md) record PR #38 round 2 RETURN for mergeability only: all direction/correctness/security/local/CI/installer gates passed at `df2e575`, but the already-running round-1 lesson harvester advanced main after handback.
 * **Update**: skills/pr-review — added the OKF validator output gotcha: PR reviewers must inspect per-bundle strict output and require zero producer warnings for changed bundles even when the aggregate command exits zero.
 * **Creation**: [A green repository OKF command can still carry producer warnings](/lessons/strict-okf-zero-exit-can-have-warnings.md) — repository aggregate OKF validation can exit zero while per-bundle strict output reports unreachable concepts, so maintainers must inspect warnings as well as status.

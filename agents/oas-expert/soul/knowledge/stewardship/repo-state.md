@@ -15,7 +15,7 @@ than letting the file grow stale.
 
 ## On main
 
-- **Agent-relations architecture recorded 2026-07-26** — the canonical [spawn-relations decision](/decisions/spawn-relations-live-lineage.md) accepts sparse explicit child/sibling/parent/unrelated live lineage, ambiguity-safe identity, attached child-of-owner semantics, and the v0.18.6 Desktop gate. Per explicit human direction it does not add a journal/lease subsystem; concurrent same-anchor parent writes and sequential multi-orphan retirement repair remain documented bounded limitations. Feature code is not on main yet (PR #38 is RETURNED below).
+- **PR #38 merged 2026-07-26 as `dfa0ac0`** — explicit child/sibling/parent/unrelated spawn relations across kernel, CLI, and Desktop; ambiguity-safe root-qualified anchors; attached child-of-owner semantics; retirement splice repair; composite instance identity; cluster-first Active/sidebar surfaces; and a relation-aware spawn modal. The merge preserves PR #35 editable keybindings and PR #36 knowledge, with reviewed fixes for composite roster parent focus, hierarchy Brain selection, and modal shortcut ownership. Final exact head `4bbfe8d`; all local, strict OKF, PR CI, and three installer checks passed after two RETURNs. The remote feature branch is deleted. Scaffold-only child-relation probe `oas-expert-pr38-probe` verified expected layout, real skill directories, relation metadata, no launch, and clean retirement. The [spawn-relations decision](/decisions/spawn-relations-live-lineage.md) records the human-accepted no-journal/lease limitations. Release impact: source is merged with manifests still v0.18.5; cut exactly v0.18.6 next.
 
 - **PR #36 merged 2026-07-25 as `032c7a3`** — knowledge-only oas-desktop-engineer post-PR35 keybindings harvests. Preserves both keybindings developers' stranded post-merge harvests: dispatch-ineligible view-action semantics, crossed-mail coordination, PR35 follow-up queues, modal focus restoration, and the DEFAULT_KEYMAP/defaultChord split plus terminal allowlist delivery follow-ups. Final exact head `1e9980f`; all local gates, strict OKF for all 8 bundles, PR CI, and mergeability passed after two maintainer RETURNs. The remote `harvest/keybindings-wiring` branch is deleted; local branch cleanup is blocked by another worktree at `/private/tmp/harvest-wiring`. No product, release, manifest, package, or framework behavior changes.
 
@@ -158,10 +158,14 @@ than letting the file grow stale.
 
 ## In flight
 
-- **PR #38 feature/agent-relations — RETURNED round 2 at `df2e575` (2026-07-26), mergeability only.** Round-1 knowledge and conflict findings are fixed; direction, correctness, security, full local gates, exact-head PR CI, and all three installer checks pass. The PR preserves PR #35/#36 and adds reviewed identity-correct keybinding interactions. Its only blocker is ancestry: the maintainer's already-running round-1 harvester landed `d60ee05` after handback, so the coordinator must merge final current main (including this round-2 stewardship record), rerun/settle checks, and return the new exact head. No further harvest is being launched before handback.
+- **v0.18.6 release in progress.** PR #38 is merged and its post-merge scaffold probe passed. Release notes are being committed before the exact tag; tag-driven CI must publish root/pi 0.18.6 plus the Desktop installer matrix, after which the known org-policy bump-PR rescue may be required.
 
 ## Recent deliveries
 
+- PR #38 spawn-time agent relations across kernel, CLI, and Desktop: MERGED
+  2026-07-26 as `dfa0ac0` after two RETURNs; exact head `4bbfe8d`, remote
+  branch deleted, scaffold-only relation probe passed, v0.18.6 release pending
+  (see delivery-log).
 - PR #38 round 2 spawn-time agent relations: RETURNED 2026-07-26 for
   mergeability only at `df2e575`; all other gates and exact-head checks pass,
   but a previously launched maintainer harvest advanced main after handback
