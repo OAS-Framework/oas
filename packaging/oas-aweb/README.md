@@ -5,7 +5,7 @@ Official [OAS](https://github.com/OAS-Framework/oas) messaging-layer integration
 - per-instance, team-scoped aweb identity minting at spawn and self-deletion at retire;
 - bounded authority discovery that never walks above the deployment workspace;
 - `oas aweb roster` and guided `oas aweb setup` commands;
-- official `aweb-messaging`, `aweb-team-membership`, and `aweb-identity` skills from `@awebai/pi`; and
+- reviewed, MIT-licensed `aweb-messaging`, `aweb-team-membership`, and `aweb-identity` skill trees synchronized from `@awebai/pi@0.2.3`; and
 - a Claude Code channel-plugin launch integration for real-time events.
 
 Messaging is deliberately separate from durable task tracking. The selected tasks integration owns task state.
@@ -14,15 +14,9 @@ Messaging is deliberately separate from durable task tracking. The selected task
 
 Install the `aw` CLI and initialize an aweb workspace at the deployment's team scope. `oas aweb setup` reports the next onboarding step without authenticating or creating a team silently.
 
-The inner capability directory owns its JavaScript runtime closure with checked `capabilities/oas-aweb/package-lock.json`. Materialize it exactly, without lifecycle scripts:
+The three Agent Skills are vendored package-owned resources under `capabilities/oas-aweb/skills/`; acquisition performs no npm install or runtime fetch. [`VENDORED.md`](capabilities/oas-aweb/skills/VENDORED.md) records the exact upstream repository, `pi-v0.2.3` tag, commit, registry integrity, MIT license, and deterministic local-checkout sync procedure.
 
-```bash
-npm ci --omit=dev --omit=peer --ignore-scripts --prefix capabilities/oas-aweb
-```
-
-This creates `capabilities/oas-aweb/node_modules/@awebai/pi/skills/...` beside the inner manifest, satisfying all three escape-free skill paths in `oas.json`. The package retains `@awebai/pi` 0.2.x but omits its unused pi-coding-agent peer; the capability consumes the packaged skills, and its commands/hooks do not import that peer. OAS package acquisition must use the same script-free, peer-omitting materialization contract.
-
-The frozen addendum confirms this per-capability closure placement and peer-omitting materialization contract. The package requires OAS `>=0.19.0`; see [`SCHEMA-STATUS.md`](SCHEMA-STATUS.md) for the remaining fixture and conditional advisory gates.
+The `aw` binary remains a separately consented host requirement. Vendoring the skills does not install, authenticate, or bundle that CLI. The package requires OAS `>=0.19.0`; see [`SCHEMA-STATUS.md`](SCHEMA-STATUS.md) for the remaining released-kernel fixture gate.
 
 ## Acquire and activate
 
@@ -59,9 +53,12 @@ capabilities:
 ## Development
 
 ```bash
-npm ci --omit=dev --omit=peer --ignore-scripts --prefix capabilities/oas-aweb
-npm audit --omit=dev --omit=peer --ignore-scripts --prefix capabilities/oas-aweb
 npm test
+
+# Maintainer-only vendored update from an exact clean upstream checkout:
+node scripts/sync-vendored-skills.mjs --source /path/to/aweb
+npm test
+git diff -- capabilities/oas-aweb/skills
 ```
 
-Tests validate both manifests, prove all declared skills resolve while the unused peer remains absent, reject peer imports from executable scripts, and exercise missing-CLI/bounded-root/retire hook behavior. The full acquire → lock → trust → activate → spawn probe remains pending released OAS 0.19.0 consumer fixtures.
+Tests validate both manifests, skill frontmatter/provenance/licenses, absence of runtime dependency closures, executable independence from omitted npm packages, and missing-CLI/bounded-root/retire hook behavior. The full acquire → lock → trust → activate → spawn probe remains pending released OAS 0.19.0 consumer fixtures.

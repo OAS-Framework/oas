@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
-import { join, resolve, sep } from "node:path";
+import { join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -40,38 +40,62 @@ function run(args = [], env = {}, cwd = ROOT) {
   });
 }
 
-test("all declared skill paths resolve inside package-owned node_modules", () => {
+test("manifest resolves the three vendored Agent Skills by expected names", () => {
   const manifest = JSON.parse(readFileSync(join(CAPABILITY, "oas.json"), "utf8"));
-  const dependencyRoot = realpathSync(join(CAPABILITY, "node_modules"));
-  assert.equal(manifest.skills.length, 3);
-  for (const skill of manifest.skills) {
-    assert.match(skill, /^node_modules\/@awebai\/pi\/skills\//);
-    const resolvedSkill = realpathSync(join(CAPABILITY, skill, "SKILL.md"));
-    assert.ok(resolvedSkill.startsWith(dependencyRoot + sep), `${skill} resolved outside package-owned node_modules`);
+  const expected = ["aweb-messaging", "aweb-team-membership", "aweb-identity"];
+  assert.deepEqual(manifest.skills, expected.map((name) => `skills/${name}`));
+  for (const name of expected) {
+    const skill = readFileSync(join(CAPABILITY, "skills", name, "SKILL.md"), "utf8");
+    assert.match(skill, new RegExp(`^---\\nname: ${name}\\n`));
+    assert.match(skill, /description:/);
   }
 });
 
-test("checked lock pins the aweb skill dependency", () => {
-  const lock = JSON.parse(readFileSync(join(CAPABILITY, "package-lock.json"), "utf8"));
-  assert.equal(lock.lockfileVersion, 3);
-  assert.equal(lock.packages[""].dependencies["@awebai/pi"], "^0.2.1");
-  assert.ok(lock.packages["node_modules/@awebai/pi"].integrity);
+test("package has no npm runtime dependency closure", () => {
+  const foundLocks = [];
+  const foundModules = [];
+  const walk = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name);
+      if (entry.name === "package-lock.json") foundLocks.push(path);
+      if (entry.name === "node_modules") foundModules.push(path);
+      if (entry.isDirectory()) walk(path);
+      if (entry.name === "package.json") {
+        const pkg = JSON.parse(readFileSync(path, "utf8"));
+        for (const field of ["dependencies", "devDependencies", "optionalDependencies", "peerDependencies"]) {
+          assert.equal(pkg[field], undefined, `${path} contains ${field}`);
+        }
+      }
+    }
+  };
+  walk(ROOT);
+  assert.deepEqual(foundLocks, []);
+  assert.deepEqual(foundModules, []);
 });
 
-test("materialized closure keeps aweb pi 0.2.x and omits its coding-agent peer", () => {
-  const pi = JSON.parse(readFileSync(join(CAPABILITY, "node_modules", "@awebai", "pi", "package.json"), "utf8"));
-  assert.match(pi.version, /^0\.2\./);
-  assert.equal(existsSync(join(CAPABILITY, "node_modules", "@earendil-works", "pi-coding-agent")), false);
+test("vendored skills carry exact upstream provenance and MIT license", () => {
+  const vendored = readFileSync(join(CAPABILITY, "skills", "VENDORED.md"), "utf8");
+  const license = readFileSync(join(CAPABILITY, "skills", "LICENSE"), "utf8");
+  const sync = readFileSync(join(ROOT, "scripts", "sync-vendored-skills.mjs"), "utf8");
+  for (const value of ["pi-v0.2.3", "812bdeb1be8ed99dbd339a910a153e7b802501d4", "https://github.com/awebai/aweb.git"]) {
+    assert.ok(vendored.includes(value));
+    assert.ok(sync.includes(value));
+  }
+  assert.match(license, /^MIT License/);
+  assert.match(license, /Copyright \(c\) 2025 Juan Reyero/);
 });
 
-test("declared commands and hooks do not import the omitted peer", () => {
+test("declared commands and hooks have no npm package imports", () => {
   const manifest = JSON.parse(readFileSync(join(CAPABILITY, "oas.json"), "utf8"));
   const commands = [...Object.values(manifest.commands || {}), ...Object.values(manifest.hooks || {})];
   const entrypoints = new Set(commands.map((command) => command.trim().split(/\s+/)[0]));
   assert.ok(entrypoints.size > 0);
   for (const entrypoint of entrypoints) {
     const source = readFileSync(join(CAPABILITY, entrypoint), "utf8");
-    assert.doesNotMatch(source, /@earendil-works\/pi-coding-agent/);
+    assert.doesNotMatch(source, /node_modules|from ["']@awebai|require\(["']@awebai/);
+    assert.match(source, /command -v aw/);
+    assert.match(source, /aw team|aw workspace|aw id team/);
+    assert.match(source, /claude plugin/, "retained Claude channel setup must remain explicit");
   }
 });
 

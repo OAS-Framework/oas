@@ -9,20 +9,14 @@ permissions:
   contents: read
 
 jobs:
-  validate-materialize-and-test:
+  validate-and-test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
-          cache-dependency-path: capabilities/oas-aweb/package-lock.json
-      - name: Materialize locked runtime dependencies without development or peer packages
-        run: npm ci --omit=dev --omit=peer --ignore-scripts --prefix capabilities/oas-aweb
-      - name: Audit the materialized runtime closure
-        run: npm audit --omit=dev --omit=peer --ignore-scripts --prefix capabilities/oas-aweb
-      - name: Validate manifests, package-local skills, and hooks
+      - name: Validate manifests, vendored skills, and hooks
         run: npm test
       - name: Consumer probe status
         run: echo "PENDING(released-0.19.0-fixtures; package-runtime-api.md Consumer fixture) acquire -> lock -> trust -> activate -> spawn"

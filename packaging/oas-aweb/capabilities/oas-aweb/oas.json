@@ -15,9 +15,9 @@
     }
   ],
   "skills": [
-    "node_modules/@awebai/pi/skills/aweb-messaging",
-    "node_modules/@awebai/pi/skills/aweb-team-membership",
-    "node_modules/@awebai/pi/skills/aweb-identity"
+    "skills/aweb-messaging",
+    "skills/aweb-team-membership",
+    "skills/aweb-identity"
   ],
   "inject": "injects/aweb.md",
   "commands": {
