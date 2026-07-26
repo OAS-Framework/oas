@@ -712,6 +712,51 @@ test("doctor reports profile provenance, available-but-unapplied profiles, and m
   assert.match(r2.stdout, /package other\.pkg exports config profiles \(default, minimal\) not applied at any scope/);
 });
 
+test("doctor --json carries schemaVersion 1 and the WS2 payload with field parity to the human report", () => {
+  const base = temp();
+  const pkg = fixturePackage(join(base, "pkg"));
+  const ws = join(base, "ws"); mkdirSync(ws);
+  assert.equal(cli(["init", "--package", pkg, "--dir", ws, "--no-tmux-mouse"]).status, 0);
+  for (const [folder, id, layer] of [["example-review", "example.review", undefined], ["example-delivery", "example.delivery", "knowledge"]]) {
+    write(join(ws, ".agents", "capabilities", "owned", folder, "oas.json"), JSON.stringify({
+      capability: id, version: "1.0.0", description: "x", ...(layer ? { layer } : {}),
+      ...(id === "example.review" ? { requires: [{ command: "json-doctor-missing-cmd", why: "testing", install: { docs: "https://example.invalid", methods: [{ platform: process.platform, manager: "brew", formula: "json-doctor-missing-cmd" }] } }] } : {}),
+    }));
+  }
+  const file = join(ws, "oas-config.yaml");
+  writeFileSync(file, readFileSync(file, "utf8").replaceAll("from: installed", "from: owned"));
+  assert.equal(cli(["use", "example.review", "--global", "--dir", ws]).status, 0);
+  const other = fixturePackage(join(base, "other"), { id: "other.pkg" });
+  installFixturePackage(ws, other, { id: "other.pkg" });
+
+  const r = cli(["doctor", ws, "--json"], { cwd: ws });
+  assert.equal(r.status, 0, r.stderr);
+  const doc = JSON.parse(r.stdout); // exactly one JSON document on stdout
+  assert.equal(doc.schemaVersion, 1);
+  // packages: lock v2 entries with provenance
+  assert.deepEqual(doc.packages.map((p) => p.id), ["other.pkg"]);
+  assert.equal(doc.packages[0].version, "1.0.0");
+  assert.deepEqual(doc.packages[0].capabilities, ["example.review", "example.delivery"]);
+  // profileProvenance: the adopted snapshot
+  assert.equal(doc.profileProvenance.length, 1);
+  assert.equal(doc.profileProvenance[0].package, "example.engineering");
+  assert.equal(doc.profileProvenance[0].profile, "default");
+  // unappliedProfiles: other.pkg exports profiles, adopted nowhere
+  assert.deepEqual(doc.unappliedProfiles, [{ package: "other.pkg", profiles: ["default", "minimal"] }]);
+  // missingHostRequirements: structured plan + consent command, no shell text
+  const req = doc.missingHostRequirements.find((x) => x.command === "json-doctor-missing-cmd");
+  assert.ok(req, JSON.stringify(doc.missingHostRequirements));
+  assert.deepEqual(req.plan.argv, ["brew", "install", "json-doctor-missing-cmd"]);
+  assert.equal(req.consentCommand, "oas install --accept-requirement json-doctor-missing-cmd");
+  assert.deepEqual(req.requestedBy.map((x) => x.capability), ["example.review"]);
+  // field parity: every WS2 fact in the human report is present in JSON
+  const human = cli(["doctor", ws], { cwd: ws });
+  assert.match(human.stdout, /other\.pkg/);
+  assert.match(human.stdout, /profile "default"/);
+  assert.match(human.stdout, /json-doctor-missing-cmd/);
+  assert.match(human.stdout, /oas install --accept-requirement json-doctor-missing-cmd/);
+});
+
 // ---------- provenance helpers ----------
 
 test("profile provenance header round-trips through the parser", () => {

@@ -104,13 +104,56 @@ function doctorComposition(ctx, soulName) {
   if (!agent) throw new Error(`unknown soul "${soulName}" for doctor composition`);
   return composeInstanceAgentsMd(join(agent._dir, "soul"), ctx, agent.name, agent.work || "checkout", agent.kind);
 }
+/** WS2 package-layer doctor data — the ONE source for both human and --json
+ * doctor output: lock v2 packages, adopted-profile provenance, available-but-
+ * unapplied profiles, and missing host requirements with structured plans. */
+function doctorPackagesData(ctx, chain) {
+  const pkgLocks = readPackageLocks(ctx).packages;
+  const packages = Object.entries(pkgLocks).map(([id, lock]) => ({
+    id, version: lock.version || null, level: lock._level, source: lock.source || null,
+    commit: lock.commit || null, capabilities: lock.capabilities || [],
+  }));
+  const profileProvenance = [];
+  const adoptedPackages = new Set();
+  for (const cfg of chain) {
+    const prov = parseProfileProvenance(readFileSync(cfg._file, "utf8"));
+    if (!prov) continue;
+    profileProvenance.push({ file: cfg._file, package: prov.package, ref: prov.ref || null, profile: prov.profile });
+    adoptedPackages.add(prov.package);
+  }
+  const unappliedProfiles = [];
+  for (const [id, lock] of Object.entries(pkgLocks)) {
+    if (adoptedPackages.has(id)) continue;
+    const pkgDir = installedPackageDir(lock, id);
+    if (!pkgDir) continue;
+    try {
+      const m = loadPackageManifest(pkgDir);
+      const profiles = Object.keys(m?.configs || {});
+      if (profiles.length) unappliedProfiles.push({ package: id, profiles });
+    } catch { /* broken installed package reported through capability paths */ }
+  }
+  const missingHostRequirements = aggregateMissingRequirements([ctx]).map((req) => ({
+    command: req.command, why: req.why || null, docs: req.docs || null,
+    requestedBy: req.requestedBy,
+    plan: req.plan && !req.plan.unavailable
+      ? { manager: req.plan.manager, argv: req.plan.argv, source: req.plan.source, version: req.plan.version || null, scope: req.plan.scope }
+      : null,
+    unavailable: req.plan?.unavailable || null,
+    consentCommand: req.plan && !req.plan.unavailable ? `oas install --accept-requirement ${req.command}` : null,
+  }));
+  return { packages, profileProvenance, unappliedProfiles, missingHostRequirements };
+}
+
 function doctorJson(dir) {
   const ctx = resolve(dir || process.cwd());
   const soulName = flag("soul");
   const r = resolveForDoctor(ctx, soulName, { json: true });
   const mans = capabilityManifests(ctx);
   const composition = doctorComposition(ctx, soulName);
+  const chain = configChain(ctx);
+  const pkg = doctorPackagesData(ctx, chain);
   console.log(JSON.stringify({
+    schemaVersion: 1,
     context: ctx,
     team: r.team || null,
     chain: r.chain.map((c) => ({ file: c._file, level: c._level, levelKind: levelOf(c._level) })),
@@ -130,6 +173,10 @@ function doctorJson(dir) {
     retiredArtifacts: Object.entries(mans)
       .filter(([id]) => RETIRED_CAPABILITIES[id])
       .map(([id, m]) => ({ id, dir: m._dir, origin: m._origin, reason: RETIRED_CAPABILITIES[id] })),
+    packages: pkg.packages,
+    profileProvenance: pkg.profileProvenance,
+    unappliedProfiles: pkg.unappliedProfiles,
+    missingHostRequirements: pkg.missingHostRequirements,
     composedInstructions: composition?.text,
     instructionBlocks: composition?.blocks,
   }, null, 2));
@@ -214,37 +261,26 @@ function doctor(dir) {
   }
   if (existsSync(LEGACY_HOME_CAPABILITIES_DIR)) console.log(`  WARNING: legacy ~/.oas/capabilities exists and is no longer discovered — reinstall its packages at a config scope and remove it`);
 
-  // Distribution packages: profile provenance, available-but-unapplied profiles, missing host commands.
-  const pkgLocks = readPackageLocks(ctx).packages;
-  if (Object.keys(pkgLocks).length) {
+  // Distribution packages (WS2): same data source as doctor --json.
+  const pkg = doctorPackagesData(ctx, chain);
+  if (pkg.packages.length) {
     console.log("\nDistribution packages:");
-    for (const [id, lock] of Object.entries(pkgLocks)) {
-      console.log(`  ${id}  ${lock.version || ""}  [${shortPath(lock._level)}]  source: ${lock.source || "?"}`);
-      if (lock.capabilities?.length) console.log(`             capabilities: ${lock.capabilities.join(", ")}`);
+    for (const p of pkg.packages) {
+      console.log(`  ${p.id}  ${p.version || ""}  [${shortPath(p.level)}]  source: ${p.source || "?"}`);
+      if (p.capabilities.length) console.log(`             capabilities: ${p.capabilities.join(", ")}`);
     }
   }
-  for (const cfg of chain) {
-    const prov = parseProfileProvenance(readFileSync(cfg._file, "utf8"));
-    if (prov) console.log(`\nConfig profile provenance: ${shortPath(cfg._file)} adopted ${prov.package}${prov.ref ? `@${prov.ref}` : ""} profile "${prov.profile}" (snapshot — compare with \`oas config diff\`)`);
+  for (const prov of pkg.profileProvenance) {
+    console.log(`\nConfig profile provenance: ${shortPath(prov.file)} adopted ${prov.package}${prov.ref ? `@${prov.ref}` : ""} profile "${prov.profile}" (snapshot — compare with \`oas config diff\`)`);
   }
-  // Available-but-unapplied profile: a locked package exports config profiles but no chain config carries its provenance.
-  const adoptedPackages = new Set(chain.map((c) => parseProfileProvenance(readFileSync(c._file, "utf8"))?.package).filter(Boolean));
-  for (const [id, lock] of Object.entries(pkgLocks)) {
-    if (adoptedPackages.has(id)) continue;
-    const pkgDir = installedPackageDir(lock, id);
-    if (!pkgDir) continue;
-    try {
-      const m = loadPackageManifest(pkgDir);
-      const profiles = Object.keys(m?.configs || {});
-      if (profiles.length) console.log(`\nNOTE: package ${id} exports config profile${profiles.length > 1 ? "s" : ""} (${profiles.join(", ")}) not applied at any scope — adopt one with \`oas init --package ${id}${profiles.length > 1 ? " --config <name>" : ""}\` at a fresh scope`);
-    } catch { /* broken installed package reported through capability paths */ }
+  for (const u of pkg.unappliedProfiles) {
+    console.log(`\nNOTE: package ${u.package} exports config profile${u.profiles.length > 1 ? "s" : ""} (${u.profiles.join(", ")}) not applied at any scope — adopt one with \`oas init --package ${u.package}${u.profiles.length > 1 ? " --config <name>" : ""}\` at a fresh scope`);
   }
-  const missingReqs = aggregateMissingRequirements([ctx]);
-  if (missingReqs.length) {
+  if (pkg.missingHostRequirements.length) {
     console.log("\nMissing host commands (active capabilities):");
-    for (const req of missingReqs) {
+    for (const req of pkg.missingHostRequirements) {
       console.log(`  ${req.command} — ${req.why || "required"} (requested by: ${req.requestedBy.map((r) => r.capability).join(", ")})`);
-      if (req.plan && !req.plan.unavailable) console.log(`             install with consent: oas install --accept-requirement ${req.command}  (runs: ${req.plan.argv.join(" ")})`);
+      if (req.plan) console.log(`             install with consent: ${req.consentCommand}  (runs: ${req.plan.argv.join(" ")})`);
       else if (req.docs) console.log(`             install docs: ${req.docs}`);
     }
   }
