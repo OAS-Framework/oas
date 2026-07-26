@@ -99,8 +99,8 @@ function harvestFixture(t, mode, { model, errorCode } = {}) {
       OAS_WORK: mode === "workspace" ? "workspace" : "worktree",
       OAS_SETTINGS: JSON.stringify(model ? { "harvest-model": model } : {}),
       OAS_TEST_RECORD: record,
+      OAS_CLI_BIN: join(fakeOasPath(t), "oas"),
       ...(errorCode ? { OAS_TEST_ERROR_CODE: errorCode } : {}),
-      PATH: `${fakeOasPath(t)}:${process.env.PATH}`,
     },
   };
 }
@@ -150,8 +150,9 @@ test("harvest implementation uses no private kernel-file boundary", () => {
   assert.doesNotMatch(source, /lib\/core\.mjs/);
   assert.doesNotMatch(source, /oas root/);
   assert.doesNotMatch(source, /pathToFileURL|resolveOasConfig|spawnInstance/);
-  assert.match(source, /function packageRuntimeCli\(\)/);
-  assert.match(source, /spawnSync\(packageRuntimeCli\(\)/);
+  assert.match(source, /process\.env\.OAS_CLI_BIN/);
+  assert.match(source, /execFile\(packageRuntimeCli\(\)/);
+  assert.doesNotMatch(source, /spawnSync|return "oas"/);
 });
 
 test("manifest exports the packaged ephemeral memory-harvest agent", () => {
@@ -188,6 +189,17 @@ test("harvest skips without notes before requiring the runtime boundary", async 
     ok: true,
     result: { harvest: "skipped", reason: "no pending notes" },
   });
+});
+
+test("harvest rejects a non-absolute OAS_CLI_BIN instead of searching PATH", async (t) => {
+  const fixture = harvestFixture(t, "local");
+  fixture.env.OAS_CLI_BIN = "oas";
+  const result = await run(["harvest", "--json"], fixture.env, fixture.home);
+  assert.equal(result.code, 1);
+  const envelope = JSON.parse(result.stdout);
+  assert.equal(envelope.error.code, "E_SPAWN_FAILED");
+  assert.match(envelope.error.message, /OAS_CLI_BIN must be an absolute path/);
+  assert.equal(existsSync(fixture.record), false, "relative CLI must never execute");
 });
 
 test("local-soul harvest spawns attached through the CLI boundary with effective settings", async (t) => {

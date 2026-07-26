@@ -23,7 +23,7 @@
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync, readFileSync, readdirSync, realpathSync, rmSync } from "node:fs";
 import { join, isAbsolute, dirname } from "node:path";
 import { tmpdir } from "node:os";
-import { spawnSync } from "node:child_process";
+import { execFile } from "node:child_process";
 
 const out = (o) => { process.stdout.write(JSON.stringify(o) + "\n"); process.exit(0); };
 const warn = (m) => out({ warning: `oas-okf: ${String(m).slice(0, 300)}` });
@@ -57,29 +57,36 @@ function runtimeError(code, message) {
   return Object.assign(new Error(message), { code });
 }
 
-/** Single swappable binary-resolution point. The corrected runtime addendum
- * will replace this PATH fallback with its final canonical absolute-CLI env
- * contract without changing spawn argument/envelope handling. */
+/** Canonical package-runtime binary supplied by capability command dispatch.
+ * Never discover or resolve the kernel through PATH. */
 function packageRuntimeCli() {
-  return "oas";
+  const cli = process.env.OAS_CLI_BIN;
+  if (!cli) throw runtimeError("E_SPAWN_FAILED", "OAS_CLI_BIN is required by the package-runtime contract");
+  if (!isAbsolute(cli)) throw runtimeError("E_SPAWN_FAILED", "OAS_CLI_BIN must be an absolute path");
+  return cli;
 }
 
 /** Invoke the versioned package-runtime boundary. Task text crosses the
  * process boundary only through an owner-readable tempfile, removed on every
  * success/failure outcome. */
-function spawnHarvester(spawnArgs, task) {
+async function spawnHarvester(spawnArgs, task) {
   const temp = mkdtempSync(join(tmpdir(), "oas-okf-harvest-"));
   const taskFile = join(temp, "TASK.md");
   try {
     writeFileSync(taskFile, task, { mode: 0o600, flag: "wx" });
-    const child = spawnSync(packageRuntimeCli(), ["spawn", "memory-harvest", ...spawnArgs, "--task-file", taskFile, "--json"], {
-      encoding: "utf8",
-      env: process.env,
-      stdio: ["ignore", "pipe", "pipe"],
-      timeout: 300000,
+    const args = ["spawn", "memory-harvest", ...spawnArgs, "--task-file", taskFile, "--json"];
+    const child = await new Promise((resolveChild) => {
+      execFile(packageRuntimeCli(), args, {
+        encoding: "utf8",
+        env: process.env,
+        timeout: 300000,
+        maxBuffer: 1024 * 1024,
+      }, (error, stdout, stderr) => resolveChild({ error, stdout, stderr }));
     });
     if (child.stderr) process.stderr.write(child.stderr);
-    if (child.error) throw runtimeError("E_SPAWN_FAILED", child.error.message || child.error);
+    if (child.error && !String(child.stdout || "").trim()) {
+      throw runtimeError("E_SPAWN_FAILED", child.error.message || child.error);
+    }
     let envelope;
     try { envelope = JSON.parse(String(child.stdout || "").trim()); }
     catch { throw runtimeError("E_SPAWN_FAILED", "oas spawn returned an invalid JSON envelope"); }
@@ -89,7 +96,7 @@ function spawnHarvester(spawnArgs, task) {
     if (!envelope.ok) {
       throw runtimeError(envelope.error?.code || "E_SPAWN_FAILED", envelope.error?.message || "oas spawn failed");
     }
-    if (child.status !== 0) throw runtimeError("E_SPAWN_FAILED", `oas spawn exited ${child.status}`);
+    if (child.error) throw runtimeError("E_SPAWN_FAILED", child.error.message || "oas spawn failed");
     if (!envelope.result?.instance) throw runtimeError("E_SPAWN_FAILED", "oas spawn success envelope has no instance");
     return envelope.result;
   } finally {
@@ -262,7 +269,7 @@ _(the single next action — keep this current; a fresh session on any model res
       // edits to the canonical soul — no commit, no PR: there is nothing to
       // version. It must not touch the owner's work tree.
       const task = `Harvest the pending notes of live LOCAL-SOUL instance "${inst}" (agent "${agName}") into its soul — by direct edits, no commit.\n\n- Source notes: ${notesDir} (${notes.join(", ")})\n- Soul knowledge bundle to update: ${join(realSoul, "knowledge")}\n- Soul skills dir (for procedure-shaped notes): ${join(realSoul, "skills")}\n- This soul is LOCAL (uncommitted, gitignored): edit those soul files IN PLACE. Do NOT run git commit — not for the soul, and not in ./work (the shared tree belongs to the working instance; leave it untouched).\n- Follow your memory-harvest skill for everything else: promote/merge/drop each note, knowledge vs skill routing, index + log discipline, validate the bundle, DELETE processed notes from the source notes/ dir.\n- Then run \`oas retire ${harvName} --self\`.`;
-      r = spawnHarvester(harvestSpawnArgs({
+      r = await spawnHarvester(harvestSpawnArgs({
         slug, parent: inst, repo: context, work: "attached", workDir, model: harvestModel,
       }), task);
     } else if ((process.env.OAS_WORK || meta.work) === "workspace") {
@@ -274,7 +281,7 @@ _(the single next action — keep this current; a fresh session on any model res
       if (!soulRepo) skip("workspace-mode soul is not inside a git repo — nowhere to deliver a PR");
       const relSoul = realSoul.slice(soulRepo.length + 1);
       const task = `Harvest the pending notes of live WORKSPACE-MODE instance "${inst}" (agent "${agName}") into its soul — delivered as a PR.\n\n- Source notes: ${notesDir} (${notes.join(", ")})\n- Your ./work is a dedicated worktree of the soul's home repo (${soulRepo}), branch memory-harvest/${slug}.\n- Soul knowledge bundle to update: ./work/${join(relSoul, "knowledge")}\n- Soul skills dir (for procedure-shaped notes): ./work/${join(relSoul, "skills")}\n- Follow your memory-harvest skill: promote/merge/drop each note, knowledge vs skill routing, index + log discipline, validate the bundle, DELETE processed notes from the source notes/ dir, commit once (prefixed "memory-harvest:").\n- Then push the branch and open a PR (\`git push -u origin memory-harvest/${slug}\` then \`gh pr create --fill\`). Do NOT merge it; the humans/owners of ${soulRepo} review soul changes. If gh is unavailable, push the branch and report the compare URL.\n- Finally run \`oas retire ${harvName} --self\` (keep the branch: --self only).`;
-      r = spawnHarvester(harvestSpawnArgs({
+      r = await spawnHarvester(harvestSpawnArgs({
         slug, parent: inst, repo: soulRepo, work: "worktree",
         branch: `memory-harvest/${slug}`, model: harvestModel,
       }), task);
@@ -286,7 +293,7 @@ _(the single next action — keep this current; a fresh session on any model res
         ? join(workDir, realSoul.slice(realRepo.length + 1))
         : realSoul;
       const task = `Harvest the pending notes of live instance "${inst}" (agent "${agName}") into its soul.\n\n- Source notes: ${notesDir} (${notes.join(", ")})\n- Soul knowledge bundle to update: ${join(soulTarget, "knowledge")}\n- Soul skills dir (for procedure-shaped notes): ${join(soulTarget, "skills")}\n- You are ATTACHED to the instance's work tree (./work) — commit your promotions there as a single commit, prefixed "memory-harvest:".\n- Follow your memory-harvest skill: promote/merge/drop each note, knowledge vs skill routing, index + log discipline, validate the bundle, DELETE processed notes from the source notes/ dir (so they are not re-harvested), commit, then run \`oas retire ${harvName} --self\`.`;
-      r = spawnHarvester(harvestSpawnArgs({
+      r = await spawnHarvester(harvestSpawnArgs({
         slug, parent: inst, repo: context, work: "attached", workDir, model: harvestModel,
       }), task);
     }

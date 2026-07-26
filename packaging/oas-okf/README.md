@@ -12,7 +12,7 @@ Official [OAS](https://github.com/OAS-Framework/oas) knowledge-layer integration
 
 The capability has no external host-command requirement. It requires OAS `>=0.19.0`, whose frozen package-runtime boundary provides schema-v1 `oas spawn ... --json` envelopes and capability-defined agents.
 
-The harvest command invokes only that structured CLI boundary. It never discovers the kernel root or imports private kernel files. [`KERNEL-API-NEEDS.md`](KERNEL-API-NEEDS.md) records the now-satisfied historical inventory.
+The harvest command invokes only that structured CLI boundary through the absolute `OAS_CLI_BIN` supplied by dispatch and argv-safe `execFile`. It never searches `PATH`, discovers the kernel root, or imports private kernel files. [`KERNEL-API-NEEDS.md`](KERNEL-API-NEEDS.md) records the now-satisfied historical inventory.
 
 ## Acquire and activate
 
