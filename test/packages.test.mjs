@@ -1611,10 +1611,8 @@ test("platform-variant closures are rejected at materialization (v1 MUST, findin
   }));
   assert.throws(() => acquirePackage(s, src), /platform-variant runtime closure.*os\/cpu\/libc/);
   assert.ok(!existsSync(join(installedPackagesDir(s), "pv.p")), "nothing installed");
-  // hasInstallScript ALONE is NOT variance (inert under --ignore-scripts;
-  // reviewer-11752b2 corrected the earlier over-rejection) — the entry passes
-  // the scan; here npm ci fails only because the registry tarball is fake,
-  // which is the ordinary materialization failure path, not a policy one.
+  // INCLUDED install scripts are REJECTED (maintainer ruling on 19fbc86: the
+  // runtime almost certainly expects the artifacts --ignore-scripts suppresses).
   const src2 = pkgSource(join(base, "src2"), { package: "pv2.p" }, { "cap": { capability: "pv2.cap" } });
   write(join(src2, "package.json"), JSON.stringify({ name: "pv2-p", version: "1.0.0", dependencies: { "gyp-dep": "1.0.0" } }));
   write(join(src2, "package-lock.json"), JSON.stringify({
@@ -1624,7 +1622,7 @@ test("platform-variant closures are rejected at materialization (v1 MUST, findin
       "node_modules/gyp-dep": { version: "1.0.0", resolved: "https://registry.npmjs.org/gyp-dep/-/gyp-dep-1.0.0.tgz", integrity: "sha512-BBB", hasInstallScript: true },
     },
   }));
-  assert.throws(() => acquirePackage(s, src2), /materialization failed/); // scan passed; fake tarball fails npm ci itself
+  assert.throws(() => acquirePackage(s, src2), /install script/);
   // pure-JS closures still pass (regression: the vendored prod-dep fixture pattern)
   const ok = pkgSource(join(base, "ok"), { package: "pi.p" }, { "cap": { capability: "pi.cap" } });
   write(join(ok, "vendor/dep/package.json"), JSON.stringify({ name: "dep", version: "1.0.0" }));
@@ -1953,7 +1951,7 @@ test("retired spawn flags reject before local-agent upsert — no soul scaffolde
 
 // ---------- reviewer-11752b2 findings: scan scope, reachability, preflight ----------
 
-test("platform scan: dev/peer entries ignored, pure-JS install scripts accepted, v1 lockfile fails closed (reviewer-11752b2)", () => {
+test("platform scan: omitted dev/peer entries (even scripted/native) ignored; v1 lockfile fails closed (reviewer-11752b2 + maintainer 19fbc86 ruling)", () => {
   const base = temp();
   const s = scope(base);
   const integ = "sha512-AAA";
@@ -1969,11 +1967,11 @@ test("platform scan: dev/peer entries ignored, pure-JS install scripts accepted,
       "vendor/dep": { version: "1.0.0" },
       "node_modules/dev-native": { version: "1.0.0", resolved: "https://x/d.tgz", integrity: integ, dev: true, os: ["darwin"] },
       "node_modules/peer-native": { version: "1.0.0", resolved: "https://x/p.tgz", integrity: integ, peer: true, cpu: ["arm64"] },
-      "node_modules/pure-js-scripted": { version: "1.0.0", resolved: "vendor/dep", link: true, hasInstallScript: true },
+      "node_modules/dev-scripted": { version: "1.0.0", resolved: "vendor/dep", link: true, dev: true, hasInstallScript: true },
     },
   }));
   const r = acquirePackage(s, okSrc);
-  assert.equal(r.root, "sc.ok", "dev/peer natives and inert install scripts do not block");
+  assert.equal(r.root, "sc.ok", "omitted dev/peer natives and dev install scripts do not block");
   // production os/cpu constraint still rejects
   const bad = pkgSource(join(base, "bad"), { package: "sc.bad" });
   write(join(bad, "package.json"), JSON.stringify({ name: "sc-bad", version: "1.0.0", dependencies: { n: "1.0.0" } }));
@@ -2178,5 +2176,27 @@ test("restoreCapabilities preserves e.code — retired manifest in a locked path
   const env = JSON.parse(r.stdout);
   assert.equal(env.ok, false);
   assert.equal(env.error.code, "retired-capability", `expected typed retirement code, got ${env.error.code}: ${env.error.message}`);
+  rmSync(base, { recursive: true, force: true });
+});
+
+// ---------- maintainer 19fbc86 ruling: included optional/install-script/native-binary rejection ----------
+
+test("included optional deps and post-materialization .node binaries are rejected (maintainer 19fbc86)", () => {
+  const base = temp();
+  const s = scope(base);
+  const integ = "sha512-AAA";
+  // included optionalDependency variance rejected at preflight
+  const opt = pkgSource(join(base, "opt"), { package: "op.p" });
+  write(join(opt, "package.json"), JSON.stringify({ name: "op-p", version: "1.0.0", optionalDependencies: { maybe: "1.0.0" } }));
+  write(join(opt, "package-lock.json"), JSON.stringify({ name: "op-p", version: "1.0.0", lockfileVersion: 3, requires: true, packages: { "": { name: "op-p", version: "1.0.0", optionalDependencies: { maybe: "1.0.0" } }, "node_modules/maybe": { version: "1.0.0", resolved: "https://x/m.tgz", integrity: integ, optional: true } } }));
+  assert.throws(() => acquirePackage(s, opt), /optional dependency/);
+  // a .node binary landing in the MATERIALIZED tree is rejected post-npm-ci
+  const nb = pkgSource(join(base, "nb"), { package: "nb.p" });
+  write(join(nb, "vendor/dep/package.json"), JSON.stringify({ name: "dep", version: "1.0.0" }));
+  write(join(nb, "vendor/dep/prebuilt.node"), "\x00fake-native\x00");
+  write(join(nb, "package.json"), JSON.stringify({ name: "nb-p", version: "1.0.0", dependencies: { dep: "file:vendor/dep" } }));
+  write(join(nb, "package-lock.json"), JSON.stringify({ name: "nb-p", version: "1.0.0", lockfileVersion: 3, requires: true, packages: { "": { name: "nb-p", version: "1.0.0", dependencies: { dep: "file:vendor/dep" } }, "node_modules/dep": { resolved: "vendor/dep", link: true }, "vendor/dep": { version: "1.0.0" } } }));
+  assert.throws(() => acquirePackage(scope(base, "s2"), nb), (e) => /native binary/.test(e.message) && /prebuilt\.node/.test(e.message));
+  assert.ok(!existsSync(join(installedPackagesDir(scope(base, "s2")), "nb.p")), "rollback: nothing installed");
   rmSync(base, { recursive: true, force: true });
 });
