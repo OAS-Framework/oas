@@ -482,9 +482,11 @@ test("nested descendants do not retry an ancestor's FAILED restore: acquisition 
   const src = join(base, "src");
   write(join(src, "oas.json"), JSON.stringify({ capability: "acme.cap", version: "1.0.0", description: "x", compatibility: { oas: ">=0.6.2" } }));
   const bin = join(base, "bin"); mkdirSync(bin, { recursive: true });
-  write(join(bin, "cp"), `#!/bin/sh\necho "cp $@" >> ${join(base, "cp-log.txt")}\nexec /bin/cp "$@"\n`);
+  // Log path travels via env var and a quoted redirect — robust against TMPDIRs
+  // containing spaces or shell metacharacters.
+  write(join(bin, "cp"), `#!/bin/sh\necho "cp $@" >> "$CP_LOG"\nexec /bin/cp "$@"\n`);
   chmodSync(join(bin, "cp"), 0o755);
-  const env = { ...process.env, PATH: `${bin}:${process.env.PATH}` };
+  const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, CP_LOG: join(base, "cp-log.txt") };
 
   const ws = join(base, "ws");
   write(join(ws, "oas-config.yaml"), "name: ws\nteam:\n  name: t\n");
