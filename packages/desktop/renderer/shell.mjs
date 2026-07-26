@@ -24,7 +24,7 @@ import { createViewLifecycle } from "./view-lifecycle.mjs";
 import { reserveKey, whenKeyFree } from "./tab-keys.mjs";
 import { createTerminalTab, terminalOptions } from "./terminal-tab.mjs";
 import { createTabChrome, tabKeyAction, focusAfterLastTab } from "./tab-a11y.mjs";
-import { createIntentGate, prepareOwnedOpen } from "./open-intent.mjs";
+import { createIntentGate, prepareOwnedOpen, runOpenFlow } from "./open-intent.mjs";
 import { createWorkspaceSwitcher } from "./workspace-switcher.mjs";
 import { NAV, stageSidebarMode, loadStageView } from "./shell-nav.mjs";
 import {
@@ -51,7 +51,7 @@ async function api(pathname, opts) {
 const ctx = {
   api,
   openFile: (path) => openViewTab("markdown", `≡ ${String(path).split("/").pop()}`, { path }, `file:${path}`),
-  openTerminal: (instance) => openTerminalTab(instance),
+  openTerminal: (instance, opts) => openTerminalTab(instance, opts),
   openBrain: (agent) => openBrainTab(agent),
   // CLI degradation affordances (cli-status.mjs feature-detects both):
   // native binary picker (privileged; main persists the choice) and external
@@ -661,12 +661,25 @@ async function openViewTab(name, title, extra = {}, key = `view:${name}`,
 const pendingTerms = new Set(); // keys with a tab CREATION in flight (post-resolution — dedup for concurrent opens of one resolved identity)
 /** ref: either a bare instance name (views, palette — resolved only when
  * unambiguous) or { instance, home?, agentsRoot? } (sidebar rows — exact).
+ * opts.quiet (post-spawn auto-open): failures report via console.warn
+ * instead of a blocking alert() — an automated handoff must never park a
+ * modal dialog over the app; the user recovers from the sidebar roster.
  * ORDER MATTERS (review 7d740f9): the reference is resolved against the
  * roster FIRST and the dedup key derives from the RESOLVED instance, so a
  * bare-name open and a sidebar open of the same identity share one tab —
  * and an existing tab can never be activated for a name that has since
  * become ambiguous (resolution refuses before dedup can activate). */
-async function openTerminalTab(ref) {
+async function openTerminalTab(ref, { quiet = false } = {}) {
+  const notify = quiet ? (msg) => console.warn(`[terminal open] ${msg}`) : (msg) => alert(msg);
+  // Quiet opens must NEVER reject either (review ff70e1c nit): the refusal
+  // messages route through notify, but transport failures (the panel fetch,
+  // the tab mount) would still escape as an unhandled rejection from an
+  // automated caller that does not await. runOpenFlow catches every quiet
+  // rejection into notify; interactive opens keep throwing.
+  return runOpenFlow(() => openTerminalTabFlow(ref, notify), { quiet, notify });
+}
+
+async function openTerminalTabFlow(ref, notify) {
   // A sidebar-tree selection opens its terminal directly — the persistent
   // sidebar roster IS the instances surface (there is no Instances stage;
   // scope correction of PR #29).
@@ -693,7 +706,7 @@ async function openTerminalTab(ref) {
   // first same-named match could be another agents root's tmux session.
   const r = resolveTerminalOpen(panel.instances, ref, ws);
   if (r.error) {
-    return alert(r.error === "ambiguous"
+    return notify(r.error === "ambiguous"
       ? `several instances are named "${r.name}" — open it from the sidebar tree, which addresses the exact one`
       : `unknown instance "${r.name}"`);
   }
@@ -706,19 +719,19 @@ async function openTerminalTab(ref) {
   if (pendingTerms.has(key)) return; // an open for this key is already in flight
   pendingTerms.add(key);
   try {
-    await openTerminalTabInner(inst, ws, key, owns);
+    await openTerminalTabInner(inst, ws, key, owns, notify);
   } finally {
     pendingTerms.delete(key);
   }
 }
 
-async function openTerminalTabInner(inst, ws, key, owns) {
+async function openTerminalTabInner(inst, ws, key, owns, notify = (msg) => alert(msg)) {
   // inst is the RESOLVED roster instance (openTerminalTab resolves + keys
   // before dedup; review 7d740f9). Re-check ownership here — whenKeyFree
   // may have waited across a workspace switch.
   if (!owns()) return;
   const name = inst.instance;
-  if (!inst.running || !inst.tmux?.session) return alert(`"${name}" has no live tmux session`);
+  if (!inst.running || !inst.tmux?.session) return notify(`"${name}" has no live tmux session`);
 
   const wrap = document.createElement("div");
   wrap.className = "term-wrap";
