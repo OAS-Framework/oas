@@ -434,13 +434,76 @@ test("reconciliation fails clearly when a v2 package lock has no installed artif
   } } }, null, 2));
   const r = cli(["install", "--no-requirements", "--dir", ws], { cwd: ws });
   assert.equal(r.status, 1, `missing package artifact must fail reconciliation:\n${r.stdout}`);
-  assert.match(r.stdout, /FAILED\s+package example\.engineering\s+not installed/);
+  assert.match(r.stdout, /FAILED\s+package example\.engineering\s+locked package is not installed/);
   assert.match(r.stdout, /Failures by scope:/);
   // with the store present, the same lock reports ok and exits 0
   installFixturePackage(ws, pkg);
   const r2 = cli(["install", "--no-requirements", "--dir", ws], { cwd: ws });
   assert.equal(r2.status, 0, `${r2.stdout}\n${r2.stderr}`);
   assert.match(r2.stdout, /ok\s+package example\.engineering/);
+});
+
+test("non-team bare install also verifies v2 package locks (chain path, no boundary)", () => {
+  const base = temp();
+  const pkg = fixturePackage(join(base, "pkg"));
+  const ws = join(base, "ws");
+  write(join(ws, "oas-config.yaml"), "name: ws\n"); // NO team:
+  write(join(ws, "oas-lock.json"), JSON.stringify({ lockfileVersion: 2, packages: { "example.engineering": {
+    source: `path:${pkg}`, version: "1.0.0", commit: "local", integrity: `sha256-${"0".repeat(64)}`,
+    capabilities: ["example.review", "example.delivery"], dependencies: [], trustedCapabilities: [],
+  } } }, null, 2));
+  const r = cli(["install", "--no-requirements", "--dir", ws], { cwd: ws });
+  assert.equal(r.status, 1, `non-team scope with a missing locked package must fail:\n${r.stdout}`);
+  assert.match(r.stdout, /FAILED\s+package example\.engineering/);
+  assert.doesNotMatch(r.stdout, /Nothing to restore/);
+  // ancestor package locks are checked at a team boundary too
+  const outer = join(base, "outer");
+  const inner = join(outer, "team");
+  write(join(outer, "oas-lock.json"), JSON.stringify({ lockfileVersion: 2, packages: { "example.engineering": {
+    source: `path:${pkg}`, version: "1.0.0", commit: "local", integrity: `sha256-${"0".repeat(64)}`,
+    capabilities: ["example.review"], dependencies: [], trustedCapabilities: [],
+  } } }, null, 2));
+  write(join(inner, "oas-config.yaml"), "name: team\nteam:\n  name: t\n");
+  const r2 = cli(["install", "--no-requirements", "--dir", inner], { cwd: inner });
+  assert.equal(r2.status, 1, `ancestor package lock must be checked at a team boundary:\n${r2.stdout}`);
+  assert.match(r2.stdout, /FAILED\s+package example\.engineering/);
+  // with the artifact installed, everything is ok again
+  installFixturePackage(ws, pkg);
+  const r3 = cli(["install", "--no-requirements", "--dir", ws], { cwd: ws });
+  assert.equal(r3.status, 0, `${r3.stdout}\n${r3.stderr}`);
+  assert.match(r3.stdout, /ok\s+package example\.engineering/);
+});
+
+test("nested descendants do not retry an ancestor's FAILED restore: acquisition attempts counted via a recording cp shim", () => {
+  const base = temp();
+  // A restorable path source — but locked with a WRONG integrity, so every
+  // restore attempt copies (cp), fails integrity verification, and removes the
+  // artifact again. Each retry is one observable cp call.
+  const src = join(base, "src");
+  write(join(src, "oas.json"), JSON.stringify({ capability: "acme.cap", version: "1.0.0", description: "x", compatibility: { oas: ">=0.6.2" } }));
+  const bin = join(base, "bin"); mkdirSync(bin, { recursive: true });
+  write(join(bin, "cp"), `#!/bin/sh\necho "cp $@" >> ${join(base, "cp-log.txt")}\nexec /bin/cp "$@"\n`);
+  chmodSync(join(bin, "cp"), 0o755);
+  const env = { ...process.env, PATH: `${bin}:${process.env.PATH}` };
+
+  const ws = join(base, "ws");
+  write(join(ws, "oas-config.yaml"), "name: ws\nteam:\n  name: t\n");
+  // The failing lock lives at an intermediate discovered scope with NESTED
+  // descendants below it — the pre-dedupe implementation re-walked (and
+  // re-attempted) this level once per nested descendant, hiding the retries
+  // behind its report filter.
+  const mid = join(ws, "member");
+  write(join(mid, "oas-config.yaml"), "name: member\n");
+  write(join(mid, "oas-lock.json"), JSON.stringify({ lockfileVersion: 1, capabilities: { "acme.cap": { source: `path:${src}`, version: "1.0.0", integrity: `sha256-${"0".repeat(64)}` } } }));
+  write(join(mid, "nested-a", "oas-config.yaml"), "name: a\n");
+  write(join(mid, "nested-b", "oas-config.yaml"), "name: b\n");
+
+  writeFileSync(join(base, "cp-log.txt"), "");
+  const r = cli(["install", "--no-requirements", "--dir", ws], { cwd: ws, env });
+  assert.equal(r.status, 1, `integrity-drifted restore must fail:\n${r.stdout}`);
+  const attempts = readFileSync(join(base, "cp-log.txt"), "utf8").split("\n").filter((l) => l.includes(src)).length;
+  assert.equal(attempts, 1, `the member lock must be attempted exactly once despite nested descendants:\n${r.stdout}\ncp log:\n${readFileSync(join(base, "cp-log.txt"), "utf8")}`);
+  assert.equal((r.stdout.match(/FAILED\s+acme\.cap/g) || []).length, 1, `one visible FAILED line, no hidden retries:\n${r.stdout}`);
 });
 
 test("workspace reconciliation validates config-referenced installed capabilities against visible locked packages", () => {

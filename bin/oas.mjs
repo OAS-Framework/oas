@@ -444,18 +444,44 @@ function install() {
   else if (r.manifest.commands || r.manifest.hooks) console.log(`Executable surface is blocked until: oas trust ${r.manifest.capability} --dir ${shortPath(dir)}`);
 }
 
-/** Bare `oas install`: restore every locked-but-missing capability in the config chain. */
+/** Lock-file levels from dir upward (closest last — outermost first), like restoreCapabilities' walk. */
+function lockLevelsUp(dir) {
+  const levels = [];
+  for (let d = resolve(dir); ; d = dirname(d)) {
+    if (existsSync(join(d, OAS_LOCK_FILE))) levels.push(d);
+    if (dirname(d) === d) break;
+  }
+  return levels.reverse();
+}
+
+/** Check one level's v2 package locks against the installed package store.
+ * Phase 1: the engine's restorePackages is not merged yet — a locked package
+ * whose installed artifact is present reports ok; a missing artifact is a
+ * clear FAILURE, never silent success. Returns report items. */
+function packageLockReport(level) {
+  const out = [];
+  for (const [pkgId, lock] of Object.entries(readPackageLocksAt(level))) {
+    const installed = installedPackageDir(lock, pkgId);
+    if (installed) out.push({ id: pkgId, level, status: "present", dir: installed, package: true });
+    else out.push({ id: pkgId, level, status: "failed", package: true, reason: "locked package is not installed and package restore (engine restorePackages) is not available yet — reacquire it explicitly" });
+  }
+  return out;
+}
+
+/** Bare `oas install`: restore every locked-but-missing capability in the config chain
+ * and verify every v2 package lock in the chain against the installed store. */
 function restore(dir) {
-  const report = restoreCapabilities(dir);
+  const report = [...restoreCapabilities(dir), ...lockLevelsUp(dir).flatMap(packageLockReport)];
   if (!report.length) { console.log("Nothing to restore — no locked capabilities in the config chain."); return; }
   let failed = 0;
   for (const r of report) {
-    if (r.status === "present") console.log(`ok        ${r.id}  (${shortPath(r.dir)})`);
-    else if (r.status === "restored") console.log(`restored  ${r.id} → ${shortPath(r.dir)}  (${r.integrity})`);
-    else if (r.status === "retired") console.log(`RETIRED   ${r.id}  ${r.reason}`);
-    else { failed++; console.log(`FAILED    ${r.id}  ${r.reason}`); }
+    const what = r.package ? `package ${r.id}` : r.id;
+    if (r.status === "present") console.log(`ok        ${what}  (${shortPath(r.dir)})`);
+    else if (r.status === "restored") console.log(`restored  ${what} → ${shortPath(r.dir)}  (${r.integrity})`);
+    else if (r.status === "retired") console.log(`RETIRED   ${what}  ${r.reason}`);
+    else { failed++; console.log(`FAILED    ${what}  ${r.reason}`); }
   }
-  if (failed) die(`${failed} capabilit${failed > 1 ? "ies" : "y"} could not be restored`);
+  if (failed) die(`${failed} artifact${failed > 1 ? "s" : ""} could not be restored`);
 }
 
 /** Bare `oas install` at a team boundary: reconcile the whole workspace — restore the
@@ -483,6 +509,7 @@ function reconcile(dir) {
   const failures = [];
   const reported = [];
   const restoredLevels = new Set(); // each lock level's graph restores exactly once
+  const packageCheckedLevels = new Set(); // each level's package locks verified exactly once
   for (const scope of scopes) {
     // Boundary: full ancestor chain (current-chain semantics). Descendants: their
     // own level only — every level between boundary and descendant is either the
@@ -491,28 +518,21 @@ function reconcile(dir) {
     const chainLevels = scope === boundary ? undefined : [scope];
     const report = restoreCapabilities(scope, chainLevels ? { levels: chainLevels.filter((l) => !restoredLevels.has(resolve(l))) } : undefined)
       .filter((r) => !restoredLevels.has(resolve(r.level)));
+    // v2 package locks: every lock level this scope covers (the boundary covers
+    // its whole ancestor chain), each verified exactly once.
+    const pkgLevels = (scope === boundary ? lockLevelsUp(boundary) : [scope]).filter((l) => !packageCheckedLevels.has(resolve(l)));
+    for (const l of pkgLevels) { packageCheckedLevels.add(resolve(l)); report.push(...packageLockReport(l)); }
     for (const r of report) {
       reported.push({ scope, ...r });
-      if (r.status === "present") console.log(`ok        ${r.id}  [${shortPath(r.level)}]`);
-      else if (r.status === "restored") console.log(`restored  ${r.id} → ${shortPath(r.dir)}  [${shortPath(r.level)}]`);
-      else if (r.status === "retired") console.log(`RETIRED   ${r.id}  ${r.reason}  [${shortPath(r.level)}]`);
-      else { failures.push({ scope: r.level, id: r.id, reason: r.reason }); console.log(`FAILED    ${r.id}  ${r.reason}  [${shortPath(r.level)}]`); }
+      const what = r.package ? `package ${r.id}` : r.id;
+      if (r.status === "present") console.log(`ok        ${what}  [${shortPath(r.level)}]`);
+      else if (r.status === "restored") console.log(`restored  ${what} → ${shortPath(r.dir)}  [${shortPath(r.level)}]`);
+      else if (r.status === "retired") console.log(`RETIRED   ${what}  ${r.reason}  [${shortPath(r.level)}]`);
+      else { failures.push({ scope: r.level, id: what, reason: r.reason }); console.log(`FAILED    ${what}  ${r.reason}  [${shortPath(r.level)}]`); }
     }
     if (scope === boundary) for (const cfg of configChain(boundary)) restoredLevels.add(resolve(cfg._level));
     for (const r of report) restoredLevels.add(resolve(r.level));
     restoredLevels.add(resolve(scope));
-    // v2 package locks: the engine's restorePackages is not merged yet (phase 1).
-    // A locked package whose installed artifact is present reports ok; a missing
-    // artifact is a clear FAILURE, never silent success.
-    for (const [pkgId, lock] of Object.entries(readPackageLocksAt(scope))) {
-      const installed = installedPackageDir(lock, pkgId);
-      reported.push({ scope, id: pkgId, status: installed ? "present" : "failed" });
-      if (installed) console.log(`ok        package ${pkgId}  (${shortPath(installed)})  [${shortPath(scope)}]`);
-      else {
-        failures.push({ scope, id: pkgId, reason: "locked package is not installed and package restore (engine restorePackages) is not available yet — reacquire it explicitly" });
-        console.log(`FAILED    package ${pkgId}  not installed (engine restore pending)  [${shortPath(scope)}]`);
-      }
-    }
     // Validate: every config-referenced installed capability supplied by a visible locked package/capability lock.
     if (existsSync(join(scope, "oas-config.yaml"))) {
       try {
