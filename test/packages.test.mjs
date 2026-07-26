@@ -1378,7 +1378,10 @@ test("migration rollback removes the FAILING conversion's packages too (reviewer
   const s = scope(base);
   const good = pkgSource(join(base, "good"), { package: "ok.cap" }, { "cap": { capability: "ok.cap" } });
   gitify(good);
-  const wrong = pkgSource(join(base, "wrong"), { package: "bad.cap" }, { "cap": { capability: "something.else" } });
+  // the FAILING conversion carries a DEPENDENCY — rollback must remove BOTH
+  const wrongDep = pkgSource(join(base, "wrong-dep"), { package: "bad.dep" });
+  const wrongDepCommit = gitify(wrongDep);
+  const wrong = pkgSource(join(base, "wrong"), { package: "bad.cap", dependencies: [`file://${wrongDep}@${wrongDepCommit}`] }, { "cap": { capability: "something.else" } });
   gitify(wrong);
   writeCapabilityLock(s, "ok.cap", { source: "marketplace:ok.cap@1.0.0", version: "1.0.0", integrity: `sha256-${"a".repeat(64)}` });
   writeCapabilityLock(s, "bad.cap", { source: "marketplace:bad.cap@1.0.0", version: "1.0.0", integrity: `sha256-${"b".repeat(64)}` });
@@ -1388,6 +1391,7 @@ test("migration rollback removes the FAILING conversion's packages too (reviewer
   assert.equal(readFileSync(join(s, OAS_LOCK_FILE), "utf8"), original);
   assert.ok(!existsSync(join(installedPackagesDir(s), "ok.cap")), "earlier conversion removed");
   assert.ok(!existsSync(join(installedPackagesDir(s), "bad.cap")), "FAILING conversion's package removed too");
+  assert.ok(!existsSync(join(installedPackagesDir(s), "bad.dep")), "FAILING conversion's DEPENDENCY removed too");
   rmSync(base, { recursive: true, force: true });
 });
 
@@ -1411,6 +1415,12 @@ test("refused legacy install at a v2 scope leaves lock AND store unchanged (revi
   const r2 = cli(s, "install", legacy, "--dir", s);
   assert.notEqual(r2.status, 0);
   assert.ok(!r2.stdout.includes("Already acquired"), "retry is a clean refusal, not already-acquired");
+  // init's marketplace acquisition path compensates the same way: the store
+  // stays free of stranded artifacts when its lock write is refused.
+  const r3 = cli(s, "init", "--dir", s, "--knowledge", "oas.okf");
+  assert.notEqual(r3.status, 0, "init acquisition refused at the v2 scope");
+  assert.ok(!existsSync(join(capStore, "oas-okf")), "init leaves no stranded artifact");
+  assert.equal(readFileSync(join(s, OAS_LOCK_FILE), "utf8"), lockBefore, "init leaves the lock unchanged");
   rmSync(base, { recursive: true, force: true });
 });
 
@@ -1427,7 +1437,9 @@ test("residue collision blocks unrelated acquires when a RETAINED locked package
   writeFileSync(lockFile, JSON.stringify(parsed, null, 2));
   // an UNRELATED acquire must now fail with both provenances, not succeed past the dual path
   const other = pkgSource(join(base, "other"), { package: "other.p" }, { "cap": { capability: "other.cap" } });
-  assert.throws(() => acquirePackage(s, other), (e) => e.code === "duplicate-capability-id" && /pre\.p/.test(e.message) && e.provenance.some((x) => String(x).startsWith("residue:")));
+  assert.throws(() => acquirePackage(s, other), (e) => e.code === "duplicate-capability-id"
+    && e.provenance.some((x) => String(x).startsWith("residue:"))
+    && e.provenance.includes("pre.p"));
   rmSync(base, { recursive: true, force: true });
 });
 
