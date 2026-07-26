@@ -3,7 +3,7 @@ type: Reference
 title: Delivery log — every PR that reached (or was returned from) the main gate
 description: Append-only record kept by per-PR maintainer instances — PR number, scope, verdict per gate, merge or return, and anything the review taught about the codebase. The stewardship counterpart of git history — the WHY next to the what.
 tags: [stewardship, deliveries, append-only]
-timestamp: 2026-07-25
+timestamp: 2026-07-26
 ---
 
 # Delivery log
@@ -23,6 +23,11 @@ Entries whose lessons grow beyond a line get promoted to lessons/ or
 decisions/ and referenced from here.
 
 ---
+
+## PR #38 (round 2) — spawn-time agent relations across kernel, CLI, and Desktop (2026-07-26)
+- verdict: RETURNED at exact head `df2e575` for mergeability only. Round-1 knowledge fixes PASS: cli-dev strict OKF 34/0/0, Desktop strict OKF 99/0/0, final relation matrix/accepted limitations are coherent, and stale maintainer recipe, pending clarifier, removed-roster, and future-tense projection claims are corrected. PR #35/#36 integration and the three identity/keybinding interaction fixes PASS targeted review and 54/54 tests. Full scratch gate passes 507/508 with one expected environment skip, check/check:pi/validate/all-eight-bundle strict OKF/pack/smoke/diff-check; exact-head PR CI and all three installer checks are green. Product direction, correctness, and security PASS. Mergeability FAIL only because the maintainer's already-running round-1 harvester completed after handback and advanced main to `d60ee05`; that semantic PR-review lesson is not in `df2e575`, so current main is no longer an ancestor.
+- owner: feature/agent-relations developers · coordinator: dev-coordinator-parallel
+- taught us: this is the existing settled-handback rule in action — a reviewer-driven harvest launched before handback can finish after it and invalidate otherwise exact, green ancestry. Do not launch another harvest before the next handback.
 
 ## PR #38 (round 1) — spawn-time agent relations across kernel, CLI, and Desktop (2026-07-26)
 - verdict: RETURNED at exact head `e3f7401`. Product direction PASS: explicit sparse live lineage is the right layer, `RELATIONS_MIN=0.18.6` matches the required release, and the human-declined journal/lease subsystem findings are accepted non-blocking limitations. Executable correctness and security PASS: scratch `npm test` 449/450 with one expected environment skip, check/check:pi/validate/pack/smoke and diff-check passed. Knowledge correctness FAIL: cli-dev strict OKF reports three unreachable new concepts, and changed concepts retain stale transitional claims about the maintainer spawn recipe, a resolved “pending clarifier,” removed Instances-roster language, and already-landed forwarding. Mergeability FAIL: GitHub reports CONFLICTING/DIRTY; merge-tree conflicts are the Desktop knowledge log, shell, hierarchy, and spawn view, and the branch lacks current PR #35/#36 main.
