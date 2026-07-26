@@ -1,6 +1,7 @@
 # Knowledge Log
 
 ## 2026-07-26
+* **Creation**: added [Desktop spawn-modal race — roster appearance ≠ terminal readiness](/lessons/desktop-spawn-modal-tmux-race.md) from `spawn-modal-tmux-race-diagnosis.md`.
 * **Creation**: added [`--relation parent` re-points only the anchor's lineage](/lessons/relation-parent-repoints-only-anchor.md) from `relation-parent-repoints-only-anchor.md`.
 * **Creation**: added [Scope a coordinator feature to one developer when ownership scan collapses](/lessons/scope-feature-before-spawning-developers.md) from `single-dev-scoping-split-panels.md`.
 * **Creation**: added [Merged-state reviewers catch stale-base drift against moving main](/lessons/stale-base-drift-merged-review.md) from `stale-base-drift-merged-review.md`.
