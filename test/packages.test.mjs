@@ -1872,3 +1872,42 @@ test("re-acquisition cannot re-legitimize same-bytes drift against an existing l
   assert.deepEqual(readPackageLocks(s).packages["dr.p"].trustedCapabilities, [], "approvals reset by the explicit update");
   rmSync(base, { recursive: true, force: true });
 });
+
+// ---------- reviewer-176d339 findings ----------
+
+test("no coercion anywhere: non-string array items, array depsIntegrity, numeric package id all rejected (reviewer-176d339)", () => {
+  const sha = "a".repeat(40);
+  const integ = `sha256-${"0".repeat(64)}`;
+  const mk = (over) => ({ source: "git:https://h/x.git@v1", version: "1", commit: sha, integrity: integ, capabilities: ["x.c"], ...over });
+  // array depsIntegrity coerced through String() previously
+  assert.throws(() => validateLockEntry("p", mk({ depsIntegrity: [integ] }), {}, {}), (e) => e.code === "invalid-lock" && /depsIntegrity/.test(e.message));
+  // schema-invalid array MEMBERS
+  assert.throws(() => validateLockEntry("p", mk({ capabilities: [123] }), {}, {}), (e) => e.code === "invalid-lock" && /non-string/.test(e.message));
+  assert.throws(() => validateLockEntry("p", mk({ trustedCapabilities: [123], capabilities: ["x.c"] }), {}, {}), (e) => e.code === "invalid-lock");
+  assert.throws(() => validateLockEntry("p", mk({ dependencies: ["Not A Valid Id!"] }), { p: mk({}) }, {}), (e) => e.code === "invalid-lock" && /invalid package id/.test(e.message));
+  // numeric package id in the manifest
+  const base = temp();
+  const d = join(base, "n");
+  write(join(d, "oas-package.json"), JSON.stringify({ package: 123, version: "1.0.0", description: "d", compatibility: { oas: ">=0.1.0" } }));
+  assert.throws(() => loadPackageManifestAt(d), (e) => e.code === "invalid-package-manifest" && /string "package"/.test(e.message));
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("malformed residue CONTAINERS are typed invalid-lock in read and both doctor outputs (reviewer-176d339)", () => {
+  const base = temp();
+  for (const [label, container] of [["number", 1], ["null", null], ["array", []]]) {
+    const s = scope(base, `s-${label}`);
+    writeFileSync(join(s, OAS_LOCK_FILE), JSON.stringify({ lockfileVersion: 2, packages: {}, capabilities: container }));
+    // read raises typed
+    assert.throws(() => readPackageLocks(s), (e) => e.code === "invalid-lock" && /must be an object map/.test(e.message), label);
+    // doctor human diagnoses (does not crash, does not stay silent)
+    const rh = cli(s, "doctor", s);
+    assert.equal(rh.status, 0, rh.stderr);
+    assert.match(rh.stdout, /invalid-lock/, label);
+    // doctor JSON carries the lockError with provenance instead of empty residue + null
+    const dj = JSON.parse(cli(s, "doctor", s, "--json").stdout);
+    const lockErr = dj.lockError || dj.error;
+    assert.ok(lockErr && lockErr.code === "invalid-lock", `${label}: ${JSON.stringify(lockErr)}`);
+  }
+  rmSync(base, { recursive: true, force: true });
+});
