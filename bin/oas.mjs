@@ -24,7 +24,7 @@ import {
   acquireCapability, restoreCapabilities, marketplaceCapabilities,
   capabilityManifests, capabilityManifest, capabilityMissingRequires, capabilityIntegrity, capabilityTrust, capabilityExecutablePath,
   readCapabilityLocks, writeCapabilityLock,
-  parsePackageSource, acquirePackage, restorePackages, listInstalledPackages, readPackageLocks,
+  parsePackageSource, acquirePackage, restorePackages, listInstalledPackages, readPackageLocks, residueEntryViolation,
   approveCapability, updatePackage, removePackage, migrateLegacyLock, applyLegacyLockMigration,
   packageIntegrity, packageDepsIntegrity, installedPackagesDir,
   resolveOasConfig, resolveWorkMode, composeInstanceAgentsMd, parseYamlNested, packagedInject, teamAgentRoots,
@@ -131,7 +131,12 @@ function doctorJson(dir) {
       // Doctor JSON catches the typed fail-closed error and diagnoses (finding 3).
       try {
         return { migrationResidue: readPackageLocks(ctx).legacy.filter((l) => l.lockfileVersion === 2).flatMap((l) =>
-          Object.entries(l.capabilities).map(([id, lock]) => ({ id, file: l.file, level: l.level, source: lock.source || null, status: "pending-migration", action: `oas migrate --dir ${l.level}` }))), lockError: null };
+          Object.entries(l.capabilities).map(([id, lock]) => {
+            const violation = residueEntryViolation(lock);
+            return violation
+              ? { id, file: l.file, level: l.level, source: lock?.source || null, status: "invalid-lock", violation, action: `fix or remove the entry in ${l.file} (never auto-repaired)` }
+              : { id, file: l.file, level: l.level, source: lock.source, status: "pending-migration", action: `oas migrate --dir ${l.level}` };
+          })), lockError: null };
       } catch (e) {
         return { migrationResidue: [], lockError: { code: e.code || "invalid-lock", message: e.message, provenance: e.provenance || null } };
       }
@@ -262,8 +267,8 @@ function doctor(dir) {
     if (l.lockfileVersion !== 2) console.log(`  WARNING: ${shortPath(l.file)} is lockfileVersion ${l.lockfileVersion ?? 1} — \`oas migrate\` maps its capability locks to packages`);
     else if (Object.keys(l.capabilities).length) {
       for (const [rid, rlock] of Object.entries(l.capabilities)) {
-        const malformed = !rlock || typeof rlock !== "object" || !rlock.source || !rlock.integrity;
-        if (malformed) console.log(`  ERROR: residue entry ${rid} in ${shortPath(l.file)} is malformed (missing source/integrity) — never auto-repaired; fix or remove the entry [invalid-lock]`);
+        const violation = residueEntryViolation(rlock);
+        if (violation) console.log(`  ERROR: residue entry ${rid} in ${shortPath(l.file)} is malformed (${violation}) — never auto-repaired; fix or remove the entry [invalid-lock]`);
         else console.log(`  NOTE: ${rid} in ${shortPath(l.file)} is legacy migration residue (${rlock.source}) — pending migration: re-run \`oas migrate --dir ${shortPath(l.level)}\` when its official package publishes, or remove the entry if the capability is abandoned`);
       }
     }

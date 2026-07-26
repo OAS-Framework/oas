@@ -137,7 +137,7 @@ test("writePackageLock/readPackageLocks: v2 round-trip, closest scope wins, refu
   assert.equal(readPackageLocks(outer).packages["a.pkg"].version, "1.0.0");
   // v1 file refuses package writes with legacy-lock
   const v1 = scope(base, "v1scope");
-  writeCapabilityLock(v1, "old.cap", { source: "marketplace:old.cap@1.0.0", version: "1.0.0", integrity: "sha256-x" });
+  writeCapabilityLock(v1, "old.cap", { source: "marketplace:old.cap@1.0.0", version: "1.0.0", integrity: `sha256-${"c".repeat(64)}` });
   assert.throws(() => writePackageLock(v1, "a.pkg", { source: "path:/z", version: "1", commit: "local", integrity: `sha256-${"2".repeat(64)}`, capabilities: [] }), (e) => e.code === "legacy-lock");
   // legacy locks surface separately
   assert.equal(readPackageLocks(v1).legacy.length, 1);
@@ -245,7 +245,7 @@ test("acquirePackage: catalog resolver boundary — identity/discovery only, inj
 test("acquirePackage: legacy v1 lock at the scope blocks package install with legacy-lock", () => {
   const base = temp();
   const s = scope(base);
-  writeCapabilityLock(s, "old.cap", { source: "marketplace:old.cap@1", version: "1", integrity: "sha256-x" });
+  writeCapabilityLock(s, "old.cap", { source: "marketplace:old.cap@1", version: "1", integrity: `sha256-${"c".repeat(64)}` });
   const p = pkgSource(join(base, "p"), { package: "n.p" });
   assert.throws(() => acquirePackage(s, p), (e) => e.code === "legacy-lock");
   rmSync(base, { recursive: true, force: true });
@@ -455,8 +455,8 @@ test("migrateLegacyLock + applyLegacyLockMigration: marketplace→catalog mappin
   gitify(official);
   const catalog = (id) => (id === "mig.cap" ? { url: official } : undefined);
   // v1 lock: one mappable marketplace entry, one unmappable
-  writeCapabilityLock(s, "mig.cap", { source: "marketplace:mig.cap@1.0.0", version: "1.0.0", integrity: "sha256-a", trustedExecutables: true });
-  writeCapabilityLock(s, "gone.cap", { source: "marketplace:gone.cap@1.0.0", version: "1.0.0", integrity: "sha256-b" });
+  writeCapabilityLock(s, "mig.cap", { source: "marketplace:mig.cap@1.0.0", version: "1.0.0", integrity: `sha256-${"a".repeat(64)}`, trustedExecutables: true });
+  writeCapabilityLock(s, "gone.cap", { source: "marketplace:gone.cap@1.0.0", version: "1.0.0", integrity: `sha256-${"b".repeat(64)}` });
   const { plan, warnings } = migrateLegacyLock(s, { catalog });
   assert.equal(plan.find((p) => p.capabilityId === "mig.cap").action, "acquire");
   assert.equal(plan.find((p) => p.capabilityId === "gone.cap").action, "manual");
@@ -479,8 +479,8 @@ test("migrateLegacyLock + applyLegacyLockMigration: marketplace→catalog mappin
 test("migrateLegacyLock: git and path v1 sources map to acquirable package specs only when they are packages", () => {
   const base = temp();
   const s = scope(base);
-  writeCapabilityLock(s, "g.cap", { source: "git:https://host/x.git", version: "1", commit: "abc", integrity: "sha256-x" });
-  writeCapabilityLock(s, "p.cap", { source: "path:/some/dir", version: "1", integrity: "sha256-y" });
+  writeCapabilityLock(s, "g.cap", { source: "git:https://host/x.git", version: "1", commit: "abc", integrity: `sha256-${"c".repeat(64)}` });
+  writeCapabilityLock(s, "p.cap", { source: "path:/some/dir", version: "1", integrity: `sha256-${"d".repeat(64)}` });
   const { plan } = migrateLegacyLock(s);
   assert.equal(plan.find((p) => p.capabilityId === "g.cap").package.spec, "https://host/x.git@abc");
   assert.equal(plan.find((p) => p.capabilityId === "p.cap").package.spec, "/some/dir");
@@ -583,7 +583,7 @@ test("CLI: trust <package> --all-capabilities prints the full executable-surface
 test("CLI: migrate --dry-run plans and migrate applies; update <package> shows diff and invalidates approvals", () => {
   const base = temp();
   const s = scope(base);
-  writeCapabilityLock(s, "x.cap", { source: "marketplace:x.cap@1.0.0", version: "1.0.0", integrity: "sha256-a" });
+  writeCapabilityLock(s, "x.cap", { source: "marketplace:x.cap@1.0.0", version: "1.0.0", integrity: `sha256-${"a".repeat(64)}` });
   let r = cli(s, "migrate", "--dry-run", "--dir", s);
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /x\.cap/);
@@ -626,7 +626,7 @@ test("CLI: doctor distinguishes package failures — missing locked package, int
   assert.match(r.stdout, /locked in .* but not installed/);
   // legacy lock warning
   const s2 = scope(base, "legacy");
-  writeCapabilityLock(s2, "old.cap", { source: "marketplace:old.cap@1", version: "1", integrity: "sha256-x" });
+  writeCapabilityLock(s2, "old.cap", { source: "marketplace:old.cap@1", version: "1", integrity: `sha256-${"c".repeat(64)}` });
   r = cli(s2, "doctor", s2);
   assert.match(r.stdout, /lockfileVersion 1 .*oas migrate/);
   rmSync(base, { recursive: true, force: true });
@@ -688,7 +688,7 @@ test("validateLockEntry: trust subset, dependency refs, source/commit pairing", 
   assert.throws(() => validateLockEntry("p", { ...ok, commit: "shorty" }, {}), (e) => e.code === "invalid-lock");
   assert.throws(() => validateLockEntry("p", { ...ok, source: "path:/x" }, {}), (e) => e.code === "invalid-lock"); // path needs commit "local"
   assert.equal(validateLockEntry("p", { ...ok, source: "path:/x", commit: "local" }, {}), true);
-  assert.throws(() => validateLockEntry("p", { ...ok, integrity: "sha256-xyz" }, {}), (e) => e.code === "invalid-lock");
+  assert.throws(() => validateLockEntry("p", { ...ok, integrity: "sha256-xyz" } /* malformed on purpose */, {}), (e) => e.code === "invalid-lock");
 });
 
 test("restore and trust reject semantically invalid v2 locks with invalid-lock", () => {
@@ -818,7 +818,7 @@ test("flat single-capability package: capabilities: [\".\"] — acquire/discover
 test("residue: later successful conversion — re-running migrate converts once the catalog can map", () => {
   const base = temp();
   const s = scope(base);
-  writeCapabilityLock(s, "late.cap", { source: "marketplace:late.cap@1.0.0", version: "1.0.0", integrity: "sha256-a" });
+  writeCapabilityLock(s, "late.cap", { source: "marketplace:late.cap@1.0.0", version: "1.0.0", integrity: `sha256-${"a".repeat(64)}` });
   // first migrate: not in catalog → residue
   let r = applyLegacyLockMigration(s, { catalog: () => undefined });
   assert.deepEqual(r.residue, ["late.cap"]);
@@ -840,7 +840,7 @@ test("residue: later successful conversion — re-running migrate converts once 
 test("residue: collision failure — installing a package exporting a residue capability ID errors with provenance", () => {
   const base = temp();
   const s = scope(base);
-  writeCapabilityLock(s, "col.cap", { source: "marketplace:col.cap@1.0.0", version: "1.0.0", integrity: "sha256-a" });
+  writeCapabilityLock(s, "col.cap", { source: "marketplace:col.cap@1.0.0", version: "1.0.0", integrity: `sha256-${"a".repeat(64)}` });
   applyLegacyLockMigration(s, { catalog: () => undefined }); // flips to v2 with residue
   const p = pkgSource(join(base, "p"), { package: "other.p" }, { "cap": { capability: "col.cap" } });
   assert.throws(() => acquirePackage(s, p), (e) => e.code === "duplicate-capability-id" && Array.isArray(e.provenance) && e.provenance.some((x) => String(x).startsWith("residue:")));
@@ -850,13 +850,13 @@ test("residue: collision failure — installing a package exporting a residue ca
 test("residue: v2 locks reject NEW legacy entries — only existing residue may be updated", () => {
   const base = temp();
   const s = scope(base);
-  writeCapabilityLock(s, "old.cap", { source: "marketplace:old.cap@1", version: "1", integrity: "sha256-a" });
+  writeCapabilityLock(s, "old.cap", { source: "marketplace:old.cap@1", version: "1", integrity: `sha256-${"a".repeat(64)}` });
   applyLegacyLockMigration(s, { catalog: () => undefined });
   // updating the existing residue entry is allowed (legacy restore/trust path)
-  writeCapabilityLock(s, "old.cap", { source: "marketplace:old.cap@1", version: "1", integrity: "sha256-a", trustedExecutables: true });
+  writeCapabilityLock(s, "old.cap", { source: "marketplace:old.cap@1", version: "1", integrity: `sha256-${"a".repeat(64)}`, trustedExecutables: true });
   assert.equal(JSON.parse(readFileSync(join(s, OAS_LOCK_FILE), "utf8")).lockfileVersion, 2);
   // synthesizing a NEW legacy entry in a v2 lock is refused
-  assert.throws(() => writeCapabilityLock(s, "new.cap", { source: "path:/x", version: "1", integrity: "sha256-b" }), (e) => e.code === "legacy-lock");
+  assert.throws(() => writeCapabilityLock(s, "new.cap", { source: "path:/x", version: "1", integrity: `sha256-${"b".repeat(64)}` }), (e) => e.code === "legacy-lock");
   rmSync(base, { recursive: true, force: true });
 });
 
@@ -868,8 +868,8 @@ test("residue: migration failure is atomic — original v1 lock restored, migrat
   gitify(good);
   const wrong = pkgSource(join(base, "wrong"), { package: "bad.cap" }, { "cap": { capability: "something.else" } });
   gitify(wrong);
-  writeCapabilityLock(s, "ok.cap", { source: "marketplace:ok.cap@1.0.0", version: "1.0.0", integrity: "sha256-a" });
-  writeCapabilityLock(s, "bad.cap", { source: "marketplace:bad.cap@1.0.0", version: "1.0.0", integrity: "sha256-b" });
+  writeCapabilityLock(s, "ok.cap", { source: "marketplace:ok.cap@1.0.0", version: "1.0.0", integrity: `sha256-${"a".repeat(64)}` });
+  writeCapabilityLock(s, "bad.cap", { source: "marketplace:bad.cap@1.0.0", version: "1.0.0", integrity: `sha256-${"b".repeat(64)}` });
   const original = readFileSync(join(s, OAS_LOCK_FILE), "utf8");
   const catalog = (id) => (id === "ok.cap" ? { url: good } : id === "bad.cap" ? { url: wrong } : undefined);
   assert.throws(() => applyLegacyLockMigration(s, { catalog }), (e) => /rolled back/.test(e.message));
@@ -881,7 +881,7 @@ test("residue: migration failure is atomic — original v1 lock restored, migrat
 test("residue: doctor --json lists each residue entry as pending-migration with a retry action", () => {
   const base = temp();
   const s = scope(base);
-  writeCapabilityLock(s, "res.cap", { source: "marketplace:res.cap@1.0.0", version: "1.0.0", integrity: "sha256-a" });
+  writeCapabilityLock(s, "res.cap", { source: "marketplace:res.cap@1.0.0", version: "1.0.0", integrity: `sha256-${"a".repeat(64)}` });
   applyLegacyLockMigration(s, { catalog: () => undefined });
   const r = cli(s, "doctor", s, "--json");
   const doc = JSON.parse(r.stdout);
@@ -1061,7 +1061,7 @@ test("invalid-lock: update/remove planning fail closed; doctor and list diagnose
 test("invalid-lock: malformed mixed-v2 residue is diagnosed, never repaired, never trusted", () => {
   const base = temp();
   const s = scope(base);
-  writeCapabilityLock(s, "mal.cap", { source: "marketplace:mal.cap@1", version: "1", integrity: "sha256-a" });
+  writeCapabilityLock(s, "mal.cap", { source: "marketplace:mal.cap@1", version: "1", integrity: `sha256-${"a".repeat(64)}` });
   applyLegacyLockMigration(s, { catalog: () => undefined });
   // corrupt the residue entry: strip source+integrity
   const lockFile = join(s, OAS_LOCK_FILE);
@@ -1333,8 +1333,8 @@ test("migration rollback removes the FAILING conversion's packages too (reviewer
   gitify(good);
   const wrong = pkgSource(join(base, "wrong"), { package: "bad.cap" }, { "cap": { capability: "something.else" } });
   gitify(wrong);
-  writeCapabilityLock(s, "ok.cap", { source: "marketplace:ok.cap@1.0.0", version: "1.0.0", integrity: "sha256-a" });
-  writeCapabilityLock(s, "bad.cap", { source: "marketplace:bad.cap@1.0.0", version: "1.0.0", integrity: "sha256-b" });
+  writeCapabilityLock(s, "ok.cap", { source: "marketplace:ok.cap@1.0.0", version: "1.0.0", integrity: `sha256-${"a".repeat(64)}` });
+  writeCapabilityLock(s, "bad.cap", { source: "marketplace:bad.cap@1.0.0", version: "1.0.0", integrity: `sha256-${"b".repeat(64)}` });
   const original = readFileSync(join(s, OAS_LOCK_FILE), "utf8");
   const catalog = (id) => (id === "ok.cap" ? { url: good } : id === "bad.cap" ? { url: wrong } : undefined);
   assert.throws(() => applyLegacyLockMigration(s, { catalog }), /rolled back/);
@@ -1376,7 +1376,7 @@ test("residue collision blocks unrelated acquires when a RETAINED locked package
   // simulate a pre-stricter-commit mixed lock: residue entry colliding with the locked package
   const lockFile = join(s, OAS_LOCK_FILE);
   const parsed = JSON.parse(readFileSync(lockFile, "utf8"));
-  parsed.capabilities = { "col.cap": { source: "marketplace:col.cap@1.0.0", version: "1.0.0", integrity: "sha256-a" } };
+  parsed.capabilities = { "col.cap": { source: "marketplace:col.cap@1.0.0", version: "1.0.0", integrity: `sha256-${"a".repeat(64)}` } };
   writeFileSync(lockFile, JSON.stringify(parsed, null, 2));
   // an UNRELATED acquire must now fail with both provenances, not succeed past the dual path
   const other = pkgSource(join(base, "other"), { package: "other.p" }, { "cap": { capability: "other.cap" } });
@@ -1458,5 +1458,78 @@ test("bulk trust --json prints the pre-approval surface on stderr, one object on
   assert.equal(env.ok, true);
   assert.match(r.stderr, /full executable surface/, "pre-approval summary on stderr in JSON mode");
   assert.match(r.stderr, /bt\.a: commands \[x\]/);
+  rmSync(base, { recursive: true, force: true });
+});
+
+// ---------- reviewer-fe8053d findings (blocker fixed in 4d1b826; live importants) ----------
+
+test("trust EXECUTION path rejects invalid lock graphs (self-dep) — regression for the fe8053d blocker fixed in 4d1b826", () => {
+  const base = temp();
+  const s = scope(base);
+  const src = pkgSource(join(base, "src"), { package: "a.p" }, { "cap": { capability: "ex.cap", commands: { r: { exec: "r.mjs" } } } });
+  write(join(src, "cap", "r.mjs"), "//\n");
+  acquirePackage(s, src);
+  approveCapability(s, "ex.cap");
+  // corrupt: self-dependency (the reviewer's exact repro)
+  const lockFile = join(s, OAS_LOCK_FILE);
+  const parsed = JSON.parse(readFileSync(lockFile, "utf8"));
+  parsed.packages["a.p"].dependencies = ["a.p"];
+  writeFileSync(lockFile, JSON.stringify(parsed, null, 2));
+  const t = capabilityTrust(s, "ex.cap");
+  assert.equal(t.trusted, false, "trust query fails closed on the invalid graph");
+  assert.match(t.reason, /self-dependency|invalid/);
+  // resolveCapabilities (the execution path) must not expose the hooks/commands
+  write(join(s, "oas-config.yaml"), "name: t\ncapabilities:\n  additive:\n    ex.cap:\n      from: installed\n      global: true\n");
+  assert.throws(() => resolveOasConfig(s), /not usable|invalid/);
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("updatePackage fails closed when ANY consumable lock entry is invalid (reviewer-fe8053d)", () => {
+  const base = temp();
+  const s = scope(base);
+  const dep = pkgSource(join(base, "dep"), { package: "b.p" }, { "cap": { capability: "b.cap" } });
+  const depCommit = gitify(dep);
+  const root = pkgSource(join(base, "root"), { package: "a2.p", dependencies: [`file://${dep}@${depCommit}`] });
+  gitify(root);
+  acquirePackage(s, `file://${root}`);
+  // corrupt the DEPENDENCY entry, then update the ROOT
+  const lockFile = join(s, OAS_LOCK_FILE);
+  const parsed = JSON.parse(readFileSync(lockFile, "utf8"));
+  parsed.packages["b.p"].trustedCapabilities = ["ghost"];
+  writeFileSync(lockFile, JSON.stringify(parsed, null, 2));
+  assert.throws(() => updatePackage(s, "a2.p"), (e) => e.code === "invalid-lock" && /b\.p/.test(e.message), "invalid dependency entry fails the update closure");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("schema/runtime parity: array/null compatibility, empty source (reviewer-fe8053d)", () => {
+  const base = temp();
+  const mk = (compat) => { const d = join(base, `m${Math.random().toString(36).slice(2)}`); write(join(d, "oas-package.json"), JSON.stringify({ package: "x.p", version: "1.0.0", description: "d", compatibility: compat })); return d; };
+  assert.throws(() => loadPackageManifestAt(mk({ oas: ["1.2.3"] })), (e) => e.code === "invalid-package-manifest", "array oas rejected, no coercion");
+  assert.throws(() => loadPackageManifestAt(mk(null)), (e) => e.code === "invalid-package-manifest", "null compatibility is invalid-package-manifest, not TypeError");
+  const sha = "a".repeat(40);
+  const integ = `sha256-${"0".repeat(64)}`;
+  assert.throws(() => validateLockEntry("p", { source: "path:", version: "1", commit: "local", integrity: integ, capabilities: [] }, {}, {}), (e) => e.code === "invalid-lock", "empty path source rejected");
+  assert.throws(() => validateLockEntry("p", { source: "git:", version: "1", commit: sha, integrity: integ, capabilities: [] }, {}, {}), (e) => e.code === "invalid-lock", "empty git url rejected");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("doctor --json diagnoses malformed residue with invalid-lock status; human/JSON agree (reviewer-fe8053d)", () => {
+  const base = temp();
+  const s = scope(base);
+  writeCapabilityLock(s, "ok.res", { source: "marketplace:ok.res@1.0.0", version: "1.0.0", integrity: `sha256-${"a".repeat(64)}` });
+  applyLegacyLockMigration(s, { catalog: () => undefined });
+  // corrupt: strip version (a field the OLD human check missed) + inject a second malformed entry
+  const lockFile = join(s, OAS_LOCK_FILE);
+  const parsed = JSON.parse(readFileSync(lockFile, "utf8"));
+  delete parsed.capabilities["ok.res"].version;
+  writeFileSync(lockFile, JSON.stringify(parsed, null, 2));
+  const rj = cli(s, "doctor", s, "--json");
+  const doc = JSON.parse(rj.stdout);
+  const entry = doc.migrationResidue.find((e) => e.id === "ok.res");
+  assert.equal(entry.status, "invalid-lock");
+  assert.match(entry.violation, /version/);
+  assert.match(entry.action, /fix or remove/);
+  const rh = cli(s, "doctor", s);
+  assert.match(rh.stdout, /residue entry ok\.res .* is malformed \(missing\/invalid version\)/);
   rmSync(base, { recursive: true, force: true });
 });
