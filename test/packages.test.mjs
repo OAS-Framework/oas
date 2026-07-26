@@ -2226,3 +2226,35 @@ test("human-mode bare restore exits nonzero for retired locks (reviewer-7b2cd36)
   assert.match(r.stderr, /could not be restored/);
   rmSync(base, { recursive: true, force: true });
 });
+
+// ---------- maintainer 2nd detector-round item: central parser on the writer (mail aba5e845) ----------
+
+test("writePackageLock routes through the central parser — all malformed roots/maps typed invalid-lock pre-mutation (maintainer)", () => {
+  const base = temp();
+  const sha = "a".repeat(40);
+  const integ = `sha256-${"0".repeat(64)}`;
+  const entry = { source: "git:https://h/x.git@v1", version: "1", commit: sha, integrity: integ, capabilities: [] };
+  const shapes = [["malformed", "{ nope"], ["null-root", "null"], ["scalar-root", "42"], ["array-root", "[]"],
+    ["bad-packages", JSON.stringify({ lockfileVersion: 2, packages: "x" })],
+    ["bad-residue", JSON.stringify({ lockfileVersion: 1, capabilities: [] })]];
+  for (const [label, body] of shapes) {
+    const s = scope(base, `s-${label}`);
+    writeFileSync(join(s, OAS_LOCK_FILE), body);
+    assert.throws(() => writePackageLock(s, "x.p", entry), (e) => e.code === "invalid-lock", `writePkg ${label}`);
+    assert.equal(readFileSync(join(s, OAS_LOCK_FILE), "utf8"), body, `${label}: file untouched pre-mutation`);
+    // migrate paths also typed (no raw SyntaxError/TypeError)
+    const r = cli(s, "migrate", "--dry-run", "--dir", s, "--json");
+    const env = JSON.parse(r.stdout);
+    assert.equal(env.ok, false, `migrate ${label}`);
+    assert.equal(env.error.code, "invalid-lock", `migrate ${label}`);
+  }
+  // writer preserves residue through a legitimate write on a mixed-v2 lock
+  const s2 = scope(base, "mixed");
+  writeCapabilityLock(s2, "res.cap", { source: "marketplace:res.cap@1", version: "1", integrity: `sha256-${"b".repeat(64)}` });
+  applyLegacyLockMigration(s2, { catalog: () => undefined });
+  writePackageLock(s2, "np.p", entry);
+  const parsed = JSON.parse(readFileSync(join(s2, OAS_LOCK_FILE), "utf8"));
+  assert.ok(parsed.packages["np.p"], "package written");
+  assert.ok(parsed.capabilities["res.cap"], "residue preserved byte-semantically through the central-parser writer");
+  rmSync(base, { recursive: true, force: true });
+});
