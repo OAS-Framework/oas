@@ -589,6 +589,59 @@ function updatePackageCmd(id) {
   if (r.invalidatedApprovals.length) console.log(`  APPROVALS INVALIDATED (integrity changed): ${r.invalidatedApprovals.join(", ")} — re-approve with \`oas trust\` after review.`);
 }
 
+// ---------- package-runtime API v1 (docs/design/package-runtime-api.md) ----------
+/** oas agent show <name> | oas agent upsert <name> --instructions-file <f> */
+function agentCmd() {
+  const bail = (code, msg) => (JSON_MODE ? jsonFail(code, msg) : die(msg));
+  const sub = args[1];
+  const name = args[2];
+  if (!sub || !["show", "upsert"].includes(sub) || !name || name.startsWith("--")) bail("E_USAGE", "usage: oas agent show <name> [--dir <d>] [--json] | oas agent upsert <name> --instructions-file <f> [--description <text>] [--dir <d>] [--json]");
+  let root;
+  try { root = ensureRoot(flag("dir") || process.cwd()); }
+  catch (e) { bail("E_NO_DEPLOYMENT", e.message || e); throw e; }
+  if (sub === "show") {
+    const a = findAgent(root, name);
+    const result = a ? { name: a.name, kind: a.kind || "persistent", repo: a.repo || null, work: a.work || null, runtime: a.runtime || null, model: a.model || null, type: a.type || null, dir: a._dir } : null;
+    if (JSON_MODE) jsonOk(result);
+    else if (!result) console.log(`(no agent "${name}")`);
+    else console.log(Object.entries(result).map(([k, v]) => `${k}: ${v ?? ""}`).join("\n"));
+    return;
+  }
+  const instrFile = flag("instructions-file");
+  if (!instrFile || instrFile === true) bail("E_BAD_ARGS", "oas agent upsert needs --instructions-file <f>");
+  if (!existsSync(instrFile)) bail("E_BAD_ARGS", `--instructions-file not found: ${instrFile}`);
+  const existed = !!findAgent(root, name);
+  let a;
+  try {
+    a = upsertLocalAgent(root, { name, instructions: readFileSync(instrFile, "utf8"), description: flag("description") || undefined, repo: flag("repo"), work: flag("work"), runtime: flag("runtime"), model: flag("model") });
+  } catch (e) { bail("E_BAD_ARGS", e.message || e); throw e; }
+  if (JSON_MODE) jsonOk({ name: a.name, dir: a._dir, created: !existed });
+  else console.log(`${existed ? "Updated" : "Created"} local agent ${a.name} (${shortPath(a._dir)})`);
+}
+
+/** oas config get <dotted.path> — read ONE resolved-config value (read-only). */
+function configGetCmd() {
+  const bail = (code, msg) => (JSON_MODE ? jsonFail(code, msg) : die(msg));
+  if (args[1] !== "get") bail("E_USAGE", "usage: oas config get <dotted.path> [--soul <name>] [--dir <d>] [--json]");
+  const path = args[2];
+  if (!path || path.startsWith("--")) bail("E_USAGE", "usage: oas config get <dotted.path> [--soul <name>] [--dir <d>] [--json]");
+  const dir = resolve(flag("dir") || process.cwd());
+  const segs = String(path).split(".");
+  const ROOTS = new Set(["layers", "capabilities", "team", "name"]);
+  if (!ROOTS.has(segs[0])) bail("E_BAD_ARGS", `unknown config root "${segs[0]}" (readable: ${[...ROOTS].join(", ")})`);
+  let r;
+  try { r = resolveOasConfig(dir, flag("soul")); } catch (e) { bail("E_BAD_ARGS", e.message || e); throw e; }
+  // capabilities resolves to a list; allow capabilities.<id>.<...> addressing.
+  let node = segs[0] === "capabilities" ? Object.fromEntries(r.capabilities.map((c) => [c.id, c])) : r[segs[0]];
+  for (const s of segs.slice(1)) {
+    if (node == null || typeof node !== "object") { node = undefined; break; }
+    node = node[s];
+  }
+  const value = node === undefined || typeof node === "function" ? null : node;
+  if (JSON_MODE) jsonOk({ path, value });
+  else console.log(typeof value === "string" ? value : JSON.stringify(value));
+}
+
 // ---------- init ----------
 /**
  * oas init [--raw] [--dir <dir>] [--knowledge <id>] [--messaging <id>] [--tasks <id>]
@@ -890,10 +943,14 @@ function spawnCmd() {
   const relativeRoot = flag("relative-root");
   if (relativeRoot !== undefined && (relativeRoot === true || !String(relativeRoot).trim())) bail("E_BAD_ARGS", "--relative-root needs an agents-root path");
   if (relativeRoot && !relativeTo) bail("E_BAD_ARGS", "--relative-root only qualifies --relative-to/--parent");
+  // Package-runtime API v1: exact instance naming + ephemeral kind override.
+  const instanceName = flag("instance");
+  if (instanceName !== undefined && (instanceName === true || !String(instanceName).trim())) bail("E_BAD_ARGS", "--instance needs a name");
+  if (instanceName && flag("purpose")) bail("E_BAD_ARGS", "--instance and --purpose are exclusive (exact name vs generated name)");
   let r;
   try {
-    r = spawnInstance(root, agent, {
-      purpose: flag("purpose"), task: taskText, taskFile: taskFileFlag, relation, relativeTo, relativeRoot,
+    r = spawnInstance(root, args.includes("--ephemeral") ? { ...agent, kind: "capability" } : agent, {
+      instance: instanceName, purpose: flag("purpose"), task: taskText, taskFile: taskFileFlag, relation, relativeTo, relativeRoot,
       repo: flag("repo") || agent.repo || defaultRepo(workspaceOf(root)) || defaultRepo(process.cwd()),
       work: flag("work"), workDir: flag("work-dir"), runtime: flag("runtime"), model: flag("model"), branch: flag("branch"),
       launch: !args.includes("--no-launch"),
@@ -1181,7 +1238,7 @@ function versionCmd() {
   if (JSON_MODE) {
     // EXACT Desktop API v1 probe payload — one JSON object, nothing else on
     // stdout. Desktop accepts desktopApi === 1 and a compatible semver range.
-    console.log(JSON.stringify({ schemaVersion: 1, name: "@oas-framework/oas", version: OAS_VERSION, desktopApi: 1 }));
+    console.log(JSON.stringify({ schemaVersion: 1, name: "@oas-framework/oas", version: OAS_VERSION, desktopApi: 1, packageRuntimeApi: 1 }));
     return;
   }
   console.log(`@oas-framework/oas ${OAS_VERSION} (desktop API v1)`);
@@ -1201,6 +1258,8 @@ else if (cmd === "trust") trust();
 else if (cmd === "list") listCmd();
 else if (cmd === "remove") removeCmd();
 else if (cmd === "migrate") migrateCmd();
+else if (cmd === "agent") agentCmd();
+else if (cmd === "config") configGetCmd();
 else if (cmd === "root") console.log(resolve(new URL("..", import.meta.url).pathname));
 else if (cmd === "init") init();
 else if (cmd === "status") status();
@@ -1262,6 +1321,11 @@ Usage:
                                             the provider package's exact integrity
   oas trust <package> --all-capabilities    explicit bulk approval with a full
                                             executable-surface summary
+  oas agent show <name> [--json]            agent definition lookup (runtime API v1)
+  oas agent upsert <name>                   register/update a LOCAL agent from raw
+      --instructions-file <f> [--json]      instructions (runtime API v1)
+  oas config get <dotted.path> [--soul <s>] read ONE resolved-config value, e.g.
+      [--json]                              layers.knowledge.settings.harvest-model
   oas use <capability>                      activate for one config-owned target
       [--global|--type <t>|--soul <s>]      (--global is default); --disable excludes
       [--disable] [--settings k=v [k2=v2 ...]] [--dir <d>]

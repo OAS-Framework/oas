@@ -9,7 +9,7 @@ import {
   acquirePackage, applyLegacyLockMigration, approveCapability, capabilityManifests, capabilityManifest, capabilityTrust,
   capabilitySkillDirs, capabilityExecutablePath, listInstalledPackages, loadPackageManifestAt, migrateLegacyLock,
   packageIntegrity, parsePackageSource, readPackageLocks, removePackage, resolveOasConfig, restorePackages,
-  findAgent, spawnInstance, updatePackage, writeCapabilityLock, writePackageLock, installedPackagesDir, OAS_LOCK_FILE,
+  findAgent, spawnInstance, updatePackage, validateLockEntry, writeCapabilityLock, writePackageLock, installedPackagesDir, OAS_LOCK_FILE,
 } from "../lib/core.mjs";
 
 const CLI = resolve(new URL("../bin/oas.mjs", import.meta.url).pathname);
@@ -674,5 +674,102 @@ test("clean fixture: acquire → lock → trust → activate → spawn probe wit
   assert.ok(existsSync(join(res.home, ".agents", "skills", "fx", "SKILL.md")), "package capability skill composed into the instance");
   const meta = JSON.parse(readFileSync(join(res.home, "instance.json"), "utf8"));
   assert.equal(meta.capabilityMeta?.["fx.cap"]?.probe, true, "trusted package hook ran at spawn");
+  rmSync(base, { recursive: true, force: true });
+});
+
+// ---------- lock semantic validation (invalid-lock) ----------
+
+test("validateLockEntry: trust subset, dependency refs, source/commit pairing", () => {
+  const ok = { source: "git:https://h/x.git@v1", version: "1", commit: "a".repeat(40), integrity: `sha256-${"0".repeat(64)}`, capabilities: ["a.c"], dependencies: [], trustedCapabilities: ["a.c"] };
+  assert.equal(validateLockEntry("p", ok, { p: ok }), true);
+  assert.throws(() => validateLockEntry("p", { ...ok, trustedCapabilities: ["ghost"] }, {}), (e) => e.code === "invalid-lock");
+  assert.throws(() => validateLockEntry("p", { ...ok, dependencies: ["missing.dep"] }, {}), (e) => e.code === "invalid-lock");
+  assert.throws(() => validateLockEntry("p", { ...ok, commit: "shorty" }, {}), (e) => e.code === "invalid-lock");
+  assert.throws(() => validateLockEntry("p", { ...ok, source: "path:/x" }, {}), (e) => e.code === "invalid-lock"); // path needs commit "local"
+  assert.equal(validateLockEntry("p", { ...ok, source: "path:/x", commit: "local" }, {}), true);
+  assert.throws(() => validateLockEntry("p", { ...ok, integrity: "sha256-xyz" }, {}), (e) => e.code === "invalid-lock");
+});
+
+test("restore and trust reject semantically invalid v2 locks with invalid-lock", () => {
+  const base = temp();
+  const s = scope(base);
+  const src = pkgSource(join(base, "src"), { package: "il.p" }, { "cap": { capability: "il.cap", commands: { r: { exec: "r.mjs" } } } });
+  write(join(src, "cap", "r.mjs"), "//\n");
+  acquirePackage(s, src);
+  const lockFile = join(s, OAS_LOCK_FILE);
+  const parsed = JSON.parse(readFileSync(lockFile, "utf8"));
+  parsed.packages["il.p"].trustedCapabilities = ["not.exported"];
+  writeFileSync(lockFile, JSON.stringify(parsed, null, 2));
+  const rep = restorePackages(s);
+  // present-at-integrity path also validates first
+  assert.equal(rep.find((r) => r.package === "il.p").code, "invalid-lock");
+  assert.throws(() => approveCapability(s, "il.cap"), (e) => e.code === "invalid-lock");
+  rmSync(base, { recursive: true, force: true });
+});
+
+// ---------- package-runtime API v1 (docs/design/package-runtime-api.md) ----------
+
+test("runtime API: version probe carries packageRuntimeApi", () => {
+  const r = cli(process.cwd(), "version", "--json");
+  const doc = JSON.parse(r.stdout);
+  assert.equal(doc.packageRuntimeApi, 1);
+});
+
+test("runtime API consumer fixture: agent show → upsert → config get → spawn attached, all through the CLI envelope", () => {
+  const base = temp();
+  // deployment: workspace with agents root + config with a layer setting
+  const ws = join(base, "ws");
+  write(join(ws, "oas-config.yaml"), "name: fixture\n");
+  const root = join(ws, "agents");
+  mkdirSync(root, { recursive: true });
+  // owner instance home with a work tree (for --work attached)
+  const repo = join(ws, "repo");
+  write(join(repo, "README.md"), "r\n");
+  gitify(repo);
+  write(join(root, "dev", "soul", "soul.yaml"), `name: dev\nkind: persistent\nrepo: ${repo}\nwork: checkout\nruntime: pi\n`);
+  write(join(root, "dev", "soul", "AGENTS.md"), "# Dev\n");
+  symlinkSync("AGENTS.md", join(root, "dev", "soul", "CLAUDE.md"));
+  mkdirSync(join(root, "dev", "instances"), { recursive: true });
+  const owner = spawnInstance(root, findAgent(root, "dev"), { launch: false });
+  // 1. agent show: absent → ok:true result:null
+  let r = cli(ws, "agent", "show", "memory-harvest", "--dir", ws, "--json");
+  let env = JSON.parse(r.stdout);
+  assert.equal(env.ok, true);
+  assert.equal(env.result, null);
+  // 2. agent upsert with instructions
+  const instr = join(base, "mh.md");
+  write(instr, "# Memory harvester\n\nHarvest notes.\n");
+  r = cli(ws, "agent", "upsert", "memory-harvest", "--instructions-file", instr, "--dir", ws, "--json");
+  env = JSON.parse(r.stdout);
+  assert.equal(env.ok, true, r.stdout);
+  assert.equal(env.result.created, true);
+  // show now resolves
+  r = cli(ws, "agent", "show", "memory-harvest", "--dir", ws, "--json");
+  env = JSON.parse(r.stdout);
+  assert.equal(env.result.name, "memory-harvest");
+  assert.equal(env.result.kind, "local");
+  // 3. config get on a resolved value (name root) + null for unset paths + E_BAD_ARGS for unknown roots
+  r = cli(ws, "config", "get", "name", "--dir", ws, "--json");
+  assert.equal(JSON.parse(r.stdout).result.value, "fixture");
+  r = cli(ws, "config", "get", "layers.knowledge.settings.harvest-model", "--dir", ws, "--json");
+  assert.equal(JSON.parse(r.stdout).result.value, null);
+  r = cli(ws, "config", "get", "nonsense.path", "--dir", ws, "--json");
+  env = JSON.parse(r.stdout);
+  assert.equal(env.ok, false);
+  assert.equal(env.error.code, "E_BAD_ARGS");
+  // 4. spawn with exact --instance name, --ephemeral, attached to the owner work tree
+  r = cli(ws, "spawn", "memory-harvest", "--instance", "memory-harvest-fixture", "--ephemeral", "--repo", repo,
+    "--parent", owner.instance, "--work", "attached", "--work-dir", join(owner.home, "work"),
+    "--task", "probe", "--no-launch", "--dir", ws, "--json");
+  env = JSON.parse(r.stdout);
+  assert.equal(env.ok, true, r.stdout);
+  assert.equal(env.result.instance, "memory-harvest-fixture");
+  const meta = JSON.parse(readFileSync(join(env.result.home, "instance.json"), "utf8"));
+  assert.equal(meta.kind, "capability", "--ephemeral overrides the on-disk kind");
+  // --instance + --purpose is rejected
+  r = cli(ws, "spawn", "memory-harvest", "--instance", "x", "--purpose", "y", "--no-launch", "--dir", ws, "--json");
+  env = JSON.parse(r.stdout);
+  assert.equal(env.ok, false);
+  assert.equal(env.error.code, "E_BAD_ARGS");
   rmSync(base, { recursive: true, force: true });
 });

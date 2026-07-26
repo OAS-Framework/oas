@@ -3,7 +3,7 @@
 //
 // Invariants under test:
 //   * `oas version --json` prints EXACTLY the probe payload, one JSON object:
-//     {"schemaVersion":1,"name":"@oas-framework/oas","version":<pkg>,"desktopApi":1}
+//     {"schemaVersion":1,"name":"@oas-framework/oas","version":<pkg>,"desktopApi":1,"packageRuntimeApi":1}
 //   * `oas spawn ... --json` success prints one envelope object
 //     {"schemaVersion":1,"ok":true,"result":{instance,agent,home,work,branch,
 //      launched,warnings,tmux,...}} with no progress contamination on stdout.
@@ -57,9 +57,9 @@ test("oas version --json emits the exact Desktop API v1 probe payload", () => {
   const r = spawnSync(process.execPath, [CLI, "version", "--json"], { encoding: "utf8" });
   assert.equal(r.status, 0, r.stderr);
   const doc = parseOnly(r.stdout);
-  assert.deepEqual(doc, { schemaVersion: 1, name: "@oas-framework/oas", version: PKG_VERSION, desktopApi: 1 });
+  assert.deepEqual(doc, { schemaVersion: 1, name: "@oas-framework/oas", version: PKG_VERSION, desktopApi: 1, packageRuntimeApi: 1 });
   // key order is part of the published fixture — Desktop probes with string compare fallback
-  assert.equal(r.stdout.trim(), `{"schemaVersion":1,"name":"@oas-framework/oas","version":"${PKG_VERSION}","desktopApi":1}`);
+  assert.equal(r.stdout.trim(), `{"schemaVersion":1,"name":"@oas-framework/oas","version":"${PKG_VERSION}","desktopApi":1,"packageRuntimeApi":1}`);
 });
 
 test("oas version human output stays ergonomic and mentions the version", () => {
