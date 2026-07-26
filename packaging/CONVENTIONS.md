@@ -28,7 +28,7 @@ Each repository's `ci` workflow runs for pull requests and pushes to `main` on N
 5. runs package-specific unit/smoke tests; and
 6. reports the consumer-probe gate as blocked until engine fixtures are frozen.
 
-`oas-aweb` additionally runs `npm ci --omit=dev --omit=peer --ignore-scripts --prefix capabilities/oas-aweb`; the inner capability directory owns the checked dependency lock so its existing `node_modules/...` paths remain escape-free. CI proves that all three declared skill paths resolve, the unused pi-coding-agent peer is absent, executable scripts do not import that omitted peer, and `npm audit --omit=dev --omit=peer` is clean. This placement remains pending confirmation by WS1's amended closure contract. No acquisition or CI step runs npm lifecycle scripts.
+`oas-aweb` additionally runs `npm ci --omit=dev --omit=peer --ignore-scripts --prefix capabilities/oas-aweb`; the inner capability directory owns the checked dependency lock so its existing `node_modules/...` paths remain escape-free. CI proves that all three declared skill paths resolve, the unused pi-coding-agent peer is absent, executable scripts do not import that omitted peer, and `npm audit --omit=dev --omit=peer --ignore-scripts` is clean. This placement remains pending confirmation by WS1's amended closure contract. No acquisition or CI step runs npm lifecycle scripts.
 
 ## Consumer probe gate
 

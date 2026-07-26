@@ -60,7 +60,7 @@ capabilities:
 
 ```bash
 npm ci --omit=dev --omit=peer --ignore-scripts --prefix capabilities/oas-aweb
-npm audit --omit=dev --omit=peer --prefix capabilities/oas-aweb
+npm audit --omit=dev --omit=peer --ignore-scripts --prefix capabilities/oas-aweb
 npm test
 ```
 
