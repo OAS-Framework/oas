@@ -2100,3 +2100,46 @@ test("relative-dep rejection classifies from the parsed payload — path:sub and
   }
   rmSync(base, { recursive: true, force: true });
 });
+
+// ---------- reviewer-21849d4 findings ----------
+
+test("unknown lockfileVersion is never rewritten by migrate — fail closed (reviewer-21849d4)", () => {
+  const base = temp();
+  const s = scope(base);
+  const body = JSON.stringify({ lockfileVersion: 3, packages: { "future.p": { some: "data" } }, capabilities: {} }, null, 2);
+  writeFileSync(join(s, OAS_LOCK_FILE), body);
+  // dry-run fails closed
+  let r = cli(s, "migrate", "--dry-run", "--dir", s, "--json");
+  let env = JSON.parse(r.stdout);
+  assert.equal(env.ok, false);
+  assert.equal(env.error.code, "invalid-lock");
+  // real migrate fails closed and DESTROYS NOTHING
+  r = cli(s, "migrate", "--dir", s, "--json");
+  env = JSON.parse(r.stdout);
+  assert.equal(env.ok, false);
+  assert.equal(env.error.code, "invalid-lock");
+  assert.equal(readFileSync(join(s, OAS_LOCK_FILE), "utf8"), body, "unknown-version lock byte-identical — never rewritten");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("empty-v1 conversion is atomic: a failed replace leaves the original lock byte-identical (reviewer-21849d4)", () => {
+  const base = temp();
+  const s = scope(base);
+  const original = JSON.stringify({ lockfileVersion: 1, capabilities: {} }, null, 2);
+  writeFileSync(join(s, OAS_LOCK_FILE), original);
+  // fault injection: make the scope dir read-only so the temp-file write fails
+  // (the destination file itself stays writable-in-place — a truncating write
+  // WOULD have succeeded and left a partial file; the atomic path cannot).
+  execFileSync("chmod", ["555", s]);
+  try {
+    assert.throws(() => applyLegacyLockMigration(s), /EACCES|EPERM|permission/i);
+    assert.equal(readFileSync(join(s, OAS_LOCK_FILE), "utf8"), original, "original bytes preserved through the failed conversion");
+  } finally {
+    execFileSync("chmod", ["755", s]);
+  }
+  // and the successful path still converts
+  const r = applyLegacyLockMigration(s);
+  assert.equal(r.formatConverted, true);
+  assert.deepEqual(JSON.parse(readFileSync(join(s, OAS_LOCK_FILE), "utf8")), { lockfileVersion: 2, packages: {} });
+  rmSync(base, { recursive: true, force: true });
+});
