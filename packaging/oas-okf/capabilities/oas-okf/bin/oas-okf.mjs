@@ -57,6 +57,13 @@ function runtimeError(code, message) {
   return Object.assign(new Error(message), { code });
 }
 
+/** Single swappable binary-resolution point. The corrected runtime addendum
+ * will replace this PATH fallback with its final canonical absolute-CLI env
+ * contract without changing spawn argument/envelope handling. */
+function packageRuntimeCli() {
+  return "oas";
+}
+
 /** Invoke the versioned package-runtime boundary. Task text crosses the
  * process boundary only through an owner-readable tempfile, removed on every
  * success/failure outcome. */
@@ -65,7 +72,7 @@ function spawnHarvester(spawnArgs, task) {
   const taskFile = join(temp, "TASK.md");
   try {
     writeFileSync(taskFile, task, { mode: 0o600, flag: "wx" });
-    const child = spawnSync("oas", ["spawn", "memory-harvest", ...spawnArgs, "--task-file", taskFile, "--json"], {
+    const child = spawnSync(packageRuntimeCli(), ["spawn", "memory-harvest", ...spawnArgs, "--task-file", taskFile, "--json"], {
       encoding: "utf8",
       env: process.env,
       stdio: ["ignore", "pipe", "pipe"],

@@ -150,7 +150,8 @@ test("harvest implementation uses no private kernel-file boundary", () => {
   assert.doesNotMatch(source, /lib\/core\.mjs/);
   assert.doesNotMatch(source, /oas root/);
   assert.doesNotMatch(source, /pathToFileURL|resolveOasConfig|spawnInstance/);
-  assert.match(source, /spawnSync\("oas"/);
+  assert.match(source, /function packageRuntimeCli\(\)/);
+  assert.match(source, /spawnSync\(packageRuntimeCli\(\)/);
 });
 
 test("manifest exports the packaged ephemeral memory-harvest agent", () => {
