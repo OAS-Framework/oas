@@ -91,6 +91,16 @@ function offerTmuxMouseScrolling() {
 function resolveForDoctor(ctx, soulName, { json } = {}) {
   try { return resolveOasConfig(ctx, soulName); }
   catch (e) {
+    // Doctor is THE diagnosis surface: it alone catches the typed fail-closed
+    // invalid-lock error and continues to render actionable state.
+    if (e.code === "invalid-lock") {
+      const prov = Array.isArray(e.provenance) ? e.provenance[0] : undefined;
+      if (json) { console.log(JSON.stringify({ context: ctx, error: { code: "invalid-lock", message: e.message, provenance: e.provenance || null } }, null, 2)); process.exit(1); }
+      console.log(`oas doctor — resolved from ${shortPath(ctx)}\n`);
+      console.log(`ERROR: ${e.message} [invalid-lock]`);
+      if (prov?.file) console.log(`  fix or remove the offending entry in ${shortPath(prov.file)} — the lock is never auto-repaired; all package operations fail closed until it is valid`);
+      process.exit(0); // doctor DIAGNOSED successfully; the lock is the problem
+    }
     const retiredId = Object.keys(RETIRED_CAPABILITIES).find((id) => String(e.message).includes(`"${id}"`) && String(e.message).includes("retired"));
     if (!retiredId) throw e;
     if (json) { console.log(JSON.stringify({ context: ctx, error: e.message, retired: [retiredId] }, null, 2)); process.exit(1); }

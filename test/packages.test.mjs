@@ -701,9 +701,9 @@ test("restore and trust reject semantically invalid v2 locks with invalid-lock",
   const parsed = JSON.parse(readFileSync(lockFile, "utf8"));
   parsed.packages["il.p"].trustedCapabilities = ["not.exported"];
   writeFileSync(lockFile, JSON.stringify(parsed, null, 2));
-  const rep = restorePackages(s);
-  // present-at-integrity path also validates first
-  assert.equal(rep.find((r) => r.package === "il.p").code, "invalid-lock");
+  // fail-closed: restore RAISES the typed error (report-and-continue was
+  // rejected by reviewer-f832ba9); approval also raises
+  assert.throws(() => restorePackages(s), (e) => e.code === "invalid-lock");
   assert.throws(() => approveCapability(s, "il.cap"), (e) => e.code === "invalid-lock");
   rmSync(base, { recursive: true, force: true });
 });
@@ -750,7 +750,7 @@ try {
   writeFileSync(taskFile, "# Harvest\\n\\nprobe\\n", { mode: 0o600 });
   const mode = statSync(taskFile).mode & 0o777;
   const argv = JSON.parse(process.env.FX_SPAWN_ARGS); // test-provided flags (owner/work-dir)
-  const out = execFileSync(process.execPath, [bin, "spawn", "memory-harvest", "--task-file", taskFile, "--json", ...argv, ...(settings["harvest-model"] ? ["--model", settings["harvest-model"]] : [])], { encoding: "utf8" });
+  const out = execFileSync(bin, ["spawn", "memory-harvest", "--task-file", taskFile, "--json", ...argv, ...(settings["harvest-model"] ? ["--model", settings["harvest-model"]] : [])], { encoding: "utf8" }); // execFile the EXACT path — shebang/executable contract exercised
   const env = JSON.parse(out); // one spawn envelope
   result = { ok: env.ok, instance: env.result?.instance || null, model: env.result?.model || null, taskFileMode: mode.toString(8) };
 } catch (e) {
@@ -1235,9 +1235,8 @@ test("trust QUERY path validates the lock: malformed trustedCapabilities reads a
   const parsed = JSON.parse(readFileSync(lockFile, "utf8"));
   parsed.packages["tq.p"].capabilities = [];
   writeFileSync(lockFile, JSON.stringify(parsed, null, 2));
-  const t = capabilityTrust(s, "tq.cap");
-  assert.equal(t.trusted, false, "malformed lock must never read as trusted");
-  assert.match(t.reason, /invalid|trustedCapabilities|capabilit/i);
+  // fail-closed RAISE (reviewer-f832ba9 strengthened the earlier degrade-to-untrusted)
+  assert.throws(() => capabilityTrust(s, "tq.cap"), (e) => e.code === "invalid-lock");
   rmSync(base, { recursive: true, force: true });
 });
 
@@ -1319,7 +1318,7 @@ test("dispatch passes OAS_CLI_BIN (absolute, canonical); malicious earlier-PATH 
 import { execFileSync } from "node:child_process";
 const bin = process.env.OAS_CLI_BIN;
 if (!bin || !bin.startsWith("/")) { console.log(JSON.stringify({ ok: false, why: "no absolute OAS_CLI_BIN" })); process.exit(1); }
-const out = execFileSync(process.execPath, [bin, "version", "--json"], { encoding: "utf8" });
+const out = execFileSync(bin, ["version", "--json"], { encoding: "utf8" }); // execFile the EXACT path
 console.log(JSON.stringify({ ok: true, probe: JSON.parse(out) }));
 `);
   write(join(repo, "oas-config.yaml"), "name: t\ncapabilities:\n  additive:\n    cb.svc:\n      global: true\n");
@@ -1523,12 +1522,11 @@ test("trust EXECUTION path rejects invalid lock graphs (self-dep) — regression
   const parsed = JSON.parse(readFileSync(lockFile, "utf8"));
   parsed.packages["a.p"].dependencies = ["a.p"];
   writeFileSync(lockFile, JSON.stringify(parsed, null, 2));
-  const t = capabilityTrust(s, "ex.cap");
-  assert.equal(t.trusted, false, "trust query fails closed on the invalid graph");
-  assert.match(t.reason, /self-dependency|invalid/);
+  // fail-closed RAISE on the query path (reviewer-f832ba9)
+  assert.throws(() => capabilityTrust(s, "ex.cap"), (e) => e.code === "invalid-lock");
   // resolveCapabilities (the execution path) must not expose the hooks/commands
   write(join(s, "oas-config.yaml"), "name: t\ncapabilities:\n  additive:\n    ex.cap:\n      from: installed\n      global: true\n");
-  assert.throws(() => resolveOasConfig(s), /not usable|invalid/);
+  assert.throws(() => resolveOasConfig(s), (e) => e.code === "invalid-lock" || /not usable|invalid/.test(e.message));
   rmSync(base, { recursive: true, force: true });
 });
 
@@ -1617,5 +1615,63 @@ test("platform-variant closures are rejected at materialization (v1 MUST, findin
   write(join(ok, "package-lock.json"), JSON.stringify({ name: "pi-p", version: "1.0.0", lockfileVersion: 3, requires: true, packages: { "": { name: "pi-p", version: "1.0.0", dependencies: { dep: "file:vendor/dep" } }, "node_modules/dep": { resolved: "vendor/dep", link: true }, "vendor/dep": { version: "1.0.0" } } }));
   const r = acquirePackage(s, ok);
   assert.equal(r.root, "pi.p");
+  rmSync(base, { recursive: true, force: true });
+});
+
+// ---------- reviewer-f832ba9 blockers ----------
+
+test("nested materialized links cannot bypass containment: node_modules/dep → vendor/dep with an escaping inner link (reviewer-f832ba9)", () => {
+  const base = temp();
+  const s = scope(base);
+  const src = pkgSource(join(base, "src"), { package: "nl.p" }, { "cap": { capability: "nl.cap" } });
+  // vendored dep INSIDE the root containing a symlink that ESCAPES the root
+  write(join(src, "vendor", "dep", "package.json"), JSON.stringify({ name: "dep", version: "1.0.0" }));
+  write(join(base, "outside-secret"), "leak\n");
+  symlinkSync(join(base, "outside-secret"), join(src, "vendor", "dep", "escape"));
+  write(join(src, "package.json"), JSON.stringify({ name: "nl-p", version: "1.0.0", dependencies: { dep: "file:vendor/dep" } }));
+  write(join(src, "package-lock.json"), JSON.stringify({ name: "nl-p", version: "1.0.0", lockfileVersion: 3, requires: true, packages: { "": { name: "nl-p", version: "1.0.0", dependencies: { dep: "file:vendor/dep" } }, "node_modules/dep": { resolved: "vendor/dep", link: true }, "vendor/dep": { version: "1.0.0" } } }));
+  // npm ci creates node_modules/dep → ../vendor/dep (inside), whose CONTENT
+  // holds the escaping link — reachable at runtime via node_modules/dep/escape.
+  assert.throws(() => acquirePackage(s, src), (e) => e.code === "path-escape" && /escape/.test(e.message));
+  assert.ok(!existsSync(join(installedPackagesDir(s), "nl.p")), "rollback: nothing installed");
+  const lockFile = join(s, OAS_LOCK_FILE);
+  assert.ok(!existsSync(lockFile) || !JSON.parse(readFileSync(lockFile, "utf8")).packages?.["nl.p"], "rollback: nothing locked");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("locks with only missing artifacts still fail closed on list; restore raises on malformed locks (reviewer-f832ba9)", () => {
+  const base = temp();
+  const s = scope(base);
+  // v2 lock whose ONLY entry has no installed artifact and a bad integrity
+  writeFileSync(join(s, OAS_LOCK_FILE), JSON.stringify({ lockfileVersion: 2, packages: { "ghost.p": { source: "path:/x", version: "1", commit: "local", integrity: "sha256-bad", capabilities: [] } } }, null, 2));
+  // even without a store dir, list must RAISE — not return ok:true
+  const r = cli(s, "list", "--dir", s, "--json");
+  const env = JSON.parse(r.stdout);
+  assert.equal(env.ok, false);
+  assert.equal(env.error.code, "invalid-lock");
+  // restore raises typed invalid-lock instead of reporting-and-continuing
+  assert.throws(() => restorePackages(s), (e) => e.code === "invalid-lock");
+  // malformed JSON: restore raises too
+  writeFileSync(join(s, OAS_LOCK_FILE), "{ nope");
+  assert.throws(() => restorePackages(s), (e) => e.code === "invalid-lock");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("trust query RETHROWS invalid-lock (fail closed; only doctor catches) — reviewer-f832ba9", () => {
+  const base = temp();
+  const s = scope(base);
+  const src = pkgSource(join(base, "src"), { package: "rt.p" }, { "cap": { capability: "rt.cap", commands: { r: { exec: "r.mjs" } } } });
+  write(join(src, "cap", "r.mjs"), "//\n");
+  acquirePackage(s, src);
+  const lockFile = join(s, OAS_LOCK_FILE);
+  const parsed = JSON.parse(readFileSync(lockFile, "utf8"));
+  parsed.packages["rt.p"].trustedCapabilities = ["ghost.cap"];
+  writeFileSync(lockFile, JSON.stringify(parsed, null, 2));
+  // the QUERY path raises the typed error — it must not degrade to {trusted:false}
+  assert.throws(() => capabilityTrust(s, "rt.cap"), (e) => e.code === "invalid-lock");
+  // doctor still catches and diagnoses without crashing
+  const r = cli(s, "doctor", s);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /invalid-lock/);
   rmSync(base, { recursive: true, force: true });
 });
