@@ -1,6 +1,8 @@
 # Knowledge Log
 
 ## 2026-07-26
+* **Creation**: promoted [Maintainer handback loops race the maintainer's own stewardship commits](/lessons/maintainer-handback-stewardship-race.md) from the oas-desktop-engineer-spawn-modal-fix notes.
+* **Update**: linked [Crossed mail coordination needs repository verification and single replies](/lessons/crossed-mail-coordination.md) to the maintainer handback race lesson: named base SHAs in stewardship-loop handbacks are minimums once `origin/main` advances, and duplicate stale verdicts should get only one git-evidence reply.
 * **Creation**: promoted [Quiet automated opens must contain the whole flow's rejections](/lessons/quiet-open-whole-flow-rejection-containment.md) from the oas-desktop-engineer-spawn-modal-fix notes.
 * **Update**: linked [Wait for terminal readiness before post-spawn terminal handoffs](/lessons/post-spawn-roster-snapshot-lag.md) to the quiet-open rejection-containment lesson: quiet automated terminal handoffs must wrap the whole async open flow, not just explicit refusal branches, before fire-and-forget callers cross the rejection boundary.
 * **Update**: merged the post-spawn readiness note into [Wait for terminal readiness before post-spawn terminal handoffs](/lessons/post-spawn-roster-snapshot-lag.md): terminal auto-open waits must require `running` plus `tmux.session`, close the spawn modal only on readiness success, use quiet automated handoff, and update spawn-flow fixtures for readiness rows plus closed-modal re-querying.
