@@ -3,7 +3,7 @@ type: Decision
 title: Desktop cluster grouping consumes the final siblingInstance seam
 description: Desktop cluster grouping computes connected components over parentInstance plus the final root-sibling siblingInstance field, threaded through instanceLinks() and the server projection without changing the grouping algorithm.
 tags: [desktop, agent-relations, clusters]
-timestamp: 2026-07-25
+timestamp: 2026-07-26
 ---
 
 The desktop sidebar groups running and idle instances by agent cluster: the connected component of the undirected relation graph made from spawn parentage plus sibling links.

@@ -1,5 +1,10 @@
 # Knowledge Log
 
+## 2026-07-26
+* **Fix**: [spawn-lineage-explicit-only](/decisions/spawn-lineage-explicit-only.md) now states the complete child/sibling/parent/unrelated lineage matrix, `--parent` child sugar, and attached auto-binding without a stored relation value.
+* **Update**: [spawn-relations-lineage-fields](/architecture/spawn-relations-lineage-fields.md) records the final human/maintainer-accepted concurrency limitations and the decision not to add a lineage transaction subsystem.
+* **Update**: root index makes the attached-child decision, final relation architecture, and nonexistent team-root lesson reachable.
+
 ## 2026-07-25
 * **Update**: [canonical-worktree-verification](/lessons/canonical-worktree-verification.md) merges capture-canonical-path-before-hooks: capture the canonical worktree path immediately after `git worktree add`, retain it through hooks and compensation, and fail closed when no retained identity exists.
 * **Update**: [rollback-probes-argv-and-fail-closed](/lessons/rollback-probes-argv-and-fail-closed.md) points worktree rollback probes at the retained canonical identity instead of rollback-time re-canonicalization or lexical fallback.

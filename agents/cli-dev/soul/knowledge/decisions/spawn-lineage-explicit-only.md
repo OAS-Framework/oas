@@ -1,29 +1,32 @@
 ---
 type: Decision
 title: Spawn lineage is explicit-only and deployment-local
-description: parentInstance now comes only from an explicit --parent/o.parent inside the target deployment or the attached-mode workDir-owner fallback; env vars are never consulted, and cross-deployment spawns stay operator-origin.
+description: Lineage comes only from an explicit child/sibling/parent relation (with --parent as child sugar) or attached-mode owner binding; ambient env is ignored and cross-deployment spawns stay operator-origin.
 tags: [spawn, lineage, kernel, cli, cross-deployment]
-timestamp: 2026-07-25
+timestamp: 2026-07-26
 ---
 
 # Decision
 
-Manual spawns land top-level (`spawnOrigin: operator`, no `parentInstance`)
-unless a parent is explicitly given. `lib/core.mjs` `spawnInstance` no longer
-reads `OAS_INSTANCE` or `PI_AGENT_INSTANCE` for lineage. Parentage sources, in
-order:
+Manual spawns with no relation land top-level (`spawnOrigin: operator`, no
+lineage fields). `lib/core.mjs` `spawnInstance` never reads `OAS_INSTANCE` or
+`PI_AGENT_INSTANCE` as relation intent. Lineage sources are:
 
-1. `o.parent` (CLI `--parent <instance>`, validated to exist inside the target
-   deployment's local root or team scope before scaffolding). In attached work
-   mode this is valid only when it redundantly names the path-verified
-   work-tree owner; it cannot bypass an ambiguous known-instance owner.
-2. Attached-mode binding: a verified owner of the shared work tree. Verify by
-   scanning candidate homes path-first across local and team scope, matching
-   symlinked checkout `work` paths by lexical parent relation and real work
-   directories by realpath equality, then accepting the recordable name only if
-   it resolves back to the matched home from the attached instance's context.
-   Legitimate non-instance work trees must pass an explicit parent only when the
-   path matches no known instance work. Attached service agents genuinely nest.
+1. An explicit relation inside the target deployment:
+   - `child` records the anchor as the new instance's `parentInstance`;
+   - non-root `sibling` shares the anchor's `parentInstance`, while root sibling
+     records `siblingInstance` instead;
+   - `parent` gives the new instance the anchor's old parent/sibling slot and
+     re-points the anchor beneath it;
+   - `unrelated` records no lineage. `o.parent` / CLI `--parent` is child sugar.
+2. Attached-mode binding: a verified owner of the shared work tree becomes the
+   new instance's `parentInstance`, even though auto-binding does not store a
+   `relation` value. Verify by scanning candidate homes path-first across local
+   and team scope, matching symlinked checkout `work` paths by lexical parent
+   relation and real work directories by realpath equality, then accepting the
+   recordable name only if it resolves back to the matched home from the
+   attached instance's context. A legitimate non-instance work tree must name
+   its owner with `--parent` or the equivalent explicit child relation.
 3. Otherwise: operator origin, top-level.
 
 Attached mode is a binding lineage source, not a negatable default: relation

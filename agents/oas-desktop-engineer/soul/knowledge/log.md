@@ -1,5 +1,9 @@
 # Knowledge Log
 
+## 2026-07-26
+* **Fix**: [final agent-relations kernel contract](/references/agent-relations-kernel-contract.md) resolves the flag clarifier, distinguishes absent explicit relation from attached auto-child topology, records equivalent non-instance attached child syntax, and includes `E_PARENT_NOT_FOUND`/`E_RELATIVE_AMBIGUOUS`.
+* **Update**: [desktop cluster grouping sibling-link seam](/decisions/desktop-cluster-grouping-sibling-seam.md) describes the shipped sidebar and panel projection in present tense without the removed Instances-roster surface.
+
 ## 2026-07-25
 * **Creation**: promoted [verify the committed tree matches the commit message before pushing](/lessons/verify-committed-tree-before-push.md) from the oas-desktop-engineer-agent-relations notes.
 * **Creation**: promoted [build option lists from data with createElement, never innerHTML attributes](/lessons/dom-construction-not-innerhtml-attributes.md) from the oas-desktop-engineer-agent-relations notes.
