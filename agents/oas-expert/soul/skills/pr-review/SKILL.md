@@ -73,6 +73,13 @@ BEFORE retiring — it is the last gate of the review.
 
 ## Operational gotchas
 
+- **The PR description is not the PR scope**: at the product-direction gate,
+  compare the described feature area with the full merge range (`origin/main...HEAD`
+  or GitHub's changed-files/commits view) before running expensive correctness
+  and security gates. If the branch carries unrelated local, stewardship, or
+  soul changes that are not already on GitHub `main`, return it for branch
+  rebuilding or for those base commits to land through their own maintainer
+  path first. See `knowledge/lessons/pr-branch-merge-range-scope.md`.
 - **Green OKF commands can still hide producer warnings**: when a PR touches
   knowledge bundles, inspect `npm run validate:okf` output per bundle, not only
   the exit status or the final “Strict OKF validation passed” summary. Treat

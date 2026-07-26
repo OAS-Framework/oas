@@ -1,6 +1,8 @@
 # Knowledge Log
 
 ## 2026-07-26
+* **Update**: skills/pr-review — added the merge-range scope gotcha: PR reviewers must compare the PR description with the full changed-file list and commit range before expensive gates, and return branches that carry unrelated base/stewardship commits.
+* **Creation**: [Review the whole PR merge range for scope, not only the intended feature files](/lessons/pr-branch-merge-range-scope.md) — a feature PR can silently carry unrelated local or stewardship commits unless maintainers inspect the actual merge range before running expensive gates.
 * **Delivery**: PR #45 round 4 returned at handed-back/API head `0b6853a` for mergeability only after concurrent PR #44 stewardship advanced main to `9ad504f`; [repo state](/stewardship/repo-state.md) and the [delivery log](/stewardship/delivery-log.md) preserve the otherwise-passing final handback and required post-verdict base refresh.
 * **Delivery**: PR #45 round 3 returned at handed-back/API head `f614be5` for mergeability only: it merged superseded base `627ffaa` and preserved the reviewed Desktop delta but omitted explicit successor `b5c9f3d`; [repo state](/stewardship/repo-state.md) and the [delivery log](/stewardship/delivery-log.md) add an acknowledgment barrier before the next base merge.
 * **Delivery**: PR #45 round 2 returned at handed-back/API head `40938b8` for mergeability only: it merged `8191ea0` and preserved the reviewed Desktop delta but omitted explicit stewardship base `627ffaa`; [repo state](/stewardship/repo-state.md) and the [delivery log](/stewardship/delivery-log.md) record the required latest-main refresh.
