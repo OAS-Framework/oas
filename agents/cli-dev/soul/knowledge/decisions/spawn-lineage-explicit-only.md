@@ -8,8 +8,9 @@ timestamp: 2026-07-26
 
 # Decision
 
-Manual spawns with no relation land top-level (`spawnOrigin: operator`, no
-lineage fields). `lib/core.mjs` `spawnInstance` never reads `OAS_INSTANCE` or
+Non-attached manual spawns with no explicit relation land top-level
+(`spawnOrigin: operator`, no lineage fields). `lib/core.mjs` `spawnInstance`
+never reads `OAS_INSTANCE` or
 `PI_AGENT_INSTANCE` as relation intent. Lineage sources are:
 
 1. An explicit relation inside the target deployment:
