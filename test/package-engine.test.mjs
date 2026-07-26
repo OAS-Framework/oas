@@ -130,15 +130,15 @@ test("writePackageLock/readPackageLocks: v2 round-trip, closest scope wins, refu
   const base = temp();
   const outer = scope(base, "outer");
   const inner = scope(join(base, "outer"), "inner");
-  writePackageLock(outer, "a.pkg", { source: "path:/x", version: "1.0.0", commit: "local", integrity: "sha256-0", capabilities: ["a.cap"] });
-  writePackageLock(inner, "a.pkg", { source: "path:/y", version: "2.0.0", commit: "local", integrity: "sha256-1", capabilities: ["a.cap"] });
+  writePackageLock(outer, "a.pkg", { source: "path:/x", version: "1.0.0", commit: "local", integrity: `sha256-${"0".repeat(64)}`, capabilities: ["a.cap"] });
+  writePackageLock(inner, "a.pkg", { source: "path:/y", version: "2.0.0", commit: "local", integrity: `sha256-${"1".repeat(64)}`, capabilities: ["a.cap"] });
   const locks = readPackageLocks(inner);
   assert.equal(locks.packages["a.pkg"].version, "2.0.0"); // closer wins
   assert.equal(readPackageLocks(outer).packages["a.pkg"].version, "1.0.0");
   // v1 file refuses package writes with legacy-lock
   const v1 = scope(base, "v1scope");
-  writeCapabilityLock(v1, "old.cap", { source: "marketplace:old.cap@1.0.0", version: "1.0.0", integrity: "sha256-x" });
-  assert.throws(() => writePackageLock(v1, "a.pkg", { source: "path:/z", version: "1", commit: "local", integrity: "sha256-2", capabilities: [] }), (e) => e.code === "legacy-lock");
+  writeCapabilityLock(v1, "old.cap", { source: "marketplace:old.cap@1.0.0", version: "1.0.0", integrity: `sha256-${"c".repeat(64)}` });
+  assert.throws(() => writePackageLock(v1, "a.pkg", { source: "path:/z", version: "1", commit: "local", integrity: `sha256-${"2".repeat(64)}`, capabilities: [] }), (e) => e.code === "legacy-lock");
   // legacy locks surface separately
   assert.equal(readPackageLocks(v1).legacy.length, 1);
   // deleting an entry
@@ -150,9 +150,9 @@ test("writePackageLock/readPackageLocks: v2 round-trip, closest scope wins, refu
 test("writeCapabilityLock never downgrades a v2 lock and refuses NEW legacy entries there", () => {
   const base = temp();
   const s = scope(base);
-  writePackageLock(s, "a.pkg", { source: "path:/x", version: "1", commit: "local", integrity: "sha256-0", capabilities: [] });
+  writePackageLock(s, "a.pkg", { source: "path:/x", version: "1", commit: "local", integrity: `sha256-${"0".repeat(64)}`, capabilities: [] });
   // Only `oas migrate` creates residue: adding a fresh legacy entry to a v2 lock is refused.
-  assert.throws(() => writeCapabilityLock(s, "legacy.cap", { source: "path:/y", version: "1", integrity: "sha256-1" }), (e) => e.code === "legacy-lock");
+  assert.throws(() => writeCapabilityLock(s, "legacy.cap", { source: "path:/y", version: "1", integrity: `sha256-${"1".repeat(64)}` }), (e) => e.code === "legacy-lock");
   const parsed = JSON.parse(readFileSync(join(s, OAS_LOCK_FILE), "utf8"));
   assert.equal(parsed.lockfileVersion, 2);
   assert.ok(parsed.packages["a.pkg"]);
@@ -245,7 +245,7 @@ test("acquirePackage: catalog resolver boundary — identity/discovery only, inj
 test("acquirePackage: legacy v1 lock at the scope blocks package install with legacy-lock", () => {
   const base = temp();
   const s = scope(base);
-  writeCapabilityLock(s, "old.cap", { source: "marketplace:old.cap@1", version: "1", integrity: "sha256-x" });
+  writeCapabilityLock(s, "old.cap", { source: "marketplace:old.cap@1", version: "1", integrity: `sha256-${"c".repeat(64)}` });
   const p = pkgSource(join(base, "p"), { package: "n.p" });
   assert.throws(() => acquirePackage(s, p), (e) => e.code === "legacy-lock");
   rmSync(base, { recursive: true, force: true });
@@ -441,7 +441,7 @@ test("removePackage: refuses while a dependent package or a config reference exi
   // drop the config reference → removable
   write(join(s, "oas-config.yaml"), "name: t\n");
   removePackage(s, "rm.dep");
-  assert.deepEqual(readPackageLocks(s).packages, {});
+  assert.deepEqual({ ...readPackageLocks(s).packages }, {});
   rmSync(base, { recursive: true, force: true });
 });
 
@@ -455,8 +455,8 @@ test("migrateLegacyLock + applyLegacyLockMigration: marketplace→catalog mappin
   gitify(official);
   const catalog = (id) => (id === "mig.cap" ? { url: official } : undefined);
   // v1 lock: one mappable marketplace entry, one unmappable
-  writeCapabilityLock(s, "mig.cap", { source: "marketplace:mig.cap@1.0.0", version: "1.0.0", integrity: "sha256-a", trustedExecutables: true });
-  writeCapabilityLock(s, "gone.cap", { source: "marketplace:gone.cap@1.0.0", version: "1.0.0", integrity: "sha256-b" });
+  writeCapabilityLock(s, "mig.cap", { source: "marketplace:mig.cap@1.0.0", version: "1.0.0", integrity: `sha256-${"a".repeat(64)}`, trustedExecutables: true });
+  writeCapabilityLock(s, "gone.cap", { source: "marketplace:gone.cap@1.0.0", version: "1.0.0", integrity: `sha256-${"b".repeat(64)}` });
   const { plan, warnings } = migrateLegacyLock(s, { catalog });
   assert.equal(plan.find((p) => p.capabilityId === "mig.cap").action, "acquire");
   assert.equal(plan.find((p) => p.capabilityId === "gone.cap").action, "manual");
@@ -479,8 +479,8 @@ test("migrateLegacyLock + applyLegacyLockMigration: marketplace→catalog mappin
 test("migrateLegacyLock: git and path v1 sources map to acquirable package specs only when they are packages", () => {
   const base = temp();
   const s = scope(base);
-  writeCapabilityLock(s, "g.cap", { source: "git:https://host/x.git", version: "1", commit: "abc", integrity: "sha256-x" });
-  writeCapabilityLock(s, "p.cap", { source: "path:/some/dir", version: "1", integrity: "sha256-y" });
+  writeCapabilityLock(s, "g.cap", { source: "git:https://host/x.git", version: "1", commit: "abc", integrity: `sha256-${"c".repeat(64)}` });
+  writeCapabilityLock(s, "p.cap", { source: "path:/some/dir", version: "1", integrity: `sha256-${"d".repeat(64)}` });
   const { plan } = migrateLegacyLock(s);
   assert.equal(plan.find((p) => p.capabilityId === "g.cap").package.spec, "https://host/x.git@abc");
   assert.equal(plan.find((p) => p.capabilityId === "p.cap").package.spec, "/some/dir");
@@ -583,7 +583,7 @@ test("CLI: trust <package> --all-capabilities prints the full executable-surface
 test("CLI: migrate --dry-run plans and migrate applies; update <package> shows diff and invalidates approvals", () => {
   const base = temp();
   const s = scope(base);
-  writeCapabilityLock(s, "x.cap", { source: "marketplace:x.cap@1.0.0", version: "1.0.0", integrity: "sha256-a" });
+  writeCapabilityLock(s, "x.cap", { source: "marketplace:x.cap@1.0.0", version: "1.0.0", integrity: `sha256-${"a".repeat(64)}` });
   let r = cli(s, "migrate", "--dry-run", "--dir", s);
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /x\.cap/);
@@ -626,7 +626,7 @@ test("CLI: doctor distinguishes package failures — missing locked package, int
   assert.match(r.stdout, /locked in .* but not installed/);
   // legacy lock warning
   const s2 = scope(base, "legacy");
-  writeCapabilityLock(s2, "old.cap", { source: "marketplace:old.cap@1", version: "1", integrity: "sha256-x" });
+  writeCapabilityLock(s2, "old.cap", { source: "marketplace:old.cap@1", version: "1", integrity: `sha256-${"c".repeat(64)}` });
   r = cli(s2, "doctor", s2);
   assert.match(r.stdout, /lockfileVersion 1 .*oas migrate/);
   rmSync(base, { recursive: true, force: true });
@@ -688,7 +688,7 @@ test("validateLockEntry: trust subset, dependency refs, source/commit pairing", 
   assert.throws(() => validateLockEntry("p", { ...ok, commit: "shorty" }, {}), (e) => e.code === "invalid-lock");
   assert.throws(() => validateLockEntry("p", { ...ok, source: "path:/x" }, {}), (e) => e.code === "invalid-lock"); // path needs commit "local"
   assert.equal(validateLockEntry("p", { ...ok, source: "path:/x", commit: "local" }, {}), true);
-  assert.throws(() => validateLockEntry("p", { ...ok, integrity: "sha256-xyz" }, {}), (e) => e.code === "invalid-lock");
+  assert.throws(() => validateLockEntry("p", { ...ok, integrity: "sha256-xyz" } /* malformed on purpose */, {}), (e) => e.code === "invalid-lock");
 });
 
 test("restore and trust reject semantically invalid v2 locks with invalid-lock", () => {
@@ -701,9 +701,9 @@ test("restore and trust reject semantically invalid v2 locks with invalid-lock",
   const parsed = JSON.parse(readFileSync(lockFile, "utf8"));
   parsed.packages["il.p"].trustedCapabilities = ["not.exported"];
   writeFileSync(lockFile, JSON.stringify(parsed, null, 2));
-  const rep = restorePackages(s);
-  // present-at-integrity path also validates first
-  assert.equal(rep.find((r) => r.package === "il.p").code, "invalid-lock");
+  // fail-closed: restore RAISES the typed error (report-and-continue was
+  // rejected by reviewer-f832ba9); approval also raises
+  assert.throws(() => restorePackages(s), (e) => e.code === "invalid-lock");
   assert.throws(() => approveCapability(s, "il.cap"), (e) => e.code === "invalid-lock");
   rmSync(base, { recursive: true, force: true });
 });
@@ -727,11 +727,41 @@ test("runtime API consumer fixture: capability-defined harvester spawned through
   const capDir = join(repo, ".agents", "capabilities", "owned", "fixture-svc");
   write(join(capDir, "oas.json"), JSON.stringify({
     capability: "fx.svc", version: "1.0.0", description: "fixture service", command: "fxsvc",
-    agents: ["agents/memory-harvest"], commands: { settings: "bin/settings.mjs" },
+    agents: ["agents/memory-harvest"], commands: { settings: "bin/settings.mjs", harvest: "bin/harvest.mjs" },
   }));
   write(join(capDir, "agents", "memory-harvest", "soul.yaml"), "name: memory-harvest\nkind: capability\nwork: attached\nruntime: pi\n");
   write(join(capDir, "agents", "memory-harvest", "AGENTS.md"), "# Memory harvester\n\nHarvest notes.\n");
   write(join(capDir, "bin", "settings.mjs"), "console.log(JSON.stringify({ ok: true, settings: JSON.parse(process.env.OAS_SETTINGS || \"{}\") }));\n");
+  // Consumer-fidelity command (the ruled pattern end-to-end): reads OAS_SETTINGS,
+  // writes a 0600 task tempfile, execFiles the CLI at OAS_CLI_BIN (never PATH),
+  // parses the one spawn envelope, re-emits ITS OWN single envelope, removes the
+  // tempfile in finally.
+  write(join(capDir, "bin", "harvest.mjs"), `
+import { execFileSync } from "node:child_process";
+import { writeFileSync, statSync, unlinkSync, existsSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+const settings = JSON.parse(process.env.OAS_SETTINGS || "{}");
+const bin = process.env.OAS_CLI_BIN;
+const taskFile = join(tmpdir(), \`fx-task-\${process.pid}.md\`);
+let result;
+try {
+  if (!bin) throw new Error("no OAS_CLI_BIN");
+  writeFileSync(taskFile, "# Harvest\\n\\nprobe\\n", { mode: 0o600 });
+  const mode = statSync(taskFile).mode & 0o777;
+  const argv = JSON.parse(process.env.FX_SPAWN_ARGS); // test-provided flags (owner/work-dir)
+  const out = execFileSync(bin, ["spawn", "memory-harvest", "--task-file", taskFile, "--json", ...argv, ...(settings["harvest-model"] ? ["--model", settings["harvest-model"]] : [])], { encoding: "utf8" }); // execFile the EXACT path — shebang/executable contract exercised
+  const env = JSON.parse(out); // one spawn envelope
+  result = { ok: env.ok, instance: env.result?.instance || null, model: env.result?.model || null, taskFileMode: mode.toString(8) };
+} catch (e) {
+  result = { ok: false, error: String(e.message || e) };
+} finally {
+  try { unlinkSync(taskFile); } catch {}
+  result.taskFileRemoved = !existsSync(taskFile);
+}
+console.log(JSON.stringify(result));
+process.exit(result.ok ? 0 : 1);
+`);
   write(join(repo, "oas-config.yaml"), "name: fixture\ncapabilities:\n  additive:\n    fx.svc:\n      global:\n        enabled: true\n        settings:\n          harvest-model: test-model-1\n");
   gitify(repo);
   const root = join(ws, "agents");
@@ -744,19 +774,25 @@ test("runtime API consumer fixture: capability-defined harvester spawned through
   let r = spawnSync(process.execPath, [CLI, "fxsvc", "settings"], { cwd: repo, encoding: "utf8", env: { ...process.env, PI_AGENT_HOME: "", OAS_HOME: "" } });
   const out = JSON.parse(r.stdout.trim().split("\n").pop());
   assert.equal(out.settings["harvest-model"], "test-model-1", "dispatched command reads effective settings from OAS_SETTINGS");
-  // 2. capability-defined agent resolves + spawns through oas spawn --json with
-  //    purpose-derived naming and automatic ephemeral (capability kind) semantics
-  const task = join(base, "task.md");
-  write(task, "# Harvest\n\nprobe\n");
-  r = cli(repo, "spawn", "memory-harvest", "--purpose", "fixture", "--repo", repo,
-    "--parent", owner.instance, "--work", "attached", "--work-dir", join(owner.home, "work"),
-    "--task-file", task, "--no-launch", "--dir", repo, "--json");
-  const env = JSON.parse(r.stdout);
-  assert.equal(env.ok, true, r.stdout);
-  assert.equal(env.result.instance, "memory-harvest-fixture", "purpose-derived deterministic naming");
-  assert.equal(env.result.parent, owner.instance);
-  const meta = JSON.parse(readFileSync(join(env.result.home, "instance.json"), "utf8"));
+  // 2. FULL consumer fidelity: the capability's own command execFiles OAS_CLI_BIN
+  //    (never PATH), writes a 0600 task file, spawns via --purpose naming, parses
+  //    the one envelope, re-emits its own envelope, and cleans up in finally —
+  //    with a malicious earlier-PATH oas planted to prove no PATH resolution.
+  const evil = join(base, "evilbin");
+  write(join(evil, "oas"), "#!/bin/sh\necho INTERCEPTED; exit 99\n");
+  execFileSync("chmod", ["+x", join(evil, "oas")]);
+  const spawnArgs = JSON.stringify(["--purpose", "fixture", "--repo", repo, "--parent", owner.instance, "--work", "attached", "--work-dir", join(owner.home, "work"), "--no-launch", "--dir", repo]);
+  r = spawnSync(process.execPath, [CLI, "fxsvc", "harvest"], { cwd: repo, encoding: "utf8", env: { ...process.env, PATH: `${evil}:${process.env.PATH}`, FX_SPAWN_ARGS: spawnArgs, PI_AGENT_HOME: "", OAS_HOME: "" } });
+  const henv = JSON.parse(r.stdout.trim().split("\n").pop()); // consumer's ONE envelope
+  assert.equal(henv.ok, true, r.stdout + r.stderr);
+  assert.equal(henv.instance, "memory-harvest-fixture", "purpose-derived deterministic naming through the consumer");
+  assert.equal(henv.model, "test-model-1", "OAS_SETTINGS model reached the spawn");
+  assert.equal(henv.taskFileMode, "600", "task tempfile created 0600");
+  assert.equal(henv.taskFileRemoved, true, "task tempfile removed in finally");
+  assert.ok(!r.stdout.includes("INTERCEPTED"), "PATH-shadowed oas never executed");
+  const meta = JSON.parse(readFileSync(join(installedHomeOf(root, "memory-harvest-fixture"), "instance.json"), "utf8"));
   assert.equal(meta.kind, "capability", "capability-defined agent is ephemeral without any override flag");
+  assert.equal(meta.parentInstance, owner.instance);
   // 3. no dropped public surfaces: `agent` is not a kernel command; `config`
   //    IS one on the merged head (WS2's `oas config diff`) — an unknown
   //    subcommand is a usage error there, still one envelope.
@@ -772,8 +808,20 @@ test("runtime API consumer fixture: capability-defined harvester spawned through
     assert.equal(e.ok, false);
     assert.equal(e.error.code, "E_USAGE");
   }
+  // 4. retired flags fail LOUDLY with E_BAD_ARGS and no side effects
+  for (const retired of ["--instance", "--ephemeral"]) {
+    const rr = cli(repo, "spawn", "memory-harvest", retired, "x", "--no-launch", "--dir", repo, "--json");
+    const e = JSON.parse(rr.stdout);
+    assert.equal(e.ok, false, retired);
+    assert.equal(e.error.code, "E_BAD_ARGS");
+    assert.match(e.error.message, /removed by the runtime-boundary ruling/);
+  }
   rmSync(base, { recursive: true, force: true });
 });
+function installedHomeOf(root, instance) {
+  // capability-defined agents home under <workspace>/local-agents/<agent>/instances/<instance>
+  return join(dirname(root), "local-agents", "memory-harvest", "instances", instance);
+}
 
 test("materializePackageDeps: per-capability lock placement — deps land beside the inner manifest, integrity unchanged", () => {
   const base = temp();
@@ -826,7 +874,7 @@ test("flat single-capability package: capabilities: [\".\"] — acquire/discover
 test("residue: later successful conversion — re-running migrate converts once the catalog can map", () => {
   const base = temp();
   const s = scope(base);
-  writeCapabilityLock(s, "late.cap", { source: "marketplace:late.cap@1.0.0", version: "1.0.0", integrity: "sha256-a" });
+  writeCapabilityLock(s, "late.cap", { source: "marketplace:late.cap@1.0.0", version: "1.0.0", integrity: `sha256-${"a".repeat(64)}` });
   // first migrate: not in catalog → residue
   let r = applyLegacyLockMigration(s, { catalog: () => undefined });
   assert.deepEqual(r.residue, ["late.cap"]);
@@ -848,7 +896,7 @@ test("residue: later successful conversion — re-running migrate converts once 
 test("residue: collision failure — installing a package exporting a residue capability ID errors with provenance", () => {
   const base = temp();
   const s = scope(base);
-  writeCapabilityLock(s, "col.cap", { source: "marketplace:col.cap@1.0.0", version: "1.0.0", integrity: "sha256-a" });
+  writeCapabilityLock(s, "col.cap", { source: "marketplace:col.cap@1.0.0", version: "1.0.0", integrity: `sha256-${"a".repeat(64)}` });
   applyLegacyLockMigration(s, { catalog: () => undefined }); // flips to v2 with residue
   const p = pkgSource(join(base, "p"), { package: "other.p" }, { "cap": { capability: "col.cap" } });
   assert.throws(() => acquirePackage(s, p), (e) => e.code === "duplicate-capability-id" && Array.isArray(e.provenance) && e.provenance.some((x) => String(x).startsWith("residue:")));
@@ -858,13 +906,13 @@ test("residue: collision failure — installing a package exporting a residue ca
 test("residue: v2 locks reject NEW legacy entries — only existing residue may be updated", () => {
   const base = temp();
   const s = scope(base);
-  writeCapabilityLock(s, "old.cap", { source: "marketplace:old.cap@1", version: "1", integrity: "sha256-a" });
+  writeCapabilityLock(s, "old.cap", { source: "marketplace:old.cap@1", version: "1", integrity: `sha256-${"a".repeat(64)}` });
   applyLegacyLockMigration(s, { catalog: () => undefined });
   // updating the existing residue entry is allowed (legacy restore/trust path)
-  writeCapabilityLock(s, "old.cap", { source: "marketplace:old.cap@1", version: "1", integrity: "sha256-a", trustedExecutables: true });
+  writeCapabilityLock(s, "old.cap", { source: "marketplace:old.cap@1", version: "1", integrity: `sha256-${"a".repeat(64)}`, trustedExecutables: true });
   assert.equal(JSON.parse(readFileSync(join(s, OAS_LOCK_FILE), "utf8")).lockfileVersion, 2);
   // synthesizing a NEW legacy entry in a v2 lock is refused
-  assert.throws(() => writeCapabilityLock(s, "new.cap", { source: "path:/x", version: "1", integrity: "sha256-b" }), (e) => e.code === "legacy-lock");
+  assert.throws(() => writeCapabilityLock(s, "new.cap", { source: "path:/x", version: "1", integrity: `sha256-${"b".repeat(64)}` }), (e) => e.code === "legacy-lock");
   rmSync(base, { recursive: true, force: true });
 });
 
@@ -876,8 +924,8 @@ test("residue: migration failure is atomic — original v1 lock restored, migrat
   gitify(good);
   const wrong = pkgSource(join(base, "wrong"), { package: "bad.cap" }, { "cap": { capability: "something.else" } });
   gitify(wrong);
-  writeCapabilityLock(s, "ok.cap", { source: "marketplace:ok.cap@1.0.0", version: "1.0.0", integrity: "sha256-a" });
-  writeCapabilityLock(s, "bad.cap", { source: "marketplace:bad.cap@1.0.0", version: "1.0.0", integrity: "sha256-b" });
+  writeCapabilityLock(s, "ok.cap", { source: "marketplace:ok.cap@1.0.0", version: "1.0.0", integrity: `sha256-${"a".repeat(64)}` });
+  writeCapabilityLock(s, "bad.cap", { source: "marketplace:bad.cap@1.0.0", version: "1.0.0", integrity: `sha256-${"b".repeat(64)}` });
   const original = readFileSync(join(s, OAS_LOCK_FILE), "utf8");
   const catalog = (id) => (id === "ok.cap" ? { url: good } : id === "bad.cap" ? { url: wrong } : undefined);
   assert.throws(() => applyLegacyLockMigration(s, { catalog }), (e) => /rolled back/.test(e.message));
@@ -889,7 +937,7 @@ test("residue: migration failure is atomic — original v1 lock restored, migrat
 test("residue: doctor --json lists each residue entry as pending-migration with a retry action", () => {
   const base = temp();
   const s = scope(base);
-  writeCapabilityLock(s, "res.cap", { source: "marketplace:res.cap@1.0.0", version: "1.0.0", integrity: "sha256-a" });
+  writeCapabilityLock(s, "res.cap", { source: "marketplace:res.cap@1.0.0", version: "1.0.0", integrity: `sha256-${"a".repeat(64)}` });
   applyLegacyLockMigration(s, { catalog: () => undefined });
   const r = cli(s, "doctor", s, "--json");
   const doc = JSON.parse(r.stdout);
@@ -965,8 +1013,8 @@ test("agent-callable JSON completeness: install/restore/trust/update/remove/migr
   assert.equal(env.ok, true);
   assert.deepEqual(env.result.approved, ["js.cap"]);
   // bare install (restore) --json — WS2's approved reconcile envelope
-  // (maintainer refinement 5: boundary/scopes/artifacts) carries the engine's
-  // per-package restore rows as artifacts with kind "package".
+  // (boundary/scopes/artifacts) carries the engine's per-package rows as
+  // artifacts with kind "package".
   rmSync(join(installedPackagesDir(s), "js.p"), { recursive: true, force: true });
   env = JSON.parse(cli(s, "install", "--dir", s, "--json").stdout);
   assert.equal(env.ok, true);
@@ -1056,20 +1104,25 @@ test("invalid-lock: update/remove planning fail closed; doctor and list diagnose
   // update and remove planning fail closed with invalid-lock
   assert.throws(() => updatePackage(s, "hd.p"), (e) => e.code === "invalid-lock");
   assert.throws(() => removePackage(s, "hd.p"), (e) => e.code === "invalid-lock");
-  // list --json diagnoses (lockError), does not crash
-  const env = JSON.parse(cli(s, "list", "--dir", s, "--json").stdout);
-  assert.equal(env.ok, true);
-  assert.match(env.result.packages.find((p) => p.package === "hd.p").lockError, /trustedCapabilities/);
-  // doctor human output carries the actionable diagnosis
-  const r = cli(s, "doctor", s);
+  // list FAILS CLOSED (maintainer finding 3): raises typed invalid-lock via the envelope
+  let r = cli(s, "list", "--dir", s, "--json");
+  let env = JSON.parse(r.stdout);
+  assert.equal(env.ok, false);
+  assert.equal(env.error.code, "invalid-lock");
+  assert.match(env.error.message, /trustedCapabilities/);
+  assert.notEqual(r.status, 0);
+  // doctor CATCHES the typed error and diagnoses actionably without crashing
+  r = cli(s, "doctor", s);
+  assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /\[invalid-lock\]/);
+  assert.match(r.stdout, /never auto-repaired/);
   rmSync(base, { recursive: true, force: true });
 });
 
 test("invalid-lock: malformed mixed-v2 residue is diagnosed, never repaired, never trusted", () => {
   const base = temp();
   const s = scope(base);
-  writeCapabilityLock(s, "mal.cap", { source: "marketplace:mal.cap@1", version: "1", integrity: "sha256-a" });
+  writeCapabilityLock(s, "mal.cap", { source: "marketplace:mal.cap@1", version: "1", integrity: `sha256-${"a".repeat(64)}` });
   applyLegacyLockMigration(s, { catalog: () => undefined });
   // corrupt the residue entry: strip source+integrity
   const lockFile = join(s, OAS_LOCK_FILE);
@@ -1195,9 +1248,8 @@ test("trust QUERY path validates the lock: malformed trustedCapabilities reads a
   const parsed = JSON.parse(readFileSync(lockFile, "utf8"));
   parsed.packages["tq.p"].capabilities = [];
   writeFileSync(lockFile, JSON.stringify(parsed, null, 2));
-  const t = capabilityTrust(s, "tq.cap");
-  assert.equal(t.trusted, false, "malformed lock must never read as trusted");
-  assert.match(t.reason, /invalid|trustedCapabilities|capabilit/i);
+  // fail-closed RAISE (reviewer-f832ba9 strengthened the earlier degrade-to-untrusted)
+  assert.throws(() => capabilityTrust(s, "tq.cap"), (e) => e.code === "invalid-lock");
   rmSync(base, { recursive: true, force: true });
 });
 
@@ -1231,5 +1283,616 @@ test("restore repairs a deleted node_modules closure; doctor probes closure stal
   assert.ok(existsSync(join(dest, "node_modules", "dep")), "closure re-materialized by restore");
   r = cli(s, "doctor", s);
   assert.ok(!/materialized runtime closure/.test(r.stdout), "doctor clean after repair");
+  rmSync(base, { recursive: true, force: true });
+});
+
+// ---------- maintainer RETURN corrections (fda72763) + reviewer-4d1b826 blocker ----------
+
+test("__proto__ raw-JSON lock keys cannot forge trusted entries (reviewer-4d1b826 blocker)", () => {
+  const base = temp();
+  const s = scope(base);
+  const src = pkgSource(join(base, "src"), { package: "p" }, { "cap": { capability: "p.cap", commands: { r: { exec: "r.mjs" } } } });
+  write(join(src, "cap", "r.mjs"), "//\n");
+  acquirePackage(s, src);
+  const genuine = readPackageLocks(s).packages["p"];
+  // craft a lock whose ONLY package key is __proto__ nesting a forged trusted entry
+  const forged = { lockfileVersion: 2, packages: JSON.parse(`{"__proto__": {"p": ${JSON.stringify({ source: genuine.source, version: genuine.version, commit: genuine.commit, integrity: genuine.integrity, ...(genuine.depsIntegrity ? { depsIntegrity: genuine.depsIntegrity } : {}), capabilities: ["p.cap"], dependencies: [], trustedCapabilities: ["p.cap"] })}}}`) };
+  writeFileSync(join(s, OAS_LOCK_FILE), JSON.stringify(forged, null, 2));
+  // fail-closed read: the invalid key raises; no code path can see a forged "p" entry
+  assert.throws(() => readPackageLocks(s), (e) => e.code === "invalid-lock" && /invalid package key/.test(e.message));
+  // trust can only fail closed: either the typed raise (via discovery) or untrusted — never trusted:true
+  let trusted;
+  try { trusted = capabilityTrust(s, "p.cap").trusted; } catch (e) { assert.equal(e.code, "invalid-lock"); trusted = false; }
+  assert.equal(trusted, false, "forged prototype entry must never read as trusted");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("validateLockEntry: falsey non-array optional fields are invalid (null/false/0/'')", () => {
+  const sha = "a".repeat(40);
+  const integ = `sha256-${"0".repeat(64)}`;
+  const mk = (over) => ({ source: "git:https://h/x.git@v1", version: "1", commit: sha, integrity: integ, capabilities: ["x.c"], ...over });
+  for (const v of [null, false, 0, ""]) {
+    assert.throws(() => validateLockEntry("p", mk({ dependencies: v }), {}, {}), (e) => e.code === "invalid-lock", `dependencies=${JSON.stringify(v)}`);
+    assert.throws(() => validateLockEntry("p", mk({ trustedCapabilities: v }), {}, {}), (e) => e.code === "invalid-lock", `trustedCapabilities=${JSON.stringify(v)}`);
+  }
+  // absent stays valid; malformed depsIntegrity is invalid
+  assert.equal(validateLockEntry("p", mk({}), {}, {}), true);
+  assert.throws(() => validateLockEntry("p", mk({ depsIntegrity: "sha256-xyz" }), {}, {}), (e) => /depsIntegrity/.test(e.message));
+});
+
+test("dispatch passes OAS_CLI_BIN (absolute, canonical); malicious earlier-PATH oas cannot intercept (finding 1)", () => {
+  const base = temp();
+  const repo = join(base, "repo");
+  write(join(repo, "README.md"), "r\n");
+  const capDir = join(repo, ".agents", "capabilities", "owned", "clibin");
+  write(join(capDir, "oas.json"), JSON.stringify({ capability: "cb.svc", version: "1.0.0", description: "d", command: "cbsvc", commands: { probe: "bin/probe.mjs" } }));
+  // consumer-style probe: execFile the OAS_CLI_BIN path (never PATH), re-emit its envelope
+  write(join(capDir, "bin", "probe.mjs"), `
+import { execFileSync } from "node:child_process";
+const bin = process.env.OAS_CLI_BIN;
+if (!bin || !bin.startsWith("/")) { console.log(JSON.stringify({ ok: false, why: "no absolute OAS_CLI_BIN" })); process.exit(1); }
+const out = execFileSync(bin, ["version", "--json"], { encoding: "utf8" }); // execFile the EXACT path
+console.log(JSON.stringify({ ok: true, probe: JSON.parse(out) }));
+`);
+  write(join(repo, "oas-config.yaml"), "name: t\ncapabilities:\n  additive:\n    cb.svc:\n      global: true\n");
+  gitify(repo);
+  // malicious PATH: an earlier `oas` that would poison any PATH-based resolution
+  const evil = join(base, "evilbin");
+  write(join(evil, "oas"), "#!/bin/sh\necho INTERCEPTED; exit 99\n");
+  execFileSync("chmod", ["+x", join(evil, "oas")]);
+  const r = spawnSync(process.execPath, [CLI, "cbsvc", "probe"], { cwd: repo, encoding: "utf8", env: { ...process.env, PATH: `${evil}:${process.env.PATH}`, PI_AGENT_HOME: "", OAS_HOME: "" } });
+  const out = JSON.parse(r.stdout.trim().split("\n").pop());
+  assert.equal(out.ok, true, r.stdout + r.stderr);
+  assert.equal(out.probe.name, "@oas-framework/oas", "consumer reached the REAL CLI via OAS_CLI_BIN");
+  assert.ok(!r.stdout.includes("INTERCEPTED"), "PATH-shadowed oas never executed");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("materialized symlink containment: escaping/broken node_modules links fail the transaction with rollback (finding 4)", () => {
+  const base = temp();
+  const s = scope(base);
+  // package whose npm ci produces a node_modules symlink escaping the root:
+  // file: dep pointing OUTSIDE the package root does exactly that.
+  write(join(base, "outside-dep", "package.json"), JSON.stringify({ name: "outside-dep", version: "1.0.0" }));
+  const src = pkgSource(join(base, "src"), { package: "sl.p" }, { "cap": { capability: "sl.cap" } });
+  write(join(src, "package.json"), JSON.stringify({ name: "sl-p", version: "1.0.0", dependencies: { "outside-dep": "file:../outside-dep" } }));
+  write(join(src, "package-lock.json"), JSON.stringify({
+    name: "sl-p", version: "1.0.0", lockfileVersion: 3, requires: true,
+    packages: { "": { name: "sl-p", version: "1.0.0", dependencies: { "outside-dep": "file:../outside-dep" } }, "node_modules/outside-dep": { resolved: "../outside-dep", link: true }, "../outside-dep": { version: "1.0.0" } },
+  }));
+  assert.throws(() => acquirePackage(s, src), (e) => e.code === "path-escape" && /symlink/.test(e.message));
+  assert.ok(!existsSync(join(installedPackagesDir(s), "sl.p")), "rollback: nothing installed");
+  const lockFile = join(s, OAS_LOCK_FILE);
+  assert.ok(!existsSync(lockFile) || !JSON.parse(readFileSync(lockFile, "utf8")).packages?.["sl.p"], "rollback: nothing locked");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("writePackageLock validates the FULL prospective map (finding 3)", () => {
+  const base = temp();
+  const s = scope(base);
+  const sha = "a".repeat(40);
+  const integ = `sha256-${"3".repeat(64)}`;
+  const good = { source: `git:https://h/x.git@v1`, version: "1", commit: sha, integrity: integ, capabilities: ["g.c"], dependencies: [], trustedCapabilities: [] };
+  writePackageLock(s, "good.p", good);
+  // writing an entry that references a missing dependency is rejected...
+  assert.throws(() => writePackageLock(s, "bad.p", { ...good, capabilities: ["b.c"], dependencies: ["ghost.p"] }), (e) => e.code === "invalid-lock");
+  // ...and the file still contains only the valid entry
+  const parsed = JSON.parse(readFileSync(join(s, OAS_LOCK_FILE), "utf8"));
+  assert.deepEqual(Object.keys(parsed.packages), ["good.p"]);
+  // an invalid package identity key is rejected up front
+  assert.throws(() => writePackageLock(s, "__proto__", good), (e) => e.code === "invalid-lock");
+  rmSync(base, { recursive: true, force: true });
+});
+
+// ---------- reviewer-72f06c7 findings ----------
+
+test("migration rollback removes the FAILING conversion's packages too (reviewer-72f06c7)", () => {
+  const base = temp();
+  const s = scope(base);
+  const good = pkgSource(join(base, "good"), { package: "ok.cap" }, { "cap": { capability: "ok.cap" } });
+  gitify(good);
+  // the FAILING conversion carries a DEPENDENCY — rollback must remove BOTH
+  const wrongDep = pkgSource(join(base, "wrong-dep"), { package: "bad.dep" });
+  const wrongDepCommit = gitify(wrongDep);
+  const wrong = pkgSource(join(base, "wrong"), { package: "bad.cap", dependencies: [`file://${wrongDep}@${wrongDepCommit}`] }, { "cap": { capability: "something.else" } });
+  gitify(wrong);
+  writeCapabilityLock(s, "ok.cap", { source: "marketplace:ok.cap@1.0.0", version: "1.0.0", integrity: `sha256-${"a".repeat(64)}` });
+  writeCapabilityLock(s, "bad.cap", { source: "marketplace:bad.cap@1.0.0", version: "1.0.0", integrity: `sha256-${"b".repeat(64)}` });
+  const original = readFileSync(join(s, OAS_LOCK_FILE), "utf8");
+  const catalog = (id) => (id === "ok.cap" ? { url: good } : id === "bad.cap" ? { url: wrong } : undefined);
+  assert.throws(() => applyLegacyLockMigration(s, { catalog }), /rolled back/);
+  assert.equal(readFileSync(join(s, OAS_LOCK_FILE), "utf8"), original);
+  assert.ok(!existsSync(join(installedPackagesDir(s), "ok.cap")), "earlier conversion removed");
+  assert.ok(!existsSync(join(installedPackagesDir(s), "bad.cap")), "FAILING conversion's package removed too");
+  assert.ok(!existsSync(join(installedPackagesDir(s), "bad.dep")), "FAILING conversion's DEPENDENCY removed too");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("refused legacy install at a v2 scope leaves lock AND store unchanged (reviewer-72f06c7)", () => {
+  const base = temp();
+  const s = scope(base);
+  // v2 scope with migration residue-capable lock
+  const pkg = pkgSource(join(base, "pkg"), { package: "v2.p" }, { "cap": { capability: "v2.cap" } });
+  acquirePackage(s, pkg);
+  const lockBefore = readFileSync(join(s, OAS_LOCK_FILE), "utf8");
+  // legacy capability source (bare oas.json, no oas-package.json)
+  const legacy = join(base, "legacy-cap");
+  write(join(legacy, "oas.json"), JSON.stringify({ capability: "leg.cap", version: "1.0.0", description: "d" }));
+  const r = cli(s, "install", legacy, "--dir", s);
+  assert.notEqual(r.status, 0, "refused");
+  assert.match(r.stderr, /legacy|migrate/i);
+  assert.equal(readFileSync(join(s, OAS_LOCK_FILE), "utf8"), lockBefore, "lock unchanged");
+  const capStore = join(s, ".agents", "capabilities", "installed");
+  assert.ok(!existsSync(join(capStore, "legacy-cap")), "no stranded artifact in the capability store");
+  // retry does NOT report already-acquired
+  const r2 = cli(s, "install", legacy, "--dir", s);
+  assert.notEqual(r2.status, 0);
+  assert.ok(!r2.stdout.includes("Already acquired"), "retry is a clean refusal, not already-acquired");
+  // init's marketplace acquisition path compensates the same way: the store
+  // stays free of stranded artifacts when its lock write is refused.
+  const r3 = cli(s, "init", "--dir", s, "--knowledge", "oas.okf");
+  assert.notEqual(r3.status, 0, "init acquisition refused at the v2 scope");
+  assert.ok(!existsSync(join(capStore, "oas-okf")), "init leaves no stranded artifact");
+  assert.equal(readFileSync(join(s, OAS_LOCK_FILE), "utf8"), lockBefore, "init leaves the lock unchanged");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("residue collision blocks unrelated acquires when a RETAINED locked package exports the colliding id (reviewer-72f06c7)", () => {
+  const base = temp();
+  const s = scope(base);
+  // pre-existing package exporting col.cap (installed BEFORE any residue exists)
+  const pre = pkgSource(join(base, "pre"), { package: "pre.p" }, { "cap": { capability: "col.cap" } });
+  acquirePackage(s, pre);
+  // simulate a pre-stricter-commit mixed lock: residue entry colliding with the locked package
+  const lockFile = join(s, OAS_LOCK_FILE);
+  const parsed = JSON.parse(readFileSync(lockFile, "utf8"));
+  parsed.capabilities = { "col.cap": { source: "marketplace:col.cap@1.0.0", version: "1.0.0", integrity: `sha256-${"a".repeat(64)}` } };
+  writeFileSync(lockFile, JSON.stringify(parsed, null, 2));
+  // an UNRELATED acquire must now fail with both provenances, not succeed past the dual path
+  const other = pkgSource(join(base, "other"), { package: "other.p" }, { "cap": { capability: "other.cap" } });
+  assert.throws(() => acquirePackage(s, other), (e) => e.code === "duplicate-capability-id"
+    && e.provenance.some((x) => String(x).startsWith("residue:"))
+    && e.provenance.includes("pre.p"));
+  rmSync(base, { recursive: true, force: true });
+});
+
+// ---------- reviewer-775b060 findings: complete JSON envelope coverage ----------
+
+test("install --json envelopes every branch: missing path, retired id, legacy success, already-acquired", () => {
+  const base = temp();
+  const s = scope(base);
+  // missing local path → invalid-source envelope
+  let env = JSON.parse(cli(s, "install", "path:/definitely/missing", "--dir", s, "--json").stdout);
+  assert.equal(env.ok, false);
+  assert.equal(env.error.code, "invalid-source");
+  // retired capability id → retired-capability envelope
+  env = JSON.parse(cli(s, "install", "oas.web", "--dir", s, "--json").stdout);
+  assert.equal(env.ok, false);
+  assert.equal(env.error.code, "retired-capability");
+  // legacy capability success → ONE object
+  const legacy = join(base, "cap");
+  write(join(legacy, "oas.json"), JSON.stringify({ capability: "lj.cap", version: "1.0.0", description: "d" }));
+  let r = cli(s, "install", legacy, "--dir", s, "--json");
+  env = JSON.parse(r.stdout); // throws on prose contamination
+  assert.equal(env.ok, true);
+  assert.equal(env.result.capability, "lj.cap");
+  // re-install of the same path → enveloped refusal (never silent update), not prose
+  env = JSON.parse(cli(s, "install", legacy, "--dir", s, "--json").stdout);
+  assert.equal(env.ok, false);
+  assert.equal(env.error.code, "invalid-source");
+  assert.match(env.error.message, /never silently updates/);
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("bare restore --json failure uses the reconcile envelope with per-artifact taxonomy codes", () => {
+  const base = temp();
+  const s = scope(base);
+  // v1 lock naming a missing path source → restore failure
+  writeCapabilityLock(s, "gone.cap", { source: "path:/nope/missing", version: "1", integrity: `sha256-${"a".repeat(64)}` });
+  const r = cli(s, "install", "--dir", s, "--json");
+  const env = JSON.parse(r.stdout);
+  assert.equal(env.ok, false);
+  assert.deepEqual(Object.keys(env).sort(), ["error", "ok", "schemaVersion"], "EXACT failure shape — no extra top-level keys");
+  // Maintainer-approved WS2 contract (refinement 5): bare install failures
+  // aggregate under E_RECONCILE_FAILED with the COMPLETE report in
+  // error.details; per-artifact rows carry the frozen taxonomy codes.
+  assert.equal(env.error.code, "E_RECONCILE_FAILED");
+  const failures = env.error.details.failures;
+  assert.ok(failures.length >= 1);
+  assert.ok(failures.some((f) => String(f.id).includes("gone.cap")), JSON.stringify(failures));
+  assert.notEqual(r.status, 0);
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("trust/migrate --json: usage and malformed-lock failures stay enveloped", () => {
+  const base = temp();
+  const s = scope(base);
+  // trust usage error → envelope
+  let env = JSON.parse(cli(s, "trust", "--dir", s, "--json").stdout);
+  assert.equal(env.ok, false);
+  assert.equal(env.error.code, "E_USAGE");
+  // malformed lock JSON → migrate --dry-run --json envelopes invalid-lock (no stack trace)
+  writeFileSync(join(s, OAS_LOCK_FILE), "{ definitely not json");
+  const r = cli(s, "migrate", "--dry-run", "--dir", s, "--json");
+  env = JSON.parse(r.stdout);
+  assert.equal(env.ok, false);
+  assert.equal(env.error.code, "invalid-lock");
+  // trust against the malformed lock also envelopes (unknown target probes first;
+  // both are one-object failures with taxonomy codes)
+  env = JSON.parse(cli(s, "trust", "whatever.cap", "--dir", s, "--json").stdout);
+  assert.equal(env.ok, false);
+  assert.ok(["invalid-lock", "unknown-capability"].includes(env.error.code), env.error.code);
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("bulk trust --json prints the pre-approval surface on stderr, one object on stdout", () => {
+  const base = temp();
+  const s = scope(base);
+  const src = pkgSource(join(base, "src"), { package: "bt.p" }, { "c1": { capability: "bt.a", commands: { x: { exec: "x.mjs" } } } });
+  write(join(src, "c1", "x.mjs"), "//\n");
+  cli(s, "install", src, "--dir", s);
+  const r = cli(s, "trust", "bt.p", "--all-capabilities", "--dir", s, "--json");
+  const env = JSON.parse(r.stdout); // one object
+  assert.equal(env.ok, true);
+  assert.match(r.stderr, /full executable surface/, "pre-approval summary on stderr in JSON mode");
+  assert.match(r.stderr, /bt\.a: commands \[x\]/);
+  rmSync(base, { recursive: true, force: true });
+});
+
+// ---------- reviewer-fe8053d findings (blocker fixed in 4d1b826; live importants) ----------
+
+test("trust EXECUTION path rejects invalid lock graphs (self-dep) — regression for the fe8053d blocker fixed in 4d1b826", () => {
+  const base = temp();
+  const s = scope(base);
+  const src = pkgSource(join(base, "src"), { package: "a.p" }, { "cap": { capability: "ex.cap", commands: { r: { exec: "r.mjs" } } } });
+  write(join(src, "cap", "r.mjs"), "//\n");
+  acquirePackage(s, src);
+  approveCapability(s, "ex.cap");
+  // corrupt: self-dependency (the reviewer's exact repro)
+  const lockFile = join(s, OAS_LOCK_FILE);
+  const parsed = JSON.parse(readFileSync(lockFile, "utf8"));
+  parsed.packages["a.p"].dependencies = ["a.p"];
+  writeFileSync(lockFile, JSON.stringify(parsed, null, 2));
+  // fail-closed RAISE on the query path (reviewer-f832ba9)
+  assert.throws(() => capabilityTrust(s, "ex.cap"), (e) => e.code === "invalid-lock");
+  // resolveCapabilities (the execution path) must not expose the hooks/commands
+  write(join(s, "oas-config.yaml"), "name: t\ncapabilities:\n  additive:\n    ex.cap:\n      from: installed\n      global: true\n");
+  assert.throws(() => resolveOasConfig(s), (e) => e.code === "invalid-lock" || /not usable|invalid/.test(e.message));
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("updatePackage fails closed when ANY consumable lock entry is invalid (reviewer-fe8053d)", () => {
+  const base = temp();
+  const s = scope(base);
+  const dep = pkgSource(join(base, "dep"), { package: "b.p" }, { "cap": { capability: "b.cap" } });
+  const depCommit = gitify(dep);
+  const root = pkgSource(join(base, "root"), { package: "a2.p", dependencies: [`file://${dep}@${depCommit}`] });
+  gitify(root);
+  acquirePackage(s, `file://${root}`);
+  // corrupt the DEPENDENCY entry, then update the ROOT
+  const lockFile = join(s, OAS_LOCK_FILE);
+  const parsed = JSON.parse(readFileSync(lockFile, "utf8"));
+  parsed.packages["b.p"].trustedCapabilities = ["ghost"];
+  writeFileSync(lockFile, JSON.stringify(parsed, null, 2));
+  assert.throws(() => updatePackage(s, "a2.p"), (e) => e.code === "invalid-lock" && /b\.p/.test(e.message), "invalid dependency entry fails the update closure");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("schema/runtime parity: array/null compatibility, empty source (reviewer-fe8053d)", () => {
+  const base = temp();
+  const mk = (compat) => { const d = join(base, `m${Math.random().toString(36).slice(2)}`); write(join(d, "oas-package.json"), JSON.stringify({ package: "x.p", version: "1.0.0", description: "d", compatibility: compat })); return d; };
+  assert.throws(() => loadPackageManifestAt(mk({ oas: ["1.2.3"] })), (e) => e.code === "invalid-package-manifest", "array oas rejected, no coercion");
+  assert.throws(() => loadPackageManifestAt(mk(null)), (e) => e.code === "invalid-package-manifest", "null compatibility is invalid-package-manifest, not TypeError");
+  const sha = "a".repeat(40);
+  const integ = `sha256-${"0".repeat(64)}`;
+  assert.throws(() => validateLockEntry("p", { source: "path:", version: "1", commit: "local", integrity: integ, capabilities: [] }, {}, {}), (e) => e.code === "invalid-lock", "empty path source rejected");
+  assert.throws(() => validateLockEntry("p", { source: "git:", version: "1", commit: sha, integrity: integ, capabilities: [] }, {}, {}), (e) => e.code === "invalid-lock", "empty git url rejected");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("doctor --json diagnoses malformed residue with invalid-lock status; human/JSON agree (reviewer-fe8053d)", () => {
+  const base = temp();
+  const s = scope(base);
+  writeCapabilityLock(s, "ok.res", { source: "marketplace:ok.res@1.0.0", version: "1.0.0", integrity: `sha256-${"a".repeat(64)}` });
+  applyLegacyLockMigration(s, { catalog: () => undefined });
+  // corrupt: strip version (a field the OLD human check missed) + inject a second malformed entry
+  const lockFile = join(s, OAS_LOCK_FILE);
+  const parsed = JSON.parse(readFileSync(lockFile, "utf8"));
+  delete parsed.capabilities["ok.res"].version;
+  writeFileSync(lockFile, JSON.stringify(parsed, null, 2));
+  const rj = cli(s, "doctor", s, "--json");
+  const doc = JSON.parse(rj.stdout);
+  const entry = doc.migrationResidue.find((e) => e.id === "ok.res");
+  assert.equal(entry.status, "invalid-lock");
+  assert.match(entry.violation, /version/);
+  assert.match(entry.action, /fix or remove/);
+  const rh = cli(s, "doctor", s);
+  assert.match(rh.stdout, /residue entry ok\.res .* is malformed \(missing\/invalid version\)/);
+  rmSync(base, { recursive: true, force: true });
+});
+
+// ---------- maintainer finding 2: platform-invariance enforcement ----------
+
+test("platform-variant closures are rejected at materialization (v1 MUST, finding 2)", () => {
+  const base = temp();
+  const s = scope(base);
+  const src = pkgSource(join(base, "src"), { package: "pv.p" }, { "cap": { capability: "pv.cap" } });
+  // lockfile resolving a platform-constrained (native-style) package
+  write(join(src, "package.json"), JSON.stringify({ name: "pv-p", version: "1.0.0", dependencies: { "fake-native": "1.0.0" } }));
+  write(join(src, "package-lock.json"), JSON.stringify({
+    name: "pv-p", version: "1.0.0", lockfileVersion: 3, requires: true,
+    packages: {
+      "": { name: "pv-p", version: "1.0.0", dependencies: { "fake-native": "1.0.0" } },
+      "node_modules/fake-native": { version: "1.0.0", resolved: "https://registry.npmjs.org/fake-native/-/fake-native-1.0.0.tgz", integrity: "sha512-AAA", os: ["darwin"], cpu: ["arm64"] },
+    },
+  }));
+  assert.throws(() => acquirePackage(s, src), /platform-variant runtime closure.*os\/cpu\/libc/);
+  assert.ok(!existsSync(join(installedPackagesDir(s), "pv.p")), "nothing installed");
+  // install-script marker also rejected
+  const src2 = pkgSource(join(base, "src2"), { package: "pv2.p" }, { "cap": { capability: "pv2.cap" } });
+  write(join(src2, "package.json"), JSON.stringify({ name: "pv2-p", version: "1.0.0", dependencies: { "gyp-dep": "1.0.0" } }));
+  write(join(src2, "package-lock.json"), JSON.stringify({
+    name: "pv2-p", version: "1.0.0", lockfileVersion: 3, requires: true,
+    packages: {
+      "": { name: "pv2-p", version: "1.0.0", dependencies: { "gyp-dep": "1.0.0" } },
+      "node_modules/gyp-dep": { version: "1.0.0", resolved: "https://registry.npmjs.org/gyp-dep/-/gyp-dep-1.0.0.tgz", integrity: "sha512-BBB", hasInstallScript: true },
+    },
+  }));
+  assert.throws(() => acquirePackage(s, src2), /install script/);
+  // pure-JS closures still pass (regression: the vendored prod-dep fixture pattern)
+  const ok = pkgSource(join(base, "ok"), { package: "pi.p" }, { "cap": { capability: "pi.cap" } });
+  write(join(ok, "vendor/dep/package.json"), JSON.stringify({ name: "dep", version: "1.0.0" }));
+  write(join(ok, "package.json"), JSON.stringify({ name: "pi-p", version: "1.0.0", dependencies: { dep: "file:vendor/dep" } }));
+  write(join(ok, "package-lock.json"), JSON.stringify({ name: "pi-p", version: "1.0.0", lockfileVersion: 3, requires: true, packages: { "": { name: "pi-p", version: "1.0.0", dependencies: { dep: "file:vendor/dep" } }, "node_modules/dep": { resolved: "vendor/dep", link: true }, "vendor/dep": { version: "1.0.0" } } }));
+  const r = acquirePackage(s, ok);
+  assert.equal(r.root, "pi.p");
+  rmSync(base, { recursive: true, force: true });
+});
+
+// ---------- reviewer-f832ba9 blockers ----------
+
+test("nested materialized links cannot bypass containment: node_modules/dep → vendor/dep with an escaping inner link (reviewer-f832ba9)", () => {
+  const base = temp();
+  const s = scope(base);
+  const src = pkgSource(join(base, "src"), { package: "nl.p" }, { "cap": { capability: "nl.cap" } });
+  // vendored dep INSIDE the root containing a symlink that ESCAPES the root
+  write(join(src, "vendor", "dep", "package.json"), JSON.stringify({ name: "dep", version: "1.0.0" }));
+  write(join(base, "outside-secret"), "leak\n");
+  symlinkSync(join(base, "outside-secret"), join(src, "vendor", "dep", "escape"));
+  write(join(src, "package.json"), JSON.stringify({ name: "nl-p", version: "1.0.0", dependencies: { dep: "file:vendor/dep" } }));
+  write(join(src, "package-lock.json"), JSON.stringify({ name: "nl-p", version: "1.0.0", lockfileVersion: 3, requires: true, packages: { "": { name: "nl-p", version: "1.0.0", dependencies: { dep: "file:vendor/dep" } }, "node_modules/dep": { resolved: "vendor/dep", link: true }, "vendor/dep": { version: "1.0.0" } } }));
+  // npm ci creates node_modules/dep → ../vendor/dep (inside), whose CONTENT
+  // holds the escaping link — reachable at runtime via node_modules/dep/escape.
+  assert.throws(() => acquirePackage(s, src), (e) => e.code === "path-escape" && /escape/.test(e.message));
+  assert.ok(!existsSync(join(installedPackagesDir(s), "nl.p")), "rollback: nothing installed");
+  const lockFile = join(s, OAS_LOCK_FILE);
+  assert.ok(!existsSync(lockFile) || !JSON.parse(readFileSync(lockFile, "utf8")).packages?.["nl.p"], "rollback: nothing locked");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("locks with only missing artifacts still fail closed on list; restore raises on malformed locks (reviewer-f832ba9)", () => {
+  const base = temp();
+  const s = scope(base);
+  // v2 lock whose ONLY entry has no installed artifact and a bad integrity
+  writeFileSync(join(s, OAS_LOCK_FILE), JSON.stringify({ lockfileVersion: 2, packages: { "ghost.p": { source: "path:/x", version: "1", commit: "local", integrity: "sha256-bad", capabilities: [] } } }, null, 2));
+  // even without a store dir, list must RAISE — not return ok:true
+  const r = cli(s, "list", "--dir", s, "--json");
+  const env = JSON.parse(r.stdout);
+  assert.equal(env.ok, false);
+  assert.equal(env.error.code, "invalid-lock");
+  // restore raises typed invalid-lock instead of reporting-and-continuing
+  assert.throws(() => restorePackages(s), (e) => e.code === "invalid-lock");
+  // malformed JSON: restore raises too
+  writeFileSync(join(s, OAS_LOCK_FILE), "{ nope");
+  assert.throws(() => restorePackages(s), (e) => e.code === "invalid-lock");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("trust query RETHROWS invalid-lock (fail closed; only doctor catches) — reviewer-f832ba9", () => {
+  const base = temp();
+  const s = scope(base);
+  const src = pkgSource(join(base, "src"), { package: "rt.p" }, { "cap": { capability: "rt.cap", commands: { r: { exec: "r.mjs" } } } });
+  write(join(src, "cap", "r.mjs"), "//\n");
+  acquirePackage(s, src);
+  const lockFile = join(s, OAS_LOCK_FILE);
+  const parsed = JSON.parse(readFileSync(lockFile, "utf8"));
+  parsed.packages["rt.p"].trustedCapabilities = ["ghost.cap"];
+  writeFileSync(lockFile, JSON.stringify(parsed, null, 2));
+  // the QUERY path raises the typed error — it must not degrade to {trusted:false}
+  assert.throws(() => capabilityTrust(s, "rt.cap"), (e) => e.code === "invalid-lock");
+  // doctor still catches and diagnoses without crashing
+  const r = cli(s, "doctor", s);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /invalid-lock/);
+  rmSync(base, { recursive: true, force: true });
+});
+
+// ---------- WS2-reported engine bugs (coordinator mail dd2acc27) ----------
+
+test("hostile manifest roots: JSON null/scalar/array are invalid-package-manifest, never TypeError (WS2 bug 1)", () => {
+  const base = temp();
+  for (const [label, body] of [["null", "null"], ["scalar", "42"], ["string", '"x"'], ["array", "[1,2]"]]) {
+    const d = join(base, `h-${label}`);
+    write(join(d, "oas-package.json"), body);
+    assert.throws(() => loadPackageManifestAt(d), (e) => e.code === "invalid-package-manifest" && /must be a JSON object/.test(e.message), label);
+  }
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("relative dependency paths resolve against the DEPENDING package's root, not CWD (WS2 bug 2)", () => {
+  const base = temp();
+  const s = scope(base);
+  // package at <base>/a depending on ./sub — must resolve <base>/a/sub regardless of CWD
+  const a = join(base, "a");
+  pkgSource(join(a, "sub"), { package: "sub.p" }, { "cap": { capability: "sub.cap" } });
+  pkgSource(a, { package: "root.rel", dependencies: ["./sub"] }, { "cap": { capability: "root.relcap" } });
+  // run acquire from a DIFFERENT cwd (the CLI always runs elsewhere)
+  const elsewhere = join(base, "elsewhere");
+  mkdirSync(elsewhere, { recursive: true });
+  const prevCwd = process.cwd();
+  try {
+    process.chdir(elsewhere);
+    const r = acquirePackage(s, a);
+    assert.deepEqual(r.installed.map((p) => p.package).sort(), ["root.rel", "sub.p"]);
+    assert.match(readPackageLocks(s).packages["sub.p"].source, /path:.*\/a\/sub$/, "resolved against the depending package root");
+  } finally {
+    process.chdir(prevCwd);
+  }
+  // a relative dependency declared by a NON-path (git) parent is a coded error, not CWD guessing
+  const g = pkgSource(join(base, "g"), { package: "g.rel", dependencies: ["./sub"] });
+  gitify(g);
+  assert.throws(() => acquirePackage(scope(base, "s2"), `file://${g}`), (e) => e.code === "invalid-source" && /relative path/.test(e.message));
+  rmSync(base, { recursive: true, force: true });
+});
+
+// ---------- empty-v1-lock ruling (maintainer, coordinator mail 9aaea2c3) ----------
+
+test("empty v1 locks SURFACE, convert trivially, and doctor reports format migration (maintainer ruling)", () => {
+  const base = temp();
+  const s = scope(base);
+  writeFileSync(join(s, OAS_LOCK_FILE), JSON.stringify({ lockfileVersion: 1, capabilities: {} }, null, 2));
+  // 1. read: legacy includes the EMPTY v1 file with provenance
+  const locks = readPackageLocks(s);
+  assert.equal(locks.legacy.length, 1);
+  assert.equal(locks.legacy[0].lockfileVersion, 1);
+  assert.equal(Object.keys(locks.legacy[0].capabilities).length, 0);
+  assert.equal(locks.legacy[0].level, s);
+  // 2. dry-run reports the format conversion, not "nothing found"
+  let r = cli(s, "migrate", "--dry-run", "--dir", s);
+  assert.match(r.stdout, /convert-format/);
+  assert.match(r.stdout, /canonical v2/);
+  r = cli(s, "migrate", "--dry-run", "--dir", s, "--json");
+  const env = JSON.parse(r.stdout);
+  assert.equal(env.result.plan[0].action, "convert-format");
+  // 3. doctor: pending LOCK-FORMAT migration, never residue
+  r = cli(s, "doctor", s);
+  assert.match(r.stdout, /pending lock-format migration/);
+  assert.ok(!/residue/.test(r.stdout.split("pending lock-format")[0].slice(-200)), "not described as residue");
+  const dj = JSON.parse(cli(s, "doctor", s, "--json").stdout);
+  assert.equal(dj.legacyLockFiles.length, 1);
+  assert.equal(dj.legacyLockFiles[0].empty, true);
+  assert.equal(dj.legacyLockFiles[0].status, "pending-format-migration");
+  assert.deepEqual(dj.migrationResidue, [], "empty v1 is NOT capability residue");
+  // 4. migrate: atomic canonical v2, no residue
+  r = cli(s, "migrate", "--dir", s);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /converted to canonical v2/);
+  const parsed = JSON.parse(readFileSync(join(s, OAS_LOCK_FILE), "utf8"));
+  assert.deepEqual(parsed, { lockfileVersion: 2, packages: {} });
+  // 5. post-conversion: legacy list is empty (v2 {capabilities:{}} is NOT residue)
+  assert.deepEqual(readPackageLocks(s).legacy, []);
+  const dj2 = JSON.parse(cli(s, "doctor", s, "--json").stdout);
+  assert.deepEqual(dj2.legacyLockFiles, []);
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("cutover gate probe: two-part acceptance and rejection (empty v1 blocks; nonempty residue blocks; clean passes)", () => {
+  const base = temp();
+  // scope A: empty v1 (blocks part a) — a lock-owning scope with NO config
+  const a = join(base, "a");
+  mkdirSync(a, { recursive: true });
+  writeFileSync(join(a, OAS_LOCK_FILE), JSON.stringify({ lockfileVersion: 1, capabilities: {} }));
+  // discovery includes lock-owning scopes without config entries: read from a CHILD dir
+  const child = join(a, "nested", "deeper");
+  mkdirSync(child, { recursive: true });
+  const gate = (dir) => {
+    const l = readPackageLocks(dir).legacy;
+    const v1Files = l.filter((x) => x.lockfileVersion !== 2);
+    const residue = l.filter((x) => x.lockfileVersion === 2 && Object.keys(x.capabilities).length);
+    return { pass: v1Files.length === 0 && residue.length === 0, v1Files: v1Files.length, residue: residue.length };
+  };
+  let g = gate(child);
+  assert.equal(g.pass, false, "empty v1 blocks the cutover");
+  assert.equal(g.v1Files, 1);
+  // convert → passes
+  cli(a, "migrate", "--dir", a);
+  g = gate(child);
+  assert.equal(g.pass, true, "clean two-part gate passes after conversion");
+  // scope B: nonempty v2 residue blocks part b
+  const b = join(base, "b");
+  mkdirSync(b, { recursive: true });
+  writeFileSync(join(b, OAS_LOCK_FILE), JSON.stringify({ lockfileVersion: 2, packages: {}, capabilities: { "res.cap": { source: "marketplace:res.cap@1", version: "1", integrity: `sha256-${"a".repeat(64)}` } } }));
+  g = gate(b);
+  assert.equal(g.pass, false, "nonempty v2 residue blocks the cutover");
+  assert.equal(g.residue, 1);
+  rmSync(base, { recursive: true, force: true });
+});
+
+// ---------- reviewer-6f0a3bd findings ----------
+
+test("bare restore reports unrestorable/retired statuses as failures with frozen codes (reviewer-6f0a3bd)", () => {
+  const base = temp();
+  const s = scope(base);
+  writeCapabilityLock(s, "bogus.cap", { source: "bogus:thing", version: "1", integrity: `sha256-${"a".repeat(64)}` });
+  const r = cli(s, "install", "--dir", s, "--json");
+  const env = JSON.parse(r.stdout);
+  assert.equal(env.ok, false, "unrestorable must not report ok");
+  // WS2 reconcile envelope: aggregate code E_RECONCILE_FAILED; the per-artifact
+  // row carries the frozen taxonomy code (invalid-source for unrestorable).
+  assert.equal(env.error.code, "E_RECONCILE_FAILED");
+  const art = env.error.details.scopes.flatMap((sc) => sc.artifacts).find((a) => a.id === "bogus.cap");
+  assert.equal(art.status, "unrestorable");
+  assert.equal(art.code, "invalid-source");
+  assert.notEqual(r.status, 0);
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("valueless --dir is E_BAD_ARGS inside the JSON boundary for every lifecycle command (reviewer-6f0a3bd)", () => {
+  const base = temp();
+  const s = scope(base);
+  for (const argv of [["list"], ["install"], ["trust", "x.cap"], ["update", "x.p"], ["remove", "x.p"], ["migrate"]]) {
+    const r = cli(s, ...argv, "--dir", "--json");
+    const env = JSON.parse(r.stdout); // throws on a stack trace / empty stdout
+    assert.equal(env.ok, false, argv.join(" "));
+    assert.equal(env.error.code, "E_BAD_ARGS", argv.join(" "));
+    assert.notEqual(r.status, 0);
+    assert.ok(!r.stderr.includes("TypeError"), "no uncaught stack trace");
+  }
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("typed codes preserved: retired manifest → retired-capability; malformed lock at install → invalid-lock (reviewer-6f0a3bd)", () => {
+  const base = temp();
+  const s = scope(base);
+  // local capability whose oas.json declares the retired oas.web
+  const retired = join(base, "retired-cap");
+  write(join(retired, "oas.json"), JSON.stringify({ capability: "oas.web", version: "1.0.0", description: "d" }));
+  let env = JSON.parse(cli(s, "install", retired, "--dir", s, "--json").stdout);
+  assert.equal(env.ok, false);
+  assert.equal(env.error.code, "retired-capability", "typed retirement code, not catch-all invalid-source");
+  // malformed lock JSON at a package install → invalid-lock, not legacy-lock
+  const s2 = scope(base, "s2");
+  writeFileSync(join(s2, OAS_LOCK_FILE), "{ nope");
+  const pkg = pkgSource(join(base, "pkg"), { package: "ml.p" });
+  env = JSON.parse(cli(s2, "install", pkg, "--dir", s2, "--json").stdout);
+  assert.equal(env.ok, false);
+  assert.equal(env.error.code, "invalid-lock", "malformed JSON is invalid-lock, not legacy-lock");
+  rmSync(base, { recursive: true, force: true });
+});
+
+// ---------- corrective item 5: same-bytes drift vs existing lock (coordinator mail 169d7944) ----------
+
+test("re-acquisition cannot re-legitimize same-bytes drift against an existing lock (item 5)", () => {
+  const base = temp();
+  const s = scope(base);
+  const src = pkgSource(join(base, "src"), { package: "dr.p" }, { "cap": { capability: "dr.cap", commands: { r: { exec: "r.mjs" } } } });
+  write(join(src, "cap", "r.mjs"), "// v1\n");
+  acquirePackage(s, src);
+  approveCapability(s, "dr.cap");
+  const lockBefore = readFileSync(join(s, OAS_LOCK_FILE), "utf8");
+  // drift SOURCE and INSTALLED trees to the SAME bytes post-acquisition
+  const dest = join(installedPackagesDir(s), "dr.p");
+  write(join(src, "cap", "r.mjs"), "// drifted identically\n");
+  write(join(dest, "cap", "r.mjs"), "// drifted identically\n");
+  // re-acquire: keep-path integrities match each other but NOT the lock → integrity-drift
+  assert.throws(() => acquirePackage(s, src), (e) => e.code === "integrity-drift" && /oas update/.test(e.message));
+  assert.equal(readFileSync(join(s, OAS_LOCK_FILE), "utf8"), lockBefore, "lock unchanged — drift not re-legitimized");
+  // no trust survival through the drift: the query fails closed on the drifted artifact
+  const t = capabilityTrust(s, "dr.cap");
+  assert.equal(t.trusted, false, "approval does not survive the drift");
+  // explicit update is the sanctioned advancement path
+  const r = updatePackage(s, "dr.p", { spec: src });
+  assert.equal(r.changed, true);
+  assert.deepEqual(readPackageLocks(s).packages["dr.p"].trustedCapabilities, [], "approvals reset by the explicit update");
   rmSync(base, { recursive: true, force: true });
 });

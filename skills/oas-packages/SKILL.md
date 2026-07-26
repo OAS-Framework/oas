@@ -26,8 +26,15 @@ codes) and `--dir <scope>`.
 oas install git:github.com/org/repo@v1.0.0    # git shorthand (ref optional; resolved once, exact-locked)
 oas install https://host/org/repo.git@v1.0.0  # raw HTTPS/SSH git URL
 oas install ../my-package                     # local path (dev escape hatch)
-oas install oas.okf                           # official catalog short id (identity only — no auto-trust)
+oas install <catalog-id>                      # official catalog short id (identity only — no auto-trust)
 ```
+
+Interim cutover note: official ids that are still KERNEL-MARKETPLACE
+capabilities (e.g. `oas.okf` today) route through the legacy capability path
+and are trusted at acquisition because they ship with the kernel you already
+installed. Once workstream 3 publishes them as catalog packages, the same id
+acquires as a package with NO automatic executable trust. Doctor's migration
+residue reporting tracks the cutover per scope.
 
 Dependencies declared in `oas-package.json` must be pinnable (official
 selector, tag/commit, or path). The whole closure is exact-locked in the
@@ -41,7 +48,9 @@ Installed roots live in `<scope>/.agents/packages/installed/` (gitignored).
 oas install                    # bare: EXACT restore of this chain's locks (never advances refs)
 oas list [--json]              # packages, exported capabilities, scopes, trust state
 oas update <package>           # transactional: temp fetch, closure validation, diff,
-                               # artifact+lock replaced together, ALL approvals invalidated
+                               # artifact+lock replaced together; approvals of every
+                               # CHANGED-integrity package are invalidated (unchanged
+                               # packages in the closure keep theirs)
 oas remove <package>           # refuses while config or dependent packages reference it
 ```
 
@@ -64,8 +73,11 @@ but no approval. Official-catalog identity is NOT executable trust.
 A package (root or per-capability dir) may check in `package.json` +
 `package-lock.json`; OAS materializes it with
 `npm ci --omit=dev --omit=peer --ignore-scripts` — production tree only, no
-lifecycle scripts, `node_modules` never hashed (reproducible from the locked
-lockfile). Host peer APIs are reached only through the supported runtime
+lifecycle scripts. The source hash excludes `node_modules`, but the
+materialized closure is hashed SEPARATELY as the lock's `depsIntegrity` and
+verified by trust and restore — tampering materialized deps invalidates
+approvals like source drift. Closures must be platform-invariant in v1.
+Host peer APIs are reached only through the supported runtime
 boundary, never auto-installed.
 
 ## Migration from v1 locks

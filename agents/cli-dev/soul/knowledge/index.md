@@ -11,6 +11,7 @@ read what the current task needs, not everything.
 # Sections
 
 ## Decisions
+* [decisions/package-runtime-boundary-structured-cli.md](decisions/package-runtime-boundary-structured-cli.md) - Official packages reach the kernel only through existing oas CLI commands (capability-defined agents via oas spawn, OAS_SETTINGS on dispatch, OAS_CLI_BIN execution), versioned by compatibility floor + pinned consumer fixture; one-for-one public wrappers were maintainer-rejected.
 
 * [decisions/spawn-lineage-explicit-only.md](decisions/spawn-lineage-explicit-only.md) - parentInstance now comes only from an explicit relation/--parent inside the target deployment or the attached-mode owner binding; env vars are never consulted, and cross-deployment spawns stay operator-origin.
 * [decisions/attached-spawns-child-of-work-owner.md](decisions/attached-spawns-child-of-work-owner.md) - attached work mode always makes the new agent a child of the verified work-tree owner; contradictory relations are rejected.
@@ -29,6 +30,8 @@ read what the current task needs, not everything.
 * [architecture/spawn-relations-lineage-fields.md](architecture/spawn-relations-lineage-fields.md) - final child/sibling/parent/unrelated semantics, sparse lineage fields, attached-owner binding, ambiguity validation, and retirement splice behavior.
 
 ## Lessons
+* [lessons/symlink-containment-walker-throws.md](lessons/symlink-containment-walker-throws.md) - A symlink-containment walker that recurses through contained link targets must narrow lstat probe try/catch blocks so path-escape errors thrown by deeper recursion fail closed instead of being silently swallowed.
+* [lessons/coordinator-stale-verification-loop.md](lessons/coordinator-stale-verification-loop.md) - When a coordinator repeatedly verifies stale commits and demands already-landed work, answer with branch-head, ancestry, and blob-level evidence plus explicit ACKs for the named mails.
 
 * [lessons/caller-controlled-instance-name-containment.md](lessons/caller-controlled-instance-name-containment.md) - findInstanceHome must reject names outside the instance-name charset and verify a realpath-resolved hit is the named immediate child of instances/ before any kernel function uses a caller-supplied instance name as a path.
 * [lessons/marketplace-trust-and-hoisted-paths.md](lessons/marketplace-trust-and-hoisted-paths.md) - marketplace-over-bundled migration: trust at acquisition and the lock-sourced hoisted-path exemption.
@@ -73,6 +76,7 @@ read what the current task needs, not everything.
 * [playbooks/test-conventions.md](playbooks/test-conventions.md) - Kernel and CLI tests run node:test against temp directories with fixture souls, fake/runtime tmux shims on PATH, spawnSync of bin/oas.mjs for CLI behavior, and regression coverage at the layer where bugs occurred.
 
 ## References
+* [references/strict-curriculum-scoping.md](references/strict-curriculum-scoping.md) - Launch-path facts and maintainer rulings for strict instance curriculum enforcement: Pi strict mode is viable, Claude requires a real-runtime spike, repo AGENTS files stay visible but not auto-loaded, and parity acceptance gates README claims.
 
 * [references/oas-expert-decisions.md](references/oas-expert-decisions.md) - pointers to the canonical Decision records and docs governing this area.
 * [references/strict-curriculum-scoping.md](references/strict-curriculum-scoping.md) - Key launch-path facts gathered while scoping strict instance curriculum enforcement: pi can combine --no-skills with explicit --skill, Claude Code isolation needs CLAUDE_CONFIG_DIR plus a version-probed allowlist, and enforcement belongs in spawnInstance command-line construction.

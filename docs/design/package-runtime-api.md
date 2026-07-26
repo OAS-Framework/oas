@@ -21,8 +21,9 @@ ruled out.
 
 **Rule: independently released packages MUST NOT import kernel-private
 `lib/core.mjs` (including via `oas root` + dynamic import).** Package
-commands/hooks invoke the `oas` binary already on PATH in their execution
-environment.
+commands/hooks execute the CLI at the exact absolute path the dispatcher
+provides in `OAS_CLI_BIN` (§1 item 4) — never by resolving `oas` from PATH,
+which is untrusted inside worktrees.
 
 ### Envelope and versioning
 
@@ -79,10 +80,14 @@ this contract remains authoritative).
    context), the same contract lifecycle hooks already have. Capabilities
    read their settings (e.g. oas.okf's `harvest-model`) from `OAS_SETTINGS`;
    there is NO public resolved-config read command.
-4. **Consumer rules**: a package command invokes the installed/selected
-   `oas` CLI from PATH, parses the one schema-v1 envelope, emits its own
-   envelope, and never imports `lib/core.mjs` or calls `oas root` for
-   kernel-file resolution.
+4. **Consumer rules**: a package command executes the CLI at the exact
+   absolute path the dispatcher provides in the **`OAS_CLI_BIN`** environment
+   variable (part of the dispatch env contract, beside `OAS_SETTINGS`), via
+   `execFile` on that path — **never** by resolving `oas` from `PATH` and
+   never through a shell: PATH is not a trusted runtime boundary, and package
+   commands run in worktrees where it can be shadowed. The consumer parses
+   the one schema-v1 envelope, emits its own envelope, and never imports
+   `lib/core.mjs` or calls `oas root` for kernel-file resolution.
 
 Error codes are part of the contract: `E_USAGE`, `E_BAD_ARGS`,
 `E_UNKNOWN_COMMAND`, `E_SPAWN_FAILED`, `E_PARENT_NOT_FOUND`,
@@ -140,17 +145,29 @@ from `test/packages.test.mjs`. (The oas.okf tree changes themselves —
   dependency invalidates capability approvals exactly like source drift.
   `npm ci` fails closed on any lockfile mismatch. Doctor reports source
   integrity + the materialized-closure state.
-- **Reproducibility**: `node_modules` is a derived, platform-dependent
-  artifact — never part of the SOURCE hash, never committed, always
-  reproduced from the locked `package-lock.json` on the host platform, then
-  verified against the locked `depsIntegrity`. Platform-dependent closures
-  (native builds) will produce platform-specific digests; v1 packages should
-  prefer pure-JS closures (the official set qualifies).
+- **Reproducibility (v1 MUST: platform-invariant closures)**: `node_modules`
+  is a derived artifact — never part of the SOURCE hash, never committed,
+  always reproduced from the locked `package-lock.json` and verified against
+  the locked `depsIntegrity`. Because one `depsIntegrity` lives in a shared
+  lock, **v1 packages MUST have platform-invariant materialized closures**:
+  no native builds, no platform-specific optional dependencies, no
+  install-time variance of any kind. A closure that cannot materialize
+  byte-identically across supported platforms is UNSUPPORTED in v1 — the
+  package must vendor a pure-JS closure or drop the dependency; official
+  dependency-bearing packages gate this across their published platforms in
+  CI. The engine ENFORCES this at materialization: a lockfile resolving
+  packages with os/cpu/libc constraints or install scripts (native-build
+  markers) is rejected before anything materializes, failing the
+  acquire/update transaction. (A future keyed per-platform closure map may
+  relax this.)
 - **Containment**: capability code/hook paths must resolve inside the locked
   package root after symlink resolution; materialized `node_modules` trees
   under that root (package-root or per-capability) are inside the boundary by
-  construction. Paths escaping the root — including through `node_modules`
-  symlinks — are `path-escape`.
+  construction — and ENFORCED: after `npm ci`, before any digest or swap,
+  every symlink under every materialized `node_modules` is realpath-checked
+  to resolve inside the package root; a broken or escaping link fails the
+  transaction (`path-escape`) with full rollback. Node import resolution
+  follows symlinks, so this check is global, not best-effort.
 - **Rollback**: materialization happens IN STAGING before any destination
   mutation; a materialization failure fails the whole acquire/update
   transaction with the store and lock unchanged, and a restore whose
@@ -207,7 +224,20 @@ complete:
     self-dependency and no cycle in the locked dependency graph;
   - arrays retain schema uniqueness (no duplicates);
   - malformed mixed-v2 legacy residue is DIAGNOSED by doctor (human and
-    JSON), never silently repaired and never a trust source.
+    JSON), never silently repaired and never a trust source;
+  - optional `depsIntegrity`, when present, must be a well-formed sha256
+    digest (semantic check, not just schema).
+
+Fail-closed enforcement points: `readPackageLocks` and
+`listInstalledPackages` RAISE `invalid-lock` — consumers never see invalid
+locks as absent or usable data; `writePackageLock` validates the complete
+prospective packages map before writing; restore, trust queries, approval,
+and update/remove planning validate before acting. Doctor (human and
+`--json`) catches the typed error and renders the actionable diagnosis — it
+is the only consumer that continues past an invalid lock, and it never uses
+the invalid data. Lock package-map keys are validated against the package
+identity charset and read into null-prototype maps, so raw-JSON
+`__proto__`/`constructor` keys cannot forge entries.
 
 `invalid-lock` joins the error taxonomy of the main contract (§4).
 
@@ -262,10 +292,19 @@ constraints:
 5. Doctor (human and `--json` `migrationResidue`) identifies each residue
    entry as `pending-migration` with the exact retry action
    (`oas migrate --dir <level>`) or removal guidance.
-6. Cutover gate: the official-catalog/kernel-marketplace switch requires ZERO
-   residue in the deployment probe. Post-transition, residue is readable only
-   for pointed diagnosis/migration — never a discovery source, never a way to
-   add legacy capabilities.
+6. Cutover gate (two-part, both pinned in the deployment probe): the
+   official-catalog/kernel-marketplace switch requires (a) ZERO
+   lockfileVersion 1 files — INCLUDING empty `{capabilities:{}}` ones — and
+   (b) ZERO nonempty v2 legacy capability residue, across every reconciled
+   scope. Empty v1 files SURFACE in `readPackageLocks().legacy` with
+   file/level/version provenance and convert trivially via `oas migrate`
+   (atomic canonical `{lockfileVersion: 2, packages: {}}`, no residue);
+   doctor reports them as pending LOCK-FORMAT migration — never as
+   capability residue. A v2 `{capabilities:{}}` is NOT residue.
+   Post-transition, residue is readable only for pointed diagnosis/migration
+   — never a discovery source, never a way to add legacy capabilities.
+   Discovery includes lock-owning scopes even when no config or capability
+   entry exists there.
 7. Migration and rollback are atomic: any conversion failure restores the
    original v1 lock byte-identically and removes every package the migration
    installed.

@@ -286,7 +286,7 @@ test("lock v2 packages map is read scope-wise (contract envelope) and supplies c
   write(join(ws2, "oas-config.yaml"), "name: ws2\n");
   write(join(ws2, "oas-lock.json"), JSON.stringify({ lockfileVersion: 1, capabilities: { "old.cap": { source: "marketplace:old.cap@1.0.0", version: "1.0.0", integrity: `sha256-${"0".repeat(64)}` } } }));
   const r2 = readPackageLocks(ws2);
-  assert.deepEqual(r2.packages, {});
+  assert.deepEqual({ ...r2.packages }, {});
   assert.equal(r2.legacy.length, 1);
   assert.ok(r2.legacy[0].capabilities["old.cap"]);
   // an EMPTY v1 lock: the ENGINE's readPackageLocks surfaces legacy entries
@@ -298,7 +298,7 @@ test("lock v2 packages map is read scope-wise (contract envelope) and supplies c
   write(join(ws3, "oas-config.yaml"), "name: ws3\n");
   write(join(ws3, "oas-lock.json"), JSON.stringify({ lockfileVersion: 1, capabilities: {} }));
   const r3 = readPackageLocks(ws3);
-  assert.deepEqual(r3.packages, {});
+  assert.deepEqual({ ...r3.packages }, {});
 });
 
 test("discoverWorkspaceScopes: deterministic path order with pruning of stores, vendor dirs, instances, and nested team boundaries", () => {
@@ -380,9 +380,13 @@ test("non-team bare install also verifies v2 package locks (chain path, no bound
   const r2 = cli(["install", "--no-requirements", "--dir", inner], { cwd: inner });
   assert.equal(r2.status, 1, `ancestor package lock must be checked at a team boundary:\n${r2.stdout}`);
   assert.match(r2.stdout, /FAILED\s+package example\.engineering/);
-  // with the artifact installed, everything is ok again
-  installFixturePackage(ws, pkg);
-  const r3 = cli(["install", "--no-requirements", "--dir", ws], { cwd: ws });
+  // with the artifact properly acquired at a FRESH scope, everything is ok
+  // (the drifted lock at ws now correctly blocks re-acquisition — 7b2cd36's
+  // lock-integrity invariant — so the ok-path needs a clean scope)
+  const ws2 = join(base, "ws2");
+  write(join(ws2, "oas-config.yaml"), "name: ws2\n");
+  installFixturePackage(ws2, pkg);
+  const r3 = cli(["install", "--no-requirements", "--dir", ws2], { cwd: ws2 });
   assert.equal(r3.status, 0, `${r3.stdout}\n${r3.stderr}`);
   assert.match(r3.stdout, /ok\s+package example\.engineering/);
 });
@@ -1091,14 +1095,18 @@ test("init --package always acquires local sources: a same-ID lock from a differ
   // v2 of the package at a DIFFERENT source path with different content.
   const v2 = fixturePackage(join(base, "v2"), { id: "same.pkg", configs: { d: { path: "configs/default/oas-config.yaml", default: true } }, extraFiles: { "EXTRA.md": "v2 content\n" } });
   const r = cli(["init", "--package", v2, "--json", "--dir", ws]);
-  // Pre-fix: succeeded and published a v2 provenance snapshot over the v1 lock/artifact.
-  // Engine semantics: same-ID different-content acquisition is refused with the
-  // "never silently updates" error (codeless in the engine → E_ACQUIRE_FAILED).
+  // FIXED engine behavior (7b2cd36, corrective item 5): re-acquisition against
+  // an existing same-scope lock with different resolved integrity is
+  // integrity-drift with the oas update pointer — never re-legitimized.
   assert.equal(r.status, 1, `same-ID different-source init must not bypass acquisition:\n${r.stdout}`);
   const env = JSON.parse(r.stdout);
   assert.equal(env.ok, false);
-  assert.match(env.error.message, /never silently updates|different content/);
+  assert.equal(env.error.code, "integrity-drift");
+  assert.match(env.error.message, /locked source never advances on acquire.*oas update/s);
   assert.equal(existsSync(join(ws, "oas-config.yaml")), false, "no snapshot published on refused acquisition");
+  // lock unchanged by the refused acquisition
+  const lockAfter = JSON.parse(readFileSync(join(ws, "oas-lock.json"), "utf8")).packages["same.pkg"];
+  assert.notEqual(lockAfter.integrity, undefined);
   // Identical re-init (same source) still works — exact-integrity reuse is a no-op re-lock.
   const again = cli(["init", "--package", v1, "--json", "--dir", ws]);
   assert.equal(again.status, 0, again.stdout);

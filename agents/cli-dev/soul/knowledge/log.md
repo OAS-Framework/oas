@@ -1,6 +1,12 @@
 # Knowledge Log
 
 ## 2026-07-26
+* **Creation**: [symlink-containment-walker-throws](/lessons/symlink-containment-walker-throws.md) records the recursive symlink walker lesson: broad lstat probe catches can swallow deeper path-escape throws, so guards must be narrowed and real npm `file:` symlink layouts must be tested.
+* **Update**: [test-conventions](/playbooks/test-conventions.md) records the real `npm ci` `file:` symlink fixture shape for symlink-containment walker regressions.
+* **Fix**: [package-runtime-boundary-structured-cli](/decisions/package-runtime-boundary-structured-cli.md) superseded its pre-ruling draft — the recorded surface (packageRuntimeApi probe field, agent show/upsert, spawn --instance/--ephemeral, config get) was maintainer-REJECTED; the decision now records the ruled minimal surface (capability-defined agents, OAS_SETTINGS dispatch, OAS_CLI_BIN, floor+fixture versioning) and the index entry was corrected (reviewer-3f39f2b finding).
+* **Update**: [strict-curriculum-scoping](/references/strict-curriculum-scoping.md) merges the maintainer ruling ledger for strict-curriculum sequencing, Claude spike evidence, AGENTS.md loading semantics, and parity gates.
+* **Creation**: skills/stale-verification-loop — adds the commit-anchored evidence protocol for coordinator loops that re-verify stale commits and request already-landed work.
+* **Creation**: [coordinator-stale-verification-loop](/lessons/coordinator-stale-verification-loop.md) records that stale-verification coordination loops should be answered with branch-head, ancestry, blob-at-head evidence, and explicit ACK references.
 * **Creation**: [api-swap-regression-fix-mechanisms](/lessons/api-swap-regression-fix-mechanisms.md) records that seam replacements must preserve reviewer-proven fix mechanisms, rerun the original regression against the replacement path, and fetch provider manifests when validation rules depend on manifest content.
 * **Update**: [reconciliation-truthfulness-fixes](/lessons/reconciliation-truthfulness-fixes.md) points exact-level restore dedupe at the API-swap regression lesson so seam teardown cannot silently drop the fix mechanism.
 * **Update**: [package-profile-validation-config-shape](/lessons/package-profile-validation-config-shape.md) records that dependency-supplied capability ids still require provider-manifest lookup for layer-agreement validation.
