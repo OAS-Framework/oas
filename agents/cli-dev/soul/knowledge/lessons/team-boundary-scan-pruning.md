@@ -25,9 +25,12 @@ The boundary prints before any restore, network, or host work; the test asserts
 ordering with `indexOf`, which is cheap and robust.
 
 Non-team scopes keep chain-only restore unless `--recursive` is passed.
-`restoreCapabilities(scope)` walks lockfiles upward, so per-scope reports must
-be filtered to `r.level === scope`; otherwise an ancestor's graph can be
-reported or restored once for each descendant scope.
+`restoreCapabilities(scope)` walks lockfiles upward, so recursive reconciliation
+must not rely on after-the-fact `r.level === scope` report filtering to control
+side effects. Use exact-level restore plus a processed-level set; otherwise an
+ancestor's graph can be restored once for each descendant scope while failures
+are hidden in descendant output. See
+[reconciliation truthfulness](/lessons/reconciliation-truthfulness-fixes.md).
 
 This extends the team-as-config discovery posture captured in
 [team-scope-and-cross-repo-spawn](/lessons/team-scope-and-cross-repo-spawn.md):

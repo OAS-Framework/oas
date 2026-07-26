@@ -1,6 +1,9 @@
 # Knowledge Log
 
 ## 2026-07-26
+* **Creation**: [reconciliation-truthfulness-fixes](/lessons/reconciliation-truthfulness-fixes.md) records the review lesson that reconciliation must restore each lock level once, fail locked-but-uninstalled v2 package locks, and exit nonzero for consented requirement install failures.
+* **Fix**: [team-boundary-scan-pruning](/lessons/team-boundary-scan-pruning.md) replaces after-the-fact restore report filtering with exact-level restore plus processed-level tracking.
+* **Update**: [requirement-recipes-data-allowlist](/lessons/requirement-recipes-data-allowlist.md) records that consented requirement install failures are fatal while skipped requirements remain non-fatal.
 * **Creation**: [frozen-package-engine-contract-alignment](/lessons/frozen-package-engine-contract-alignment.md) records the package-engine frozen-contract alignment points for shared-reader envelopes, schema-verbatim fixtures, and `error.code` taxonomy reuse.
 * **Creation**: [team-boundary-scan-pruning](/lessons/team-boundary-scan-pruning.md) records team-boundary reconciliation discovery pruning by directory name, agent-home structure, nested team declarations, and symlink skipping.
 * **Creation**: [requirement-recipes-data-allowlist](/lessons/requirement-recipes-data-allowlist.md) records the allowlisted, argv-only, consented host-requirement install plan and PATH verification pattern.

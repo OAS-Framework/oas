@@ -23,7 +23,9 @@ The consented host-requirement gate decomposes cleanly into four pieces:
    automation; noninteractive default is report and skip; `--no-requirements`
    skips the whole gate.
 4. `runRequirementInstall(plan)` executes `execFileSync(argv[0], argv.slice(1))`,
-   then re-checks PATH and reports `onPath` honestly.
+   then re-checks PATH and reports `onPath` honestly. A consented install
+   attempt that fails — manager nonzero or PATH verification miss — must make
+   the command exit nonzero; unaccepted/skipped requirements remain non-fatal.
 
 Testing trick: put a fake `npm` shim on PATH that writes its argv to a file and
 drops a fake binary into the same bin dir. That proves both "consent runs the
