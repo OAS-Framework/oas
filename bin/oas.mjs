@@ -147,7 +147,7 @@ function doctorJson(dir) {
     injects: r.injects,
     capabilities: r.capabilities.map((c) => ({ id: c.id, layer: c.layer, command: c.command, origin: c.origin, provenance: c.provenance, settings: c.settings, skills: c.skills, inject: c.inject, hooks: Object.keys(c.hooks || {}), trust: c.trust })),
     acquired: Object.fromEntries(Object.entries(mans).map(([n, m]) => [n, { layer: m.layer, command: m.command, version: m.version, dir: m._dir, origin: m._origin, description: m.description }])),
-    retiredLocks: Object.entries(readCapabilityLocks(ctx))
+    retiredLocks: (() => { try { return Object.entries(readCapabilityLocks(ctx)) } catch { return []; } })()
       .filter(([id]) => RETIRED_CAPABILITIES[id])
       .map(([id, lock]) => ({ id, file: lock._file, reason: RETIRED_CAPABILITIES[id] })),
     ...(() => {
@@ -247,7 +247,16 @@ function doctor(dir) {
       console.log(`             WARNING: artifact of a retired capability — ${RETIRED_CAPABILITIES[name]}${installed ? `; also delete ${shortPath(m._dir)}` : ` (origin ${m._origin}: remove its declaration; the source tree at ${shortPath(m._dir)} is yours to keep or drop)`}`);
     }
   }
-  const locks = readCapabilityLocks(ctx);
+  // readCapabilityLocks fails closed on invalid legacy entries — doctor is the
+  // diagnosis surface, so catch the typed error and render it (never using the data).
+  let locks = {};
+  try { locks = readCapabilityLocks(ctx); }
+  catch (e) {
+    if (e.code !== "invalid-lock") throw e;
+    const prov = Array.isArray(e.provenance) ? e.provenance[0] : undefined;
+    console.log(`  ERROR: ${e.message} [invalid-lock]`);
+    if (prov?.file) console.log(`         fix or remove the entry in ${shortPath(prov.file)} — never auto-repaired; legacy trust/restore fail closed until it is valid`);
+  }
   const mans = capabilityManifests(ctx);
   for (const [id, lock] of Object.entries(locks)) {
     if (RETIRED_CAPABILITIES[id]) { console.log(`  WARNING: ${id} is locked in ${shortPath(lock._file)} but ${RETIRED_CAPABILITIES[id]}`); continue; }
@@ -493,7 +502,8 @@ function install() {
   const isLocalPackage = parsedSrc?.kind === "path" && existsSync(join(parsedSrc.path, "oas-package.json"));
   const isCatalogPackage = parsedSrc?.kind === "catalog" && !isMarketplaceCap;
   if (parsedSrc && (parsedSrc.kind === "git" || isLocalPackage || isCatalogPackage)) { installPackage(dir, src); return; }
-  const known = capabilityManifest(src, dir);
+  let known;
+  try { known = capabilityManifest(src, dir); } catch (e) { cmdFail(e.code || "invalid-lock", e.message || e); return; }
   if (known) {
     if (JSON_MODE) { jsonOk({ alreadyAcquired: known.capability, version: known.version || null }); return; }
     console.log(`Already acquired capability ${known.capability} (${known.version || "unversioned"}); not activated or updated.`);
