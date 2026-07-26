@@ -1,0 +1,172 @@
+# Distribution packages — config profiles, workspace reconciliation, and host requirements
+
+An **OAS distribution package** is the install/update/review unit above
+capabilities: one Git repository (or local path) carrying one or more
+independently targetable capabilities plus one or more reference config
+**profiles**, described by a root `oas-package.json`. The package layer's
+engine (acquisition, store, lock v2, per-capability trust) is documented in
+its own workstream; this document covers the config side: adopting profiles,
+whole-workspace reconciliation, and consented host-requirement installs.
+
+Ground truth for the contract: the accepted Decision "Distribution packages,
+config profiles, and consented host requirements".
+
+## Package config profiles (`oas init --package`)
+
+A profile is a complete reference `oas-config.yaml` shipped by a package and
+enumerated in `oas-package.json` under `configs:`. Adopting one is explicit:
+
+```bash
+oas init --package example.engineering                 # locked/installed package id
+oas init --package ../engineering-oas --config minimal # local path + explicit profile
+oas init --package https://example.invalid/pkg.git     # git URL (default branch)
+```
+
+Behavior:
+
+- **Preview + validation first.** The profile must be valid against the config
+  schema; every `from: installed` capability it references must be supplied by
+  the package or its dependency closure; layer bindings must agree with the
+  capability manifests; agent types must be syntactically valid; and no path
+  (injection overrides, work-mode setup scripts) may escape the target scope.
+  A failing profile is never written.
+- **Default selection.** A profile marked `"default": true` is chosen when
+  `--config` is omitted; a single profile is chosen implicitly; multiple
+  unmarked profiles require `--config <name>`.
+- **Overwrite refusal.** `oas init --package` refuses when an
+  `oas-config.yaml` already exists at the scope.
+- **Provenance.** The snapshot's first line records package, version/commit,
+  and profile:
+
+  ```yaml
+  # package: example.engineering@0123456789ab profile: default (snapshot — …)
+  ```
+
+### The snapshot is yours (adopter sovereignty)
+
+The adopted config is an **ordinary scoped config** — not live inheritance,
+not ambient package policy. `oas use`, `oas type`, `oas inject eject`, and
+hand edits keep their meaning; package updates never rewrite the snapshot.
+Every capability exported by an installed package stays individually
+addressable: you may
+
+- **retarget** a capability from global to an agent type or soul
+  (`oas use example.review --type reviewers`);
+- **disable** something the profile enabled
+  (`oas use example.review --global --disable`, or `knowledge: none` for a
+  layer);
+- **re-set settings** per family (`oas use example.review --soul dev
+  --settings depth=high`);
+- **replace** an exclusive-layer provider with another capability; and
+- **override from a nested repository** — a closer repo's `oas-config.yaml`
+  wins per the normal cascade, e.g.:
+
+  ```yaml
+  # member-repo/oas-config.yaml — this repo opts out of the workspace default
+  name: member
+  capabilities:
+    layers:
+      knowledge: none
+  ```
+
+Nothing a package ships is mandatory; the resolved local config is always
+authoritative.
+
+### Diffing against the package (`oas config diff`)
+
+Snapshots deliberately drift from newer package defaults. To see how:
+
+```bash
+oas config diff --package example.engineering --config default
+oas config diff          # the snapshot's provenance header supplies defaults
+```
+
+The diff is **report-only** — lines prefixed `+` exist only locally, `-` only
+in the package's current profile. Nothing is merged or overwritten; adopt
+changes by hand if wanted.
+
+## Workspace reconciliation (bare `oas install`)
+
+At a config scope that declares `team:`, bare `oas install` reconciles the
+whole workspace instead of only the ancestor chain:
+
+1. prints the chosen boundary **before any network or host work**;
+2. restores the boundary scope's locked graph;
+3. discovers descendant scopes containing `oas-config.yaml` or
+   `oas-lock.json`, in deterministic path order, pruning `.git`, generated
+   stores (`.agents/`), dependency/vendor directories (`node_modules`,
+   `vendor`, virtualenvs), agent instances/worktrees, `local-agents/`, and
+   **nested team boundaries** (each is its own reconciliation unit);
+4. restores each descendant scope once;
+5. validates that every config-referenced installed capability is supplied by
+   a visible locked package (or capability lock); and
+6. aggregates missing requirements and failures **by scope**.
+
+At a non-team scope, bare `oas install` keeps current-chain behavior. Pass
+`--recursive` to request descendant reconciliation outside a team boundary —
+the boundary is still printed first. OAS never scans downward from the
+laptop/home config by default.
+
+## Host requirements — a separate consent gate
+
+A capability `requires` entry may declare structured, platform-aware install
+methods (the legacy `install: "https://…"` docs URL still works):
+
+```json
+{
+  "command": "example-cli",
+  "why": "send and receive team messages",
+  "install": {
+    "docs": "https://example.invalid/install",
+    "methods": [
+      { "platform": "darwin", "manager": "npm-global", "package": "@example/cli@1.2.3" }
+    ]
+  }
+}
+```
+
+Rules (all enforced):
+
+- **Allowlisted managers only**: `npm-global` and `brew`
+  (download-with-checksum is declared but not implemented yet). Recipes are
+  data — argv arrays, never shell snippets; no sudo, no shell metacharacters,
+  no authentication.
+- **Informed, per-requirement consent.** Interactive `oas install` shows the
+  exact command, source, version, and whether it changes user- or
+  machine-level state, then asks per requirement.
+- **Aggregation is scoped**: only capabilities *activated somewhere in the
+  reconciled scopes* are considered, deduplicated by required command, and the
+  report names which capabilities requested each command.
+- **Noninteractive runs never install by default.** Automation names each
+  accepted requirement: `oas install --accept-requirement example-cli`.
+  `--no-requirements` restores packages only (CI).
+- **PATH verification** runs after each install; a tool that does not land on
+  PATH is reported honestly.
+- **Skipping is safe**: `oas doctor` keeps an actionable warning (the consent
+  command to run) until the command is on PATH.
+- **Trust and requirement consent are distinct gates**: installing a binary
+  neither activates nor approves any capability, and capability trust never
+  authorizes host installs.
+
+When no safe recipe matches the host, OAS prints the documented install URL.
+
+## Doctor
+
+`oas doctor` reports, in addition to its capability diagnostics:
+
+- **Distribution packages** visible in lock v2 (`packages:` in
+  `oas-lock.json`), with source and exported capabilities;
+- **profile provenance** of any adopted snapshot in the chain;
+- **available-but-unapplied profiles** — a locked, installed package exporting
+  config profiles that no scope has adopted;
+- **missing host commands** for active capabilities, with the exact consent
+  command when a safe installer exists.
+
+## Phase note
+
+Until the package engine lands, `oas init --package` and `oas config diff`
+resolve package ids through lock v2 `packages:` entries and the installed
+package store (`<scope>/.agents/packages/installed/<slug>/`) written by the
+engine; local paths and git URLs work standalone. Acquiring packages
+(`oas install <source>` for multi-capability packages), lock v2 writing,
+update/remove, and per-capability trust are the engine workstream.
