@@ -31,66 +31,77 @@ exactly one JSON object on stdout — `{ schemaVersion: 1, ok: true, result }`
 or `{ schemaVersion: 1, ok: false, error: { code, message } }` — nonzero exit
 on failure; progress prose only on stderr.
 
-- **Probe**: `oas version --json` →
-  `{ schemaVersion: 1, name, version, desktopApi: 1, packageRuntimeApi: 1 }`.
-  `packageRuntimeApi` is the boundary's contract version; it increments only
-  on breaking changes to the commands/results below.
-- **Floor**: the boundary (and lock v2) ships in kernel **0.19.0**. Official
-  packages consuming it declare `compatibility.oas: ">=0.19.0"` in
-  `oas-package.json` (and capability `compatibility.oas` likewise). Consumer
-  CI pins its probe to `packageRuntimeApi === 1`.
+- **Versioning** (maintainer ruling): the boundary is versioned by the
+  **compatibility floor plus a pinned consumer fixture** — the boundary (and
+  lock v2) ships in kernel **0.19.0**; official packages consuming it declare
+  `compatibility.oas: ">=0.19.0"` in `oas-package.json` (and capability
+  `compatibility.oas` likewise), and each consumer repo pins the kernel
+  consumer-fixture version its CI probes against. The exact Desktop
+  `oas version --json` probe payload is NOT extended (no `packageRuntimeApi`
+  field) — Desktop API compatibility is a separate contract.
+- Kernels below the floor are rejected by the consumer's normal
+  compatibility check (`incompatible-oas` at acquire; the consumer fixture
+  asserts the rejection).
 
-### Commands (exact surface, packageRuntimeApi 1)
+### Commands (exact surface, boundary v1 — maintainer-ruled minimal)
 
-Covers the complete official-package consumer inventory (oas.okf:
-`findAgent`, `upsertLocalAgent`/`upsertTmpAgent`, `spawnInstance`,
-`resolveOasConfig`; no other official package imports core). File-of-record
-for the consumer inventory: `packaging/oas-okf/KERNEL-API-NEEDS.md` on kernel
-branch `integrations-expert/official-packages-staging` @ `60d5eb6` (design
-input; this contract remains authoritative).
+The public boundary is HIGHER-LEVEL than the private core calls it replaces:
+private `findAgent`/`upsertLocalAgent`/`spawnInstance`/`resolveOasConfig`
+usage maps onto capability-defined agents, `oas spawn`, and dispatch-provided
+settings — not onto one-for-one public equivalents. File-of-record for the
+consumer inventory: `packaging/oas-okf/KERNEL-API-NEEDS.md` on kernel branch
+`integrations-expert/official-packages-staging` @ `60d5eb6` (design input;
+this contract remains authoritative).
 
-1. **Agent lookup** — `oas agent show <name> [--dir <d>] --json`
-   - result: `{ name, kind, repo, work, runtime, model, type, dir } | null`
-     (null result with `ok: true` when the agent does not exist; lookup is not
-     an error).
-2. **Local agent upsert** — `oas agent upsert <name> --instructions-file <f>
-   [--description <text>] [--dir <d>] --json`
-   - registers/updates a LOCAL soul (uncommitted, `local-agents/`), exactly
-     `upsertLocalAgent`; result: `{ name, dir, created }`.
-3. **Spawn** — `oas spawn <agent> ... --json` (existing command; the boundary
-   adds/fixes the options the consumer inventory needs):
-   - `--instance <name>` exact instance name (used instead of `--purpose`
-     naming; collision → `E_SPAWN_FAILED`),
-   - `--ephemeral` treat the agent as service infrastructure regardless of
-     its on-disk kind (the `kind: "capability"` override oas.okf applies),
-   - existing `--parent`, `--repo`, `--work attached|worktree|...`,
-     `--work-dir`, `--branch`, `--model`, `--task`/`--task-file` carry over
-     unchanged with their existing validation and error codes
-     (`E_BAD_ARGS`, `E_PARENT_NOT_FOUND`, `E_SPAWN_FAILED`, ...);
-   - result: the fixed Desktop CLI API v1 spawn shape
-     (`{ instance, agent, home, work, ... }`).
-4. **Resolved-config read** — `oas config get <dotted.path> [--soul <name>]
-   [--dir <d>] --json`
-   - reads ONE value from the resolved configuration (the
-     `resolveOasConfig` projection), e.g.
-     `oas config get layers.knowledge.settings.harvest-model`;
-   - result: `{ path, value }` (`value: null` when unset; unknown top-level
-     roots → `E_BAD_ARGS`). Read-only; never an editing surface.
-5. **Probe** — `oas version --json` (above).
+1. **Capability-defined agents own lookup/registration/ephemerality.** A
+   package capability declares its service agents in its manifest `agents:`
+   (package-relative soul dirs, e.g. oas.okf ships
+   `agents/memory-harvest/{soul.yaml,AGENTS.md}`). `oas spawn <agent>`
+   resolves capability-defined agents for the active context, scaffolds a
+   fresh soul homed locally, and applies ephemeral (`kind: "capability"`)
+   semantics automatically. There is NO public `oas agent show`,
+   `oas agent upsert`, or generic `--ephemeral` flag — add such a surface
+   only when a reusable use case proves it.
+2. **Spawn** — `oas spawn <agent> ... --json` with the EXISTING flags:
+   `--purpose <slug>` (deterministic derived naming
+   `<agent>-<purpose>`; no raw instance-name authority), `--parent`,
+   `--repo`, `--work attached|worktree|checkout|workspace`, `--work-dir`,
+   `--branch`, `--model`, `--task`/`--task-file` (owner-only tempfiles:
+   mode 0600, removed on every outcome). Existing validation and error codes
+   (`E_BAD_ARGS`, `E_PARENT_NOT_FOUND`, `E_SPAWN_FAILED`, ...) are part of
+   the contract; result is the fixed Desktop CLI API v1 spawn shape
+   (`{ instance, agent, home, work, tmux, ... }`). If an accepted consumer
+   mode cannot be expressed by an existing flag, ONE narrow flag is added
+   with JSON tests — never a general override.
+3. **Settings via dispatch** — `oas <namespace> <command>` passes the active
+   capability's EFFECTIVE settings to the dispatched process as
+   `OAS_SETTINGS` (JSON; from the instance metadata snapshot or the resolved
+   context), the same contract lifecycle hooks already have. Capabilities
+   read their settings (e.g. oas.okf's `harvest-model`) from `OAS_SETTINGS`;
+   there is NO public resolved-config read command.
+4. **Consumer rules**: a package command invokes the installed/selected
+   `oas` CLI from PATH, parses the one schema-v1 envelope, emits its own
+   envelope, and never imports `lib/core.mjs` or calls `oas root` for
+   kernel-file resolution.
 
 Error codes are part of the contract: `E_USAGE`, `E_BAD_ARGS`,
 `E_UNKNOWN_COMMAND`, `E_SPAWN_FAILED`, `E_PARENT_NOT_FOUND`,
-`E_RELATIVE_NOT_FOUND`, `E_RELATIVE_AMBIGUOUS`, `E_CAPABILITY_BLOCKED`.
+`E_RELATIVE_NOT_FOUND`, `E_RELATIVE_AMBIGUOUS`, `E_CAPABILITY_BLOCKED`,
+`E_CAPABILITY_INACTIVE`.
 
 ### Consumer fixture
 
-The engine ships a consumer fixture test that drives the full oas.okf call
-pattern exclusively through this CLI surface (agent show → upsert → config
-get → spawn attached, `--json` envelopes asserted), so a boundary regression
-fails the kernel's own CI before it can break a published package. WS3 reuses
-the same fixture shape as each official repo's per-repo CI probe, combined
-with the acquire → lock → trust → activate → spawn probe from
-`test/packages.test.mjs`.
+The engine ships a consumer fixture driving the full oas.okf pattern
+exclusively through this surface: a capability-defined `memory-harvest`
+agent resolved and spawned via `oas spawn --json` in all three source modes
+(local-soul / workspace-mode / repo-resident), parent relation,
+purpose-derived naming + debounce, model via `OAS_SETTINGS` dispatch,
+task-file privacy/cleanup, clean JSON success/failure, no private
+import/`oas root` lookup, Pi + Claude scaffold parity, and sub-floor kernel
+rejection. WS3 reuses the fixture shape as each official repo's per-repo CI
+probe, combined with the acquire → lock → trust → activate → spawn probe
+from `test/packages.test.mjs`. (The oas.okf tree changes themselves —
+`agents/memory-harvest`, dropping the core import — are WS3 deliverables.)
 
 ## 2. Package-local npm runtime closure
 

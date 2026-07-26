@@ -710,68 +710,60 @@ test("restore and trust reject semantically invalid v2 locks with invalid-lock",
 
 // ---------- package-runtime API v1 (docs/design/package-runtime-api.md) ----------
 
-test("runtime API: version probe carries packageRuntimeApi", () => {
+test("runtime API: Desktop probe payload unchanged (no packageRuntimeApi field)", () => {
   const r = cli(process.cwd(), "version", "--json");
   const doc = JSON.parse(r.stdout);
-  assert.equal(doc.packageRuntimeApi, 1);
+  assert.equal(doc.desktopApi, 1);
+  assert.equal("packageRuntimeApi" in doc, false, "boundary is versioned by compatibility floor + pinned consumer fixture, not the Desktop probe");
 });
 
-test("runtime API consumer fixture: agent show → upsert → config get → spawn attached, all through the CLI envelope", () => {
+test("runtime API consumer fixture: capability-defined harvester spawned through oas spawn --json; settings via dispatch", () => {
   const base = temp();
-  // deployment: workspace with agents root + config with a layer setting
+  // deployment: workspace whose config activates a capability that DEFINES the
+  // service agent and declares a command + settings (the oas.okf pattern).
   const ws = join(base, "ws");
-  write(join(ws, "oas-config.yaml"), "name: fixture\n");
-  const root = join(ws, "agents");
-  mkdirSync(root, { recursive: true });
-  // owner instance home with a work tree (for --work attached)
   const repo = join(ws, "repo");
   write(join(repo, "README.md"), "r\n");
+  const capDir = join(repo, ".agents", "capabilities", "owned", "fixture-svc");
+  write(join(capDir, "oas.json"), JSON.stringify({
+    capability: "fx.svc", version: "1.0.0", description: "fixture service", command: "fxsvc",
+    agents: ["agents/memory-harvest"], commands: { settings: "bin/settings.mjs" },
+  }));
+  write(join(capDir, "agents", "memory-harvest", "soul.yaml"), "name: memory-harvest\nkind: capability\nwork: attached\nruntime: pi\n");
+  write(join(capDir, "agents", "memory-harvest", "AGENTS.md"), "# Memory harvester\n\nHarvest notes.\n");
+  write(join(capDir, "bin", "settings.mjs"), "console.log(JSON.stringify({ ok: true, settings: JSON.parse(process.env.OAS_SETTINGS || \"{}\") }));\n");
+  write(join(repo, "oas-config.yaml"), "name: fixture\ncapabilities:\n  additive:\n    fx.svc:\n      global:\n        enabled: true\n        settings:\n          harvest-model: test-model-1\n");
   gitify(repo);
+  const root = join(ws, "agents");
   write(join(root, "dev", "soul", "soul.yaml"), `name: dev\nkind: persistent\nrepo: ${repo}\nwork: checkout\nruntime: pi\n`);
   write(join(root, "dev", "soul", "AGENTS.md"), "# Dev\n");
   symlinkSync("AGENTS.md", join(root, "dev", "soul", "CLAUDE.md"));
   mkdirSync(join(root, "dev", "instances"), { recursive: true });
   const owner = spawnInstance(root, findAgent(root, "dev"), { launch: false });
-  // 1. agent show: absent → ok:true result:null
-  let r = cli(ws, "agent", "show", "memory-harvest", "--dir", ws, "--json");
-  let env = JSON.parse(r.stdout);
-  assert.equal(env.ok, true);
-  assert.equal(env.result, null);
-  // 2. agent upsert with instructions
-  const instr = join(base, "mh.md");
-  write(instr, "# Memory harvester\n\nHarvest notes.\n");
-  r = cli(ws, "agent", "upsert", "memory-harvest", "--instructions-file", instr, "--dir", ws, "--json");
-  env = JSON.parse(r.stdout);
-  assert.equal(env.ok, true, r.stdout);
-  assert.equal(env.result.created, true);
-  // show now resolves
-  r = cli(ws, "agent", "show", "memory-harvest", "--dir", ws, "--json");
-  env = JSON.parse(r.stdout);
-  assert.equal(env.result.name, "memory-harvest");
-  assert.equal(env.result.kind, "local");
-  // 3. config get on a resolved value (name root) + null for unset paths + E_BAD_ARGS for unknown roots
-  r = cli(ws, "config", "get", "name", "--dir", ws, "--json");
-  assert.equal(JSON.parse(r.stdout).result.value, "fixture");
-  r = cli(ws, "config", "get", "layers.knowledge.settings.harvest-model", "--dir", ws, "--json");
-  assert.equal(JSON.parse(r.stdout).result.value, null);
-  r = cli(ws, "config", "get", "nonsense.path", "--dir", ws, "--json");
-  env = JSON.parse(r.stdout);
-  assert.equal(env.ok, false);
-  assert.equal(env.error.code, "E_BAD_ARGS");
-  // 4. spawn with exact --instance name, --ephemeral, attached to the owner work tree
-  r = cli(ws, "spawn", "memory-harvest", "--instance", "memory-harvest-fixture", "--ephemeral", "--repo", repo,
+  // 1. settings arrive via dispatch as OAS_SETTINGS (no public config-read command)
+  let r = spawnSync(process.execPath, [CLI, "fxsvc", "settings"], { cwd: repo, encoding: "utf8", env: { ...process.env, PI_AGENT_HOME: "", OAS_HOME: "" } });
+  const out = JSON.parse(r.stdout.trim().split("\n").pop());
+  assert.equal(out.settings["harvest-model"], "test-model-1", "dispatched command reads effective settings from OAS_SETTINGS");
+  // 2. capability-defined agent resolves + spawns through oas spawn --json with
+  //    purpose-derived naming and automatic ephemeral (capability kind) semantics
+  const task = join(base, "task.md");
+  write(task, "# Harvest\n\nprobe\n");
+  r = cli(repo, "spawn", "memory-harvest", "--purpose", "fixture", "--repo", repo,
     "--parent", owner.instance, "--work", "attached", "--work-dir", join(owner.home, "work"),
-    "--task", "probe", "--no-launch", "--dir", ws, "--json");
-  env = JSON.parse(r.stdout);
+    "--task-file", task, "--no-launch", "--dir", repo, "--json");
+  const env = JSON.parse(r.stdout);
   assert.equal(env.ok, true, r.stdout);
-  assert.equal(env.result.instance, "memory-harvest-fixture");
+  assert.equal(env.result.instance, "memory-harvest-fixture", "purpose-derived deterministic naming");
+  assert.equal(env.result.parent, owner.instance);
   const meta = JSON.parse(readFileSync(join(env.result.home, "instance.json"), "utf8"));
-  assert.equal(meta.kind, "capability", "--ephemeral overrides the on-disk kind");
-  // --instance + --purpose is rejected
-  r = cli(ws, "spawn", "memory-harvest", "--instance", "x", "--purpose", "y", "--no-launch", "--dir", ws, "--json");
-  env = JSON.parse(r.stdout);
-  assert.equal(env.ok, false);
-  assert.equal(env.error.code, "E_BAD_ARGS");
+  assert.equal(meta.kind, "capability", "capability-defined agent is ephemeral without any override flag");
+  // 3. no dropped public surfaces: agent/config are not kernel commands
+  for (const argv of [["agent", "show", "memory-harvest"], ["config", "get", "name"]]) {
+    const rr = cli(repo, ...argv, "--dir", repo, "--json");
+    const e = JSON.parse(rr.stdout);
+    assert.equal(e.ok, false, argv.join(" "));
+    assert.equal(e.error.code, "E_UNKNOWN_COMMAND");
+  }
   rmSync(base, { recursive: true, force: true });
 });
 

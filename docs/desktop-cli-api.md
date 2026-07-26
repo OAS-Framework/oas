@@ -14,7 +14,7 @@ oas version --json
 prints exactly one JSON object on stdout:
 
 ```json
-{"schemaVersion":1,"name":"@oas-framework/oas","version":"<installed version>","desktopApi":1,"packageRuntimeApi":1}
+{"schemaVersion":1,"name":"@oas-framework/oas","version":"<installed version>","desktopApi":1}
 ```
 
 `version` is the installed package's exact semver (e.g. `0.18.2`).
