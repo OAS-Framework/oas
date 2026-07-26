@@ -16,7 +16,7 @@ import {
 import { createPalette } from "./palette.mjs";
 import { createQuickOpen } from "./quick-open.mjs";
 import {
-  registerAction, setActiveContexts, getBinding, onKeymapChange, formatChord, handleKeydown, matchEvent,
+  registerAction, setActiveContexts, getBinding, onKeymapChange, formatChord, handleKeydown, matchEvent, runAction,
 } from "./keybindings.mjs";
 import { createKeybindingsEditor } from "./keybindings-editor.mjs";
 import { rosterKeyAction, moveTarget } from "./roster-keys.mjs";
@@ -37,6 +37,8 @@ import {
   fallbackTabForContext, terminalOpenOwnsWorkspace, restoreTerminalTab,
 } from "./workspace-tabs.mjs";
 import { requestSplit, absorbTab, removeSplitTab, isSplitMember, adjacentSplitMember, wireSplitPaneSelection } from "./split-layout.mjs";
+import { splitControlsState } from "./split-controls.mjs";
+import { renderSplitLayout, projectTabStrip } from "./split-dom.mjs";
 
 const desk = window.oasDesktop;
 initTheme();
@@ -112,11 +114,12 @@ function setNavActive(name) {
 
 function showTabLayer(on) {
   document.getElementById("tabhost").style.display = on ? "" : "none";
-  tabbar.style.display = on ? "" : "none";
+  document.getElementById("tabstrip").style.display = on ? "" : "none";
   updateActiveContexts(on);
   if (!on) {
     stageHost.style.display = "";
     activeTab = null;
+    updateSplitControls();
     for (const t of tabs.values()) {
       t.tabEl.classList.remove("active");
       t.triggerEl.setAttribute("aria-selected", "false");
@@ -424,28 +427,31 @@ const splitEmptyEl = (() => {
 })();
 
 function renderSplit(splitVisible) {
-  const on = splitVisible && !!split;
-  tabhost.classList.toggle("split-row", on && split.orientation === "row");
-  tabhost.classList.toggle("split-col", on && split.orientation === "col");
-  if (!on) { splitEmptyEl.remove(); return; }
-  // Append only when the pane is out of position: re-inserting an
-  // already-placed node would tear it out of the DOM mid-interaction
-  // (pane-click selection fires activateTab → renderSplit on pointerdown).
-  let anchor = null; // last correctly-placed element
-  for (const id of split.members) {
-    const t = tabs.get(id);
-    if (!t) continue;
-    const inPlace = t.paneEl.parentNode === tabhost && (anchor ? anchor.nextSibling === t.paneEl : true);
-    if (!inPlace) {
-      if (anchor) anchor.after(t.paneEl); else tabhost.append(t.paneEl);
-    }
-    anchor = t.paneEl;
-  }
-  if (split.pending > 0) {
-    if (splitEmptyEl.previousSibling !== anchor || splitEmptyEl.parentNode !== tabhost) {
-      if (anchor) anchor.after(splitEmptyEl); else tabhost.append(splitEmptyEl);
-    }
-  } else splitEmptyEl.remove();
+  // DOM projections (panes as flex cells; the strip grouped to match the
+  // panes — members[0] is the tab the user split FROM) live in
+  // split-dom.mjs so they are testable without booting the shell.
+  renderSplitLayout(tabhost, splitEmptyEl, split, splitVisible, (id) => tabs.get(id)?.paneEl || null);
+  projectTabStrip(paneTabsEl, tabbar, split, splitVisible, [...tabs]);
+}
+
+// ── tab-strip split controls: clickable twins of the split.* actions ──
+// The buttons run the SAME registered actions (runAction is context-gated
+// exactly like chord dispatch); enablement dry-runs the same model
+// transition the actions perform — no duplicated gating logic.
+const tabActionsEl = document.getElementById("tab-actions");
+const paneTabsEl = document.getElementById("pane-tabs");
+for (const [btnId, actionId] of [
+  ["split-right", "split.vertical"], ["split-down", "split.horizontal"], ["split-close", "split.close"],
+]) {
+  document.getElementById(btnId).addEventListener("click", () => runAction(actionId));
+}
+function updateSplitControls() {
+  const t = activeTab != null ? tabs.get(activeTab) : null;
+  const s = splitControlsState(split, activeTab, t?.kind ?? null, tabLayerVisible);
+  tabActionsEl.hidden = !s.visible;
+  document.getElementById("split-right").disabled = !s.splitRow;
+  document.getElementById("split-down").disabled = !s.splitCol;
+  document.getElementById("split-close").disabled = !s.close;
 }
 
 function splitPane(orientation) {
@@ -553,6 +559,7 @@ function activateTab(id, { focusContent = false } = {}) {
     t.paneEl.hidden = !shown;
   }
   renderSplit(splitVisible);
+  updateSplitControls();
   tabs.get(id)?.onShow?.();
   if (focusContent) tabs.get(id)?.focusContent?.();
   return true;
@@ -907,6 +914,10 @@ function setSidebarHidden(on) {
   } catch { /* storage-less */ }
 }
 function toggleSidebar() { setSidebarHidden(!sidebarHidden()); }
+// Restore-by-mouse must exist while the sidebar is hidden: a thin edge
+// button (CSS shows it only under #app.sidebar-hidden) runs the SAME
+// sidebar.toggle action as the chord/palette/rail-footer button.
+document.getElementById("sidebar-restore").addEventListener("click", () => runAction("sidebar.toggle"));
 try { if (localStorage.getItem(SIDEBAR_HIDDEN_KEY) === "1") setSidebarHidden(true); } catch { /* storage-less */ }
 
 /** Focus the ACTIVE terminal tab's xterm input from anywhere in the shell
@@ -972,7 +983,17 @@ registerAction({ id: "tabs.close", label: "Close the active tab", context: "tabs
 // The engine skips already-consumed (defaultPrevented) events itself.
 window.addEventListener("keydown", (e) => handleKeydown(e));
 
-// rail-footer: Shortcuts button next to Theme
+// rail-footer: Sidebar toggle + Shortcuts button next to Theme
+{
+  const foot = document.getElementById("nav-foot");
+  const b = document.createElement("button");
+  b.className = "nav-item";
+  b.title = "Toggle the sidebar";
+  b.dataset.action = "sidebar.toggle";
+  b.innerHTML = `<span class="icon">◧</span><span class="label">Sidebar</span>`;
+  b.addEventListener("click", () => runAction("sidebar.toggle"));
+  (foot || navEl).append(b);
+}
 {
   const foot = document.getElementById("nav-foot");
   const b = document.createElement("button");
