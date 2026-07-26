@@ -223,6 +223,7 @@ function doctor(dir) {
     const lock = pkgLocks.packages[p.package];
     console.log(`  ${p.package}@${p.version}  [${levelOf(p.level)} ${shortPath(p.level)}]`);
     if (!lock) { console.log(`             ERROR: installed but not locked — reacquire it [manifest graph error]`); continue; }
+    if (p.lockError) console.log(`             ERROR: ${p.lockError} [invalid-lock]`);
     const integ = packageIntegrity(p.dir);
     if (integ !== lock.integrity) console.log(`             ERROR: integrity drift — installed ${integ}, locked ${lock.integrity}; all capability approvals are invalid [integrity-drift]`);
     const have = new Set(p.capabilities.map((c) => c.id));
@@ -238,7 +239,11 @@ function doctor(dir) {
   for (const l of pkgLocks.legacy) {
     if (l.lockfileVersion !== 2) console.log(`  WARNING: ${shortPath(l.file)} is lockfileVersion ${l.lockfileVersion ?? 1} — \`oas migrate\` maps its capability locks to packages`);
     else if (Object.keys(l.capabilities).length) {
-      for (const [rid, rlock] of Object.entries(l.capabilities)) console.log(`  NOTE: ${rid} in ${shortPath(l.file)} is legacy migration residue (${rlock.source || "unknown source"}) — pending migration: re-run \`oas migrate --dir ${shortPath(l.level)}\` when its official package publishes, or remove the entry if the capability is abandoned`);
+      for (const [rid, rlock] of Object.entries(l.capabilities)) {
+        const malformed = !rlock || typeof rlock !== "object" || !rlock.source || !rlock.integrity;
+        if (malformed) console.log(`  ERROR: residue entry ${rid} in ${shortPath(l.file)} is malformed (missing source/integrity) — never auto-repaired; fix or remove the entry [invalid-lock]`);
+        else console.log(`  NOTE: ${rid} in ${shortPath(l.file)} is legacy migration residue (${rlock.source}) — pending migration: re-run \`oas migrate --dir ${shortPath(l.level)}\` when its official package publishes, or remove the entry if the capability is abandoned`);
+      }
     }
   }
   // Capability provenance mismatch: a config from: installed capability that no visible package or store provides is already reported above.
@@ -546,14 +551,14 @@ function listCmd() {
   const locks = readPackageLocks(dir);
   if (JSON_MODE) {
     jsonOk({
-      packages: pkgs.map((p) => ({ package: p.package, version: p.version, level: p.level, source: p.source || null, commit: p.commit || null, integrity: p.integrity || null, locked: p.locked, dependencies: p.dependencies, trustedCapabilities: p.trustedCapabilities, capabilities: p.capabilities.map((c) => c.id) })),
+      packages: pkgs.map((p) => ({ package: p.package, version: p.version, level: p.level, source: p.source || null, commit: p.commit || null, integrity: p.integrity || null, locked: p.locked, lockError: p.lockError || null, dependencies: p.dependencies, trustedCapabilities: p.trustedCapabilities, capabilities: p.capabilities.map((c) => c.id) })),
       legacy: locks.legacy.map((l) => ({ file: l.file, level: l.level, lockfileVersion: l.lockfileVersion, capabilities: Object.keys(l.capabilities) })),
     });
     return;
   }
   if (!pkgs.length) console.log("No installed packages in this config chain.");
   for (const p of pkgs) {
-    console.log(`${p.package}@${p.version}  [${levelOf(p.level)} ${shortPath(p.level)}]${p.locked ? "" : "  UNLOCKED (no lock entry — reacquire)"}`);
+    console.log(`${p.package}@${p.version}  [${levelOf(p.level)} ${shortPath(p.level)}]${p.locked ? "" : "  UNLOCKED (no lock entry — reacquire)"}${p.lockError ? `  INVALID LOCK: ${p.lockError}` : ""}`);
     if (p.source) console.log(`  source: ${p.source}  commit: ${p.commit || "?"}`);
     for (const c of p.capabilities) {
       const executable = Object.keys(c.manifest.commands || {}).length || Object.keys(c.manifest.hooks || {}).length;

@@ -36,7 +36,7 @@ function pkgSource(dir, manifest, capabilities = {}) {
     caps.push(rel);
     write(join(dir, rel, "oas.json"), JSON.stringify({ version: "1.0.0", description: "cap", ...cm }, null, 2));
   }
-  write(join(dir, "oas-package.json"), JSON.stringify({ version: "1.0.0", description: "pkg", capabilities: caps, ...manifest }, null, 2));
+  write(join(dir, "oas-package.json"), JSON.stringify({ version: "1.0.0", description: "pkg", compatibility: { oas: ">=0.1.0" }, capabilities: caps, ...manifest }, null, 2));
   return dir;
 }
 /** A scope with an oas-config.yaml so the config chain sees it. */
@@ -112,7 +112,7 @@ test("loadPackageManifestAt: path escape — .. segments and symlinks out of the
   const d2 = pkgSource(join(base, "esc2"), { package: "a.esc2", capabilities: [] });
   write(join(base, "elsewhere", "oas.json"), JSON.stringify({ capability: "x.out", version: "1", description: "d" }));
   symlinkSync(join(base, "elsewhere"), join(d2, "linked"));
-  write(join(d2, "oas-package.json"), JSON.stringify({ package: "a.esc2", version: "1.0.0", description: "d", capabilities: ["linked"] }));
+  write(join(d2, "oas-package.json"), JSON.stringify({ package: "a.esc2", version: "1.0.0", description: "d", compatibility: { oas: ">=0.1.0" }, capabilities: ["linked"] }));
   assert.throws(() => loadPackageManifestAt(d2), (e) => e.code === "path-escape");
   rmSync(base, { recursive: true, force: true });
 });
@@ -393,7 +393,7 @@ test("trust: unknown capability/package errors; approvals reset when update chan
   assert.deepEqual(readPackageLocks(s).packages["u.p"].trustedCapabilities, ["u.exec"]);
   // source advances; update re-resolves, replaces artifact+lock, resets approvals
   write(join(src, "cap", "go.mjs"), "// v2\n");
-  write(join(src, "oas-package.json"), JSON.stringify({ package: "u.p", version: "1.1.0", description: "pkg", capabilities: ["cap"] }));
+  write(join(src, "oas-package.json"), JSON.stringify({ package: "u.p", version: "1.1.0", description: "pkg", compatibility: { oas: ">=0.1.0" }, capabilities: ["cap"] }));
   gitCommit(src);
   const r = updatePackage(s, "u.p");
   assert.equal(r.changed, true);
@@ -800,7 +800,7 @@ test("flat single-capability package: capabilities: [\".\"] — acquire/discover
   const src = join(base, "flat");
   write(join(src, "oas.json"), JSON.stringify({ capability: "flat.cap", version: "1.0.0", description: "c", commands: { go: { exec: "go.mjs" } } }));
   write(join(src, "go.mjs"), "//\n");
-  write(join(src, "oas-package.json"), JSON.stringify({ package: "flat.p", version: "1.0.0", description: "p", capabilities: ["."] }));
+  write(join(src, "oas-package.json"), JSON.stringify({ package: "flat.p", version: "1.0.0", description: "p", compatibility: { oas: ">=0.1.0" }, capabilities: ["."] }));
   gitify(src);
   acquirePackage(s, `file://${src}`);
   const m = capabilityManifests(s)["flat.cap"];
@@ -816,7 +816,7 @@ test("flat single-capability package: capabilities: [\".\"] — acquire/discover
   const bad = join(base, "bad");
   write(join(bad, "oas.json"), JSON.stringify({ capability: "b.cap", version: "1", description: "c" }));
   write(join(bad, "sub", "oas.json"), JSON.stringify({ capability: "b.sub", version: "1", description: "c" }));
-  write(join(bad, "oas-package.json"), JSON.stringify({ package: "b.p", version: "1", description: "p", capabilities: [".", "sub"] }));
+  write(join(bad, "oas-package.json"), JSON.stringify({ package: "b.p", version: "1", description: "p", compatibility: { oas: ">=0.1.0" }, capabilities: [".", "sub"] }));
   assert.throws(() => loadPackageManifestAt(bad), (e) => e.code === "invalid-package-manifest" && /must be the only entry/.test(e.message));
   rmSync(base, { recursive: true, force: true });
 });
@@ -993,5 +993,87 @@ test("agent-callable JSON completeness: install/restore/trust/update/remove/migr
   env = JSON.parse(cli(s, "trust", "js.cap", "--dir", s, "--json").stdout);
   assert.equal(env.ok, false);
   assert.equal(env.error.code, "integrity-drift");
+  rmSync(base, { recursive: true, force: true });
+});
+
+// ---------- maintainer ruling: required compatibility + hardened invalid-lock ----------
+
+test("compatibility: required, exact v1 grammar; malformed/missing → invalid-package-manifest; unsatisfied → incompatible-oas", () => {
+  const base = temp();
+  const mk = (compat) => {
+    const d = join(base, `c${Math.random().toString(36).slice(2)}`);
+    write(join(d, "oas-package.json"), JSON.stringify({ package: "c.p", version: "1.0.0", description: "d", ...(compat === null ? {} : { compatibility: compat }) }));
+    return d;
+  };
+  // three accepted forms
+  for (const oas of [">=0.1.0", "^0.1.0", "0.1.0"]) loadPackageManifestAt(mk({ oas }));
+  // missing
+  assert.throws(() => loadPackageManifestAt(mk(null)), (e) => e.code === "invalid-package-manifest" && /requires "compatibility"/.test(e.message));
+  // malformed / unsupported operator
+  for (const oas of ["banana", ">=1.2", "~1.2.3", "1.2.x", ">= 1.2.3"]) {
+    assert.throws(() => loadPackageManifestAt(mk({ oas })), (e) => e.code === "invalid-package-manifest" && /malformed/.test(e.message), oas);
+  }
+  // valid but unsatisfied range → incompatible-oas at acquire
+  const un = mk({ oas: ">=999.0.0" });
+  assert.throws(() => acquirePackage(scope(base), un), (e) => e.code === "incompatible-oas");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("invalid-lock hardening: self-dependency, locked-graph cycle, duplicates, provenance fields", () => {
+  const sha = "a".repeat(40);
+  const integ = `sha256-${"0".repeat(64)}`;
+  const mkEntry = (over = {}) => ({ source: "git:https://h/x.git@v1", version: "1", commit: sha, integrity: integ, capabilities: ["x.c"], dependencies: [], trustedCapabilities: [], ...over });
+  // self-dependency
+  assert.throws(() => validateLockEntry("p", mkEntry({ dependencies: ["p"] }), { p: mkEntry() }, { file: "/f" }),
+    (e) => e.code === "invalid-lock" && /self-dependency/.test(e.message) && e.provenance?.[0]?.package === "p" && e.provenance?.[0]?.file === "/f");
+  // cycle across the locked graph: a → b → a
+  const a = mkEntry({ dependencies: ["b"] });
+  const b = mkEntry({ dependencies: ["a"], capabilities: ["y.c"] });
+  assert.throws(() => validateLockEntry("a", a, { a, b }, {}), (e) => e.code === "invalid-lock" && /cycle/.test(e.message));
+  // duplicates in arrays
+  assert.throws(() => validateLockEntry("p", mkEntry({ capabilities: ["x.c", "x.c"] }), {}, {}), (e) => /duplicates/.test(e.message));
+  // plausible-but-invalid pairing: catalog source with "local" commit
+  assert.throws(() => validateLockEntry("p", mkEntry({ source: "catalog:oas.x@v1", commit: "local" }), {}, {}), (e) => e.code === "invalid-lock" && /40-hex/.test(e.message));
+  rmSync; // no fs in this test
+});
+
+test("invalid-lock: update/remove planning fail closed; doctor and list diagnose without crashing", () => {
+  const base = temp();
+  const s = scope(base);
+  const src = pkgSource(join(base, "src"), { package: "hd.p" }, { "cap": { capability: "hd.cap" } });
+  gitify(src);
+  cli(s, "install", `file://${src}`, "--dir", s);
+  // corrupt the lock: trust outside capabilities
+  const lockFile = join(s, OAS_LOCK_FILE);
+  const parsed = JSON.parse(readFileSync(lockFile, "utf8"));
+  parsed.packages["hd.p"].trustedCapabilities = ["ghost.cap"];
+  writeFileSync(lockFile, JSON.stringify(parsed, null, 2));
+  // update and remove planning fail closed with invalid-lock
+  assert.throws(() => updatePackage(s, "hd.p"), (e) => e.code === "invalid-lock");
+  assert.throws(() => removePackage(s, "hd.p"), (e) => e.code === "invalid-lock");
+  // list --json diagnoses (lockError), does not crash
+  const env = JSON.parse(cli(s, "list", "--dir", s, "--json").stdout);
+  assert.equal(env.ok, true);
+  assert.match(env.result.packages.find((p) => p.package === "hd.p").lockError, /trustedCapabilities/);
+  // doctor human output carries the actionable diagnosis
+  const r = cli(s, "doctor", s);
+  assert.match(r.stdout, /\[invalid-lock\]/);
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("invalid-lock: malformed mixed-v2 residue is diagnosed, never repaired, never trusted", () => {
+  const base = temp();
+  const s = scope(base);
+  writeCapabilityLock(s, "mal.cap", { source: "marketplace:mal.cap@1", version: "1", integrity: "sha256-a" });
+  applyLegacyLockMigration(s, { catalog: () => undefined });
+  // corrupt the residue entry: strip source+integrity
+  const lockFile = join(s, OAS_LOCK_FILE);
+  const parsed = JSON.parse(readFileSync(lockFile, "utf8"));
+  parsed.capabilities["mal.cap"] = { version: "1" };
+  writeFileSync(lockFile, JSON.stringify(parsed, null, 2));
+  const before = readFileSync(lockFile, "utf8");
+  const r = cli(s, "doctor", s);
+  assert.match(r.stdout, /residue entry mal\.cap .* is malformed .* \[invalid-lock\]/);
+  assert.equal(readFileSync(lockFile, "utf8"), before, "doctor never repairs the lock");
   rmSync(base, { recursive: true, force: true });
 });

@@ -38,7 +38,7 @@
               "source": {
                 "description": "Normalized acquisition source: git:<url>@<ref>, path:<dir>, or catalog:<id>@<selector> (official catalog resolution is recorded but grants no executable trust).",
                 "type": "string",
-                "minLength": 1
+                "pattern": "^(git:|path:|catalog:).+"
               },
               "version": {
                 "description": "Version from the locked oas-package.json.",
@@ -46,9 +46,9 @@
                 "minLength": 1
               },
               "commit": {
-                "description": "Exact git commit the package was acquired at. For path: sources this is the string \"local\".",
+                "description": "Exact git commit the package was acquired at (40-hex). For path: sources this is the string \"local\".",
                 "type": "string",
-                "minLength": 1
+                "pattern": "^([0-9a-f]{40}|local)$"
               },
               "integrity": {
                 "description": "sha256 tree hash of the installed package root; any change invalidates all capability approvals.",

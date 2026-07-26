@@ -171,15 +171,27 @@ JSON Schema cannot express these in the current shapes, so they are normative
 SEMANTIC validation rules with tests; validators of the schemas alone are not
 complete:
 
-- `oas-package.json`: at most one `configs.*.default === true` per manifest →
-  `invalid-package-manifest` (enforced in `loadPackageManifestAt`; rejection
-  fixture in `test/packages.test.mjs`).
-- `oas-lock.json` v2, validated before restore and before trust operations →
-  `invalid-lock`:
-  - `trustedCapabilities` ⊆ `capabilities` per entry;
-  - every `dependencies[]` id is a key of the same lock's `packages` map;
-  - `source`/`commit` pairing: `git:`/`catalog:` sources require a 40-hex
-    `commit`; `path:` sources require `commit: "local"`.
+- `oas-package.json`:
+  - at most one `configs.*.default === true` per manifest →
+    `invalid-package-manifest` (enforced in `loadPackageManifestAt`; rejection
+    fixture in `test/packages.test.mjs`);
+  - `compatibility.oas` is REQUIRED with exactly the v1 grammar `>=x.y.z`,
+    `^x.y.z`, or `x.y.z` — schema and runtime agree; malformed/missing →
+    `invalid-package-manifest`, valid-but-unsatisfied → `incompatible-oas`.
+- `oas-lock.json` v2, validated BEFORE restore, trust/approval, update/remove
+  planning, and doctor/list consumption → `invalid-lock` (fail closed before
+  executable approval or artifact replacement; no normalization or
+  auto-repair on read; message/provenance carry lock file, package identity,
+  and the violated field/edge):
+  - normalized source prefix (`git:`/`path:`/`catalog:`) and source/commit
+    pairing: `path:` requires `commit: "local"`; `git:`/`catalog:` require an
+    exact 40-hex `commit`;
+  - `trustedCapabilities` ⊆ `capabilities`;
+  - every `dependencies[]` id is a key of the same lock's `packages` map; no
+    self-dependency and no cycle in the locked dependency graph;
+  - arrays retain schema uniqueness (no duplicates);
+  - malformed mixed-v2 legacy residue is DIAGNOSED by doctor (human and
+    JSON), never silently repaired and never a trust source.
 
 `invalid-lock` joins the error taxonomy of the main contract (§4).
 
