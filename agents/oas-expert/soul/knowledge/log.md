@@ -1,6 +1,7 @@
 # Knowledge Log
 
 ## 2026-07-26
+* **Delivery**: PR #45 round 1 returned at exact head `67d865c` for mergeability only after all other gates passed; [repo state](/stewardship/repo-state.md) and the [delivery log](/stewardship/delivery-log.md) record the current-main `8191ea0` refresh required before final handback.
 * **Delivery**: PR #42 merged as `09605c7` at exact head `028a984`; [repo state](/stewardship/repo-state.md) and the [delivery log](/stewardship/delivery-log.md) record the knowledge-only quick-open deferred-intent harvest, strict OKF and scratch gates, same-account approval comment, and deleted remote branch.
 * **Update**: [The oas implementation](/architecture/implementation.md) records strict instance curriculum as the accepted target while marking ambient coexistence as current-release transitional behavior until Pi/Claude parity gates pass.
 * **Update**: [Config authorship completeness and ambient skill coexistence](/decisions/config-authorship-and-ambient-skills.md) is partially superseded: injection/config authorship sections remain accepted, but ambient-skill coexistence is replaced by strict instantiation-time curriculum.
