@@ -7,7 +7,7 @@ import { dirname, join, resolve } from "node:path";
 import { resolveOasConfig, capabilityIntegrity, acquirePackage, loadPackageManifestAt, parsePackageSource, readPackageLocks } from "../lib/core.mjs";
 import {
   aggregateMissingRequirements, capabilityRuntimeTargets, commandOnPath, diffConfigTexts, discoverWorkspaceScopes,
-  lockedPackageCapabilities, normalizeRequirement, packageSpecIdentity, runtimePackageInstalled,
+  lockedPackageCapabilities, normalizeRequirement, packageSpecIdentity, runtimePackageInstalled, runtimePackageStatus,
   parseProfileProvenance, profileProvenanceHeader, requirementInstallPlan,
   resolveProfilePackage, runRequirementInstall, selectProfile, validateProfile,
 } from "../lib/packages.mjs";
@@ -1449,21 +1449,36 @@ test("packageSpecIdentity collapses version selectors, keeping scoped names inta
   assert.equal(packageSpecIdentity("npm:pi-web-search@^1.2.0"), "npm:pi-web-search");
 });
 
-test("a runtime package is detected in the runtime's own package list, not on PATH", () => {
+test("a runtime package counts as installed only when the runtime resolves an install location", () => {
   const base = temp();
-  const env = { ...process.env, HOME: base };
-  // pi records installed packages as bare source strings or { source } objects.
-  write(join(base, ".pi", "agent", "settings.json"), JSON.stringify({
-    packages: ["npm:pi-web-search", { source: "npm:@awebai/pi@latest", skills: ["skills/aweb-messaging"] }],
-  }));
-  assert.equal(runtimePackageInstalled("pi", "npm:@awebai/pi", env), true, "matches across a version selector");
-  assert.equal(runtimePackageInstalled("pi", "npm:@awebai/pi@0.2.1", env), true);
-  assert.equal(runtimePackageInstalled("pi", "npm:pi-web-search", env), true, "bare string entries count");
-  assert.equal(runtimePackageInstalled("pi", "npm:not-installed", env), false);
-  assert.equal(runtimePackageInstalled("nosuchruntime", "npm:@awebai/pi", env), false, "unknown runtime is never satisfied");
-  // Unreadable settings must read as "not installed" — never a false positive.
-  write(join(base, ".pi", "agent", "settings.json"), "{ this is not json");
-  assert.equal(runtimePackageInstalled("pi", "npm:@awebai/pi", env), false);
+  const pkgDir = join(base, "store", "@awebai", "pi");
+  write(join(pkgDir, "package.json"), JSON.stringify({ name: "@awebai/pi" }));
+  const oldPath = process.env.PATH;
+  try {
+    // Verified: pi lists it AND names a directory that exists.
+    process.env.PATH = fakePi(base, [{ source: "npm:@awebai/pi@latest", dir: pkgDir }]);
+    const env = { ...process.env, HOME: base };
+    assert.equal(runtimePackageInstalled("pi", "npm:@awebai/pi", env), true, "matches across a version selector");
+    assert.equal(runtimePackageInstalled("pi", "npm:@awebai/pi@0.2.1", env), true);
+    assert.equal(runtimePackageInstalled("pi", "npm:not-installed", env), false);
+    assert.equal(runtimePackageInstalled("nosuchruntime", "npm:@awebai/pi", env), false, "unknown runtime is never satisfied");
+
+    // Configured but never installed: pi prints no path line. Presence in the
+    // list is not installation.
+    process.env.PATH = fakePi(base, [{ source: "npm:@awebai/pi" }]);
+    const st = runtimePackageStatus("pi", "npm:@awebai/pi", { ...process.env, HOME: base });
+    assert.equal(st.installed, true, "the row exists…");
+    assert.equal(st.missingFiles, true, "…but nothing is installed for it");
+    assert.equal(runtimePackageInstalled("pi", "npm:@awebai/pi", { ...process.env, HOME: base }), false);
+
+    // pi unrunnable: settings record intent, never installation.
+    process.env.PATH = fakePi(base, [], { fails: true });
+    write(join(base, ".pi", "agent", "settings.json"), JSON.stringify({ packages: ["npm:@awebai/pi"] }));
+    const fallback = runtimePackageStatus("pi", "npm:@awebai/pi", { ...process.env, HOME: base });
+    assert.match(fallback.unverified || "", /could not run/);
+    assert.equal(runtimePackageInstalled("pi", "npm:@awebai/pi", { ...process.env, HOME: base }), false,
+      "a config entry is never accepted as an installation");
+  } finally { process.env.PATH = oldPath; }
   rmSync(base, { recursive: true, force: true });
 });
 
@@ -1534,6 +1549,19 @@ function runtimeScopeFixture(base, souls, { target = "global" } = {}) {
   gitRepo(repo);
   return repo;
 }
+/** A `pi` stub answering `pi list` in pi's real format: the install path line
+ * appears ONLY for a genuinely installed package. Returns a PATH prefix. */
+function fakePi(base, rows, { fails = false } = {}) {
+  const bin = join(base, "bin"); mkdirSync(bin, { recursive: true });
+  const body = ["User packages:", ...rows.flatMap((r) => [
+    `  ${r.source}${r.filtered ? " (filtered)" : ""}`,
+    ...(r.dir ? [`    ${r.dir}`] : []),
+  ])].join("\n");
+  write(join(bin, "pi"), fails ? "#!/bin/sh\nexit 3\n" : `#!/bin/sh\nif [ "$1" = "list" ]; then cat <<'EOF'\n${body}\nEOF\nfi\nexit 0\n`);
+  chmodSync(join(bin, "pi"), 0o755);
+  return `${bin}:${process.env.PATH}`;
+}
+
 const noPiPackages = () => ({ ...process.env, HOME: mkdtempSync(join(tmpdir(), "oas-nopi-")) });
 
 test("a Claude-only deployment is never prompted for a pi package", () => {
@@ -1598,18 +1626,33 @@ test("no souls yet: the requirement is not raised, and the policy is spawn's to 
   rmSync(base, { recursive: true, force: true });
 });
 
-test("an already-installed pi package is not raised, across a version selector", () => {
+test("a genuinely installed pi package is not raised; an unverifiable one still is (reviewer-14c38e8)", () => {
   const base = temp();
   const repo = runtimeScopeFixture(base, { coder: "pi" });
-  const home = temp();
-  write(join(home, ".pi", "agent", "settings.json"), JSON.stringify({ packages: [{ source: "npm:@awebai/pi@0.2.1" }] }));
-  assert.equal(aggregateMissingRequirements([repo], { env: { ...process.env, HOME: home } }).some((m) => m.kind === "runtime-package"), false);
-  // …and pi's documented config-dir override is honored, not just $HOME.
-  const relocated = temp();
-  write(join(relocated, "settings.json"), JSON.stringify({ packages: ["npm:@awebai/pi"] }));
-  assert.equal(runtimePackageInstalled("pi", "npm:@awebai/pi", { HOME: temp(), PI_CODING_AGENT_DIR: relocated }), true,
-    "PI_CODING_AGENT_DIR relocates the settings file");
-  for (const d of [base, home, relocated]) rmSync(d, { recursive: true, force: true });
+  const pkgDir = join(base, "store", "@awebai", "pi");
+  write(join(pkgDir, "package.json"), JSON.stringify({ name: "@awebai/pi" }));
+  const oldPath = process.env.PATH;
+  try {
+    // Verified install → nothing to prompt for.
+    process.env.PATH = fakePi(base, [{ source: "npm:@awebai/pi@0.2.1", dir: pkgDir }]);
+    assert.equal(aggregateMissingRequirements([repo], { env: { ...process.env, HOME: temp() } }).some((m) => m.kind === "runtime-package"), false);
+
+    // Listed with NO install location: aggregation must still offer to install
+    // it, or the `oas install --accept-requirement …` remedy spawn prints is a
+    // no-op and the retry fails identically.
+    process.env.PATH = fakePi(base, [{ source: "npm:@awebai/pi" }]);
+    assert.ok(aggregateMissingRequirements([repo], { env: { ...process.env, HOME: temp() } }).some((m) => m.command === "pi:npm:@awebai/pi"),
+      "a configured-but-uninstalled package is still raised");
+
+    // `pi list` fails and only settings exist: same conclusion.
+    const home = temp();
+    write(join(home, ".pi", "agent", "settings.json"), JSON.stringify({ packages: ["npm:@awebai/pi"] }));
+    process.env.PATH = fakePi(base, [], { fails: true });
+    assert.ok(aggregateMissingRequirements([repo], { env: { ...process.env, HOME: home } }).some((m) => m.command === "pi:npm:@awebai/pi"),
+      "an unverifiable settings row is still raised");
+    rmSync(home, { recursive: true, force: true });
+  } finally { process.env.PATH = oldPath; }
+  rmSync(base, { recursive: true, force: true });
 });
 
 test("naming a requirement with --accept-requirement overrides runtime scoping (reviewer-ad1b9f0)", () => {
