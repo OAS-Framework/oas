@@ -37,6 +37,7 @@ test("Soul roster: switching A→B during a hanging spawn removes A form and age
   const ctx = {
     api(pathname, opts = {}) {
       if (pathname === "/api/cli" || pathname === "/api/cli/reprobe") return Promise.resolve(CLI_OK);
+      if (pathname === "/api/models") return Promise.resolve({ ok: true, status: 200, json: async () => ({ runtime: "pi", models: [] }) });
       requests.push({ pathname, opts });
       if (opts.method === "POST") return new Promise((ok) => { releaseA = ok; });
       const ws = pathname.includes("ws=wsB") ? "wsB" : "wsA";
@@ -118,6 +119,7 @@ test("Soul roster: delayed switch refresh cannot erase a newer B spawn form", as
   const ctx = {
     api(pathname, opts = {}) {
       if (pathname === "/api/cli" || pathname === "/api/cli/reprobe") return Promise.resolve(CLI_OK);
+      if (pathname === "/api/models") return Promise.resolve({ ok: true, status: 200, json: async () => ({ runtime: "pi", models: [] }) });
       if (opts.method === "POST") return new Promise((ok) => { releaseBSpawn = ok; });
       const ws = pathname.includes("ws=wsB") ? "wsB" : "wsA";
       if (ws === "wsB" && bGets++ < 2) {
@@ -190,6 +192,7 @@ test("Soul roster: the periodic refresh never wipes an open spawn form's typed t
   const ctx = {
     api: (pathname, opts = {}) => {
       if (pathname === "/api/cli" || pathname === "/api/cli/reprobe") return Promise.resolve(CLI_OK);
+      if (pathname === "/api/models") return Promise.resolve({ ok: true, status: 200, json: async () => ({ runtime: "pi", models: [] }) });
       if (opts.method === "POST") {
         posts.push(JSON.parse(opts.body));
         return Promise.resolve({ ok: true, status: 200, json: async () => ({ instance: "i1", launched: true }) });
@@ -249,6 +252,7 @@ test("Soul roster: selector-metacharacter agent names spawn cleanly and still bl
   const ctx = {
     api: (pathname, opts = {}) => {
       if (pathname === "/api/cli" || pathname === "/api/cli/reprobe") return Promise.resolve(CLI_OK);
+      if (pathname === "/api/models") return Promise.resolve({ ok: true, status: 200, json: async () => ({ runtime: "pi", models: [] }) });
       if (opts.method === "POST") {
         posts.push(JSON.parse(opts.body));
         return Promise.resolve({ ok: true, status: 200, json: async () => ({ instance: "i1", launched: true }) });
@@ -303,6 +307,7 @@ test("Soul roster: relation + reference instance pass through POST /api/spawn; u
   const ctx = {
     api: (pathname, opts = {}) => {
       if (pathname === "/api/cli" || pathname === "/api/cli/reprobe") return Promise.resolve(CLI_OK);
+      if (pathname === "/api/models") return Promise.resolve({ ok: true, status: 200, json: async () => ({ runtime: "pi", models: [] }) });
       if (opts.method === "POST") {
         posts.push(JSON.parse(opts.body));
         return Promise.resolve({ ok: true, status: 200, json: async () => ({ instance: "dev-1", launched: false }) });
@@ -397,6 +402,7 @@ test("Spawn modal: every option always visible; runtime/model pass through; defa
   const ctx = {
     api: (pathname, opts = {}) => {
       if (pathname === "/api/cli" || pathname === "/api/cli/reprobe") return Promise.resolve(CLI_OK);
+      if (pathname === "/api/models") return Promise.resolve({ ok: true, status: 200, json: async () => ({ runtime: "pi", models: [] }) });
       if (opts.method === "POST") {
         posts.push(JSON.parse(opts.body));
         return Promise.resolve({ ok: true, status: 200, json: async () => ({ instance: "dev-1", launched: false }) });
@@ -433,6 +439,91 @@ test("Spawn modal: every option always visible; runtime/model pass through; defa
     assert.equal(posts.length, 2);
     assert.equal(posts[1].runtime, "claude");
     assert.equal(posts[1].model, "sonnet");
+  } finally {
+    spawn.unmount();
+    common.setWorkspace(previousWs);
+    globalThis.setInterval = oldSetInterval;
+    dom.window.close();
+    if (oldDocument === undefined) delete globalThis.document; else globalThis.document = oldDocument;
+    if (oldWindow === undefined) delete globalThis.window; else globalThis.window = oldWindow;
+  }
+});
+
+test("Spawn modal: model dropdown offers the runtime's catalog, swaps on runtime change, and out-of-order responses never win; free text stays valid", async () => {
+  const dom = new JSDOM("<!doctype html><html><head></head><body><div id=host></div></body></html>", { url: "http://localhost" });
+  const oldDocument = globalThis.document;
+  const oldWindow = globalThis.window;
+  const oldSetInterval = globalThis.setInterval;
+  globalThis.document = dom.window.document;
+  globalThis.window = dom.window;
+  globalThis.setInterval = () => ({ fake: true });
+  const common = await import("../renderer/views/common.mjs");
+  const spawn = await import("../renderer/views/spawn.mjs");
+  await seedCliAvailable();
+  const previousWs = common.currentWorkspace();
+  const agent = { name: "dev", agentsRoot: "/a", description: "d", runtime: "pi", work: "worktree", repo: true, repoName: "r" };
+  const modelRequests = [];
+  const deferred = []; // manual resolution — the race assertions drive order
+  const catalogs = {
+    pi: [{ id: "anthropic/claude-opus-4-5", label: "anthropic/claude-opus-4-5" }, { id: "openai/gpt-5.2", label: "openai/gpt-5.2" }],
+    claude: [{ id: "opus", label: "opus (alias)" }, { id: "claude-opus-4-5", label: "claude-opus-4-5" }],
+  };
+  const ctx = {
+    api: (pathname, opts = {}) => {
+      if (pathname === "/api/cli" || pathname === "/api/cli/reprobe") return Promise.resolve(CLI_OK);
+      if (pathname === "/api/models") {
+        const runtime = JSON.parse(opts.body).runtime;
+        modelRequests.push(runtime);
+        return new Promise((resolve) => deferred.push({ runtime, resolve: () =>
+          resolve({ ok: true, status: 200, json: async () => ({ runtime, models: catalogs[runtime] || [] }) }) }));
+      }
+      if (opts.method === "POST") return Promise.resolve({ ok: true, status: 200, json: async () => ({ instance: "dev-1", launched: false }) });
+      return Promise.resolve({ ok: true, status: 200, json: async () => pathname.startsWith("/api/agents")
+        ? { agents: [agent] }
+        : { instances: [], workspace: { id: "w" }, workspaces: [] } });
+    },
+    openTerminal: () => {},
+  };
+  try {
+    common.setWorkspace("w");
+    spawn.mount(dom.window.document.getElementById("host"), ctx);
+    await tick(); await tick();
+    const doc = dom.window.document;
+    doc.querySelector(".spawn-act").click();
+    await tick(); await tick();
+    // opening the modal fetched the catalog for the agent's DEFAULT runtime
+    assert.deepEqual(modelRequests, ["pi"], "catalog fetched for the agent default runtime");
+    const dl = doc.querySelector("#spawn-model-options");
+    assert.ok(dl, "datalist present");
+    const input = doc.querySelector(".fmodel");
+    assert.equal(input.getAttribute("list"), "spawn-model-options", "model input wired to the datalist");
+    // RACE (review 9b1e3ff): flip the runtime while the initial pi request
+    // is STILL PENDING, then resolve claude FIRST and pi LAST — the stale
+    // pi response must never overwrite the later claude list.
+    const fruntime = doc.querySelector(".fruntime");
+    fruntime.value = "claude";
+    fruntime.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    await tick();
+    assert.deepEqual(modelRequests, ["pi", "claude"], "runtime change refetches the catalog");
+    deferred[1].resolve(); // claude (latest) lands first
+    await tick(); await tick();
+    assert.deepEqual([...dl.querySelectorAll("option")].map((o) => o.value),
+      ["opus", "claude-opus-4-5"], "latest runtime's catalog rendered");
+    deferred[0].resolve(); // stale pi response lands LAST
+    await tick(); await tick();
+    assert.deepEqual([...dl.querySelectorAll("option")].map((o) => o.value),
+      ["opus", "claude-opus-4-5"], "out-of-order stale response never overwrites the latest list");
+    // a fresh runtime change still repopulates normally
+    fruntime.value = "";
+    fruntime.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    await tick();
+    deferred[2].resolve();
+    await tick(); await tick();
+    assert.deepEqual([...dl.querySelectorAll("option")].map((o) => o.value),
+      ["anthropic/claude-opus-4-5", "openai/gpt-5.2"], "agent-default runtime (pi) catalog restored");
+    // free text remains valid — the field is advisory, never a hard select
+    input.value = "anthropic/custom,openai/gpt-5.2";
+    assert.equal(input.value, "anthropic/custom,openai/gpt-5.2");
   } finally {
     spawn.unmount();
     common.setWorkspace(previousWs);
@@ -515,6 +606,7 @@ test("Spawn modal close restores focus to the LIVE Spawn button and clears the c
   const ctx = {
     api: (pathname, opts = {}) => {
       if (pathname === "/api/cli" || pathname === "/api/cli/reprobe") return Promise.resolve(CLI_OK);
+      if (pathname === "/api/models") return Promise.resolve({ ok: true, status: 200, json: async () => ({ runtime: "pi", models: [] }) });
       if (opts.method === "POST") return Promise.resolve({ ok: true, status: 200, json: async () => ({ instance: "x" }) });
       return Promise.resolve({ ok: true, status: 200, json: async () => pathname.startsWith("/api/agents")
         ? { agents: [agent] }
@@ -584,6 +676,7 @@ test("Spawn modal tracks CLI capability LIVE: relations flip disables/enables co
   const ctx = {
     api: (pathname, opts = {}) => {
       if (pathname === "/api/cli" || pathname === "/api/cli/reprobe") return Promise.resolve({ ok: true, status: 200, json: async () => status(true) });
+      if (pathname === "/api/models") return Promise.resolve({ ok: true, status: 200, json: async () => ({ runtime: "pi", models: [] }) });
       if (opts.method === "POST") { posts.push(JSON.parse(opts.body)); return Promise.resolve({ ok: true, status: 200, json: async () => ({ instance: "x" }) }); }
       return Promise.resolve({ ok: true, status: 200, json: async () => pathname.startsWith("/api/agents")
         ? { agents: [agent] }
@@ -703,6 +796,7 @@ test("Spawn modal: relation + instance form ONE grouped fieldset with plain-lang
   const ctx = {
     api: (pathname, opts = {}) => {
       if (pathname === "/api/cli" || pathname === "/api/cli/reprobe") return Promise.resolve(CLI_OK);
+      if (pathname === "/api/models") return Promise.resolve({ ok: true, status: 200, json: async () => ({ runtime: "pi", models: [] }) });
       if (opts.method === "POST") return Promise.resolve({ ok: true, status: 200, json: async () => ({ instance: "x" }) });
       return Promise.resolve({ ok: true, status: 200, json: async () => pathname.startsWith("/api/agents")
         ? { agents: [agent] }
@@ -774,6 +868,7 @@ test("Spawn modal: picker sends the anchor's agents root; E_RELATIVE_AMBIGUOUS s
   const ctx = {
     api: (pathname, opts = {}) => {
       if (pathname === "/api/cli" || pathname === "/api/cli/reprobe") return Promise.resolve(CLI_OK);
+      if (pathname === "/api/models") return Promise.resolve({ ok: true, status: 200, json: async () => ({ runtime: "pi", models: [] }) });
       if (opts.method === "POST") {
         posts.push(JSON.parse(opts.body));
         if (failNext) { const body = failNext; failNext = null;
@@ -876,6 +971,7 @@ test("Spawn modal picker: hostile paths stay inert; colliding root tags render d
   const ctx = {
     api: (pathname, opts = {}) => {
       if (pathname === "/api/cli" || pathname === "/api/cli/reprobe") return Promise.resolve(CLI_OK);
+      if (pathname === "/api/models") return Promise.resolve({ ok: true, status: 200, json: async () => ({ runtime: "pi", models: [] }) });
       if (opts.method === "POST") return Promise.resolve({ ok: true, status: 200, json: async () => ({ instance: "x" }) });
       return Promise.resolve({ ok: true, status: 200, json: async () => pathname.startsWith("/api/agents")
         ? { agents: [agent] }
