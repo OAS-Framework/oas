@@ -219,7 +219,10 @@ spawn, OAS resolves active capabilities and creates an instance-local view:
 3. `instance.json` records every source and setting.
 
 Both pi and Claude use that same directory. Pi starts with ambient skill and
-context discovery disabled, so it sees exactly the composed set. Claude reads
+context discovery disabled — no user, project, ancestor or package catalogs —
+so the OAS-managed curriculum is exactly the composed set; your globally
+configured pi **extensions stay ambient** on purpose, and anything they
+contribute comes with them. Claude reads
 it natively through the instance's `.claude/` symlinks while **keeping your own
 Claude Code configuration** — user and project skills, plugins and settings all
 still apply, because they are useful and it is your choice to use them. Each

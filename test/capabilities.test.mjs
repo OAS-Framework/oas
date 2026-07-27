@@ -2950,6 +2950,35 @@ exit 0
   rmSync(base, { recursive: true, force: true });
 });
 
+test("a failed team join never discloses the invite token (reviewer-aggregate2)", () => {
+  const base = temp();
+  const hook = resolve(new URL("../capabilities/oas-aweb/bin/oas-aweb.mjs", import.meta.url).pathname);
+  const bin = join(base, "bin"); mkdirSync(bin, { recursive: true });
+  // execFileSync puts the whole argv in the error message, and this hook's
+  // failures are surfaced by the kernel into CLI/Desktop logs. A join that fails
+  // must not carry a still-valid invite token there — including one the command
+  // echoes back in its own stderr.
+  const TOKEN = "inv_SUPERSECRET_TOKEN_9f3a";
+  write(join(bin, "aw"), `#!/bin/sh
+if [ "$1" = "team" ] && [ "$2" = "list" ]; then echo '{"active_team":"default:acme.aweb.ai","memberships":[{"team_id":"default:acme.aweb.ai","alias":"x"}]}'; exit 0; fi
+if [ "$1" = "team" ] && [ "$2" = "invite" ]; then echo '{"token":"${TOKEN}"}'; exit 0; fi
+if [ "$1" = "team" ] && [ "$2" = "join" ]; then echo "join rejected for token ${TOKEN}" 1>&2; exit 3; fi
+exit 0
+`);
+  execFileSync("chmod", ["+x", join(bin, "aw")]);
+  const root = join(base, "awroot"); mkdirSync(join(root, ".aw"), { recursive: true });
+  const r = spawnSync(process.execPath, [hook, "spawn"], {
+    encoding: "utf8",
+    env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, OAS_EVENT: "spawn", OAS_INSTANCE: "probe", OAS_HOME: root, OAS_WORKSPACE: root, OAS_CONTEXT: root, OAS_TEAM_SCOPE: root, OAS_TEAM_NAME: "default", OAS_TEAM_ID: "" },
+  });
+  assert.notEqual(r.status, 0, "a failed join still fails the spawn");
+  assert.doesNotMatch(r.stdout, new RegExp(TOKEN), "the token must not reach stdout");
+  assert.doesNotMatch(r.stderr, new RegExp(TOKEN), "nor stderr — not from the argv, not from the command's own echo");
+  assert.match(r.stderr + r.stdout, /identity minting failed/, "while the failure itself is still reported");
+  assert.match(r.stderr + r.stdout, /<redacted>|exit 3/, "with enough to diagnose it");
+  rmSync(base, { recursive: true, force: true });
+});
+
 test("an alias minted with no local key is incomplete cleanup, not 'nothing to delete'", () => {
   const base = temp();
   const hook = resolve(new URL("../capabilities/oas-aweb/bin/oas-aweb.mjs", import.meta.url).pathname);
@@ -2991,6 +3020,15 @@ function fakeClaudeWithPlugins(base, rows, { name = "claude", keepPath = false }
     ...(r.projectPath ? { projectPath: r.projectPath } : {}),
     installPath: join(base, "plugins", r.name),
   })));
+  // Claude advertises an installPath, so the fixture must MAKE it: a stub that
+  // names a directory it never creates would prove the preflight passes on a
+  // registration whose install is gone — the very thing it must reject.
+  // `missing: true` keeps the row without the directory, for that case.
+  for (const r of rows) {
+    const dir = join(base, "plugins", r.name);
+    if (r.missing) rmSync(dir, { recursive: true, force: true });   // an earlier fixture in the same test may have made it
+    else mkdirSync(dir, { recursive: true });
+  }
   write(join(bin, name), `#!/bin/sh
 if [ "$1" = "plugin" ] && [ "$2" = "list" ]; then cat <<'EOF'
 ${json}
@@ -3051,6 +3089,17 @@ test("a missing or DISABLED Claude plugin fails the spawn with the consent remed
     assert.throws(
       () => spawnInstance(root, findAgent(root, "dev"), { instance: "dev-off", launch: false }),
       (e) => e.code === "E_RUNTIME_RESOURCE_MISSING" && /installed but DISABLED/.test(e.message),
+    );
+    // REGISTERED but gone: Claude still lists the plugin and names an installPath
+    // that no longer exists (a cleared cache, a pruned directory). The row is not
+    // the install — a registration OAS accepts on the strength of the row alone
+    // starts an instance whose required channel is simply absent
+    // (reviewer-aggregate2).
+    process.env.PATH = fakeClaudeWithPlugins(base, [{ name: "chan@acme-marketplace", missing: true }]);
+    assert.throws(
+      () => spawnInstance(root, findAgent(root, "dev"), { instance: "dev-gone", launch: false }),
+      (e) => e.code === "E_RUNTIME_RESOURCE_MISSING",
+      "a plugin whose advertised install directory is gone does not satisfy the requirement",
     );
   } finally { process.env.PATH = oldPath; }
   rmSync(base, { recursive: true, force: true });

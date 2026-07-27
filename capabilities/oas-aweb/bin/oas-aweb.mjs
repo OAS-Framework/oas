@@ -45,8 +45,24 @@ import { join, dirname, resolve, delimiter } from "node:path";
  * property of one helper staying correct forever, while argv removes the class.
  * This hook is a REQUIRED spawn hook, so it gates every spawn, which is reason
  * enough not to rely on quoting. */
-const run = (argv, cwd, timeout = 45000) =>
-  execFileSync(argv[0], argv.slice(1), { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout }).trim();
+const run = (argv, cwd, timeout = 45000, secrets = []) => {
+  try {
+    return execFileSync(argv[0], argv.slice(1), { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout }).trim();
+  } catch (e) {
+    // execFileSync puts the WHOLE ARGV in e.message ("Command failed: aw team
+    // join <token> …"). This hook's failures are reported by the kernel and land
+    // in CLI/Desktop logs, so a failed join disclosed a still-valid team invite
+    // token to anyone reading them (reviewer-aggregate2). Rebuild the error from
+    // the command name, the status and stderr only — and scrub any secret the
+    // caller named, because the command's own stderr may echo it back.
+    const scrub = (t) => secrets.filter(Boolean).reduce((acc, sec) => acc.split(sec).join("<redacted>"), String(t ?? ""));
+    const where = [argv[0], argv[1]].filter(Boolean).join(" ");  // program + subcommand: never an argument
+    const why = scrub(e.stderr).trim() || (e.status === undefined ? String(e.code || "failed") : "");
+    const err = new Error(`${where} failed${e.status === undefined ? "" : ` (exit ${e.status})`}${why ? `: ${why}` : ""}`);
+    err.status = e.status;
+    throw err;
+  }
+};
 /** Is a command on PATH? Resolved in-process rather than by running
  * `command -v`, which is a SHELL BUILTIN — spawning it as a program depends on
  * a /usr/bin/command binary that many systems do not ship, and its absence
@@ -141,7 +157,7 @@ if (event === "spawn") {
       else fatal(`no membership matching team "${team}" at ${root}, so no identity could be minted — join or create it first (aweb-team-membership skill), or set team.id`);
     }
     const inv = JSON.parse(run(["aw", "team", "invite", "--team-id", team, "--json"], root));
-    const joined = JSON.parse(run(["aw", "team", "join", inv.token, "--name", instance, "--json"], home));
+    const joined = JSON.parse(run(["aw", "team", "join", inv.token, "--name", instance, "--json"], home, 45000, [inv.token]));
     // External state now exists. Record it immediately so any later failure can
     // still report it for compensation.
     minted = { team: joined.team_id, alias: joined.alias || instance };
@@ -210,7 +226,7 @@ if (event === "spawn") {
   const members = r.members || [];
   if (!members.length) console.log("  (no member certificates visible from this workspace)");
   for (const m of members) console.log(`  ${m.alias || m.name || m.did || JSON.stringify(m)}`);
-  console.log("\nAliases minted by OAS are instance names; message one with `aw mail send <alias> ...`.");
+  console.log("\nAliases minted by OAS are instance names; message one with `aw mail send --to <alias> --subject \"...\" --body \"...\"`.");
   process.exit(0);
 } else if (event === "setup") {
   // Guided onboarding — idempotent, prints what it finds and the one next step.

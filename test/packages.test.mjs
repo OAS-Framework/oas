@@ -1704,7 +1704,13 @@ test("post-install verification probes the same executable the install ran throu
   // Two wrappers reporting OPPOSITE states: `claude-personal` (the configured
   // one) has the plugin, the literal `claude` does not.
   const bin = join(base, "bin"); mkdirSync(bin, { recursive: true });
-  const listing = (rows) => JSON.stringify(rows.map((id) => ({ id, version: "1.0.0", scope: "user", enabled: true, installPath: join(base, id) })));
+  // The advertised installPath must EXIST — Claude names one, and a row pointing
+  // at a directory that was never created is a registration without an install,
+  // which the preflight is supposed to reject (reviewer-aggregate2).
+  const listing = (rows) => JSON.stringify(rows.map((id) => {
+    mkdirSync(join(base, id), { recursive: true });
+    return { id, version: "1.0.0", scope: "user", enabled: true, installPath: join(base, id) };
+  }));
   for (const [name, rows] of [["claude", []], ["claude-personal", ["chan@acme-marketplace"]]]) {
     write(join(bin, name), `#!/bin/sh
 if [ "$1" = "plugin" ] && [ "$2" = "list" ]; then echo '${listing(rows)}'; exit 0; fi

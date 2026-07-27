@@ -94,8 +94,10 @@ an inherited slot and remains distinct from absence.
 
 Pi launches with `--no-skills --skill <instance-home>/.agents/skills
 --no-context-files --no-prompt-templates --append-system-prompt
-<instance-home>/AGENTS.md`. The instance's skill set is exactly the composed
-one: no user, project, ancestor or package skill catalogs.
+<instance-home>/AGENTS.md`. The OAS-managed skill set is exactly the composed
+one: no user, project, ancestor or package skill catalogs. It is not a claim
+that nothing else can reach the session — extensions stay ambient (below), and
+what they contribute stays with them.
 
 `--no-context-files` also suppresses the instance's *own* composed `AGENTS.md`,
 so that is delivered explicitly; the work tree's `AGENTS.md` stays readable by
