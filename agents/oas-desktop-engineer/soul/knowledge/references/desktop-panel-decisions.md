@@ -3,7 +3,7 @@ type: Reference
 title: Founding and succession decision records (oas-expert soul)
 description: Canonical decisions in the oas-expert soul — web-pane.md fixed terminal-direct interaction, localhost-only trust boundary, and zero backend dependencies; desktop-panel-succession.md moved ownership to the desktop app and retired the browser panel and oas.web capability.
 tags: [decision, desktop, reference, trust-boundary]
-timestamp: 2026-07-24
+timestamp: 2026-07-27
 ---
 
 Read the full records at
@@ -27,5 +27,6 @@ internalize:
   Per the decision, OAS lifecycle mutations from the app go through a
   compatible installed `oas ... --json` CLI (observation-only when absent). The
   desktop server's direct `lib/core.mjs` bridge has been removed: read-only
-  deployment discovery is app-owned, while mutation requests validate first and
-  then degrade as `cli-unavailable` 503 until the CLI adapter lands.
+  deployment discovery is app-owned, while mutation requests validate first,
+  cross the shipped CLI adapter, and degrade as `cli-unavailable` 503 when no
+  compatible installed `oas` binary is discovered.

@@ -1,9 +1,9 @@
 ---
 type: Concept
 title: Model preference lists probe pi's catalog and fall back to the first entry
-description: A soul's model field is a comma-separated preference list of provider/id[:thinking] patterns; resolveModelPreference picks the first entry actually available by probing pi --list-models, and any probe failure or non-pi runtime falls back to the first entry so pi errors loudly at launch.
-tags: [model, runtime, resolveModelPreference, spawn, pi]
-timestamp: 2026-07-21
+description: A soul's model field is a comma-separated preference list of provider/id[:thinking] patterns; resolveModelPreference picks the first entry actually available by probing pi --list-models, translates entries to claude-valid ids for the claude runtime (anthropic/<id> → <id>, other providers dropped, fallback to claude's default), and any probe failure or other non-pi runtime falls back to the first entry so pi errors loudly at launch.
+tags: [model, runtime, resolveModelPreference, spawn, pi, claude]
+timestamp: 2026-07-27
 ---
 
 # Behavior (lib/core.mjs resolveModelPreference)
@@ -16,9 +16,14 @@ timestamp: 2026-07-21
   entry whose provider+id appears in the catalog output (authenticated
   providers only) wins.
 - Bare pattern without a provider: returned immediately — let pi resolve it.
-- Non-pi runtimes or probe failures: **first entry wins**. Deliberate: the
-  kernel does not silently pick something else; pi errors loudly at launch if
-  the model is unavailable.
+- Runtime `claude`: entries are TRANSLATED, not probed — claude accepts its
+  aliases and bare `claude-*` ids, never pi-style `provider/id[:thinking]`
+  patterns. `anthropic/<id>[:thinking]` becomes the bare `<id>`; aliases and
+  bare ids pass through; other providers' entries are dropped; nothing usable
+  resolves to `""` (claude's own default). First usable list entry wins.
+- Other non-pi runtimes or probe failures: **first entry wins**. Deliberate:
+  the kernel does not silently pick something else; pi errors loudly at launch
+  if the model is unavailable.
 
 # Notes for changes
 

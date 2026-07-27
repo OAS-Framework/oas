@@ -1,9 +1,9 @@
 ---
 type: Concept
 title: Desktop deployment reader and mutation degradation after kernel bridge removal
-description: The desktop deployment reader owns read-only deployment discovery after kernel bridge removal, mirrors first-class local souls under sibling local-agents/ directories, and leaves mutations to validation plus cli-unavailable degradation until the CLI adapter lands.
+description: The desktop deployment reader owns read-only deployment discovery after kernel bridge removal, mirrors first-class local souls under sibling local-agents/ directories, and leaves mutations to validation plus installed-CLI cli-unavailable degradation.
 tags: [desktop, backend, deployment, packaging, cli-boundary, local-souls]
-timestamp: 2026-07-24
+timestamp: 2026-07-27
 ---
 
 # Boundary
@@ -62,13 +62,13 @@ and `/api/file` serving a local soul's `AGENTS.md`.
 `spawnInstance` was the desktop server's mutation seam and did not move into the
 reader. `POST /api/spawn` / `spawnAgent` keeps the validation half in process —
 the `agentsRoot` allowlist and agent resolution still fail with meaningful
-client errors — but, until the compatible CLI adapter lands, a request that
-reaches the mutation boundary throws a stable `{ code: "cli-unavailable" }` and
-maps to HTTP 503.
+client errors — then crosses the shipped CLI adapter boundary. If discovery has
+not found a compatible installed `oas` binary, the adapter throws a stable
+`{ code: "cli-unavailable" }` and maps to HTTP 503.
 
-Keep this validation-vs-degradation distinction testable before the CLI exists:
-unknown roots or agents should remain validation failures, while unavailable OAS
-mutation capability is a stable service-unavailable degradation.
+Keep this validation-vs-degradation distinction testable at the installed-CLI
+boundary: unknown roots or agents should remain validation failures, while a
+missing compatible `oas` CLI is a stable service-unavailable degradation.
 
 # Verification and regression traps
 
