@@ -3301,6 +3301,9 @@ console.log(JSON.stringify({ meta: { retired: true } }));`,
     const r = retireInstance(root, "dev-git", { tmuxSession: "oas-test-nosuch" });
     const branches = execFileSync("git", ["-C", repo, "branch", "--list"], { encoding: "utf8" });
     assert.doesNotMatch(branches, /dev-git-leftover/, "the rollback-owned branch is deleted and verified on retry");
+    // Doing it is not enough: --json consumers read branchDeleted, and this path
+    // deletes without the --delete-branch flag that normally sets it.
+    assert.equal(r.branchDeleted, true, "and the verified deletion is REPORTED");
     assert.equal(r.rollbackIncomplete, undefined, "and cleanup then reports complete");
     assert.equal(existsSync(home), false);
   } finally { process.env.PATH = oldPath; }
@@ -3324,6 +3327,72 @@ test("a home with no instance.json and no cleanup descriptor is not silently del
   // force is the deliberate manual-cleanup escape.
   retireInstance(root, "dev-orphan", { tmuxSession: "oas-test-nosuch", force: true });
   assert.equal(existsSync(orphan), false);
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("--force clears a home whose quarantine marker is malformed (reviewer-adff009)", () => {
+  const base = temp();
+  const { root } = fixtureSoul(base, "pi");
+  // A truncated marker is reachable: the spawn path writes it while already
+  // failing. It identifies nothing, so retire must still refuse by default —
+  // but --force is the documented escape and it has to actually work. Treating
+  // the unusable marker as a retryable quarantine made the retry impossible AND
+  // the home permanently unremovable.
+  const home = join(root, "dev", "instances", "dev-broken");
+  mkdirSync(home, { recursive: true });
+  writeFileSync(join(home, "identity.key"), "secret");
+  writeFileSync(join(home, ".oas-rollback-incomplete.json"), '{"cleanup": {"repo":');
+  assert.throws(
+    () => retireInstance(root, "dev-broken", { tmuxSession: "oas-test-nosuch" }),
+    (e) => e.code === "E_UNIDENTIFIED_INSTANCE_HOME",
+    "an unreadable marker is an unidentified home, not a retryable quarantine",
+  );
+  assert.equal(existsSync(join(home, "identity.key")), true, "nothing was destroyed");
+  const r = retireInstance(root, "dev-broken", { tmuxSession: "oas-test-nosuch", force: true });
+  assert.equal(r.rollbackIncomplete, undefined, "force does not report an incompletion it cannot retry");
+  assert.equal(r.removedDir, true);
+  assert.equal(existsSync(home), false, "the operator's escape hatch actually removes the home");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("an incomplete cleanup names the home's REAL path, including local-agents/ (reviewer-adff009)", async () => {
+  const base = temp();
+  const { repo, root } = fixtureSoul(base, "pi");
+  // Capability-defined agents home under the scope's local-agents/, NOT under
+  // <root>/<agent>/instances/. A reconstructed path sends the operator to a
+  // directory that does not exist, on the one message that asks them to go
+  // clean up by hand.
+  capability(repo, "rev", {
+    capability: "acme.review",
+    agents: ["agents/reviewer"],
+    hooks: { spawn: { command: "hook.mjs spawn", required: true }, retire: "hook.mjs retire" },
+  }, {
+    "agents/reviewer/soul.yaml": "name: reviewer\nkind: capability\nwork: checkout\nruntime: pi\ndescription: Fresh reviewer.\n",
+    "agents/reviewer/AGENTS.md": "# Reviewer\n",
+    "hook.mjs": `if (process.env.OAS_EVENT === 'spawn') { console.log(JSON.stringify({ meta: { alias: 'probe' } })); process.exit(1); }
+console.log(JSON.stringify({ meta: { retired: false, reason: 'self-delete-failed' } }));`,
+  });
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.review:\n      global: true\n");
+  const oldPath = process.env.PATH; process.env.PATH = fakeRuntimes(base);
+  try {
+    const core = await import("../lib/core.mjs");
+    const agent = core.findCapabilityAgent(repo, root, "reviewer");
+    assert.throws(() => spawnInstance(root, { ...agent, repo }, { instance: "reviewer-q", launch: false }),
+      (e) => e.code === "E_REQUIRED_HOOK_FAILED");
+    const home = findInstanceHomes(root, "reviewer-q")[0].home;
+    assert.ok(home.includes(join("local-agents", "reviewer", "instances")), "precondition: it homes under local-agents/");
+
+    const r = retireInstance(root, "reviewer-q", { tmuxSession: "oas-test-nosuch" });
+    assert.ok(r.rollbackIncomplete, "cleanup is incomplete");
+    assert.equal(realpathSync(r.retainedHome), realpathSync(home), "the result names the home that actually survived");
+
+    const env = { ...process.env, PI_AGENTS_TMUX_SESSION: "oas-test-nosuch" };
+    delete env.PI_AGENTS_ROOT;
+    const cli = spawnSync(process.execPath, [CLI, "retire", "reviewer-q", "--dir", root], { encoding: "utf8", env });
+    assert.notEqual(cli.status, 0);
+    assert.match(cli.stderr, new RegExp(home.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+      `the diagnostic must point at the retained home, got: ${cli.stderr}`);
+  } finally { process.env.PATH = oldPath; }
   rmSync(base, { recursive: true, force: true });
 });
 

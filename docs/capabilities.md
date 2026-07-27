@@ -80,7 +80,15 @@ A self-contained package has an `oas.json`:
   retry needs, and removing it would turn a transient cleanup failure into
   permanent external residue. It is marked `.oas-rollback-incomplete.json`, so
   `oas status` reports it as retained state rather than a live instance, and
-  `oas retire <instance>` retries the cleanup.
+  `oas retire <instance>` retries the cleanup — re-running the retire hooks and
+  the rollback-owned Git steps, and verifying both. A retry that still cannot
+  finish keeps the home again, names what is outstanding, and exits nonzero.
+- The **escape hatch is `oas retire <instance> --force`**, for a home OAS cannot
+  identify at all: no `instance.json` and no usable cleanup descriptor (an
+  unreadable or truncated marker counts as none). Without `--force` that state
+  fails closed with `E_UNIDENTIFIED_INSTANCE_HOME` rather than deleting whatever
+  credentials the directory still holds; `--force` removes it and leaves any
+  external state for the operator to clean up by hand.
 - `requires` declares what must exist before the capability works. Two kinds:
   - a **host command** (`command`), satisfied by a binary on `PATH`;
   - a **runtime package** (`runtime` + `package`, optionally `marketplace`),

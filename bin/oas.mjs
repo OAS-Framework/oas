@@ -1709,7 +1709,7 @@ function retireCmd() {
   // home and its external state are still there, and a zero exit would tell
   // both a human and any script that the work is done.
   if (r.rollbackIncomplete) {
-    console.error(`Cleanup for ${r.retired} is INCOMPLETE — the instance home is retained at ${join(root, r.agent, "instances", r.retired)} because external state may still exist:`);
+    console.error(`Cleanup for ${r.retired} is INCOMPLETE — the instance home is retained at ${r.retainedHome} because external state may still exist:`);
     for (const f of r.rollbackIncomplete) console.error(`  ${f}`);
     console.error(`Fix the cause and re-run \`oas retire ${r.retired}\`; the home holds the state that cleanup needs.`);
     process.exit(1);
@@ -2031,7 +2031,7 @@ Usage:
       [--instructions-file <f>|--def-file <f>] [--no-launch] [--json]
                                             with team: declared, unknown local souls
                                             resolve across the team scope's repos
-  oas retire <instance>                     retire an instance (window, hooks,
+  oas retire <instance> [--force]           retire an instance (window, hooks,
       [--self] [--delete-branch]            worktree, home); --self = retire the
       [--keep-dir] [--json]                 CALLING instance (delayed window kill)
   oas doctor [dir] [--soul <name>] [--json] resolved targets, trust, requirements;
