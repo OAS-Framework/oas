@@ -7,8 +7,10 @@ The reference implementation publishes two npm packages:
 - **`@oas-framework/pi`**: minimal pi adapter for instance-local resource
   exposure and memory session events. It registers no agent tools.
 
-Claude instances consume generated standard files directly; OAS redirects
-Claude's config home to the instance-local view.
+Claude instances consume the generated standard files directly through the
+instance home's `.claude/` and `CLAUDE.md` symlinks. OAS does **not** redirect
+Claude's config home: an isolated one cannot authenticate, and the operator's
+own Claude configuration is deliberately left enabled.
 
 ## Repository layout
 

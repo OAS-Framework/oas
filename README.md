@@ -218,9 +218,13 @@ spawn, OAS resolves active capabilities and creates an instance-local view:
 2. exact `.agents/skills/` = kernel + soul + selected capability skills; and
 3. `instance.json` records every source and setting.
 
-Both pi and Claude use that same directory. Pi starts with ambient skill
-discovery disabled; Claude receives an instance-local config home. Duplicate
-skill names fail unless config explicitly selects an override. This gives one
+Both pi and Claude use that same directory. Pi starts with ambient skill and
+context discovery disabled, so it sees exactly the composed set. Claude reads
+it natively through the instance's `.claude/` symlinks while **keeping your own
+Claude Code configuration** — user and project skills, plugins and settings all
+still apply, because they are useful and it is your choice to use them. Each
+instance records what it actually exposes in `instance.json`. Duplicate skill
+names fail unless config explicitly selects an override. This gives one
 soul different deployment capabilities without changing its committed files.
 
 See [Capability packages](docs/capabilities.md#exact-runtime-composition).

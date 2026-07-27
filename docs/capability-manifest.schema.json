@@ -126,13 +126,76 @@
       "type": "object",
       "properties": {
         "soul-scaffold": {
-          "type": "string"
+          "oneOf": [
+            {
+              "type": "string",
+              "description": "Command to run, relative to the capability."
+            },
+            {
+              "type": "object",
+              "required": [
+                "command"
+              ],
+              "properties": {
+                "command": {
+                  "type": "string"
+                },
+                "required": {
+                  "type": "boolean",
+                  "description": "Only valid on `spawn`. When true, a failure fails the spawn and rolls it back, instead of leaving an instance whose capability is not configured."
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
         },
         "spawn": {
-          "type": "string"
+          "oneOf": [
+            {
+              "type": "string",
+              "description": "Command to run, relative to the capability."
+            },
+            {
+              "type": "object",
+              "required": [
+                "command"
+              ],
+              "properties": {
+                "command": {
+                  "type": "string"
+                },
+                "required": {
+                  "type": "boolean",
+                  "description": "Only valid on `spawn`. When true, a failure fails the spawn and rolls it back, instead of leaving an instance whose capability is not configured."
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
         },
         "retire": {
-          "type": "string"
+          "oneOf": [
+            {
+              "type": "string",
+              "description": "Command to run, relative to the capability."
+            },
+            {
+              "type": "object",
+              "required": [
+                "command"
+              ],
+              "properties": {
+                "command": {
+                  "type": "string"
+                },
+                "required": {
+                  "type": "boolean",
+                  "description": "Only valid on `spawn`. When true, a failure fails the spawn and rolls it back, instead of leaving an instance whose capability is not configured."
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
         }
       },
       "additionalProperties": false

@@ -62,7 +62,15 @@ A self-contained package has an `oas.json`:
   packages cannot implement the same layer for one soul.
 - `skills` entries can be skill directories or roots containing skills.
 - `inject` is optional instance instruction Markdown.
-- Only `soul-scaffold`, `spawn`, and `retire` hooks are accepted.
+- Only `soul-scaffold`, `spawn`, and `retire` hooks are accepted. A hook is a
+  command string, or `{ command, required }`. `required: true` is valid **only
+  on `spawn`**: the hook's failure then fails the spawn and rolls it back,
+  instead of producing an instance whose capability never configured itself —
+  an aweb identity that could not be minted leaves an agent believing it can be
+  woken by mail. Every other hook stays best-effort and only warns, so advisory
+  work never becomes a spawn blocker. `retire` and `soul-scaffold` cannot be
+  required: they run outside a spawn transaction, so there is no moment to
+  enforce them.
 - `requires` declares what must exist before the capability works. Two kinds:
   - a **host command** (`command`), satisfied by a binary on `PATH`;
   - a **runtime package** (`runtime` + `package`), satisfied by that runtime's

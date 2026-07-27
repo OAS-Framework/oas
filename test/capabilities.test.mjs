@@ -2668,3 +2668,100 @@ test("instance.json records the runtime posture — what is composed, curtailed,
   } finally { process.env.PATH = oldPath; }
   rmSync(base, { recursive: true, force: true });
 });
+
+// ---------- required lifecycle hooks ----------
+
+test("a failing REQUIRED spawn hook fails the spawn and rolls it back", () => {
+  const base = temp();
+  const { repo, root } = fixtureSoul(base, "pi");
+  // A capability that cannot configure itself. Left best-effort, the instance
+  // would start believing this capability works.
+  capability(repo, "chan", { capability: "acme.chan", hooks: { spawn: { command: "hook.mjs spawn", required: true } } },
+    { "hook.mjs": "process.stderr.write('identity minting failed\\n'); process.exit(1);" });
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.chan:\n      global: true\n");
+  const oldPath = process.env.PATH; process.env.PATH = fakeRuntimes(base);
+  try {
+    assert.throws(
+      () => spawnInstance(root, findAgent(root, "dev"), { instance: "dev-reqhook", launch: false }),
+      (e) => e.code === "E_REQUIRED_HOOK_FAILED"
+        && /acme\.chan spawn hook \(declared required\)/.test(e.message)
+        && /spawn rolled back/.test(e.message),
+    );
+    assert.equal(existsSync(join(root, "dev", "instances", "dev-reqhook")), false, "no half-configured instance left behind");
+  } finally { process.env.PATH = oldPath; }
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("a failing hook that is NOT required still only warns", () => {
+  const base = temp();
+  const { repo, root } = fixtureSoul(base, "pi");
+  // Advisory work — memory scaffolding and the like — must not become a spawn
+  // blocker just because required hooks now exist.
+  capability(repo, "soft", { capability: "acme.soft", hooks: { spawn: "hook.mjs spawn" } },
+    { "hook.mjs": "process.stderr.write('scaffolding failed\\n'); process.exit(1);" });
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.soft:\n      global: true\n");
+  const oldPath = process.env.PATH; process.env.PATH = fakeRuntimes(base);
+  try {
+    const r = spawnInstance(root, findAgent(root, "dev"), { instance: "dev-soft", launch: false });
+    assert.ok(r.warnings?.some((w) => /acme\.soft spawn hook failed/.test(w)), `failure is surfaced: ${JSON.stringify(r.warnings)}`);
+    retireInstance(root, "dev-soft", { tmuxSession: "oas-test-nosuch" });
+  } finally { process.env.PATH = oldPath; }
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("a required worktree spawn rolls back the worktree and branch too", () => {
+  const base = temp();
+  const { repo, root } = fixtureSoul(base, "pi");
+  capability(repo, "chan", { capability: "acme.chan", hooks: { spawn: { command: "hook.mjs spawn", required: true } } },
+    { "hook.mjs": "process.exit(1);" });
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.chan:\n      global: true\n");
+  execFileSync("git", ["-C", repo, "add", "-A"]);
+  execFileSync("git", ["-C", repo, "commit", "-qm", "cap"]);
+  const oldPath = process.env.PATH; process.env.PATH = fakeRuntimes(base);
+  try {
+    assert.throws(
+      () => spawnInstance(root, findAgent(root, "dev"), { instance: "dev-wtreq", work: "worktree", launch: false }),
+      (e) => e.code === "E_REQUIRED_HOOK_FAILED" && /spawn rolled back/.test(e.message),
+    );
+    const wts = execFileSync("git", ["-C", repo, "worktree", "list"], { encoding: "utf8" });
+    assert.doesNotMatch(wts, /dev-wtreq/, "worktree deregistered");
+    const branches = execFileSync("git", ["-C", repo, "branch", "--list"], { encoding: "utf8" });
+    assert.doesNotMatch(branches, /dev-wtreq/, "branch deleted");
+  } finally { process.env.PATH = oldPath; }
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("only the spawn hook may be declared required", () => {
+  const base = temp();
+  const { repo, root } = fixtureSoul(base, "pi");
+  // retire and soul-scaffold run outside a spawn transaction, so "required"
+  // there would promise an enforcement with no moment to act.
+  capability(repo, "bad", { capability: "acme.bad", hooks: { retire: { command: "hook.mjs retire", required: true } } }, { "hook.mjs": "" });
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.bad:\n      global: true\n");
+  assert.throws(() => resolveOasConfig(repo, "dev"), /cannot be required — only the spawn hook is enforced/);
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("a clean rollback reports no verification problems (probe stderr regression)", () => {
+  const base = temp();
+  const { repo, root } = fixtureSoul(base, "pi");
+  capability(repo, "chan", { capability: "acme.chan", hooks: { spawn: { command: "hook.mjs spawn", required: true } } },
+    { "hook.mjs": "process.exit(1);" });
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.chan:\n      global: true\n");
+  execFileSync("git", ["-C", repo, "add", "-A"]);
+  execFileSync("git", ["-C", repo, "commit", "-qm", "cap"]);
+  const oldPath = process.env.PATH; process.env.PATH = fakeRuntimes(base);
+  try {
+    // execFileSync with encoding:"utf8" gives stderr === "" for a silent
+    // command, so `stderr || message` fell through to "Command failed: …" and
+    // an absent ref — the SUCCESS signal of `rev-parse --verify --quiet` —
+    // looked like an unverifiable probe. Every clean rollback then reported
+    // INCOMPLETE, training readers to ignore the one message that matters.
+    assert.throws(
+      () => spawnInstance(root, findAgent(root, "dev"), { instance: "dev-cleanrb", work: "worktree", launch: false }),
+      (e) => /spawn rolled back/.test(e.message) && !/rollback INCOMPLETE/.test(e.message),
+      "a rollback that fully succeeded must say so",
+    );
+  } finally { process.env.PATH = oldPath; }
+  rmSync(base, { recursive: true, force: true });
+});
