@@ -4,7 +4,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { resolveOasConfig, capabilityIntegrity, acquirePackage, loadPackageManifestAt, readPackageLocks } from "../lib/core.mjs";
+import { resolveOasConfig, capabilityIntegrity, acquirePackage, loadPackageManifestAt, parsePackageSource, readPackageLocks } from "../lib/core.mjs";
 import {
   aggregateMissingRequirements, commandOnPath, diffConfigTexts, discoverWorkspaceScopes,
   lockedPackageCapabilities, normalizeRequirement,
@@ -1217,6 +1217,20 @@ test("configless-scope provider shadowing: own-scope acquired manifests override
   assert.equal(existsSync(join(ws, "oas-config.yaml")), false, "no invalid snapshot written");
 });
 
+test("catalog source grammar: short-id inputs accepted, catalog: prefix is lock-normalized output only (reviewer-78f72e5)", () => {
+  const bare = parsePackageSource("example.engineering");
+  assert.equal(bare.kind, "catalog");
+  assert.equal(bare.id, "example.engineering");
+  assert.equal(bare.normalized, "catalog:example.engineering");
+  const pinned = parsePackageSource("example.engineering@1.2.0");
+  assert.equal(pinned.selector, "1.2.0");
+  assert.equal(pinned.normalized, "catalog:example.engineering@1.2.0");
+  // the normalized spelling is NOT accepted as input (docs must show short forms)
+  for (const s of ["catalog:example.engineering", "catalog:example.engineering@1.2.0"]) {
+    assert.throws(() => parsePackageSource(s), (e) => e.code === "invalid-source", s);
+  }
+});
+
 // ---------- oas.dev consumer fixture (primary WS2 acceptance case) ----------
 
 /** The oas.dev-shaped consumer package per the founder-approved requirement: a
@@ -1252,10 +1266,10 @@ function oasDevFixture(base) {
       default: { path: "configs/default/oas-config.yaml", description: "OAS project workspace defaults", default: true },
     },
     // WS3-coordination point: dependency spec form (package-root-relative
-    // local path now — engine gap b fixed; the engine also accepts the
-    // official catalog forms, bare catalog:<id> and catalog:<id>@<selector>,
-    // preserving the original spelling in lock metadata — switch this spec to
-    // a catalog selector once WS3's published catalog lands).
+    // local path now — engine gap b fixed; the engine also accepts official
+    // catalog SHORT-ID inputs, <id> and <id>@<selector> (the catalog: prefix
+    // is the NORMALIZED lock-metadata spelling, not input syntax) — switch
+    // this spec to a catalog selector once WS3's published catalog lands).
     dependencies: ["../oas-knowledge"],
   }, null, 2));
   write(join(root, "configs", "default", "oas-config.yaml"), [
