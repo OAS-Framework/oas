@@ -8,7 +8,7 @@ Every repository contains:
 
 - `oas-package.json`, enumerating package resources explicitly;
 - exactly one self-contained capability directory (normally `capabilities/<name>`; the frozen addendum supports `.` for a flat single-capability package);
-- `schemas/oas-package.schema.json`, `schemas/oas-lock.schema.json`, and `schemas/capability-manifest.schema.json` byte-identical to package-engine PR head `b3ac4c6`; lock provenance accepts both bare `catalog:<id>` requests and explicit `catalog:<id>@<selector>` requests, with the resolved commit recorded separately;
+- `schemas/oas-package.schema.json`, `schemas/oas-lock.schema.json`, and `schemas/capability-manifest.schema.json` byte-identical to the final package-engine reference (pending PR #51 merge to main); lock provenance accepts both bare `catalog:<id>` requests and explicit `catalog:<id>@<selector>` requests, with the resolved commit recorded separately;
 - `scripts/validate-manifests.mjs`, including package-path, config-profile, schema, cardinality, and symlink-containment checks;
 - standalone tests under `test/`, runnable with `npm test`;
 - `.github/workflows/ci.yml`, `README.md`, `SCHEMA-STATUS.md`, and the identical MIT `LICENSE`;
