@@ -30,6 +30,7 @@ read what the current task needs, not everything.
 * [architecture/spawn-relations-lineage-fields.md](architecture/spawn-relations-lineage-fields.md) - final child/sibling/parent/unrelated semantics, sparse lineage fields, attached-owner binding, ambiguity validation, and retirement splice behavior.
 
 ## Lessons
+* [lessons/prove-auto-merge-preserved-both-deltas.md](lessons/prove-auto-merge-preserved-both-deltas.md) - Git reporting "Auto-merging <file>" with no conflict is not evidence the other side's change survived; reverse-applying each side's post-base delta against the merged tree turns that into a checkable fact.
 * [lessons/symlink-containment-walker-throws.md](lessons/symlink-containment-walker-throws.md) - A symlink-containment walker that recurses through contained link targets must narrow lstat probe try/catch blocks so path-escape errors thrown by deeper recursion fail closed instead of being silently swallowed.
 * [lessons/coordinator-stale-verification-loop.md](lessons/coordinator-stale-verification-loop.md) - When a coordinator repeatedly verifies stale commits and demands already-landed work, answer with branch-head, ancestry, and blob-level evidence plus explicit ACKs for the named mails.
 * [lessons/crossed-mail-freeze-discipline.md](lessons/crossed-mail-freeze-discipline.md) - Under repeated HOLD/GO/HOLD cycles with out-of-order mail delivery, use state-report-and-freeze: report exactly what is pushed vs local, keep freeze-time fixes as local unpushed commits, and treat incoming instructions as possibly stale.
