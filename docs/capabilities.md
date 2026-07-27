@@ -84,11 +84,14 @@ A self-contained package has an `oas.json`:
   the rollback-owned Git steps, and verifying both. A retry that still cannot
   finish keeps the home again, names what is outstanding, and exits nonzero.
 - The **escape hatch is `oas retire <instance> --force`**, for a home OAS cannot
-  identify at all: no `instance.json` and no usable cleanup descriptor (an
-  unreadable or truncated marker counts as none). Without `--force` that state
-  fails closed with `E_UNIDENTIFIED_INSTANCE_HOME` rather than deleting whatever
-  credentials the directory still holds; `--force` removes it and leaves any
-  external state for the operator to clean up by hand.
+  identify at all: no `instance.json` and no **usable** cleanup descriptor. Usable
+  means it can actually drive the retry — a marker that does not parse, carries no
+  `cleanup`, or carries one without a context `repo` (or with mistyped fields) is
+  no more retryable than a missing one, and is treated as missing so the escape
+  hatch works. Without `--force` that state fails closed with
+  `E_UNIDENTIFIED_INSTANCE_HOME` rather than deleting whatever credentials the
+  directory still holds; `--force` removes it and leaves any external state for
+  the operator to clean up by hand.
 - `requires` declares what must exist before the capability works. Two kinds:
   - a **host command** (`command`), satisfied by a binary on `PATH`;
   - a **runtime package** (`runtime` + `package`, optionally `marketplace`),

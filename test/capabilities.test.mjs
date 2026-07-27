@@ -3330,28 +3330,45 @@ test("a home with no instance.json and no cleanup descriptor is not silently del
   rmSync(base, { recursive: true, force: true });
 });
 
-test("--force clears a home whose quarantine marker is malformed (reviewer-adff009)", () => {
+test("--force clears a home whose quarantine marker cannot drive a retry (reviewer-adff009, reviewer-45ff039r2)", () => {
   const base = temp();
   const { root } = fixtureSoul(base, "pi");
-  // A truncated marker is reachable: the spawn path writes it while already
-  // failing. It identifies nothing, so retire must still refuse by default —
-  // but --force is the documented escape and it has to actually work. Treating
-  // the unusable marker as a retryable quarantine made the retry impossible AND
-  // the home permanently unremovable.
-  const home = join(root, "dev", "instances", "dev-broken");
-  mkdirSync(home, { recursive: true });
-  writeFileSync(join(home, "identity.key"), "secret");
-  writeFileSync(join(home, ".oas-rollback-incomplete.json"), '{"cleanup": {"repo":');
-  assert.throws(
-    () => retireInstance(root, "dev-broken", { tmuxSession: "oas-test-nosuch" }),
-    (e) => e.code === "E_UNIDENTIFIED_INSTANCE_HOME",
-    "an unreadable marker is an unidentified home, not a retryable quarantine",
-  );
-  assert.equal(existsSync(join(home, "identity.key")), true, "nothing was destroyed");
-  const r = retireInstance(root, "dev-broken", { tmuxSession: "oas-test-nosuch", force: true });
-  assert.equal(r.rollbackIncomplete, undefined, "force does not report an incompletion it cannot retry");
-  assert.equal(r.removedDir, true);
-  assert.equal(existsSync(home), false, "the operator's escape hatch actually removes the home");
+  // A marker that cannot drive the retry identifies nothing, so retire must
+  // still refuse by default — but --force is the documented escape and it has
+  // to actually work. Treating such a marker as a retryable quarantine made the
+  // retry impossible AND the home permanently unremovable: the retry ran
+  // without a context repo, reported the cleanup incomplete, and retained the
+  // home again on every attempt, forced or not.
+  //
+  // "Parses as JSON" is not the bar — each of these is valid JSON and none of
+  // them can rerun a single hook.
+  const unusable = {
+    truncated: '{"cleanup": {"repo":',
+    "no descriptor": '{"reason": "required spawn hook failed"}',
+    "empty descriptor": '{"cleanup": {}}',
+    "array descriptor": '{"cleanup": []}',
+    "descriptor with no repo": '{"cleanup": {"branch": "agents/dev-broken"}}',
+    "descriptor with a mistyped repo": '{"cleanup": {"repo": 17}}',
+    "descriptor with a blank repo": '{"cleanup": {"repo": "   "}}',
+    "descriptor with a mistyped branch": '{"cleanup": {"repo": "/tmp/x", "branch": ["a"]}}',
+    "descriptor with a mistyped capabilityRuntime": '{"cleanup": {"repo": "/tmp/x", "capabilityRuntime": {}}}',
+  };
+  for (const [label, marker] of Object.entries(unusable)) {
+    const home = join(root, "dev", "instances", "dev-broken");
+    mkdirSync(home, { recursive: true });
+    writeFileSync(join(home, "identity.key"), "secret");
+    writeFileSync(join(home, ".oas-rollback-incomplete.json"), marker);
+    assert.throws(
+      () => retireInstance(root, "dev-broken", { tmuxSession: "oas-test-nosuch" }),
+      (e) => e.code === "E_UNIDENTIFIED_INSTANCE_HOME",
+      `${label}: an unusable marker is an unidentified home, not a retryable quarantine`,
+    );
+    assert.equal(existsSync(join(home, "identity.key")), true, `${label}: nothing was destroyed`);
+    const r = retireInstance(root, "dev-broken", { tmuxSession: "oas-test-nosuch", force: true });
+    assert.equal(r.rollbackIncomplete, undefined, `${label}: force does not report an incompletion it cannot retry`);
+    assert.equal(r.removedDir, true, `${label}: removedDir`);
+    assert.equal(existsSync(home), false, `${label}: the operator's escape hatch actually removes the home`);
+  }
   rmSync(base, { recursive: true, force: true });
 });
 
