@@ -8,7 +8,7 @@ import { dirname, join, resolve } from "node:path";
 import {
   acquireCapability, acquirePackage, applyLegacyLockMigration, approveCapability, capabilityIntegrity, capabilityManifests, capabilityManifest, capabilityTrust,
   capabilitySkillDirs, capabilityExecutablePath, listInstalledPackages, loadPackageManifestAt, migrateLegacyLock,
-  inspectGitSourceRoot, materializePackageDeps, packageDepsIntegrity, packageIntegrity, parsePackageSource, readPackageLocks, removePackage, resolveOasConfig, restoreCapabilities, restorePackages,
+  inspectGitSourceRoot, materializePackageDeps, packageDepsIntegrity, platformVariantLockPackages, packageIntegrity, parsePackageSource, readPackageLocks, removePackage, resolveOasConfig, restoreCapabilities, restorePackages,
   findAgent, findCapabilityAgent, spawnInstance, updatePackage, validateLockEntry, writeCapabilityLock, writePackageLock, installedPackagesDir, OAS_LOCK_FILE,
 } from "../lib/core.mjs";
 
@@ -1957,11 +1957,13 @@ test("platform scan: omitted dev/peer entries (even scripted/native) ignored; v1
   const base = temp();
   const s = scope(base);
   const integ = "sha512-AAA";
-  // dev-native and peer-native entries are OUTSIDE the omit closure → accepted
-  const okSrc = pkgSource(join(base, "ok"), { package: "sc.ok" }, { "cap": { capability: "sc.okcap" } });
-  write(join(okSrc, "vendor/dep/package.json"), JSON.stringify({ name: "dep", version: "1.0.0" }));
-  write(join(okSrc, "package.json"), JSON.stringify({ name: "sc-ok", version: "1.0.0", dependencies: { dep: "file:vendor/dep" } }));
-  write(join(okSrc, "package-lock.json"), JSON.stringify({
+  // Detector-scope assertion runs on the exported scanner over a SYNTHETIC
+  // lock only — the fake omitted entries (unreachable https://x/*.tgz, bogus
+  // integrity) must never reach npm ci: a clean-cache npm validates/resolves
+  // them during materialization and fails before any assertion (CI-portability
+  // fix; product behavior unchanged).
+  const syntheticLock = join(base, "synthetic-package-lock.json");
+  write(syntheticLock, JSON.stringify({
     name: "sc-ok", version: "1.0.0", lockfileVersion: 3, requires: true,
     packages: {
       "": { name: "sc-ok", version: "1.0.0", dependencies: { dep: "file:vendor/dep" } },
@@ -1972,8 +1974,22 @@ test("platform scan: omitted dev/peer entries (even scripted/native) ignored; v1
       "node_modules/dev-scripted": { version: "1.0.0", resolved: "vendor/dep", link: true, dev: true, hasInstallScript: true },
     },
   }));
+  assert.deepEqual(platformVariantLockPackages(syntheticLock), [], "omitted dev/peer natives and dev install scripts are outside the scan scope");
+  // acquire-success assertion uses a VALID, purely local production closure
+  // (file: link only) that npm ci accepts offline with a clean cache
+  const okSrc = pkgSource(join(base, "ok"), { package: "sc.ok" }, { "cap": { capability: "sc.okcap" } });
+  write(join(okSrc, "vendor/dep/package.json"), JSON.stringify({ name: "dep", version: "1.0.0" }));
+  write(join(okSrc, "package.json"), JSON.stringify({ name: "sc-ok", version: "1.0.0", dependencies: { dep: "file:vendor/dep" } }));
+  write(join(okSrc, "package-lock.json"), JSON.stringify({
+    name: "sc-ok", version: "1.0.0", lockfileVersion: 3, requires: true,
+    packages: {
+      "": { name: "sc-ok", version: "1.0.0", dependencies: { dep: "file:vendor/dep" } },
+      "node_modules/dep": { resolved: "vendor/dep", link: true },
+      "vendor/dep": { version: "1.0.0" },
+    },
+  }));
   const r = acquirePackage(s, okSrc);
-  assert.equal(r.root, "sc.ok", "omitted dev/peer natives and dev install scripts do not block");
+  assert.equal(r.root, "sc.ok", "valid local production closure acquires cleanly");
   // production os/cpu constraint still rejects
   const bad = pkgSource(join(base, "bad"), { package: "sc.bad" });
   write(join(bad, "package.json"), JSON.stringify({ name: "sc-bad", version: "1.0.0", dependencies: { n: "1.0.0" } }));
