@@ -1,6 +1,7 @@
 # Knowledge Log
 
 ## 2026-07-26
+* **Creation**: [prototype-safe-policy-map-lookups](/lessons/prototype-safe-policy-map-lookups.md) records that plain-object policy registries need Object.hasOwn-based membership helpers so inherited Object.prototype names cannot impersonate configured entries.
 * **Creation**: [restore-preflight-visible-chain](/lessons/restore-preflight-visible-chain.md) records that restore must strictly parse the full visible lock chain before fetching, staging, or swapping artifacts so malformed inner locks cannot fail after outer mutations.
 * **Update**: [package-engine-implementation-gotchas](/lessons/package-engine-implementation-gotchas.md) links package restore gotchas to the visible-lock-chain preflight lesson.
 * **Creation**: [local-path-policy-before-expansion](/lessons/local-path-policy-before-expansion.md) records that local-path dependency policy must classify tilde/relative spellings before expansion so remote package metadata cannot bypass no-local-base guards.

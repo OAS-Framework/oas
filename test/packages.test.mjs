@@ -2,13 +2,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import {
   acquirePackage, applyLegacyLockMigration, approveCapability, capabilityIntegrity, capabilityManifests, capabilityManifest, capabilityTrust,
   capabilitySkillDirs, capabilityExecutablePath, listInstalledPackages, loadPackageManifestAt, migrateLegacyLock,
-  materializePackageDeps, packageIntegrity, parsePackageSource, readPackageLocks, removePackage, resolveOasConfig, restoreCapabilities, restorePackages,
+  materializePackageDeps, packageDepsIntegrity, packageIntegrity, parsePackageSource, readPackageLocks, removePackage, resolveOasConfig, restoreCapabilities, restorePackages,
   findAgent, spawnInstance, updatePackage, validateLockEntry, writeCapabilityLock, writePackageLock, installedPackagesDir, OAS_LOCK_FILE,
 } from "../lib/core.mjs";
 
@@ -236,7 +236,7 @@ test("acquirePackage: catalog resolver boundary — identity/discovery only, inj
   const r = acquirePackage(s, "oas.thing", { catalog });
   assert.equal(r.root, "oas.thing");
   const lock = readPackageLocks(s).packages["oas.thing"];
-  assert.ok(lock.source.startsWith("catalog:oas.thing@"));
+  assert.equal(lock.source, "catalog:oas.thing", "bare original catalog spec is preserved separately from the resolved commit");
   assert.deepEqual(lock.trustedCapabilities, []); // official identity grants NO executable trust
   assert.throws(() => acquirePackage(scope(base, "s2"), "not.in.catalog", { catalog }), (e) => e.code === "invalid-source");
   rmSync(base, { recursive: true, force: true });
@@ -2511,5 +2511,93 @@ test("prototype-named malformed legacy entries are never misclassified as retire
     assert.throws(() => applyLegacyLockMigration(s), (e) => e.code === "invalid-lock" && e.message.includes(id), `${id}: apply invalid-lock`);
     assert.equal(readFileSync(file, "utf8"), bytes, `${id}: apply leaves lock byte-identical`);
   }
+  rmSync(base, { recursive: true, force: true });
+});
+
+// ---------- final merged-state blocker round (reviewer-438abcf) ----------
+
+test("unchanged acquire repairs tampered node_modules without blessing observed depsIntegrity", () => {
+  const base = temp(); const s = scope(base);
+  const src = pkgSource(join(base, "src"), { package: "keep.p" });
+  write(join(src, "vendor/dep/package.json"), JSON.stringify({ name: "dep", version: "1.0.0" }));
+  write(join(src, "vendor/dep/index.js"), "module.exports = 1;\n");
+  write(join(src, "package.json"), JSON.stringify({ name: "keep-p", version: "1.0.0", dependencies: { dep: "file:vendor/dep" } }));
+  write(join(src, "package-lock.json"), JSON.stringify({
+    name: "keep-p", version: "1.0.0", lockfileVersion: 3, requires: true,
+    packages: { "": { name: "keep-p", version: "1.0.0", dependencies: { dep: "file:vendor/dep" } }, "node_modules/dep": { resolved: "vendor/dep", link: true }, "vendor/dep": { version: "1.0.0" } },
+  }));
+  acquirePackage(s, src);
+  const before = readPackageLocks(s).packages["keep.p"];
+  const dest = join(installedPackagesDir(s), "keep.p");
+  write(join(dest, "node_modules", "evil", "index.js"), "module.exports = 'planted';\n");
+  assert.notEqual(packageDepsIntegrity(dest), before.depsIntegrity, "tamper changes observed runtime digest");
+
+  const repaired = acquirePackage(s, src);
+  assert.equal(repaired.installed.find((p) => p.package === "keep.p").kept, false, "digest mismatch is staged+swapped, never kept");
+  assert.ok(!existsSync(join(dest, "node_modules", "evil")), "planted runtime content removed by deterministic rematerialization");
+  const after = readPackageLocks(s).packages["keep.p"];
+  assert.equal(after.depsIntegrity, before.depsIntegrity, "plain acquire never advances locked depsIntegrity from installed bytes");
+  assert.equal(packageDepsIntegrity(dest), before.depsIntegrity, "repaired artifact matches prior runtime lock");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("remove checks target own-scope dependents despite inner same-id shadow and rolls artifact back on write failure", () => {
+  const base = temp();
+  const outer = scope(base, "outer"); const inner = join(outer, "inner"); mkdirSync(inner);
+  const dep = pkgSource(join(base, "dep"), { package: "shadow.dep" });
+  const depCommit = gitify(dep);
+  const root = pkgSource(join(base, "outer-root"), { package: "shadow.root", dependencies: [`file://${dep}@${depCommit}`] });
+  acquirePackage(outer, root);
+  // Inner same-id root has no dependency and hides outer shadow.root in the
+  // closest-wins merged map used by the vulnerable implementation.
+  const innerRoot = pkgSource(join(base, "inner-root"), { package: "shadow.root" });
+  acquirePackage(inner, innerRoot);
+  const outerLock = readFileSync(join(outer, OAS_LOCK_FILE), "utf8");
+  const outerDepDir = join(installedPackagesDir(outer), "shadow.dep");
+  assert.throws(() => removePackage(inner, "shadow.dep"), (e) => e.code === "remove-blocked" && /shadow\.root/.test(e.message));
+  assert.ok(existsSync(outerDepDir), "own-scope dependent check occurs before artifact mutation");
+  assert.equal(readFileSync(join(outer, OAS_LOCK_FILE), "utf8"), outerLock, "blocked removal leaves own lock byte-identical");
+
+  // Independent package with no blockers: force the lock write to fail after
+  // the artifact is moved, and require rollback of the installed directory.
+  const rollbackScope = scope(base, "rollback");
+  const solo = pkgSource(join(base, "solo"), { package: "solo.p" });
+  acquirePackage(rollbackScope, solo);
+  const lockFile = join(rollbackScope, OAS_LOCK_FILE);
+  const lockBytes = readFileSync(lockFile, "utf8");
+  const soloDir = join(installedPackagesDir(rollbackScope), "solo.p");
+  chmodSync(lockFile, 0o444);
+  try {
+    assert.throws(() => removePackage(rollbackScope, "solo.p"));
+    assert.ok(existsSync(soloDir), "artifact restored after lock-write failure");
+    assert.equal(readFileSync(lockFile, "utf8"), lockBytes, "lock bytes preserved after failed remove");
+  } finally { chmodSync(lockFile, 0o644); }
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("update preserves explicit catalog selector and lock metadata distinguishes bare catalog spec", () => {
+  const base = temp();
+  const pinned = pkgSource(join(base, "pinned"), { package: "select.p", version: "1.0.0" }); gitify(pinned);
+  const latest = pkgSource(join(base, "latest"), { package: "select.p", version: "2.0.0" }); gitify(latest);
+  const seen = [];
+  const catalog = (id, selector) => {
+    assert.equal(id, "select.p"); seen.push(selector);
+    return { url: selector === "v1" ? pinned : latest };
+  };
+
+  const explicitScope = scope(base, "explicit");
+  acquirePackage(explicitScope, "select.p@v1", { catalog });
+  assert.equal(readPackageLocks(explicitScope).packages["select.p"].source, "catalog:select.p@v1", "explicit original selector locked verbatim");
+  seen.length = 0;
+  const explicitUpdate = updatePackage(explicitScope, "select.p", { catalog });
+  assert.deepEqual(seen, ["v1"], "update re-resolves the original explicit selector, not catalog default");
+  assert.equal(explicitUpdate.after.version, "1.0.0");
+
+  const bareScope = scope(base, "bare");
+  acquirePackage(bareScope, "select.p", { catalog });
+  assert.equal(readPackageLocks(bareScope).packages["select.p"].source, "catalog:select.p", "bare original spec remains distinguishable from explicit selector");
+  seen.length = 0;
+  updatePackage(bareScope, "select.p", { catalog });
+  assert.deepEqual(seen, [undefined], "bare update deliberately re-resolves catalog default");
   rmSync(base, { recursive: true, force: true });
 });
