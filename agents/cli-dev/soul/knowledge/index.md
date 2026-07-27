@@ -21,7 +21,7 @@ read what the current task needs, not everything.
 * [architecture/config-cascade-closest-wins.md](architecture/config-cascade-closest-wins.md) - how resolveOasConfig walks the config chain with closest-declaration-wins semantics, and its validation gotchas.
 * [architecture/work-modes-and-workspace-mode.md](architecture/work-modes-and-workspace-mode.md) - the four work modes, packaged briefings as the contract, and workspace mode's boundary requirement and no-branch semantics.
 * [architecture/capability-defined-agents.md](architecture/capability-defined-agents.md) - manifest `agents:` souls resolving on declaration, and the _dir/_soulDir split for instance homing.
-* [architecture/model-preference-lists.md](architecture/model-preference-lists.md) - comma-separated model preferences probed via `pi --list-models` with first-entry fallback.
+* [architecture/model-preference-lists.md](architecture/model-preference-lists.md) - comma-separated model preferences probed via `pi --list-models` with first-entry fallback; claude entries translated to claude-valid ids.
 * [architecture/spawn-relations-lineage-fields.md](architecture/spawn-relations-lineage-fields.md) - final child/sibling/parent/unrelated semantics, sparse lineage fields, attached-owner binding, ambiguity validation, and retirement splice behavior.
 
 ## Lessons

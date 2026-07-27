@@ -27,7 +27,7 @@ A soul is durable and committed. It is the part you review, improve, and keep.
 | `repo` | Target repo, absolute or relative to the agents root's parent. |
 | `work` | `worktree` or `checkout`. |
 | `runtime` | `pi` or `claude` — the harness new instances launch on; a spawn can override with `--runtime`. For `claude`, the binary is `claude` unless a local-only `oas-claude-config` file (closest one walking up from the repo; one line naming the binary, e.g. `claude-personal`) selects another — a personal machine preference for account selection, never committed. With the aweb messaging integration active, claude sessions get the `aweb-channel` plugin wired at spawn for real-time push events. |
-| `model` | Optional default model — a `provider/id[:thinking]` pattern or a comma-separated preference list (`github-copilot/x:high, anthropic/x:high`); at spawn the first entry whose provider/model is available wins (pi models probed via `pi --list-models`). A spawn can override it. |
+| `model` | Optional default model — a `provider/id[:thinking]` pattern or a comma-separated preference list (`github-copilot/x:high, anthropic/x:high`); at spawn the first entry whose provider/model is available wins (pi models probed via `pi --list-models`). For the `claude` runtime the value is translated to what the claude CLI accepts: `anthropic/<id>[:thinking]` becomes the bare `<id>`, aliases and bare `claude-*` ids pass through, other providers' entries are dropped, and nothing usable falls back to claude's own default. A spawn can override it. |
 
 A soul is model-agnostic as an artifact. Its files are plain operating docs,
 skills, and knowledge. `model` is only the default choice for new instances,
