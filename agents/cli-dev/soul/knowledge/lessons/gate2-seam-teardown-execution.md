@@ -1,9 +1,9 @@
 ---
 type: Lesson
 title: Gate-2 package seam teardown execution lessons
-description: Executing the package-engine seam teardown showed that prewritten disposition inventories can make merge conflicts mechanical, add/add test conflicts should split by ownership, engine report enums need explicit mapping, and fixture/schema gaps surface during consumption.
+description: Executing the package-engine seam teardown showed that prewritten disposition inventories can make merge conflicts mechanical, repeated shared-suite re-merges should adopt upstream tests wholesale before re-applying a small greppable adaptation set, engine report enums need explicit mapping, and fixture/schema gaps surface during consumption.
 tags: [packages, seam, teardown, merge, gate-2]
-timestamp: 2026-07-26
+timestamp: 2026-07-27
 ---
 
 # Gate-2 seam teardown execution
@@ -26,6 +26,16 @@ package engine head confirmed and extended the
   two engine assertions: bare `install --json` now emits WS2's reconcile
   envelope, and `config` became a kernel command so its unknown-subcommand code
   changed.
+- **Repeated shared-suite re-merges should adopt, then adapt.** When a sibling's
+  evolving branch owns a copied shared suite, avoid three-way-merging large test
+  bodies. Instead, replace the local adapted file with their current suite
+  (`git show <their-head>:test/packages.test.mjs > test/package-engine.test.mjs`),
+  re-apply only the local merged-CLI adaptations as a short list, and mark each
+  with an `ADAPTED for the merged CLI` comment naming the governing decision.
+  Run the suite after the replay; each failure is either a missing adaptation or
+  a real behavioral conflict needing a decision, not an invitation to silently
+  edit assertions. Keep the adaptation list short by relaying contract
+  disagreements upstream early.
 - **Map foreign report enums explicitly.** `restorePackages` can emit
   `status: "legacy"` rows with `package: null` for v1 locks. Those rows are
   informational and restored through the capability path; treating every

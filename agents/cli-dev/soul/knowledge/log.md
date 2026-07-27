@@ -1,6 +1,7 @@
 # Knowledge Log
 
 ## 2026-07-27
+* **Update**: [gate2-seam-teardown-execution](/lessons/gate2-seam-teardown-execution.md) merges the adopt-then-adapt re-merge lesson for sibling-owned shared test suites: adopt their suite file wholesale, re-apply a small greppable adaptation set, and classify failures as missing adaptations or real contract conflicts.
 * **Update**: [package-engine-implementation-gotchas](/lessons/package-engine-implementation-gotchas.md) records transactional Git-root package probing, direct resolved-root identity comparison, and exact parser normalized forms.
 * **Update**: [capability-defined-agents](/architecture/capability-defined-agents.md) links installed capability-agent soul reads to provider integrity and dependency-closure trust checks.
 * **Creation**: [capability-agent-trust-and-source-routing](/lessons/capability-agent-trust-and-source-routing.md) records that declaration and path containment do not authenticate capability-agent instructions and that Git package probing must fail closed except for missing package manifests.
