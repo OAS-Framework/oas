@@ -2339,3 +2339,23 @@ test("a promised skill still counts when an override satisfies its name from ano
   } finally { process.env.PATH = oldPath; }
   rmSync(base, { recursive: true, force: true });
 });
+
+test("a SKILL.md that is not a regular file does not count as a skill (reviewer-d70bc8b)", () => {
+  const base = temp();
+  const { repo, root } = fixtureSoul(base, "pi");
+  // existsSync() is true for a DIRECTORY named SKILL.md, which would let the
+  // tree pass preflight, be copied, pass the post-check, and launch an instance
+  // with no readable skill document.
+  const dir = capability(repo, "fakedoc", { capability: "acme.fakedoc", skills: ["skills"] });
+  mkdirSync(join(dir, "skills", "fake", "SKILL.md"), { recursive: true });
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.fakedoc:\n      global: true\n");
+  const oldPath = process.env.PATH; process.env.PATH = fakeRuntimes(base);
+  try {
+    assert.throws(
+      () => spawnInstance(root, findAgent(root, "dev"), { instance: "dev-fakedoc", launch: false }),
+      (e) => e.code === "E_CAPABILITY_RESOURCE_MISSING" && /contains no skill/.test(e.message),
+    );
+    assert.equal(existsSync(join(root, "dev", "instances", "dev-fakedoc")), false);
+  } finally { process.env.PATH = oldPath; }
+  rmSync(base, { recursive: true, force: true });
+});
