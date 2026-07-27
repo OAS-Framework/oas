@@ -469,7 +469,11 @@ function splitPane(orientation) {
   const r = requestSplit(split, orientation, seed, activeTab);
   split = r.split;
   if (!r.changed) return;
-  activateTab(activeTab);
+  // Re-render WITHOUT moving group focus: requestSplit just focused the new
+  // empty group (VS Code: the created group is the active one — the next
+  // terminal opens THERE); a plain activateTab would focusTab the source
+  // member and steal the focus back (review ddbbe3b blocker).
+  activateTab(activeTab, { keepGroupFocus: true });
   // an empty focused group is filled by picking an instance — take the user there
   if (split?.groups.some((g) => !g.tabs.length)) focusRoster();
 }
@@ -536,14 +540,17 @@ function addTab({ title, key, kind = "artifact", workspace = null, onClose, onSh
  * (palette instance jump, roster row Enter/click, quick-open) — which end
  * with the tab's content focused (a terminal's xterm textarea, via the
  * tab's focusContent callback) — from side-effect activations (workspace-
- * switch restoration, close-fallback), which must NOT steal focus. */
-function activateTab(id, { focusContent = false } = {}) {
+ * switch restoration, close-fallback), which must NOT steal focus.
+ * opts.keepGroupFocus re-renders around a model transition that already
+ * placed group focus (splitPane: the freshly created empty group must stay
+ * focused so the next terminal opens there). */
+function activateTab(id, { focusContent = false, keepGroupFocus = false } = {}) {
   const current = tabs.get(id);
   // Hidden is not security: reject cross-workspace terminal activation at
   // the mutation boundary before its pane can become active/receive input.
   if (!canActivateTab(current, currentWorkspace())) return false;
   activeTab = id;
-  if (current?.kind === "terminal" && split) {
+  if (current?.kind === "terminal" && split && !keepGroupFocus) {
     // Editor-group semantics: an existing member activation moves its
     // group's active tab + group focus; a NEW terminal tab (any open path
     // — roster, palette, quick-open) joins the FOCUSED group. Either way

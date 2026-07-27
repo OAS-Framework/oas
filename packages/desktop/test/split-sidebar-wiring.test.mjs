@@ -11,7 +11,9 @@ import {
   DEFAULT_KEYMAP, TERMINAL_ALLOWLIST, parseChord, matchEvent, registerAction,
   setActiveContexts,
 } from "../renderer/keybindings.mjs";
-import { isSplitMember, wireSplitPaneSelection } from "../renderer/split-layout.mjs";
+import {
+  isSplitMember, wireSplitPaneSelection, requestSplit, openTabInFocusedGroup,
+} from "../renderer/split-layout.mjs";
 
 const PKG = join(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (f) => readFileSync(join(PKG, f), "utf8");
@@ -175,4 +177,36 @@ test("activateTab keeps single-selection a11y per surface: one aria-selected per
   assert.match(src, /t\.triggerEl\.setAttribute\("aria-selected", String\(on\)\)/);
   assert.match(src, /t\.paneEl\.classList\.toggle\("active", on\)/,
     "shown group-active panes stay .active so their ResizeObservers refit");
+});
+
+test("splitPane → activateTab → open terminal fills the NEW group (review ddbbe3b blocker)", () => {
+  // Reproduce the shell's REAL sequence with the model transitions the
+  // wiring pins bind it to: splitPane runs requestSplit (focuses the new
+  // empty group) and then re-renders via activateTab with keepGroupFocus —
+  // which must NOT route through focusTab, or group focus snaps back to the
+  // source member and the next terminal opens in the ORIGINAL group,
+  // leaving the empty group unreachable.
+  const src = read("renderer/shell.mjs");
+  assert.match(src, /activateTab\(activeTab, \{ keepGroupFocus: true \}\)/,
+    "splitPane re-renders without moving group focus");
+  assert.match(src, /split && !keepGroupFocus\) \{/,
+    "activateTab honors keepGroupFocus before focusTab/openTabInFocusedGroup");
+  // model-level replay of the full sequence
+  let split = requestSplit(null, "row", [1, 2], 1).split;
+  const newGroup = split.focusedGroup;
+  // splitPane's re-render: activateTab(activeTab, { keepGroupFocus: true })
+  // skips the member transition entirely — group focus stays on the new group
+  assert.equal(split.focusedGroup, newGroup);
+  // the next terminal the user opens (roster/palette/quick-open → addTab →
+  // activateTab without keepGroupFocus → openTabInFocusedGroup)
+  split = openTabInFocusedGroup(split, 3).split;
+  const g2 = split.groups.find((g) => g.id === newGroup);
+  assert.deepEqual(g2.tabs, [3], "the new terminal fills the freshly created group");
+  assert.equal(g2.activeTab, 3);
+  // and a subsequent split from that member repeats the pattern
+  const again = requestSplit(split, "row", null, null).split;
+  assert.equal(again.groups.length, 3);
+  assert.equal(again.focusedGroup, again.groups[2].id, "the newest group is focused again");
+  const filled = openTabInFocusedGroup(again, 4).split;
+  assert.deepEqual(filled.groups[2].tabs, [4]);
 });

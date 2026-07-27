@@ -16,7 +16,7 @@ const read = (f) => readFileSync(join(PKG, f), "utf8");
 
 test("activateTab carries an explicit focusContent intent (user jumps vs side effects)", () => {
   const src = read("renderer/shell.mjs");
-  assert.match(src, /function activateTab\(id, \{ focusContent = false \} = \{\}\)/,
+  assert.match(src, /function activateTab\(id, \{ focusContent = false, keepGroupFocus = false \} = \{\}\)/,
     "focusContent defaults FALSE — side-effect activations must not steal focus");
   assert.match(src, /if \(focusContent\) tabs\.get\(id\)\?\.focusContent\?\.\(\);/,
     "content focus runs only on explicit user intent, after onShow");
