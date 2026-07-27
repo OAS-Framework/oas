@@ -504,28 +504,38 @@ function install() {
   const isMarketplaceCap = parsedSrc?.kind === "catalog" && !!marketplaceCapabilities()[src.replace(/@.*$/, "")];
   const isLocalPackage = parsedSrc?.kind === "path" && existsSync(join(parsedSrc.path, "oas-package.json"));
   const isCatalogPackage = parsedSrc?.kind === "catalog" && !isMarketplaceCap;
+  let gitInspection;
   if (parsedSrc && (parsedSrc.kind === "git" || isLocalPackage || isCatalogPackage)) {
     // Remote Git may be either a distribution package or the documented
     // legacy standalone-capability repository. Inspect the fetched ROOT before
     // any scope lock preflight; never infer root layout from closure errors.
     if (parsedSrc.kind === "git") {
-      let layout;
-      try { layout = inspectGitSourceRoot(src); }
+      try { gitInspection = inspectGitSourceRoot(src); }
       catch (e) { cmdFail(e.code || "invalid-source", e.message || e); return; }
-      if (layout.package) { installPackage(dir, src); return; }
-      if (!layout.capability) { cmdFail("invalid-package-manifest", `Git source ${src} has neither oas-package.json nor oas.json at its root`); return; }
-      // Standalone capability: continue to the legacy acquisition path below.
+      if (gitInspection.package) {
+        try { installPackage(dir, src, { rootSnapshot: gitInspection }); }
+        finally { gitInspection.cleanup(); }
+        return;
+      }
+      if (!gitInspection.capability) {
+        gitInspection.cleanup();
+        cmdFail("invalid-package-manifest", `Git source ${src} has neither oas-package.json nor oas.json at its root`); return;
+      }
+      // Standalone capability: hand the SAME fetched snapshot to legacy acquisition.
     } else { installPackage(dir, src); return; }
   }
   let known;
-  try { known = capabilityManifest(src, dir); } catch (e) { cmdFail(e.code || "invalid-lock", e.message || e); return; }
+  try { known = gitInspection ? undefined : capabilityManifest(src, dir); }
+  catch (e) { gitInspection?.cleanup(); cmdFail(e.code || "invalid-lock", e.message || e); return; }
   if (known) {
     if (JSON_MODE) { jsonOk({ alreadyAcquired: known.capability, version: known.version || null }); return; }
     console.log(`Already acquired capability ${known.capability} (${known.version || "unversioned"}); not activated or updated.`);
     return;
   }
   let r;
-  try { r = acquireCapability(dir, src); } catch (e) { cmdFail(e.code || "invalid-source", e.message); return; }
+  try { r = acquireCapability(dir, src, { rootSnapshot: gitInspection }); }
+  catch (e) { cmdFail(e.code || "invalid-source", e.message); return; }
+  finally { gitInspection?.cleanup(); }
   const lock = {
     source: r.source,
     version: r.manifest.version || null,
@@ -549,10 +559,10 @@ function install() {
   else if (r.manifest.commands || r.manifest.hooks) console.log(`Executable surface is blocked until: oas trust ${r.manifest.capability} --dir ${shortPath(dir)}`);
 }
 
-function installPackage(dir, src) {
+function installPackage(dir, src, opts = {}) {
   const bail = (e) => (JSON_MODE ? jsonFail(e.code || "invalid-source", e.message || e) : die(e.message || e));
   let r;
-  try { r = acquirePackage(dir, src); }
+  try { r = acquirePackage(dir, src, opts); }
   catch (e) { bail(e); return true; }
   if (JSON_MODE) { jsonOk({ root: r.root, installed: r.installed, lockFile: r.lockFile, depWarnings: r.depWarnings || [] }); return true; }
   for (const p of r.installed) {

@@ -330,17 +330,53 @@ function capabilityIntegrity(dir) {
   try { walk(dir); return `sha256-${hash.digest("hex")}`; } catch { return undefined; }
 }
 
-/** Read-only, fail-quiet legacy lock merge (closest scope wins). */
+/** Strict, read-only lock validation. Any invalidity discards the ENTIRE file;
+ * the Desktop degrades to invisible but never partially salvages trust data. */
+function validatedLockCapabilities(file) {
+  let p;
+  try { p = JSON.parse(readFileSync(file, "utf8")); } catch { return undefined; }
+  const map = (v) => v && typeof v === "object" && !Array.isArray(v);
+  if (!map(p)) return undefined;
+  if (p.lockfileVersion !== undefined && (typeof p.lockfileVersion !== "number" || ![1, 2].includes(p.lockfileVersion))) return undefined;
+  const capabilities = p.capabilities === undefined ? {} : p.capabilities;
+  if (!map(capabilities)) return undefined;
+  for (const [id, e] of Object.entries(capabilities)) {
+    if (!/^[a-z0-9][a-z0-9._-]*$/.test(id) || !map(e)) return undefined;
+    if (typeof e.source !== "string" || !e.source || typeof e.version !== "string" || !e.version || typeof e.integrity !== "string" || !/^sha256-[0-9a-f]{64}$/.test(e.integrity)) return undefined;
+    if (e.commit !== undefined && typeof e.commit !== "string") return undefined;
+    if (e.trustedExecutables !== undefined && typeof e.trustedExecutables !== "boolean") return undefined;
+  }
+  if ((p.lockfileVersion ?? 1) === 2) {
+    if (!map(p.packages)) return undefined;
+    const allowed = new Set(["source", "version", "commit", "integrity", "depsIntegrity", "capabilities", "dependencies", "trustedCapabilities"]);
+    for (const [id, e] of Object.entries(p.packages)) {
+      if (!/^[a-z0-9][a-z0-9._-]*$/.test(id) || !map(e) || Object.keys(e).some((k) => !allowed.has(k))) return undefined;
+      if (["source", "version", "commit", "integrity"].some((k) => typeof e[k] !== "string" || !e[k])) return undefined;
+      if (!/^sha256-[0-9a-f]{64}$/.test(e.integrity) || (e.depsIntegrity !== undefined && (typeof e.depsIntegrity !== "string" || !/^sha256-[0-9a-f]{64}$/.test(e.depsIntegrity)))) return undefined;
+      for (const k of ["capabilities", "dependencies", "trustedCapabilities"]) if (!Array.isArray(e[k]) || e[k].some((x) => typeof x !== "string")) return undefined;
+      if (e.trustedCapabilities.some((x) => !e.capabilities.includes(x)) || e.dependencies.some((x) => !Object.hasOwn(p.packages, x))) return undefined;
+      if (e.source.startsWith("path:") ? e.commit !== "local" : !/^[0-9a-f]{40}$/.test(e.commit)) return undefined;
+    }
+    const visiting = new Set(), done = new Set();
+    const visit = (id) => {
+      if (visiting.has(id)) return false;
+      if (done.has(id)) return true;
+      visiting.add(id);
+      for (const d of p.packages[id].dependencies) if (!visit(d)) return false;
+      visiting.delete(id); done.add(id); return true;
+    };
+    for (const id of Object.keys(p.packages)) if (!visit(id)) return undefined;
+  }
+  return capabilities;
+}
+
+/** Read-only, fail-quiet strict lock merge (closest scope wins). */
 function capabilityLocks(startDir) {
   const out = {};
   for (const cfg of [...configChain(startDir)].reverse()) {
-    try {
-      const parsed = JSON.parse(readFileSync(join(cfg._level, "oas-lock.json"), "utf8"));
-      if (!parsed || typeof parsed !== "object" || !parsed.capabilities || typeof parsed.capabilities !== "object" || Array.isArray(parsed.capabilities)) continue;
-      for (const [id, lock] of Object.entries(parsed.capabilities)) {
-        if (lock && typeof lock === "object" && typeof lock.integrity === "string") out[id] = lock;
-      }
-    } catch { /* malformed/missing lock degrades provider to invisible */ }
+    const capabilities = validatedLockCapabilities(join(cfg._level, "oas-lock.json"));
+    if (!capabilities) continue;
+    for (const [id, lock] of Object.entries(capabilities)) out[id] = lock;
   }
   return out;
 }
