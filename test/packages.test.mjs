@@ -9,7 +9,7 @@ import {
   acquirePackage, applyLegacyLockMigration, approveCapability, capabilityIntegrity, capabilityManifests, capabilityManifest, capabilityTrust,
   capabilitySkillDirs, capabilityExecutablePath, listInstalledPackages, loadPackageManifestAt, migrateLegacyLock,
   materializePackageDeps, packageDepsIntegrity, packageIntegrity, parsePackageSource, readPackageLocks, removePackage, resolveOasConfig, restoreCapabilities, restorePackages,
-  findAgent, spawnInstance, updatePackage, validateLockEntry, writeCapabilityLock, writePackageLock, installedPackagesDir, OAS_LOCK_FILE,
+  findAgent, findCapabilityAgent, spawnInstance, updatePackage, validateLockEntry, writeCapabilityLock, writePackageLock, installedPackagesDir, OAS_LOCK_FILE,
 } from "../lib/core.mjs";
 
 const CLI = resolve(new URL("../bin/oas.mjs", import.meta.url).pathname);
@@ -2599,5 +2599,55 @@ test("update preserves explicit catalog selector and lock metadata distinguishes
   seen.length = 0;
   updatePackage(bareScope, "select.p", { catalog });
   assert.deepEqual(seen, [undefined], "bare update deliberately re-resolves catalog default");
+  rmSync(base, { recursive: true, force: true });
+});
+
+// ---------- final merged-state blocker round 2 (reviewer-06f1160) ----------
+
+test("contained directory symlinks cannot hide second-hop skill or capability-agent escapes", () => {
+  const base = temp();
+  const s = scope(base, "scope", "name: t\ncapabilities:\n  additive:\n    tree.cap:\n      from: installed\n      global: true\n");
+  const src = pkgSource(join(base, "src"), { package: "tree.p" }, {
+    cap: { capability: "tree.cap", skills: ["skills"], agents: ["agents/reviewer"] },
+  });
+  const outside = join(base, "outside-secret.md"); write(outside, "HOST SECRET\n");
+
+  // Skill two-hop: skills/in -> contained package vendor/skill, whose
+  // SKILL.md -> host file. Immediate-target-only validation misses hop two.
+  mkdirSync(join(src, "cap", "skills"), { recursive: true });
+  mkdirSync(join(src, "vendor", "skill"), { recursive: true });
+  symlinkSync("../../vendor/skill", join(src, "cap", "skills", "in"));
+  symlinkSync(outside, join(src, "vendor", "skill", "SKILL.md"));
+
+  // Agent two-hop: declared agents/reviewer -> contained vendor/reviewer,
+  // whose AGENTS.md -> host file.
+  mkdirSync(join(src, "cap", "agents"), { recursive: true });
+  mkdirSync(join(src, "vendor", "reviewer"), { recursive: true });
+  write(join(src, "vendor", "reviewer", "soul.yaml"), "name: reviewer\nkind: local\nruntime: pi\n");
+  symlinkSync("../../vendor/reviewer", join(src, "cap", "agents", "reviewer"));
+  symlinkSync(outside, join(src, "vendor", "reviewer", "AGENTS.md"));
+
+  // Git clone preserves the authored relative directory links verbatim; local
+  // cp may canonicalize them to source-tree absolute targets.
+  gitify(src);
+  acquirePackage(s, `file://${src}`);
+  assert.throws(() => capabilitySkillDirs("tree.cap", s), /skill path escapes its integrity boundary/, "nested skill symlink escape rejected");
+  assert.throws(() => findCapabilityAgent(s, join(base, "agents-root"), "reviewer"), /agent path escapes its integrity boundary/, "nested capability-agent symlink escape rejected");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("read-only package gitignore is best-effort and cannot throw after acquisition commit", () => {
+  const base = temp(); const s = scope(base);
+  execFileSync("git", ["init", "-q", s]);
+  const ignore = join(s, ".agents", "packages", ".gitignore");
+  write(ignore, "# operator-owned\n"); chmodSync(ignore, 0o444);
+  const src = pkgSource(join(base, "src"), { package: "ignore.p" });
+  try {
+    const result = acquirePackage(s, src);
+    assert.equal(result.root, "ignore.p", "acquire returns success despite ignore maintenance failure");
+    assert.ok(existsSync(join(installedPackagesDir(s), "ignore.p")), "artifact committed");
+    assert.ok(readPackageLocks(s).packages["ignore.p"], "lock committed");
+    assert.equal(readFileSync(ignore, "utf8"), "# operator-owned\n", "read-only ignore left untouched");
+  } finally { chmodSync(ignore, 0o644); }
   rmSync(base, { recursive: true, force: true });
 });

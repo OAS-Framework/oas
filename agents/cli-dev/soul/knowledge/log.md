@@ -1,5 +1,8 @@
 # Knowledge Log
 
+## 2026-07-27
+* **Creation**: [final-package-lifecycle-transaction-invariants](/lessons/final-package-lifecycle-transaction-invariants.md) records final package lifecycle transaction invariants for no-op acquisition trust binding, target-scope removal rollback, and catalog selector preservation.
+
 ## 2026-07-26
 * **Creation**: [prototype-safe-policy-map-lookups](/lessons/prototype-safe-policy-map-lookups.md) records that plain-object policy registries need Object.hasOwn-based membership helpers so inherited Object.prototype names cannot impersonate configured entries.
 * **Creation**: [restore-preflight-visible-chain](/lessons/restore-preflight-visible-chain.md) records that restore must strictly parse the full visible lock chain before fetching, staging, or swapping artifacts so malformed inner locks cannot fail after outer mutations.
