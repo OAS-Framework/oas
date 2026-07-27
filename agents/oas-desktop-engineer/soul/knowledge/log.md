@@ -1,6 +1,9 @@
 # Knowledge Log
 
 ## 2026-07-27
+* **Update**: merged the post-review split focus blocker into [Editor-group split model replaces the pending-slot arrangement](/lessons/editor-group-split-model.md): splitPane's re-render must use `activateTab(activeTab, { keepGroupFocus: true })` after requestSplit has already focused the new empty group, and regression coverage must replay splitPane -> activateTab -> open instead of only the split model.
+* **Creation**: promoted [Editor-group split model replaces the pending-slot arrangement](/lessons/editor-group-split-model.md) from the oas-desktop-engineer-editor-groups notes.
+* **Update**: linked [Split panes as flex-cell reprojection of existing tab panes](/lessons/split-panes-flex-reprojection.md) and [Split tab-strip alignment moves real tab elements into per-pane groups](/lessons/split-tab-strip-real-tab-groups.md) to the editor-group split model that supersedes their pending-slot/shared-strip approach for VS Code-style groups.
 * **Update**: merged the per-modal async fill race from the oas-desktop-engineer-claude-code-spawn notes into [Guard async render completions on both success and error paths](/lessons/guard-both-completion-paths.md): per-modal tokens are too coarse for repeated fills inside one modal; each fill request needs its own monotonic generation and out-of-order deferred-response regression.
 * **Creation**: promoted [Command-running routes must be POST + coalesced](/lessons/command-running-get-csrf-fanout.md) from the oas-desktop-engineer-claude-code-spawn notes.
 * **Creation**: promoted [Model selection UI must stay advisory](/lessons/model-selection-advisory-datalist.md) from the oas-desktop-engineer-claude-code-spawn notes.

@@ -1,96 +1,164 @@
-// split-layout.mjs — pure split-pane state transitions.
+// Pure editor-group split model — VS Code semantics (persistent groups,
+// each owning an ordered tab list + active tab; new tabs open into the
+// focused group; the layout survives tab switches).
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  MAX_SPLIT_PANES, requestSplit, absorbTab, removeSplitTab, isSplitMember,
-  adjacentSplitMember,
+  MAX_SPLIT_GROUPS, requestSplit, focusTab, openTabInFocusedGroup,
+  isSplitMember, groupOfTab, removeSplitTab,
 } from "../renderer/split-layout.mjs";
 
-test("requestSplit starts a split from the active terminal with one pending slot", () => {
-  const { split, changed } = requestSplit(null, "row", 7);
+test("first split seeds ALL current tabs into group 1 and focuses the new empty group", () => {
+  const { split, changed } = requestSplit(null, "row", [1, 2, 3], 2);
   assert.ok(changed);
-  assert.deepEqual(split, { orientation: "row", members: [7], pending: 1 });
+  assert.equal(split.orientation, "row");
+  assert.equal(split.groups.length, 2);
+  // human requirement: all tabs that were in the strip stay together
+  assert.deepEqual(split.groups[0].tabs, [1, 2, 3]);
+  assert.equal(split.groups[0].activeTab, 2, "current tab stays active in group 1");
+  assert.deepEqual(split.groups[1].tabs, [], "new group starts empty");
+  // VS Code: the newly created group becomes the focused one
+  assert.equal(split.focusedGroup, split.groups[1].id);
 });
 
-test("requestSplit without an active terminal is a no-op", () => {
-  assert.deepEqual(requestSplit(null, "row", null), { split: null, changed: false });
-  assert.deepEqual(requestSplit(null, "col", undefined), { split: null, changed: false });
+test("split refuses without an active member tab", () => {
+  assert.equal(requestSplit(null, "row", [1, 2], null).changed, false);
+  assert.equal(requestSplit(null, "row", [1, 2], 9).changed, false, "active id must be in the layer");
 });
 
-test("requestSplit on an existing split adds ONE pending slot and re-orients", () => {
-  const s0 = { orientation: "row", members: [1, 2], pending: 0 };
-  const { split, changed } = requestSplit(s0, "col", 1);
-  assert.ok(changed);
-  assert.deepEqual(split, { orientation: "col", members: [1, 2], pending: 1 });
-  assert.deepEqual(s0, { orientation: "row", members: [1, 2], pending: 0 }, "input not mutated");
+test("splitting again while an empty group exists only re-orients", () => {
+  const { split } = requestSplit(null, "row", [1], 1);
+  const again = requestSplit(split, "row", null, null);
+  assert.equal(again.changed, false, "same orientation: no change");
+  const reoriented = requestSplit(split, "col", null, null);
+  assert.ok(reoriented.changed);
+  assert.equal(reoriented.split.orientation, "col");
+  assert.equal(reoriented.split.groups.length, 2, "no group accrual behind one placeholder");
 });
 
-test("a second split request while a slot is still empty does not stack pending slots", () => {
-  // the renderer owns a single empty-slot placeholder — the model must
-  // never record more empty slots than the DOM can show (review 156cbc7)
-  const s = { orientation: "row", members: [1], pending: 1 };
-  const same = requestSplit(s, "row", 1);
-  assert.equal(same.changed, false);
-  assert.equal(same.split, s);
-  // a different orientation still re-orients, without adding a slot
-  const flipped = requestSplit(s, "col", 1);
-  assert.ok(flipped.changed);
-  assert.deepEqual(flipped.split, { orientation: "col", members: [1], pending: 1 });
+test("new terminal tab opens into the FOCUSED group and becomes its active tab", () => {
+  let { split } = requestSplit(null, "row", [1], 1);
+  ({ split } = openTabInFocusedGroup(split, 5));
+  assert.deepEqual(split.groups[1].tabs, [5]);
+  assert.equal(split.groups[1].activeTab, 5);
+  assert.equal(split.focusedGroup, split.groups[1].id);
+  // focus back on group 1, open another: it must land in group 1
+  ({ split } = focusTab(split, 1));
+  ({ split } = openTabInFocusedGroup(split, 7));
+  assert.deepEqual(split.groups[0].tabs, [1, 7]);
+  assert.equal(split.groups[0].activeTab, 7);
+  // an existing member is focused, never duplicated
+  const r = openTabInFocusedGroup(split, 5);
+  assert.deepEqual(r.split.groups[1].tabs, [5]);
+  assert.equal(r.split.focusedGroup, r.split.groups[1].id, "focus follows the member's group");
 });
 
-test("requestSplit is capped at MAX_SPLIT_PANES (members + pending)", () => {
-  let s = { orientation: "row", members: [1, 2, 3, 4], pending: 0 };
-  assert.equal(s.members.length + s.pending, MAX_SPLIT_PANES);
-  const same = requestSplit(s, "row", 1);
-  assert.equal(same.changed, false);
-  assert.equal(same.split, s);
-  // at the cap a different orientation still re-orients (no new slot)
-  const flipped = requestSplit(s, "col", 1);
-  assert.ok(flipped.changed);
-  assert.equal(flipped.split.orientation, "col");
-  assert.equal(flipped.split.members.length + flipped.split.pending, MAX_SPLIT_PANES);
+test("focusTab moves the group's activeTab and group focus; switching tabs never dismantles the split", () => {
+  let { split } = requestSplit(null, "row", [1, 2], 1);
+  ({ split } = openTabInFocusedGroup(split, 5));
+  const r = focusTab(split, 2);
+  assert.ok(r.changed);
+  assert.equal(r.split.groups.length, 2, "split persists across tab switch");
+  assert.equal(r.split.groups[0].activeTab, 2);
+  assert.equal(r.split.focusedGroup, r.split.groups[0].id);
+  assert.equal(focusTab(r.split, 2).changed, false, "idempotent");
+  assert.equal(focusTab(r.split, 99).changed, false, "non-member no-op");
 });
 
-test("absorbTab fills the pending slot with a NEW tab only", () => {
-  const s = { orientation: "row", members: [1], pending: 1 };
-  const r = absorbTab(s, 2);
-  assert.ok(r.absorbed);
-  assert.deepEqual(r.split, { orientation: "row", members: [1, 2], pending: 0 });
-  // an existing member is never absorbed twice
-  const again = absorbTab(r.split, 2);
-  assert.equal(again.absorbed, false);
-  // no pending slot: nothing absorbed
-  assert.equal(absorbTab(r.split, 3).absorbed, false);
-  // no split at all
-  assert.deepEqual(absorbTab(null, 3), { split: null, absorbed: false });
+test("subsequent split inserts the new focused group after the focused one, up to the cap", () => {
+  let { split } = requestSplit(null, "row", [1], 1);
+  ({ split } = openTabInFocusedGroup(split, 2));
+  ({ split } = focusTab(split, 1)); // focus first group
+  const r = requestSplit(split, "row", null, null);
+  assert.ok(r.changed);
+  assert.equal(r.split.groups.length, 3);
+  assert.deepEqual(r.split.groups.map((g) => g.tabs.length), [1, 0, 1], "new group after the focused one");
+  assert.equal(r.split.focusedGroup, r.split.groups[1].id);
+  // fill it, then split to the cap; beyond the cap only re-orientation changes
+  ({ split } = openTabInFocusedGroup(r.split, 3));
+  ({ split } = requestSplit(split, "row", null, null));
+  ({ split } = openTabInFocusedGroup(split, 4));
+  assert.equal(split.groups.length, MAX_SPLIT_GROUPS);
+  assert.equal(requestSplit(split, "row", null, null).changed, false);
+  const reor = requestSplit(split, "col", null, null);
+  assert.ok(reor.changed);
+  assert.equal(reor.split.groups.length, MAX_SPLIT_GROUPS);
 });
 
-test("removeSplitTab collapses to single-pane when fewer than two panes remain", () => {
-  const s = { orientation: "row", members: [1, 2], pending: 0 };
-  assert.equal(removeSplitTab(s, 1), null, "one member left → single pane");
-  const s3 = { orientation: "col", members: [1, 2, 3], pending: 0 };
-  assert.deepEqual(removeSplitTab(s3, 2), { orientation: "col", members: [1, 3], pending: 0 });
-  // a lone member with only a pending slot remaining collapses too
-  const sp = { orientation: "row", members: [1], pending: 1 };
-  assert.equal(removeSplitTab(sp, 1), null);
-  // non-members leave the split untouched
-  assert.equal(removeSplitTab(s3, 99), s3);
-  assert.equal(removeSplitTab(null, 1), null);
+test("group ids are stable and unique across insertions", () => {
+  let { split } = requestSplit(null, "row", [1], 1);
+  ({ split } = openTabInFocusedGroup(split, 2));
+  ({ split } = requestSplit(split, "row", null, null));
+  const ids = split.groups.map((g) => g.id);
+  assert.equal(new Set(ids).size, ids.length);
 });
 
-test("adjacentSplitMember prefers the next member, then the previous, else null", () => {
-  const s = { orientation: "row", members: [1, 2, 3], pending: 0 };
-  assert.equal(adjacentSplitMember(s, 1), 2, "right/lower neighbor wins");
-  assert.equal(adjacentSplitMember(s, 2), 3);
-  assert.equal(adjacentSplitMember(s, 3), 2, "last member falls back left/up");
-  assert.equal(adjacentSplitMember(s, 99), null, "non-member");
-  assert.equal(adjacentSplitMember({ orientation: "row", members: [1], pending: 1 }, 1), null,
-    "no other member survives");
-  assert.equal(adjacentSplitMember(null, 1), null);
+test("membership helpers", () => {
+  const { split } = requestSplit(null, "row", [1, 2], 1);
+  assert.ok(isSplitMember(split, 2));
+  assert.ok(!isSplitMember(split, 9));
+  assert.ok(!isSplitMember(null, 1));
+  assert.equal(groupOfTab(split, 1), split.groups[0]);
 });
 
-test("isSplitMember", () => {
-  assert.equal(isSplitMember(null, 1), false);
-  assert.equal(isSplitMember({ orientation: "row", members: [1, 2], pending: 0 }, 2), true);
-  assert.equal(isSplitMember({ orientation: "row", members: [1, 2], pending: 0 }, 3), false);
+test("closing a non-active member keeps the group's active tab; no successor", () => {
+  let { split } = requestSplit(null, "row", [1, 2, 3], 2);
+  ({ split } = openTabInFocusedGroup(split, 5));
+  const r = removeSplitTab(split, 3);
+  assert.equal(r.successor, null);
+  assert.deepEqual(r.split.groups[0].tabs, [1, 2]);
+  assert.equal(r.split.groups[0].activeTab, 2);
+});
+
+test("closing the group-active tab picks the right-then-left neighbor IN THE GROUP", () => {
+  let { split } = requestSplit(null, "row", [1, 2, 3], 2);
+  ({ split } = openTabInFocusedGroup(split, 5));
+  const r = removeSplitTab(split, 2);
+  assert.equal(r.successor, 3, "right neighbor in the same group, not the newest tab (5)");
+  assert.equal(r.split.groups[0].activeTab, 3);
+  const r2 = removeSplitTab(r.split, 3);
+  assert.equal(r2.successor, 1, "left neighbor when no right one");
+});
+
+test("closing a group's last tab collapses the group; successor is the neighbor group's active tab", () => {
+  let { split } = requestSplit(null, "row", [1, 2], 1);
+  ({ split } = openTabInFocusedGroup(split, 5));
+  ({ split } = requestSplit(split, "row", null, null));
+  ({ split } = openTabInFocusedGroup(split, 6)); // groups: [1,2] [5] [6]
+  const r = removeSplitTab(split, 5);
+  assert.equal(r.split.groups.length, 2, "middle group collapsed");
+  assert.equal(r.successor, 6, "neighbor group's active tab survives as successor");
+});
+
+test("down to one group the model collapses to null (flat strip)", () => {
+  let { split } = requestSplit(null, "row", [1, 2], 1);
+  ({ split } = openTabInFocusedGroup(split, 5));
+  const r = removeSplitTab(split, 5);
+  assert.equal(r.split, null);
+  assert.equal(r.successor, 1, "the surviving group's active tab");
+});
+
+test("removing the last tab of the ONLY populated pair collapses cleanly (empty group present)", () => {
+  const { split } = requestSplit(null, "row", [1], 1); // [1] + empty focused group
+  const r = removeSplitTab(split, 1);
+  assert.equal(r.split, null, "an empty group cannot stand alone");
+});
+
+test("collapsing the focused group moves focus to the successor's group", () => {
+  let { split } = requestSplit(null, "row", [1, 2], 1);
+  ({ split } = openTabInFocusedGroup(split, 5));
+  ({ split } = requestSplit(split, "row", null, null));
+  ({ split } = openTabInFocusedGroup(split, 6)); // groups: [1,2] [5]* [6]
+  ({ split } = focusTab(split, 5));
+  const r = removeSplitTab(split, 5);
+  assert.equal(groupOfTab(r.split, r.successor).id, r.split.focusedGroup,
+    "focusedGroup never dangles on a removed group id");
+});
+
+test("mutation guard: removeSplitTab of a non-member changes nothing", () => {
+  const { split } = requestSplit(null, "row", [1, 2], 1);
+  const r = removeSplitTab(split, 42);
+  assert.equal(r.split, split);
+  assert.equal(r.successor, null);
+  assert.deepEqual(removeSplitTab(null, 1), { split: null, successor: null });
 });

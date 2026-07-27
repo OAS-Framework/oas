@@ -36,9 +36,11 @@ import {
   tabVisibleInContext, canActivateTab,
   fallbackTabForContext, terminalOpenOwnsWorkspace, restoreTerminalTab,
 } from "./workspace-tabs.mjs";
-import { requestSplit, absorbTab, removeSplitTab, isSplitMember, adjacentSplitMember, wireSplitPaneSelection } from "./split-layout.mjs";
+import {
+  requestSplit, focusTab, openTabInFocusedGroup, removeSplitTab, isSplitMember, groupOfTab, wireSplitPaneSelection,
+} from "./split-layout.mjs";
 import { splitControlsState } from "./split-controls.mjs";
-import { renderSplitLayout, projectTabStrip } from "./split-dom.mjs";
+import { projectSplitDom } from "./split-dom.mjs";
 
 const desk = window.oasDesktop;
 initTheme();
@@ -410,28 +412,30 @@ let activeTab = null;
 const wsActiveTerminal = new Map(); // workspace id -> last-active terminal tab key
 const brainIntents = createIntentGate();
 
-// ── split panes: several terminal tabs shown at once in #tabhost ────────
-// Pure transitions live in split-layout.mjs; the shell owns the DOM: member
-// panes become flex cells of #tabhost (orientation row = side-by-side,
-// col = stacked); an empty slot shows a placeholder until the NEXT terminal
-// tab is opened/activated — splits host tabs, so identity resolution and
-// dedup stay exactly the tab path's. Terminal FitAddon refit is automatic:
-// each tab's ResizeObserver fires when its pane is resized by the layout.
-let split = null; // { orientation, members: [tabId], pending } | null
+// ── editor groups: a split of the tab LAYER into persistent groups ─────
+// Pure transitions live in split-layout.mjs; the shell owns the DOM through
+// projectSplitDom (split-dom.mjs): each group renders its own tab strip and
+// pane cell inside #tabhost, the top #tabstrip hides while the split is
+// visible, and the flat restore is byte-identical to the non-split shell.
+// VS Code semantics: the layout persists across tab switches; new terminal
+// tabs open into the FOCUSED group; group focus follows the active tab.
+// Terminal FitAddon refit is automatic: each tab's ResizeObserver fires
+// when its pane is resized by the layout.
+let split = null; // editor-group model (split-layout.mjs) | null
 const splitEmptyEl = (() => {
   const el = document.createElement("div");
   el.className = "split-empty";
   el.setAttribute("role", "note");
-  el.textContent = "Select an instance from the sidebar (or the palette) to fill this pane";
+  el.textContent = "Select an instance from the sidebar (or the palette) to fill this group";
   return el;
 })();
 
 function renderSplit(splitVisible) {
-  // DOM projections (panes as flex cells; the strip grouped to match the
-  // panes — members[0] is the tab the user split FROM) live in
-  // split-dom.mjs so they are testable without booting the shell.
-  renderSplitLayout(tabhost, splitEmptyEl, split, splitVisible, (id) => tabs.get(id)?.paneEl || null);
-  projectTabStrip(paneTabsEl, tabbar, split, splitVisible, [...tabs]);
+  projectSplitDom({
+    tabhost, tabstrip: document.getElementById("tabstrip"), tabbar,
+    actionsEl: tabActionsEl, actionsHome: document.getElementById("tabbar-row"),
+    emptyEl: splitEmptyEl,
+  }, split, splitVisible, [...tabs]);
 }
 
 // ── tab-strip split controls: clickable twins of the split.* actions ──
@@ -439,7 +443,6 @@ function renderSplit(splitVisible) {
 // exactly like chord dispatch); enablement dry-runs the same model
 // transition the actions perform — no duplicated gating logic.
 const tabActionsEl = document.getElementById("tab-actions");
-const paneTabsEl = document.getElementById("pane-tabs");
 for (const [btnId, actionId] of [
   ["split-right", "split.vertical"], ["split-down", "split.horizontal"], ["split-close", "split.close"],
 ]) {
@@ -457,12 +460,22 @@ function updateSplitControls() {
 function splitPane(orientation) {
   const t = tabs.get(activeTab);
   if (!t || t.kind !== "terminal") return; // splits are terminal-only
-  const r = requestSplit(split, orientation, activeTab);
+  // The first split seeds group 1 with ALL of the layer's current terminal
+  // tabs (they stay together — human requirement) and creates a focused
+  // empty group; further splits add a group after the focused one.
+  const seed = [...tabs]
+    .filter(([, tab]) => tab.kind === "terminal" && tab.workspace === currentWorkspace())
+    .map(([id]) => id);
+  const r = requestSplit(split, orientation, seed, activeTab);
   split = r.split;
   if (!r.changed) return;
-  activateTab(activeTab);
-  // the empty slot is filled by picking an instance — take the user there
-  if (split?.pending > 0) focusRoster();
+  // Re-render WITHOUT moving group focus: requestSplit just focused the new
+  // empty group (VS Code: the created group is the active one — the next
+  // terminal opens THERE); a plain activateTab would focusTab the source
+  // member and steal the focus back (review ddbbe3b blocker).
+  activateTab(activeTab, { keepGroupFocus: true });
+  // an empty focused group is filled by picking an instance — take the user there
+  if (split?.groups.some((g) => !g.tabs.length)) focusRoster();
 }
 
 function closeSplit() {
@@ -478,7 +491,13 @@ function closeSplit() {
  * tab's deferred cleanup queues behind it instead of being dropped or torn
  * down by the stale lifecycle. */
 function onTabKeydown(e, id) {
-  const visible = [...tabs].filter(([, t]) => !t.tabEl.hidden);
+  // Per-group keyboard navigation: while the split renders, arrows/Home/End
+  // walk the CLOSED SET of the tab's own group strip (each .group-tabbar is
+  // its own tablist); the flat strip walks all context-visible tabs.
+  const group = tabs.get(activeTab)?.kind === "terminal" ? groupOfTab(split, id) : null;
+  const visible = group
+    ? group.tabs.map((tid) => [tid, tabs.get(tid)]).filter(([, t]) => t)
+    : [...tabs].filter(([, t]) => !t.tabEl.hidden);
   const at = visible.findIndex(([tid]) => tid === id);
   if (at < 0) return;
   const action = tabKeyAction(e, at, visible.length);
@@ -521,16 +540,24 @@ function addTab({ title, key, kind = "artifact", workspace = null, onClose, onSh
  * (palette instance jump, roster row Enter/click, quick-open) — which end
  * with the tab's content focused (a terminal's xterm textarea, via the
  * tab's focusContent callback) — from side-effect activations (workspace-
- * switch restoration, close-fallback), which must NOT steal focus. */
-function activateTab(id, { focusContent = false } = {}) {
+ * switch restoration, close-fallback), which must NOT steal focus.
+ * opts.keepGroupFocus re-renders around a model transition that already
+ * placed group focus (splitPane: the freshly created empty group must stay
+ * focused so the next terminal opens there). */
+function activateTab(id, { focusContent = false, keepGroupFocus = false } = {}) {
   const current = tabs.get(id);
   // Hidden is not security: reject cross-workspace terminal activation at
   // the mutation boundary before its pane can become active/receive input.
   if (!canActivateTab(current, currentWorkspace())) return false;
   activeTab = id;
-  if (current?.kind === "terminal") {
-    // a pending split slot absorbs the next terminal tab the user lands on
-    split = absorbTab(split, id).split;
+  if (current?.kind === "terminal" && split && !keepGroupFocus) {
+    // Editor-group semantics: an existing member activation moves its
+    // group's active tab + group focus; a NEW terminal tab (any open path
+    // — roster, palette, quick-open) joins the FOCUSED group. Either way
+    // the split persists — switching tabs never dismantles it.
+    split = isSplitMember(split, id)
+      ? focusTab(split, id).split
+      : openTabInFocusedGroup(split, id).split;
   }
   if (current?.kind === "terminal" && current.workspace) {
     wsActiveTerminal.set(current.workspace, current.key);
@@ -544,19 +571,25 @@ function activateTab(id, { focusContent = false } = {}) {
     setNavActive("spawn");
   }
   showTabLayer(true);
-  // Split panes stay visible only while the ACTIVE tab is a member —
-  // activating a non-member (file/brain/other terminal) covers the split.
-  const splitVisible = isSplitMember(split, id);
+  // The split renders while the ACTIVE tab is a terminal (the split is a
+  // terminal-layer arrangement); activating a non-terminal tab (file/brain)
+  // COVERS it without destroying the group state — the split re-materializes
+  // when the user returns to a terminal tab.
+  const splitVisible = !!split && current?.kind === "terminal";
   for (const [tid, t] of tabs) {
     const selected = tid === id;
-    const inSplit = splitVisible && isSplitMember(split, tid);
-    const shown = selected || inSplit;
-    t.tabEl.classList.toggle("active", selected);
-    t.triggerEl.setAttribute("aria-selected", String(selected));
-    t.triggerEl.tabIndex = selected ? 0 : -1;
-    t.paneEl.classList.toggle("active", shown);
-    t.paneEl.classList.toggle("split-cell", inSplit);
-    t.paneEl.hidden = !shown;
+    // Per-group a11y: while the split renders, each .group-tabbar is its
+    // own tablist — single selection and the roving tabindex hold PER
+    // GROUP (the group's active tab is selected/tabbable in its strip).
+    // Flat state keeps the classic single-selection strip.
+    const groupActive = splitVisible && groupOfTab(split, tid)?.activeTab === tid;
+    const on = splitVisible ? groupActive : selected;
+    t.tabEl.classList.toggle("active", on);
+    t.triggerEl.setAttribute("aria-selected", String(on));
+    t.triggerEl.tabIndex = on ? 0 : -1;
+    t.paneEl.classList.toggle("active", on);
+    t.paneEl.classList.toggle("split-cell", splitVisible && on);
+    t.paneEl.hidden = !on;
   }
   renderSplit(splitVisible);
   updateSplitControls();
@@ -579,12 +612,13 @@ function closeTab(id, restoreFocus = false) {
   t.paneEl.remove();
   tabs.delete(id);
   const wasSplitMember = isSplitMember(split, id);
-  // Choose the successor BEFORE the split forgets the closed member: when
-  // the ACTIVE member of a split closes, an adjacent surviving member must
-  // win over the generic most-recent-tab fallback — otherwise an unrelated
-  // newer terminal covers the split (merged-state review 156cbc7).
-  const splitSuccessor = activeTab === id ? adjacentSplitMember(split, id) : null;
-  split = removeSplitTab(split, id); // collapses to single-pane when < 2 remain
+  // The model chooses the successor (adjacent tab IN THE CLOSED TAB'S GROUP,
+  // else the neighbor group's active tab when the group collapses) — a
+  // surviving split tab must win over the generic most-recent-tab fallback,
+  // or an unrelated newer terminal covers the split (review 156cbc7).
+  const removed = removeSplitTab(split, id);
+  const splitSuccessor = activeTab === id ? removed.successor : null;
+  split = removed.split; // collapses to flat when one group remains
   if (activeTab === id) {
     if (splitSuccessor != null && tabs.has(splitSuccessor)) {
       activateTab(splitSuccessor);

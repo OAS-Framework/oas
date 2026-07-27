@@ -171,24 +171,13 @@ body {
 /* ── main / tabs ── */
 #main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 #tabstrip { display: flex; flex-direction: column; flex: none; background: var(--surface); border-bottom: 1px solid var(--border); }
-#tabstrip:has(> #tabbar-row > #tabbar:empty):has(> #pane-tabs[hidden]) { display: none; }
+#tabstrip:has(> #tabbar-row > #tabbar:empty) { display: none; }
+#tabstrip.split-hidden { display: none; }
 #tabbar-row { display: flex; min-width: 0; }
 #tabbar {
   display: flex; flex: 1; min-width: 0;
   overflow-x: auto; height: var(--bar-h);
 }
-/* Editor-group pane tabs: while a split is visible, the member tabs live in
-   their OWN full-width row whose only flex content is the pane groups — so
-   the groups divide exactly the width the panes divide in #tabhost (the
-   split controls and non-member tabs stay in the ordinary row below and
-   never skew the pane track — review 59fa415). Row orientation: equal
-   shares over equal panes; col: group order left→right = pane order
-   top→bottom (documented mapping). */
-#pane-tabs { display: flex; min-width: 0; height: var(--bar-h); border-bottom: 1px solid var(--border); }
-#pane-tabs[hidden] { display: none; }
-#pane-tabs > .tab-group { display: flex; flex: 1 1 0; min-width: 0; overflow: hidden; }
-#pane-tabs > .tab-group + .tab-group { border-left: 1px solid var(--border); }
-#pane-tabs .tab { flex: 1 1 auto; min-width: 0; max-width: none; }
 /* tab-strip split controls (shown while the active tab is a terminal) */
 #tab-actions { display: flex; align-items: center; gap: 2px; padding: 0 6px; flex: none; }
 #tab-actions[hidden] { display: none; }
@@ -211,15 +200,23 @@ body {
 .tab .close { color: var(--muted); margin: 0 8px 0 2px; padding: 2px 5px; border-radius: 4px; font-size: 15px; }
 .tab .close:hover, .tab .close:focus-visible { color: var(--fg); background: var(--surface-2); }
 #tabhost { flex: 1; position: relative; min-height: 0; }
-/* ── split panes: member terminal tabs become flex cells of #tabhost ── */
+/* ── editor groups: one .group-cell per group becomes a flex cell of #tabhost;
+   each cell stacks its own tab strip (.group-tabbar — the group's REAL tab
+   elements plus #tab-actions on the focused group) above the group's active
+   pane. The top #tabstrip is hidden while the split is visible (no empty
+   phantom chrome row — the PR #44 defect). ── */
 #tabhost.split-row { display: flex; flex-direction: row; }
 #tabhost.split-col { display: flex; flex-direction: column; }
+.group-cell { display: flex; flex-direction: column; flex: 1 1 0; min-width: 0; min-height: 0; }
+#tabhost.split-row > .group-cell + .group-cell { border-left: 1px solid var(--border); }
+#tabhost.split-col > .group-cell + .group-cell { border-top: 1px solid var(--border); }
+.group-tabbar { display: flex; flex: none; min-width: 0; overflow-x: auto; height: var(--bar-h);
+                background: var(--surface); border-bottom: 1px solid var(--border); }
+.group-tabbar .tab { min-width: 0; }
+.group-tabbar > #tab-actions { margin-left: auto; }
 .tab-pane.split-cell { position: relative; inset: auto; flex: 1 1 0; min-width: 0; min-height: 0; }
-#tabhost.split-row > .split-cell + .split-cell,
-#tabhost.split-row > .split-cell ~ .split-empty { border-left: 1px solid var(--border); }
-#tabhost.split-col > .split-cell + .split-cell,
-#tabhost.split-col > .split-cell ~ .split-empty { border-top: 1px solid var(--border); }
-.split-empty { flex: 1 1 0; min-width: 0; min-height: 0; display: flex; align-items: center; justify-content: center;
+.group-cell > .split-empty { flex: 1 1 0; min-width: 0; min-height: 0; }
+.split-empty { display: flex; align-items: center; justify-content: center;
                padding: 24px; color: var(--muted); font-size: 13px; text-align: center; background: var(--term-bg); }
 #stagehost { flex: 1; position: relative; min-height: 0; }
 #stagehost > div { height: 100%; }
