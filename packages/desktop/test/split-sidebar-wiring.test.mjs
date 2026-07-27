@@ -11,7 +11,9 @@ import {
   DEFAULT_KEYMAP, TERMINAL_ALLOWLIST, parseChord, matchEvent, registerAction,
   setActiveContexts,
 } from "../renderer/keybindings.mjs";
-import { isSplitMember, wireSplitPaneSelection } from "../renderer/split-layout.mjs";
+import {
+  isSplitMember, wireSplitPaneSelection, requestSplit, openTabInFocusedGroup,
+} from "../renderer/split-layout.mjs";
 
 const PKG = join(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (f) => readFileSync(join(PKG, f), "utf8");
@@ -65,13 +67,15 @@ test("shell registers the split and sidebar actions and exposes them in the pale
   assert.match(src, /id: "split\.vertical", label: [^\n]*context: "tabs"/, "split actions live in the tabs context");
 });
 
-test("splits are terminal-only, absorb via activateTab, and clean up on close/workspace switch", () => {
+test("splits are terminal-only, route through editor-group transitions, and clean up on close/workspace switch", () => {
   const src = read("renderer/shell.mjs");
   assert.match(src, /if \(!t \|\| t\.kind !== "terminal"\) return; \/\/ splits are terminal-only/);
-  // the pending slot fills through the SAME tab path every open uses —
-  // identity resolution and dedup are untouched (soul invariant)
-  assert.match(src, /split = absorbTab\(split, id\)\.split/);
-  assert.match(src, /split = removeSplitTab\(split, id\)/);
+  // activation routes through the SAME tab path every open uses — identity
+  // resolution and dedup are untouched (soul invariant): members focus
+  // their group; NEW terminal tabs open into the FOCUSED group.
+  assert.match(src, /\? focusTab\(split, id\)\.split/);
+  assert.match(src, /: openTabInFocusedGroup\(split, id\)\.split/);
+  assert.match(src, /const removed = removeSplitTab\(split, id\)/);
   assert.match(src, /split = null; \/\/ splits are per-workspace/);
 });
 
@@ -84,13 +88,14 @@ test("sidebar toggle is class-driven and persisted like other shell prefs", () =
   assert.match(css, /#app\.sidebar-hidden #sidebar \{ display: none; \}/);
 });
 
-test("split CSS turns member panes into flex cells in both orientations", () => {
+test("split CSS turns group cells into flex cells in both orientations", () => {
   const css = read("renderer/shell.css");
   assert.match(css, /#tabhost\.split-row \{ display: flex; flex-direction: row; \}/);
   assert.match(css, /#tabhost\.split-col \{ display: flex; flex-direction: column; \}/);
   // split cells leave absolute positioning so flex can size them; xterm's
   // FitAddon then refits via each tab's ResizeObserver
   assert.match(css, /\.tab-pane\.split-cell \{ position: relative; inset: auto; flex: 1 1 0; min-width: 0; min-height: 0; \}/);
+  assert.match(css, /\.group-cell \{ display: flex; flex-direction: column; flex: 1 1 0/);
 });
 
 test("split default chords match REAL key events — Shift+\\ arrives as event.key '|'", (t) => {
@@ -122,7 +127,7 @@ test("clicking or focusing a visible non-selected split pane selects ITS tab (re
   const { document } = dom.window;
   const paneA = document.getElementById("a");
   const paneB = document.getElementById("b");
-  let split = { orientation: "row", members: [1, 2], pending: 0 };
+  let split = { orientation: "row", nextId: 3, groups: [{ id: 1, tabs: [1], activeTab: 1 }, { id: 2, tabs: [2], activeTab: 2 }], focusedGroup: 2 };
   let activeTab = 2;
   const wire = (paneEl, id) => wireSplitPaneSelection(paneEl, {
     isMember: () => isSplitMember(split, id),
@@ -141,21 +146,21 @@ test("clicking or focusing a visible non-selected split pane selects ITS tab (re
   // an already-active pane is a no-op; a non-member pane never selects
   paneB.dispatchEvent(new dom.window.Event("pointerdown", { bubbles: true }));
   assert.equal(activeTab, 2);
-  split = { orientation: "row", members: [2], pending: 0 };
+  split = { orientation: "row", nextId: 3, groups: [{ id: 2, tabs: [2], activeTab: 2 }], focusedGroup: 2 };
   paneA.dispatchEvent(new dom.window.Event("pointerdown", { bubbles: true }));
   assert.equal(activeTab, 2, "non-member pane does not select");
   // disposer removes the listeners
-  split = { orientation: "row", members: [1, 2], pending: 0 };
+  split = { orientation: "row", nextId: 3, groups: [{ id: 1, tabs: [1], activeTab: 1 }, { id: 2, tabs: [2], activeTab: 2 }], focusedGroup: 2 };
   offA();
   activeTab = 2;
   paneA.dispatchEvent(new dom.window.Event("pointerdown", { bubbles: true }));
   assert.equal(activeTab, 2, "disposed pane no longer selects");
 });
 
-test("closing the active split member activates an adjacent survivor, not the newest tab", () => {
+test("closing the active split member activates the model-chosen successor, not the newest tab", () => {
   const src = read("renderer/shell.mjs");
-  assert.match(src, /const splitSuccessor = activeTab === id \? adjacentSplitMember\(split, id\) : null/,
-    "successor chosen from the split before removeSplitTab forgets the member");
+  assert.match(src, /const splitSuccessor = activeTab === id \? removed\.successor : null/,
+    "successor comes from the model's removeSplitTab (adjacent in the group, else neighbor group's active)");
   assert.match(src, /if \(splitSuccessor != null && tabs\.has\(splitSuccessor\)\) \{\n\s*activateTab\(splitSuccessor\)/,
     "split successor wins over fallbackTabForContext");
 });
@@ -167,9 +172,41 @@ test("shell wires pane selection on every tab pane through activateTab", () => {
   assert.match(src, /select: \(\) => activateTab\(id\)/);
 });
 
-test("activateTab keeps single-selection a11y: only the active tab is aria-selected", () => {
+test("activateTab keeps single-selection a11y per surface: one aria-selected per tablist", () => {
   const src = read("renderer/shell.mjs");
-  assert.match(src, /t\.triggerEl\.setAttribute\("aria-selected", String\(selected\)\)/);
-  assert.match(src, /t\.paneEl\.classList\.toggle\("active", shown\)/,
-    "split members stay .active so their ResizeObservers refit");
+  assert.match(src, /t\.triggerEl\.setAttribute\("aria-selected", String\(on\)\)/);
+  assert.match(src, /t\.paneEl\.classList\.toggle\("active", on\)/,
+    "shown group-active panes stay .active so their ResizeObservers refit");
+});
+
+test("splitPane → activateTab → open terminal fills the NEW group (review ddbbe3b blocker)", () => {
+  // Reproduce the shell's REAL sequence with the model transitions the
+  // wiring pins bind it to: splitPane runs requestSplit (focuses the new
+  // empty group) and then re-renders via activateTab with keepGroupFocus —
+  // which must NOT route through focusTab, or group focus snaps back to the
+  // source member and the next terminal opens in the ORIGINAL group,
+  // leaving the empty group unreachable.
+  const src = read("renderer/shell.mjs");
+  assert.match(src, /activateTab\(activeTab, \{ keepGroupFocus: true \}\)/,
+    "splitPane re-renders without moving group focus");
+  assert.match(src, /split && !keepGroupFocus\) \{/,
+    "activateTab honors keepGroupFocus before focusTab/openTabInFocusedGroup");
+  // model-level replay of the full sequence
+  let split = requestSplit(null, "row", [1, 2], 1).split;
+  const newGroup = split.focusedGroup;
+  // splitPane's re-render: activateTab(activeTab, { keepGroupFocus: true })
+  // skips the member transition entirely — group focus stays on the new group
+  assert.equal(split.focusedGroup, newGroup);
+  // the next terminal the user opens (roster/palette/quick-open → addTab →
+  // activateTab without keepGroupFocus → openTabInFocusedGroup)
+  split = openTabInFocusedGroup(split, 3).split;
+  const g2 = split.groups.find((g) => g.id === newGroup);
+  assert.deepEqual(g2.tabs, [3], "the new terminal fills the freshly created group");
+  assert.equal(g2.activeTab, 3);
+  // and a subsequent split from that member repeats the pattern
+  const again = requestSplit(split, "row", null, null).split;
+  assert.equal(again.groups.length, 3);
+  assert.equal(again.focusedGroup, again.groups[2].id, "the newest group is focused again");
+  const filled = openTabInFocusedGroup(again, 4).split;
+  assert.deepEqual(filled.groups[2].tabs, [4]);
 });
