@@ -20,6 +20,8 @@ enumerated in `oas-package.json` under `configs:`. Adopting one is explicit:
 oas init --package example.engineering                 # locked/installed package id
 oas init --package ../engineering-oas --config minimal # local path + explicit profile
 oas init --package https://example.invalid/pkg.git     # git URL (default branch)
+oas init --package catalog:example.engineering         # official catalog, latest
+oas init --package catalog:example.engineering@1.2.0   # official catalog, pinned selector
 ```
 
 Behavior:

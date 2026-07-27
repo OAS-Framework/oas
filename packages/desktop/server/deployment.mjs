@@ -16,8 +16,9 @@
 //   * NO KERNEL AUTHORITY: this reader never decides what a spawn/harvest
 //     would do; API-version acceptance and mutations belong to the CLI.
 import { execFileSync } from "node:child_process";
-import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, readdirSync, readlinkSync, realpathSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { createHash } from "node:crypto";
 
 export const RESERVED = new Set(["bin", "local-agents", "tmp-agents"]);
 /** Local (uncommitted) souls dir: <scope>/local-agents, a SIBLING of agents/
@@ -228,13 +229,13 @@ export function findAgent(root, name) {
 
 // ---- capability manifests (read-only subset) -------------------------------
 
-function loadManifestAt(idir) {
+function loadManifestAt(idir, origin, level) {
   const mf = join(idir, "oas.json");
   try {
     if (!existsSync(mf)) return undefined;
     const m = JSON.parse(readFileSync(mf, "utf8"));
     if (!m.capability) return undefined;
-    return { ...m, _dir: idir };
+    return { ...m, _dir: idir, _origin: origin, _level: level };
   } catch { return undefined; }
 }
 
@@ -255,25 +256,25 @@ function configCapabilityIds(cfg) {
  * package simply does not resolve (fail-quiet, read-only degradation). */
 function capabilityManifests(startDir) {
   const out = {};
-  const loadDir = (dir) => {
+  const loadDir = (dir, origin, level) => {
     let entries = [];
     try { entries = existsSync(dir) ? readdirSync(dir, { withFileTypes: true }) : []; } catch { return; }
     for (const e of entries) {
       if (!e.isDirectory()) continue;
-      const m = loadManifestAt(join(dir, e.name));
+      const m = loadManifestAt(join(dir, e.name), origin, level);
       if (m) out[m.capability] = m; // later (inner/owned) sources overwrite
     }
   };
   for (const cfg of [...configChain(startDir)].reverse()) {
-    loadDir(join(cfg._level, CAPABILITIES_DIRNAME, INSTALLED_SUBDIR));
-    loadDir(join(cfg._level, CAPABILITIES_DIRNAME, OWNED_SUBDIR));
+    loadDir(join(cfg._level, CAPABILITIES_DIRNAME, INSTALLED_SUBDIR), "installed", cfg._level);
+    loadDir(join(cfg._level, CAPABILITIES_DIRNAME, OWNED_SUBDIR), "owned", cfg._level);
     // `from: path:` package sources
     const caps = cfg.capabilities || {};
     for (const entry of [...Object.values(caps.layers || {}), ...Object.values(caps.additive || {})]) {
       const from = String(entry?.from || "");
       if (!from.startsWith("path:")) continue;
       const p = from.slice(5);
-      const m = loadManifestAt(isAbsolute(p) ? p : join(cfg._level, p));
+      const m = loadManifestAt(isAbsolute(p) ? p : join(cfg._level, p), "path", cfg._level);
       if (m) out[m.capability] = m;
     }
   }
@@ -314,6 +315,80 @@ function readContainedYaml(packageDir, file) {
   try { return parseYamlFlat(readFileSync(file, "utf8")); } catch { return undefined; }
 }
 
+/** Kernel-compatible standalone capability digest (excludes VCS + lock). */
+function capabilityIntegrity(dir) {
+  const hash = createHash("sha256");
+  const walk = (d) => {
+    for (const e of readdirSync(d, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      if (e.name === ".git" || e.name === "oas-lock.json") continue;
+      const p = join(d, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (e.isFile()) { hash.update(relative(dir, p)); hash.update("\0file\0"); hash.update(readFileSync(p)); hash.update("\0"); }
+      else if (e.isSymbolicLink()) { hash.update(relative(dir, p)); hash.update("\0symlink\0"); hash.update(readlinkSync(p)); hash.update("\0"); }
+    }
+  };
+  try { walk(dir); return `sha256-${hash.digest("hex")}`; } catch { return undefined; }
+}
+
+/** Strict, read-only lock validation. Any invalidity discards the ENTIRE file;
+ * the Desktop degrades to invisible but never partially salvages trust data. */
+function validatedLockCapabilities(file) {
+  let p;
+  try { p = JSON.parse(readFileSync(file, "utf8")); } catch { return undefined; }
+  const map = (v) => v && typeof v === "object" && !Array.isArray(v);
+  if (!map(p)) return undefined;
+  if (p.lockfileVersion !== undefined && (typeof p.lockfileVersion !== "number" || ![1, 2].includes(p.lockfileVersion))) return undefined;
+  const capabilities = p.capabilities === undefined ? {} : p.capabilities;
+  if (!map(capabilities)) return undefined;
+  for (const [id, e] of Object.entries(capabilities)) {
+    if (!/^[a-z0-9][a-z0-9._-]*$/.test(id) || !map(e)) return undefined;
+    if (typeof e.source !== "string" || !e.source || typeof e.version !== "string" || !e.version || typeof e.integrity !== "string" || !/^sha256-[0-9a-f]{64}$/.test(e.integrity)) return undefined;
+    if (e.commit !== undefined && typeof e.commit !== "string") return undefined;
+    if (e.trustedExecutables !== undefined && typeof e.trustedExecutables !== "boolean") return undefined;
+  }
+  if ((p.lockfileVersion ?? 1) === 2) {
+    if (!map(p.packages)) return undefined;
+    const allowed = new Set(["source", "version", "commit", "integrity", "depsIntegrity", "capabilities", "dependencies", "trustedCapabilities"]);
+    for (const [id, e] of Object.entries(p.packages)) {
+      if (!/^[a-z0-9][a-z0-9._-]*$/.test(id) || !map(e) || Object.keys(e).some((k) => !allowed.has(k))) return undefined;
+      if (["source", "version", "commit", "integrity"].some((k) => typeof e[k] !== "string" || !e[k])) return undefined;
+      if (!/^sha256-[0-9a-f]{64}$/.test(e.integrity) || (e.depsIntegrity !== undefined && (typeof e.depsIntegrity !== "string" || !/^sha256-[0-9a-f]{64}$/.test(e.depsIntegrity)))) return undefined;
+      for (const k of ["capabilities", "dependencies", "trustedCapabilities"]) if (!Array.isArray(e[k]) || e[k].some((x) => typeof x !== "string")) return undefined;
+      if (e.trustedCapabilities.some((x) => !e.capabilities.includes(x)) || e.dependencies.some((x) => !Object.hasOwn(p.packages, x))) return undefined;
+      if (e.source.startsWith("path:") ? e.commit !== "local" : !/^[0-9a-f]{40}$/.test(e.commit)) return undefined;
+    }
+    const visiting = new Set(), done = new Set();
+    const visit = (id) => {
+      if (visiting.has(id)) return false;
+      if (done.has(id)) return true;
+      visiting.add(id);
+      for (const d of p.packages[id].dependencies) if (!visit(d)) return false;
+      visiting.delete(id); done.add(id); return true;
+    };
+    for (const id of Object.keys(p.packages)) if (!visit(id)) return undefined;
+  }
+  return capabilities;
+}
+
+/** Read-only, fail-quiet strict lock merge (closest scope wins). */
+function capabilityLocks(startDir) {
+  const out = {};
+  for (const cfg of [...configChain(startDir)].reverse()) {
+    const capabilities = validatedLockCapabilities(join(cfg._level, "oas-lock.json"));
+    if (!capabilities) continue;
+    for (const [id, lock] of Object.entries(capabilities)) out[id] = lock;
+  }
+  return out;
+}
+
+/** Owned artifacts are config-owned; installed/path providers must match lock. */
+function agentProviderTrusted(manifest, startDir) {
+  if (manifest?._origin === "owned") return true;
+  const lock = capabilityLocks(startDir)[manifest?.capability];
+  if (!lock) return false;
+  return capabilityIntegrity(manifest._dir) === lock.integrity;
+}
+
 /** All capability-declared agents (souls shipped by active packages). */
 export function listCapabilityAgents(contextDir) {
   const out = [];
@@ -322,6 +397,8 @@ export function listCapabilityAgents(contextDir) {
   for (const cfg of configChain(contextDir)) for (const id of configCapabilityIds(cfg)) declared.add(id);
   for (const id of declared) {
     const manifest = manifests[id];
+    // Desktop is read-only/fault-tolerant: invalid providers are not visible.
+    if (manifest?.agents?.length && !agentProviderTrusted(manifest, contextDir)) continue;
     for (const rel of manifest?.agents || []) {
       const soulDir = manifestPath(manifest, rel);
       if (!soulDir) continue;

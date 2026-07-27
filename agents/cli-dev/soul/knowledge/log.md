@@ -1,6 +1,19 @@
 # Knowledge Log
 
+## 2026-07-27
+* **Update**: [package-engine-implementation-gotchas](/lessons/package-engine-implementation-gotchas.md) records transactional Git-root package probing, direct resolved-root identity comparison, and exact parser normalized forms.
+* **Update**: [capability-defined-agents](/architecture/capability-defined-agents.md) links installed capability-agent soul reads to provider integrity and dependency-closure trust checks.
+* **Creation**: [capability-agent-trust-and-source-routing](/lessons/capability-agent-trust-and-source-routing.md) records that declaration and path containment do not authenticate capability-agent instructions and that Git package probing must fail closed except for missing package manifests.
+* **Update**: [final-package-lifecycle-transaction-invariants](/lessons/final-package-lifecycle-transaction-invariants.md) records that post-commit convenience metadata such as package `.gitignore` maintenance must be best-effort because the lock and store are authoritative.
+* **Update**: [symlink-containment-walker-throws](/lessons/symlink-containment-walker-throws.md) merges reviewer-06f1160's resource-tree containment lesson: recurse through contained directory links with a visited realpath set and apply descendant-target validation to skill and capability-agent soul trees.
+* **Creation**: [final-package-lifecycle-transaction-invariants](/lessons/final-package-lifecycle-transaction-invariants.md) records final package lifecycle transaction invariants for no-op acquisition trust binding, target-scope removal rollback, and catalog selector preservation.
+
 ## 2026-07-26
+* **Creation**: [prototype-safe-policy-map-lookups](/lessons/prototype-safe-policy-map-lookups.md) records that plain-object policy registries need Object.hasOwn-based membership helpers so inherited Object.prototype names cannot impersonate configured entries.
+* **Creation**: [restore-preflight-visible-chain](/lessons/restore-preflight-visible-chain.md) records that restore must strictly parse the full visible lock chain before fetching, staging, or swapping artifacts so malformed inner locks cannot fail after outer mutations.
+* **Update**: [package-engine-implementation-gotchas](/lessons/package-engine-implementation-gotchas.md) links package restore gotchas to the visible-lock-chain preflight lesson.
+* **Creation**: [local-path-policy-before-expansion](/lessons/local-path-policy-before-expansion.md) records that local-path dependency policy must classify tilde/relative spellings before expansion so remote package metadata cannot bypass no-local-base guards.
+* **Update**: [package-engine-implementation-gotchas](/lessons/package-engine-implementation-gotchas.md) links the package gotcha list to the local-path policy-before-normalization lesson.
 * **Creation**: [symlink-containment-walker-throws](/lessons/symlink-containment-walker-throws.md) records the recursive symlink walker lesson: broad lstat probe catches can swallow deeper path-escape throws, so guards must be narrowed and real npm `file:` symlink layouts must be tested.
 * **Update**: [test-conventions](/playbooks/test-conventions.md) records the real `npm ci` `file:` symlink fixture shape for symlink-containment walker regressions.
 * **Fix**: [package-runtime-boundary-structured-cli](/decisions/package-runtime-boundary-structured-cli.md) superseded its pre-ruling draft — the recorded surface (packageRuntimeApi probe field, agent show/upsert, spawn --instance/--ephemeral, config get) was maintainer-REJECTED; the decision now records the ruled minimal surface (capability-defined agents, OAS_SETTINGS dispatch, OAS_CLI_BIN, floor+fixture versioning) and the index entry was corrected (reviewer-3f39f2b finding).

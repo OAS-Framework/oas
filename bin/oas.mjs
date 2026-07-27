@@ -20,11 +20,11 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { enableTmuxMouse, tmuxConfigPath, tmuxMouseEnabled } from "../lib/tmux-config.mjs";
 import {
-  LAYERS, LEGACY_HOME_CAPABILITIES_DIR, OAS_LOCK_FILE, OAS_VERSION, RETIRED_CAPABILITIES, configChain,
+  LAYERS, LEGACY_HOME_CAPABILITIES_DIR, OAS_LOCK_FILE, OAS_VERSION, RETIRED_CAPABILITIES, retiredCapabilityReason, configChain,
   acquireCapability, restoreCapabilities, marketplaceCapabilities,
   capabilityManifests, capabilityManifest, capabilityMissingRequires, capabilityIntegrity, capabilityTrust, capabilityExecutablePath,
   readCapabilityLocks, writeCapabilityLock,
-  parsePackageSource, acquirePackage, restorePackages, listInstalledPackages, readPackageLocks, residueEntryViolation,
+  parsePackageSource, inspectGitSourceRoot, acquirePackage, restorePackages, listInstalledPackages, readPackageLocks, residueEntryViolation,
   approveCapability, updatePackage, removePackage, migrateLegacyLock, applyLegacyLockMigration,
   packageIntegrity, packageDepsIntegrity, installedPackagesDir, loadPackageManifestAt,
   resolveOasConfig, resolveWorkMode, composeInstanceAgentsMd, parseYamlNested, packagedInject, teamAgentRoots,
@@ -255,14 +255,15 @@ function doctorJson(dir) {
     injects: r.injects,
     capabilities: r.capabilities.map((c) => ({ id: c.id, layer: c.layer, command: c.command, origin: c.origin, provenance: c.provenance, settings: c.settings, skills: c.skills, inject: c.inject, hooks: Object.keys(c.hooks || {}), trust: c.trust })),
     acquired: Object.fromEntries(Object.entries(mans).map(([n, m]) => [n, { layer: m.layer, command: m.command, version: m.version, dir: m._dir, origin: m._origin, description: m.description }])),
-    retiredLocks: Object.entries(readCapabilityLocks(ctx))
-      .filter(([id]) => RETIRED_CAPABILITIES[id])
-      .map(([id, lock]) => ({ id, file: lock._file, reason: RETIRED_CAPABILITIES[id] })),
+retiredLocks: (() => { try { return Object.entries(readCapabilityLocks(ctx)); } catch { return []; } })()
+      .filter(([id]) => retiredCapabilityReason(id))
+      .map(([id, lock]) => ({ id, file: lock._file, reason: retiredCapabilityReason(id) })),
     retiredArtifacts: Object.entries(mans)
-      .filter(([id]) => RETIRED_CAPABILITIES[id])
-      .map(([id, m]) => ({ id, dir: m._dir, origin: m._origin, reason: RETIRED_CAPABILITIES[id] })),
+      .filter(([id]) => retiredCapabilityReason(id))
+      .map(([id, m]) => ({ id, dir: m._dir, origin: m._origin, reason: retiredCapabilityReason(id) })),
     // Shared WS2+engine package payload (fix 4: human and JSON doctor derive
-    // from ONE computation; fail-closed reads are diagnosed via lockError).
+    // from ONE computation; fail-closed reads are diagnosed via lockError —
+    // doctorPackagesData carries the engine's residue/legacy-lock shapes).
     packages: pkg.packages,
     lockError: pkg.lockError,
     legacyLockFiles: pkg.legacyLockFiles,
@@ -338,15 +339,26 @@ function doctor(dir) {
   for (const [name, m] of Object.entries(capabilityManifests(ctx))) {
     const missing = capabilityMissingRequires(name, ctx);
     console.log(`  ${name.padEnd(16)} layer: ${(m.layer || "additive").padEnd(10)} origin: ${m._origin}${missing.length ? `  (missing: ${missing.map((x) => x.command).join(", ")})` : ""}`);
-    if (RETIRED_CAPABILITIES[name]) {
+    const retiredReason = retiredCapabilityReason(name);
+    if (retiredReason) {
       const installed = String(m._origin).startsWith("installed:");
-      console.log(`             WARNING: artifact of a retired capability — ${RETIRED_CAPABILITIES[name]}${installed ? `; also delete ${shortPath(m._dir)}` : ` (origin ${m._origin}: remove its declaration; the source tree at ${shortPath(m._dir)} is yours to keep or drop)`}`);
+      console.log(`             WARNING: artifact of a retired capability — ${retiredReason}${installed ? `; also delete ${shortPath(m._dir)}` : ` (origin ${m._origin}: remove its declaration; the source tree at ${shortPath(m._dir)} is yours to keep or drop)`}`);
     }
   }
-  const locks = readCapabilityLocks(ctx);
+  // readCapabilityLocks fails closed on invalid legacy entries — doctor is the
+  // diagnosis surface, so catch the typed error and render it (never using the data).
+  let locks = {};
+  try { locks = readCapabilityLocks(ctx); }
+  catch (e) {
+    if (e.code !== "invalid-lock") throw e;
+    const prov = Array.isArray(e.provenance) ? e.provenance[0] : undefined;
+    console.log(`  ERROR: ${e.message} [invalid-lock]`);
+    if (prov?.file) console.log(`         fix or remove the entry in ${shortPath(prov.file)} — never auto-repaired; legacy trust/restore fail closed until it is valid`);
+  }
   const mans = capabilityManifests(ctx);
   for (const [id, lock] of Object.entries(locks)) {
-    if (RETIRED_CAPABILITIES[id]) { console.log(`  WARNING: ${id} is locked in ${shortPath(lock._file)} but ${RETIRED_CAPABILITIES[id]}`); continue; }
+    const retiredReason = retiredCapabilityReason(id);
+    if (retiredReason) { console.log(`  WARNING: ${id} is locked in ${shortPath(lock._file)} but ${retiredReason}`); continue; }
     if (!mans[id]) console.log(`  WARNING: ${id} is locked in ${shortPath(lock._file)} but not acquired — run \`oas install\``);
   }
   for (const [id, m] of Object.entries(mans)) {
@@ -577,22 +589,46 @@ function install() {
     reconcile(dir);
     return;
   }
-  if (RETIRED_CAPABILITIES[src]) cmdFail("retired-capability", `${RETIRED_CAPABILITIES[src]}`);
+  const retiredReason = retiredCapabilityReason(src);
+  if (retiredReason) cmdFail("retired-capability", retiredReason);
   // Package source? (git/path with an oas-package.json, or a catalog id) — otherwise legacy capability acquisition.
   let parsedSrc;
   try { parsedSrc = parsePackageSource(src); } catch { parsedSrc = undefined; }
   const isMarketplaceCap = parsedSrc?.kind === "catalog" && !!marketplaceCapabilities()[src.replace(/@.*$/, "")];
   const isLocalPackage = parsedSrc?.kind === "path" && existsSync(join(parsedSrc.path, "oas-package.json"));
   const isCatalogPackage = parsedSrc?.kind === "catalog" && !isMarketplaceCap;
-  if (parsedSrc && (parsedSrc.kind === "git" || isLocalPackage || isCatalogPackage)) { installPackage(dir, src); return; }
-  const known = capabilityManifest(src, dir);
+  let gitInspection;
+  if (parsedSrc && (parsedSrc.kind === "git" || isLocalPackage || isCatalogPackage)) {
+    // Remote Git may be either a distribution package or the documented
+    // legacy standalone-capability repository. Inspect the fetched ROOT before
+    // any scope lock preflight; never infer root layout from closure errors.
+    if (parsedSrc.kind === "git") {
+      try { gitInspection = inspectGitSourceRoot(src); }
+      catch (e) { cmdFail(e.code || "invalid-source", e.message || e); return; }
+      if (gitInspection.package) {
+        try { installPackage(dir, src, { rootSnapshot: gitInspection }); }
+        finally { gitInspection.cleanup(); }
+        return;
+      }
+      if (!gitInspection.capability) {
+        gitInspection.cleanup();
+        cmdFail("invalid-package-manifest", `Git source ${src} has neither oas-package.json nor oas.json at its root`); return;
+      }
+      // Standalone capability: hand the SAME fetched snapshot to legacy acquisition.
+    } else { installPackage(dir, src); return; }
+  }
+  let known;
+  try { known = gitInspection ? undefined : capabilityManifest(src, dir); }
+  catch (e) { gitInspection?.cleanup(); cmdFail(e.code || "invalid-lock", e.message || e); return; }
   if (known) {
     if (JSON_MODE) { jsonOk({ alreadyAcquired: known.capability, version: known.version || null }); return; }
     console.log(`Already acquired capability ${known.capability} (${known.version || "unversioned"}); not activated or updated.`);
     return;
   }
   let r;
-  try { r = acquireCapability(dir, src); } catch (e) { cmdFail(e.code || "invalid-source", e.message); return; }
+  try { r = acquireCapability(dir, src, { rootSnapshot: gitInspection }); }
+  catch (e) { cmdFail(e.code || "invalid-source", e.message); return; }
+  finally { gitInspection?.cleanup(); }
   const lock = {
     source: r.source,
     version: r.manifest.version || null,
@@ -666,11 +702,12 @@ function partitionedPackageRestore(deepestDir) {
   return byLevel;
 }
 
-function installPackage(dir, src) {
+function installPackage(dir, src, opts = {}) {
   const bail = (e) => (JSON_MODE ? jsonFail(e.code || "invalid-source", e.message || e) : die(e.message || e));
   let r;
-  try { r = acquirePackage(dir, src); } catch (e) { bail(e); return; }
-  if (JSON_MODE) { jsonOk({ root: r.root, installed: r.installed, lockFile: r.lockFile, depWarnings: r.depWarnings || [] }); return; }
+  try { r = acquirePackage(dir, src, opts); }
+  catch (e) { bail(e); return true; }
+  if (JSON_MODE) { jsonOk({ root: r.root, installed: r.installed, lockFile: r.lockFile, depWarnings: r.depWarnings || [] }); return true; }
   for (const p of r.installed) {
     console.log(`${p.kept ? "ok       " : "Acquired "}${p.package}@${p.version} → ${shortPath(p.dir)}`);
     console.log(`  locked ${p.commit === "local" ? "local tree" : p.commit} (${p.integrity}); capabilities: ${p.capabilities.join(", ") || "(none)"}`);
@@ -682,6 +719,7 @@ function installPackage(dir, src) {
     return m && (Object.keys(m.commands || {}).length || Object.keys(m.hooks || {}).length);
   });
   if (executables.length) console.log(`Executable surfaces blocked until trusted: ${executables.map((c) => `oas trust ${c}`).join("; ")}`);
+  return true;
 }
 
 /** Bare `oas install` chain restore: engine packages (lock v2) + legacy locked
@@ -1484,7 +1522,7 @@ function init() {
 // ---------- roster: status / spawn / retire / create ----------
 function status() {
   if (args.includes("--team")) return statusTeam();
-  const root = ensureRoot(flag("dir") || process.cwd());
+  const root = ensureRoot(dirFlag());
   const data = listInstances(root);
   if (args.includes("--json")) { console.log(JSON.stringify({ root, agents: data }, null, 2)); return; }
   console.log(`oas status — agents root ${shortPath(root)}\n`);
@@ -1526,15 +1564,21 @@ function spawnCmd() {
   const note = (msg) => (JSON_MODE ? console.error(msg) : console.log(msg));
   const name = args[1];
   if (!name || name.startsWith("--")) bail("E_USAGE", "usage: oas spawn <agent> [--task <text>|--task-file <f>] [--purpose <slug>] [--relation child|sibling|parent|unrelated --relative-to <instance> [--relative-root <agents-root>]] [--parent <instance>] [--repo <r>] [--work worktree|checkout|attached|workspace] [--work-dir <owner-work>] [--runtime pi|claude] [--model <m>] [--branch <b>] [--instructions-file <f>|--def-file <f>] [--no-launch] [--json]");
+  // Retired boundary flags (maintainer transport ruling): fail LOUDLY before
+  // ANY side effect — including root discovery and local-agent upsert (an
+  // --instructions-file spawn must not scaffold/overwrite a local soul before
+  // this rejection; reviewer-b671de0).
+  if (args.includes("--instance")) bail("E_BAD_ARGS", "--instance was removed by the runtime-boundary ruling — use --purpose <slug> (deterministic <agent>-<purpose> naming)");
+  if (args.includes("--ephemeral")) bail("E_BAD_ARGS", "--ephemeral was removed by the runtime-boundary ruling — declare the agent in a capability manifest (agents:) for automatic ephemeral semantics");
   let root;
-  try { root = ensureRoot(flag("dir") || process.cwd()); }
+  try { root = ensureRoot(dirFlag()); }
   catch (e) { bail("E_NO_DEPLOYMENT", e.message || e); throw e; }
   let agent = findAgent(root, name);
   const instrFile = flag("instructions-file");
   const defFile = flag("def-file");
   if (!agent && !instrFile && !defFile) {
     // Capability-defined agent: a package's `agents:` soul, active in this context.
-    const capAgent = findCapabilityAgent(flag("dir") || process.cwd(), root, name);
+    const capAgent = findCapabilityAgent(dirFlag(), root, name);
     if (capAgent) {
       agent = capAgent;
       note(`(capability agent: "${name}" from ${capAgent.capability} — fresh soul, instances home locally)`);
@@ -1543,7 +1587,7 @@ function spawnCmd() {
   if (!agent && !instrFile && !defFile) {
     // Cross-repo lookup: the soul may live in a sibling repo of the team scope.
     // Unique match wins; the instance homes with its owning repo's agents root.
-    const teamHit = findTeamAgent(flag("dir") || process.cwd(), name);
+    const teamHit = findTeamAgent(dirFlag(), name);
     const remote = (teamHit?.matches || []).filter((m) => resolve(m.root) !== resolve(root));
     if (remote.length > 1) bail("E_AMBIGUOUS_SOUL", `soul "${name}" found in multiple team repos: ${remote.map((m) => shortPath(m.root)).join(", ")} — re-run with --dir <that repo>`);
     if (remote.length === 1) {
@@ -1595,7 +1639,7 @@ function spawnCmd() {
     // findInstanceHome also sees capability-defined agents' instance homes
     // (local-agents/<name>/ without a local soul) — e.g. a reviewer passing
     // --parent "$OAS_INSTANCE" from a capability agent.
-    if (!findInstanceHome(root, relativeTo) && !findTeamInstance(flag("dir") || process.cwd(), relativeTo)) bail(parent ? "E_PARENT_NOT_FOUND" : "E_RELATIVE_NOT_FOUND", `${parent ? "--parent" : "--relative-to"} "${relativeTo}" does not match any known instance`);
+    if (!findInstanceHome(root, relativeTo) && !findTeamInstance(dirFlag(), relativeTo)) bail(parent ? "E_PARENT_NOT_FOUND" : "E_RELATIVE_NOT_FOUND", `${parent ? "--parent" : "--relative-to"} "${relativeTo}" does not match any known instance`);
   }
   const taskText = flag("task");
   if (taskText === true) bail("E_BAD_ARGS", "--task needs a value (use --task-file for long tasks)");
@@ -1605,11 +1649,6 @@ function spawnCmd() {
   const relativeRoot = flag("relative-root");
   if (relativeRoot !== undefined && (relativeRoot === true || !String(relativeRoot).trim())) bail("E_BAD_ARGS", "--relative-root needs an agents-root path");
   if (relativeRoot && !relativeTo) bail("E_BAD_ARGS", "--relative-root only qualifies --relative-to/--parent");
-  // Retired boundary flags (maintainer transport ruling): fail LOUDLY before
-  // any side effect — an old consumer must not appear to succeed with
-  // different semantics (silent name/ephemerality divergence).
-  if (args.includes("--instance")) bail("E_BAD_ARGS", "--instance was removed by the runtime-boundary ruling — use --purpose <slug> (deterministic <agent>-<purpose> naming)");
-  if (args.includes("--ephemeral")) bail("E_BAD_ARGS", "--ephemeral was removed by the runtime-boundary ruling — declare the agent in a capability manifest (agents:) for automatic ephemeral semantics");
   let r;
   try {
     r = spawnInstance(root, agent, {
@@ -1644,10 +1683,10 @@ function retireCmd() {
   const isSelf = process.env.PI_AGENT_INSTANCE === name || process.env.OAS_INSTANCE === name;
   if (isSelf && !args.includes("--self")) die(`"${name}" is the calling instance — self-retire is irreversible; if your task is complete and you were told to retire, re-run with --self (finish your memory files FIRST; your session dies ~8s after)`);
   if (!isSelf && args.includes("--self")) die(`--self given but "${name}" is not the calling instance`);
-  let root = ensureRoot(flag("dir") || process.cwd());
+  let root = ensureRoot(dirFlag());
   // Cross-repo: the instance may home in a sibling repo of the team scope.
   if (!listAgents(root).some((a) => existsSync(join(a._dir, "instances", name)))) {
-    const hit = findTeamInstance(flag("dir") || process.cwd(), name);
+    const hit = findTeamInstance(dirFlag(), name);
     if (hit && resolve(hit.root) !== resolve(root)) { root = hit.root; console.log(`(cross-repo: instance homes at ${shortPath(root)})`); }
   }
   const r = retireInstance(root, name, { self: isSelf, deleteBranch: args.includes("--delete-branch"), keepDir: args.includes("--keep-dir") });
@@ -1664,7 +1703,7 @@ function createCmd() {
   const name = args[1];
   if (!name || name.startsWith("--")) die("usage: oas create <name> [--local] [--description <d>] [--type <agent-type>] [--repo <r>] [--work worktree|checkout|attached|workspace] [--runtime pi|claude] [--model <m>] [--instructions-file <f>]");
   const local = args.includes("--local");
-  const startDir = flag("dir") || process.cwd();
+  const startDir = dirFlag();
   // --local can BOOTSTRAP a deployment: with no agents/ or local-agents/ yet,
   // anchor at the enclosing git repo (else the start dir) — people can use OAS
   // with local agents alone.

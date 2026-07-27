@@ -3,7 +3,7 @@ type: Lesson
 title: Split tab-strip alignment moves real tab elements into per-pane groups
 description: Grouping the desktop tab strip to match split panes needs a dedicated full-width pane row containing only moved real tab elements for split members, so controls and non-members cannot skew pane alignment.
 tags: [desktop, splits, tabs, a11y]
-timestamp: 2026-07-26
+timestamp: 2026-07-27
 ---
 
 # Split tab-strip alignment moves real tab elements into per-pane groups
@@ -50,5 +50,6 @@ stay clickable; activating one covers the split.
 
 # Related concepts
 
+- [Editor-group split model replaces the pending-slot arrangement](/lessons/editor-group-split-model.md) supersedes the shared strip-row approach with per-group tabbars.
 - [Split panes as flex-cell reprojection of existing tab panes](/lessons/split-panes-flex-reprojection.md)
 - [Terminal focus follows user intent through activateTab's focusContent option](/decisions/terminal-focus-intent.md)

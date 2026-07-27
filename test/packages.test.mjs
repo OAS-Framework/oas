@@ -385,7 +385,9 @@ test("bare oas install at a team boundary prints the boundary FIRST, restores ea
   write(join(ws, "oas-config.yaml"), "name: ws\nteam:\n  name: t\n");
   // a descendant scope with an unrestorable lock
   write(join(ws, "member", "oas-config.yaml"), "name: member\n");
-  write(join(ws, "member", "oas-lock.json"), JSON.stringify({ lockfileVersion: 1, capabilities: { "ghost.cap": { source: "path:/nonexistent-src", integrity: "sha256-x" } } }));
+  // entry shape passes the strict residue validator (b3ac4c6) so the failure
+  // under test stays the unrestorable SOURCE, not a malformed-entry raise.
+  write(join(ws, "member", "oas-lock.json"), JSON.stringify({ lockfileVersion: 1, capabilities: { "ghost.cap": { source: "path:/nonexistent-src", version: "1.0.0", integrity: `sha256-${"a".repeat(64)}` } } }));
   const r = cli(["install", "--no-requirements", "--dir", ws], { cwd: ws });
   assert.equal(r.status, 1);
   assert.match(r.stdout, /^Workspace reconciliation boundary: /m);
@@ -1250,8 +1252,10 @@ function oasDevFixture(base) {
       default: { path: "configs/default/oas-config.yaml", description: "OAS project workspace defaults", default: true },
     },
     // WS3-coordination point: dependency spec form (package-root-relative
-    // local path now — engine gap b fixed; becomes an official catalog
-    // selector once WS3's catalog lands).
+    // local path now — engine gap b fixed; the engine also accepts the
+    // official catalog forms, bare catalog:<id> and catalog:<id>@<selector>,
+    // preserving the original spelling in lock metadata — switch this spec to
+    // a catalog selector once WS3's published catalog lands).
     dependencies: ["../oas-knowledge"],
   }, null, 2));
   write(join(root, "configs", "default", "oas-config.yaml"), [
