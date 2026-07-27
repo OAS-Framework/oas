@@ -1,6 +1,7 @@
 # Knowledge Log
 
 ## 2026-07-27
+* **Creation**: promoted [Claude launch argv needs option terminator and runtime model translation](/lessons/claude-launch-argv-model-translation.md) from the oas-desktop-engineer-claude-code-spawn notes.
 * **Update**: merged the stale pre-adapter phrasing follow-up from the oas-desktop-engineer-claude-code-spawn notes into [desktop deployment reader](/architecture/desktop-deployment-reader.md), [desktop backend architecture](/architecture/desktop-backend-architecture.md), and [desktop panel decisions](/references/desktop-panel-decisions.md): `cli-unavailable` now means no compatible installed `oas` CLI was discovered after the shipped CLI adapter boundary, not an interim pre-adapter state.
 * **Update**: merged the post-review split focus blocker into [Editor-group split model replaces the pending-slot arrangement](/lessons/editor-group-split-model.md): splitPane's re-render must use `activateTab(activeTab, { keepGroupFocus: true })` after requestSplit has already focused the new empty group, and regression coverage must replay splitPane -> activateTab -> open instead of only the split model.
 * **Creation**: promoted [Editor-group split model replaces the pending-slot arrangement](/lessons/editor-group-split-model.md) from the oas-desktop-engineer-editor-groups notes.
