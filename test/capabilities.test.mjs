@@ -3952,6 +3952,58 @@ exit 0
   rmSync(base, { recursive: true, force: true });
 });
 
+test("a rollback AFTER launch quarantines too — every path, not just required hooks (reviewer-terminal54a87fd)", () => {
+  const base = temp();
+  const { repo, root } = fixtureSoul(base, "pi");
+  // The spawn SUCCEEDS, then re-pointing the parent anchor fails, so the kernel
+  // rolls back an instance that already exists. That path deleted the home
+  // unconditionally — including while its own retire hook was reporting failure
+  // — which strands the external state the hook could not undo and destroys the
+  // credential that was the only way to retry. Same defect the required-hook
+  // path was fixed for; a second copy of the logic is how it survived.
+  const remote = join(base, "remote-identity");
+  const allow = join(base, "cleanup-works");
+  capability(repo, "comp", { capability: "acme.comp", hooks: { spawn: "hook.mjs spawn", retire: "hook.mjs retire" } }, {
+    "hook.mjs": `import {writeFileSync, existsSync} from 'node:fs';
+import {join} from 'node:path';
+if (process.env.OAS_EVENT === 'spawn') {
+  writeFileSync(${JSON.stringify(remote)}, 'joined');
+  writeFileSync(join(process.env.OAS_HOME, 'identity.key'), 'key');
+  console.log(JSON.stringify({ meta: { alias: 'probe' } }));
+  process.exit(0);
+}
+if (!existsSync(${JSON.stringify(allow)})) { console.log(JSON.stringify({ meta: { retired: false, reason: 'self-delete-failed' } })); process.exit(3); }
+console.log(JSON.stringify({ meta: { retired: true } }));`,
+  });
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.comp:\n      global: true\n");
+  const oldPath = process.env.PATH; process.env.PATH = fakeRuntimes(base);
+  const home = join(root, "dev", "instances", "dev-child");
+  try {
+    const anchorInst = spawnInstance(root, findAgent(root, "dev"), { instance: "dev-anchor", launch: false });
+    // Make the anchor's atomic re-point fail: a DIRECTORY where its temp file goes.
+    mkdirSync(join(anchorInst.home, "instance.json.tmp-dev-child"), { recursive: true });
+    write(join(anchorInst.home, "instance.json.tmp-dev-child", "x"), "x");
+
+    assert.throws(
+      () => spawnInstance(root, findAgent(root, "dev"), { instance: "dev-child", relation: "parent", relativeTo: "dev-anchor", launch: false }),
+      (e) => /failed to re-point anchor/.test(e.message) && /RETAINED/.test(e.message),
+      "a rollback that could not compensate must not report a clean one",
+    );
+    assert.equal(existsSync(join(home, "identity.key")), true, "the credential the retry needs survives");
+    assert.equal(existsSync(remote), true, "and the external state nobody cleaned up is still there");
+    const marker = JSON.parse(readFileSync(join(home, ".oas-rollback-incomplete.json"), "utf8"));
+    assert.equal(marker.cleanup.version, 1, "the quarantine carries the same cleanup contract");
+    assert.deepEqual(marker.cleanup.outstanding.hooks, ["acme.comp"], "naming the hook that still owes cleanup");
+
+    // The advertised retry must actually work from that marker.
+    writeFileSync(allow, "ok");
+    const r = retireInstance(root, "dev-child", { tmuxSession: "oas-test-nosuch" });
+    assert.equal(r.rollbackIncomplete, undefined, `the retry completes: ${JSON.stringify(r.rollbackIncomplete)}`);
+    assert.equal(existsSync(home), false, "and only then is the home removed");
+  } finally { process.env.PATH = oldPath; }
+  rmSync(base, { recursive: true, force: true });
+});
+
 test("a required spawn hook with NO retire hook quarantines instead of deleting the credential (reviewer-446ebe1)", () => {
   const base = temp();
   const { repo, root } = fixtureSoul(base, "pi");
