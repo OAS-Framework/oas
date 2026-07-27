@@ -39,7 +39,9 @@ general semver solver**.
 - The **package identity** is the `package` field of the acquired
   `oas-package.json` — never derived from the source string.
 - The **normalized source** recorded in the lock is one of
-  `git:<canonical-url>@<ref>`, `path:<dir>`, or `catalog:<id>@<selector>`.
+  `git:<canonical-url>@<ref>`, `path:<dir>`, `catalog:<id>` for an originally
+  bare catalog request, or `catalog:<id>@<selector>` for an originally explicit
+  selector. The resolved catalog commit is recorded separately in `commit`.
   Two source strings that normalize to the same canonical git URL are the
   same source.
 
