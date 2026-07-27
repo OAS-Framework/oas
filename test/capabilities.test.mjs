@@ -3198,25 +3198,32 @@ test("an UNTRUSTED capability's required hook fails the spawn instead of being s
 test("a quarantined home can be cleaned up on retry, and only then removed", () => {
   const base = temp();
   const { repo, root } = fixtureSoul(base, "pi");
-  // The hook fails the spawn; its compensation fails the FIRST time and
-  // succeeds once the operator fixes things — which is only possible because
-  // the home (and the state inside it) survived.
-  const flag = join(base, "cleanup-works");
+  // EXTERNAL state stands in for a remote identity. Cleanup must actually RUN on
+  // retry and remove it — asserting only that the directory disappeared passes
+  // even when every retire hook is skipped, which is exactly the bug this covers
+  // (reviewer-453d793).
+  const remote = join(base, "remote-identity");
+  const allowCleanup = join(base, "cleanup-works");
   const credential = "identity.key";
   capability(repo, "chan", {
     capability: "acme.chan",
     hooks: { spawn: { command: "hook.mjs spawn", required: true }, retire: "hook.mjs retire" },
   }, {
-    "hook.mjs": `import {writeFileSync, existsSync} from 'node:fs';
+    "hook.mjs": `import {writeFileSync, existsSync, rmSync} from 'node:fs';
 import {join} from 'node:path';
 const home = process.env.OAS_HOME;
+const remote = ${JSON.stringify(remote)};
 if (process.env.OAS_EVENT === 'spawn') {
-  writeFileSync(join(home, ${JSON.stringify(credential)}), 'secret-key-material');
+  writeFileSync(remote, 'joined');
+  writeFileSync(join(home, ${JSON.stringify(credential)}), 'key');
   console.log(JSON.stringify({ meta: { alias: 'probe' } }));
   process.exit(1);
 }
-if (!existsSync(${JSON.stringify(flag)})) { console.log(JSON.stringify({ meta: { retired: false, reason: 'self-delete-failed' } })); process.exit(1); }
+const meta = JSON.parse(process.env.OAS_META || '{}');
+if (!meta.alias) { console.log(JSON.stringify({ meta: { retired: false, reason: 'nothing-to-delete' } })); process.exit(0); }
 if (!existsSync(join(home, ${JSON.stringify(credential)}))) { console.log(JSON.stringify({ meta: { retired: false, reason: 'credential-gone' } })); process.exit(1); }
+if (!existsSync(${JSON.stringify(allowCleanup)})) { console.log(JSON.stringify({ meta: { retired: false, reason: 'self-delete-failed' } })); process.exit(1); }
+rmSync(remote);
 console.log(JSON.stringify({ meta: { retired: true } }));`,
   });
   write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.chan:\n      global: true\n");
@@ -3227,13 +3234,26 @@ console.log(JSON.stringify({ meta: { retired: true } }));`,
       () => spawnInstance(root, findAgent(root, "dev"), { instance: "dev-retry", launch: false }),
       (e) => e.code === "E_REQUIRED_HOOK_FAILED" && /RETAINED/.test(e.message),
     );
-    // The credential SURVIVED — this is the whole point.
-    assert.equal(existsSync(join(home, credential)), true, "the state needed to retry cleanup is preserved");
-    assert.equal(existsSync(join(home, ".oas-rollback-incomplete.json")), true);
+    assert.equal(existsSync(remote), true, "external state exists and cleanup has not succeeded");
+    assert.equal(existsSync(join(home, credential)), true, "its credential is preserved");
+    // The marker must carry what a retry NEEDS, not only what went wrong.
+    const marker = JSON.parse(readFileSync(join(home, ".oas-rollback-incomplete.json"), "utf8"));
+    assert.equal(marker.cleanup.repo, repo, "cleanup descriptor records the context");
+    assert.equal(marker.cleanup.capabilityMeta["acme.chan"].alias, "probe", "and the failed hook's metadata");
+    assert.ok(marker.cleanup.capabilityRuntime.some((c) => c.id === "acme.chan"), "and the capability runtime");
 
-    // Operator fixes the cause; retry now succeeds BECAUSE the credential is still there.
-    writeFileSync(flag, "ok");
-    retireInstance(root, "dev-retry", { tmuxSession: "oas-test-nosuch" });
+    // Retry while the cause persists: cleanup runs, still fails, home SURVIVES.
+    const first = retireInstance(root, "dev-retry", { tmuxSession: "oas-test-nosuch" });
+    assert.ok(first.rollbackIncomplete, "an unsuccessful retry reports incomplete");
+    assert.equal(first.removedDir, false, "and must not delete the credential it still needs");
+    assert.equal(existsSync(home), true);
+    assert.equal(existsSync(remote), true, "external state is still there");
+
+    // Operator fixes the cause; retry removes the EXTERNAL state, then the home.
+    writeFileSync(allowCleanup, "ok");
+    const second = retireInstance(root, "dev-retry", { tmuxSession: "oas-test-nosuch" });
+    assert.equal(second.rollbackIncomplete, undefined, "cleanup completed");
+    assert.equal(existsSync(remote), false, "the retire hook actually ran and removed the external state");
     assert.equal(existsSync(home), false, "and only then is the home removed");
   } finally { process.env.PATH = oldPath; }
   rmSync(base, { recursive: true, force: true });
