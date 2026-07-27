@@ -504,7 +504,14 @@ function install() {
   const isMarketplaceCap = parsedSrc?.kind === "catalog" && !!marketplaceCapabilities()[src.replace(/@.*$/, "")];
   const isLocalPackage = parsedSrc?.kind === "path" && existsSync(join(parsedSrc.path, "oas-package.json"));
   const isCatalogPackage = parsedSrc?.kind === "catalog" && !isMarketplaceCap;
-  if (parsedSrc && (parsedSrc.kind === "git" || isLocalPackage || isCatalogPackage)) { installPackage(dir, src); return; }
+  if (parsedSrc && (parsedSrc.kind === "git" || isLocalPackage || isCatalogPackage)) {
+    // Remote Git may be either a distribution package or the documented
+    // legacy standalone-capability repository. Try package acquisition first;
+    // fall back ONLY when the fetched root lacks oas-package.json.
+    if (parsedSrc.kind === "git") {
+      if (installPackage(dir, src, { fallbackOnMissingManifest: true })) return;
+    } else { installPackage(dir, src); return; }
+  }
   let known;
   try { known = capabilityManifest(src, dir); } catch (e) { cmdFail(e.code || "invalid-lock", e.message || e); return; }
   if (known) {
@@ -537,11 +544,15 @@ function install() {
   else if (r.manifest.commands || r.manifest.hooks) console.log(`Executable surface is blocked until: oas trust ${r.manifest.capability} --dir ${shortPath(dir)}`);
 }
 
-function installPackage(dir, src) {
+function installPackage(dir, src, { fallbackOnMissingManifest = false } = {}) {
   const bail = (e) => (JSON_MODE ? jsonFail(e.code || "invalid-source", e.message || e) : die(e.message || e));
   let r;
-  try { r = acquirePackage(dir, src); } catch (e) { bail(e); return; }
-  if (JSON_MODE) { jsonOk({ root: r.root, installed: r.installed, lockFile: r.lockFile, depWarnings: r.depWarnings || [] }); return; }
+  try { r = acquirePackage(dir, src); }
+  catch (e) {
+    if (fallbackOnMissingManifest && e.code === "invalid-package-manifest" && /has no oas-package\.json distribution manifest/.test(String(e.message))) return false;
+    bail(e); return true;
+  }
+  if (JSON_MODE) { jsonOk({ root: r.root, installed: r.installed, lockFile: r.lockFile, depWarnings: r.depWarnings || [] }); return true; }
   for (const p of r.installed) {
     console.log(`${p.kept ? "ok       " : "Acquired "}${p.package}@${p.version} → ${shortPath(p.dir)}`);
     console.log(`  locked ${p.commit === "local" ? "local tree" : p.commit} (${p.integrity}); capabilities: ${p.capabilities.join(", ") || "(none)"}`);
@@ -553,6 +564,7 @@ function installPackage(dir, src) {
     return m && (Object.keys(m.commands || {}).length || Object.keys(m.hooks || {}).length);
   });
   if (executables.length) console.log(`Executable surfaces blocked until trusted: ${executables.map((c) => `oas trust ${c}`).join("; ")}`);
+  return true;
 }
 
 /** Bare `oas install`: exact restore of the current chain — locked packages

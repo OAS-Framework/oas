@@ -98,7 +98,7 @@ test("reader parity (clean fixture, unconditional): kernel resolves and matches 
   mkdirSync(join(capDir, "skills", "how-to"), { recursive: true });
   writeFileSync(join(capDir, "skills", "how-to", "SKILL.md"), "---\nname: how-to\ndescription: d\n---\n# s\n");
   writeFileSync(join(scope, "repo-a", "oas-config.yaml"),
-    "name: repo-a\ncapabilities:\n  additive:\n    clean.cap:\n      from: path:../.agents/capabilities/owned/clean-cap\n");
+    "name: repo-a\ncapabilities:\n  additive:\n    clean.cap:\n      from: owned\n");
 
   // Kernel MUST resolve on the clean fixture — no conditional escape here.
   const k = core.resolveOasConfig(join(scope, "repo-a"));

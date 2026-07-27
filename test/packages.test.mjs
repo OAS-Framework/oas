@@ -62,8 +62,8 @@ test("parsePackageSource: git shorthand, raw URLs, paths, catalog ids, invalids"
   assert.equal(p.kind, "path"); assert.ok(p.normalized.startsWith("path:/"));
   assert.equal(parsePackageSource("path:/abs/dir").path, "/abs/dir");
   const cat = parsePackageSource("oas.okf@v1.4.0");
-  assert.deepEqual({ kind: cat.kind, id: cat.id, selector: cat.selector }, { kind: "catalog", id: "oas.okf", selector: "v1.4.0" });
-  assert.equal(parsePackageSource("oas.okf").selector, undefined);
+  assert.deepEqual({ kind: cat.kind, id: cat.id, selector: cat.selector, normalized: cat.normalized }, { kind: "catalog", id: "oas.okf", selector: "v1.4.0", normalized: "catalog:oas.okf@v1.4.0" });
+  assert.deepEqual({ selector: parsePackageSource("oas.okf").selector, normalized: parsePackageSource("oas.okf").normalized }, { selector: undefined, normalized: "catalog:oas.okf" });
   for (const bad of ["", "  ", "git:norepo", "Not A Source!", "UPPER"]) {
     assert.throws(() => parsePackageSource(bad), (e) => e.code === "invalid-source", bad);
   }
@@ -1200,10 +1200,13 @@ test("update transaction: identity change fails PRE-COMMIT — nothing installed
   const src = pkgSource(join(base, "src"), { package: "old.id" }, { "cap": { capability: "oi.cap" } });
   gitify(src);
   acquirePackage(s, `file://${src}`);
-  // source renames its identity
-  write(join(src, "oas-package.json"), JSON.stringify({ package: "new.id", version: "2.0.0", description: "p", compatibility: { oas: ">=0.1.0" }, capabilities: ["cap"] }));
+  // Source renames its ROOT identity while a dependency claims the expected
+  // old id. Closure-membership is insufficient: update must require rootId.
+  const impostorDep = pkgSource(join(base, "impostor-dep"), { package: "old.id" });
+  const depCommit = gitify(impostorDep);
+  write(join(src, "oas-package.json"), JSON.stringify({ package: "new.id", version: "2.0.0", description: "p", compatibility: { oas: ">=0.1.0" }, capabilities: ["cap"], dependencies: [`file://${impostorDep}@${depCommit}`] }));
   gitCommit(src);
-  assert.throws(() => updatePackage(s, "old.id"), (e) => e.code === "duplicate-package-identity");
+  assert.throws(() => updatePackage(s, "old.id"), (e) => e.code === "duplicate-package-identity" && /root resolved/.test(e.message));
   assert.ok(!existsSync(join(installedPackagesDir(s), "new.id")), "new identity NOT installed");
   assert.equal(readPackageLocks(s).packages["new.id"], undefined, "new identity NOT locked");
   assert.equal(readPackageLocks(s).packages["old.id"].version, "1.0.0", "old lock intact");
@@ -2649,5 +2652,40 @@ test("read-only package gitignore is best-effort and cannot throw after acquisit
     assert.ok(readPackageLocks(s).packages["ignore.p"], "lock committed");
     assert.equal(readFileSync(ignore, "utf8"), "# operator-owned\n", "read-only ignore left untouched");
   } finally { chmodSync(ignore, 0o644); }
+  rmSync(base, { recursive: true, force: true });
+});
+
+// ---------- final merged-state blocker round 3 (reviewer-d45641e) ----------
+
+test("declared-not-active capability agents require locked provider integrity before returning prompt files", () => {
+  const base = temp();
+  const s = scope(base, "scope", "name: t\ncapabilities:\n  additive:\n    agent.sec:\n      from: installed\n      souls:\n        other: true\n");
+  const src = pkgSource(join(base, "src"), { package: "agent.pkg" }, {
+    cap: { capability: "agent.sec", agents: ["agents/reviewer"] },
+  });
+  write(join(src, "cap", "agents", "reviewer", "soul.yaml"), "name: reviewer\nkind: local\nruntime: pi\n");
+  write(join(src, "cap", "agents", "reviewer", "AGENTS.md"), "SAFE\n");
+  acquirePackage(s, src);
+  const root = join(base, "agent-root");
+  assert.equal(findCapabilityAgent(s, root, "reviewer").name, "reviewer", "instruction-only agent needs integrity, not executable approval");
+  write(join(installedPackagesDir(s), "agent.pkg", "cap", "agents", "reviewer", "AGENTS.md"), "TAMPERED HOST PROMPT\n");
+  assert.throws(() => findCapabilityAgent(s, root, "reviewer"), (e) => e.code === "integrity-drift" && /provider.*not trusted.*integrity differs/s.test(e.message));
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("CLI Git install falls back transactionally to documented standalone capability roots", () => {
+  const base = temp(); const s = scope(base);
+  const repo = join(base, "standalone");
+  write(join(repo, "oas.json"), JSON.stringify({ capability: "legacy.git", version: "1.0.0", description: "legacy standalone" }));
+  gitify(repo);
+  const r = cli(s, "install", `file://${repo}`, "--dir", s, "--json");
+  assert.equal(r.status, 0, r.stderr || r.stdout);
+  const envelope = JSON.parse(r.stdout);
+  assert.equal(envelope.ok, true);
+  const lock = JSON.parse(readFileSync(join(s, OAS_LOCK_FILE), "utf8"));
+  assert.equal(lock.lockfileVersion, 1);
+  assert.equal(lock.capabilities["legacy.git"].source, `git:file://${repo}`);
+  assert.ok(capabilityManifest("legacy.git", s), "standalone capability acquired through legacy path");
+  assert.ok(!existsSync(join(installedPackagesDir(s), "legacy.git")), "no distribution-package artifact was committed during package probe");
   rmSync(base, { recursive: true, force: true });
 });
