@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import {
   capabilityIntegrity, capabilityManifest, composeInstanceAgentsMd, createAgent, findAgent, findInstanceHomes, resolveOasConfig,
-  resolveClaudeBinary, resolveWorkMode, retireInstance, runLifecycleHooks, spawnInstance, writeCapabilityLock,
+  listInstances, resolveClaudeBinary, resolveWorkMode, retireInstance, runLifecycleHooks, spawnInstance, writeCapabilityLock,
 } from "../lib/core.mjs";
 
 const CLI = resolve(new URL("../bin/oas.mjs", import.meta.url).pathname);
@@ -2862,8 +2862,8 @@ test("a compensation hook that reports incomplete cleanup is not announced as a 
   const base = temp();
   const { repo, root } = fixtureSoul(base, "pi");
   // Retire exits 0 but says it could not undo its external state — the shape of
-  // aweb's self-delete failure. Announcing "spawn rolled back" here would be a
-  // lie, and the local key that could still delete it is about to be removed.
+  // aweb's self-delete failure. Announcing "spawn rolled back" would be a lie,
+  // AND the home holds the only credential that can retry the cleanup.
   capability(repo, "chan", {
     capability: "acme.chan",
     hooks: { spawn: { command: "hook.mjs spawn", required: true }, retire: "hook.mjs retire" },
@@ -2882,10 +2882,24 @@ console.log(JSON.stringify({ meta: { retired: false, reason: 'self-delete-failed
       (e) => e.code === "E_REQUIRED_HOOK_FAILED"
         && /rollback INCOMPLETE/.test(e.message)
         && /external state may remain/.test(e.message)
+        && /instance home is RETAINED/.test(e.message)
         // …and the hook's OWN diagnosis reaches the operator, not just "Command failed: node …".
         && /run: chan setup/.test(e.message),
-      "the failure must name the cause and admit the incomplete cleanup",
+      "the failure must name the cause, admit the incomplete cleanup, and say the home is kept",
     );
+    // The home SURVIVES: deleting it would destroy the credentials a retry needs,
+    // turning a transient cleanup failure into permanent external residue.
+    const kept = join(root, "dev", "instances", "dev-badcomp");
+    assert.equal(existsSync(kept), true, "the home is quarantined, not destroyed");
+    const marker = JSON.parse(readFileSync(join(kept, ".oas-rollback-incomplete.json"), "utf8"));
+    assert.equal(marker.instance, "dev-badcomp");
+    assert.ok(marker.incomplete.length, "the marker records what is outstanding");
+    assert.equal(JSON.stringify(marker).includes("chan setup"), false, "and carries no hook output");
+    // status must read it as retained state, never as a live instance.
+    const listed = listInstances(root, "oas-test-nosuch").flatMap((a) => a.instances || []).find((i) => i.instance === "dev-badcomp");
+    assert.ok(listed?.rollbackIncomplete, "status identifies the quarantine");
+    assert.equal(listed.running, false);
+    rmSync(kept, { recursive: true, force: true });
   } finally { process.env.PATH = oldPath; }
   rmSync(base, { recursive: true, force: true });
 });
@@ -3139,6 +3153,88 @@ test("a plugin installed for an UNRELATED project does not satisfy the requireme
     const r = spawnInstance(root, findAgent(root, "dev"), { instance: "dev-userscope", launch: false });
     retireInstance(root, "dev-userscope", { tmuxSession: "oas-test-nosuch" });
     assert.ok(r.home);
+  } finally { process.env.PATH = oldPath; }
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("an UNTRUSTED capability's required hook fails the spawn instead of being skipped", () => {
+  const base = temp();
+  const { repo, root } = fixtureSoul(base, "pi");
+  // Package-backed capability with no executable approval — the default state
+  // right after `oas install`. Gating requiredHooks on trust made this spawn
+  // succeed with a warning while the required setup never ran.
+  const capDir = capability(repo, "chan", {
+    capability: "acme.chan",
+    hooks: { spawn: { command: "hook.mjs spawn", required: true } },
+  }, { "hook.mjs": "console.log('{}');" });
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.chan:\n      global: true\n");
+  const oldPath = process.env.PATH; process.env.PATH = fakeRuntimes(base);
+  try {
+    const resolved = resolveOasConfig(repo, "dev");
+    const cap = resolved.capabilities.find((c) => c.id === "acme.chan");
+    assert.deepEqual(cap.requiredHooks, ["spawn"], "the DECLARATION is visible regardless of trust");
+    if (!cap.trust?.trusted) {
+      assert.throws(
+        () => spawnInstance(root, findAgent(root, "dev"), { instance: "dev-untrusted", launch: false }),
+        (e) => e.code === "E_REQUIRED_HOOK_UNTRUSTED"
+          && /acme\.chan declares required hook\(s\) spawn/.test(e.message)
+          && /oas trust acme\.chan/.test(e.message),
+        "a required hook that cannot execute must fail closed, with the trust remedy",
+      );
+      assert.equal(existsSync(join(root, "dev", "instances", "dev-untrusted")), false, "and before any scaffold");
+    }
+    // An ADVISORY executable hook stays disabled-with-warning, not fatal.
+    write(join(capDir, "oas.json"), JSON.stringify({
+      capability: "acme.chan", version: "1.0.0", compatibility: { oas: ">=0.6.2" },
+      description: "Test capability.", hooks: { spawn: "hook.mjs spawn" },
+    }, null, 2));
+    const r = spawnInstance(root, findAgent(root, "dev"), { instance: "dev-advisory", launch: false });
+    assert.ok(r.home, "advisory hooks never block a spawn");
+    retireInstance(root, "dev-advisory", { tmuxSession: "oas-test-nosuch" });
+  } finally { process.env.PATH = oldPath; }
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("a quarantined home can be cleaned up on retry, and only then removed", () => {
+  const base = temp();
+  const { repo, root } = fixtureSoul(base, "pi");
+  // The hook fails the spawn; its compensation fails the FIRST time and
+  // succeeds once the operator fixes things — which is only possible because
+  // the home (and the state inside it) survived.
+  const flag = join(base, "cleanup-works");
+  const credential = "identity.key";
+  capability(repo, "chan", {
+    capability: "acme.chan",
+    hooks: { spawn: { command: "hook.mjs spawn", required: true }, retire: "hook.mjs retire" },
+  }, {
+    "hook.mjs": `import {writeFileSync, existsSync} from 'node:fs';
+import {join} from 'node:path';
+const home = process.env.OAS_HOME;
+if (process.env.OAS_EVENT === 'spawn') {
+  writeFileSync(join(home, ${JSON.stringify(credential)}), 'secret-key-material');
+  console.log(JSON.stringify({ meta: { alias: 'probe' } }));
+  process.exit(1);
+}
+if (!existsSync(${JSON.stringify(flag)})) { console.log(JSON.stringify({ meta: { retired: false, reason: 'self-delete-failed' } })); process.exit(1); }
+if (!existsSync(join(home, ${JSON.stringify(credential)}))) { console.log(JSON.stringify({ meta: { retired: false, reason: 'credential-gone' } })); process.exit(1); }
+console.log(JSON.stringify({ meta: { retired: true } }));`,
+  });
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.chan:\n      global: true\n");
+  const oldPath = process.env.PATH; process.env.PATH = fakeRuntimes(base);
+  const home = join(root, "dev", "instances", "dev-retry");
+  try {
+    assert.throws(
+      () => spawnInstance(root, findAgent(root, "dev"), { instance: "dev-retry", launch: false }),
+      (e) => e.code === "E_REQUIRED_HOOK_FAILED" && /RETAINED/.test(e.message),
+    );
+    // The credential SURVIVED — this is the whole point.
+    assert.equal(existsSync(join(home, credential)), true, "the state needed to retry cleanup is preserved");
+    assert.equal(existsSync(join(home, ".oas-rollback-incomplete.json")), true);
+
+    // Operator fixes the cause; retry now succeeds BECAUSE the credential is still there.
+    writeFileSync(flag, "ok");
+    retireInstance(root, "dev-retry", { tmuxSession: "oas-test-nosuch" });
+    assert.equal(existsSync(home), false, "and only then is the home removed");
   } finally { process.env.PATH = oldPath; }
   rmSync(base, { recursive: true, force: true });
 });

@@ -71,6 +71,16 @@ A self-contained package has an `oas.json`:
   work never becomes a spawn blocker. `retire` and `soul-scaffold` cannot be
   required: they run outside a spawn transaction, so there is no moment to
   enforce them.
+- A required hook must also be **able** to run: if its capability's executable
+  surface is not trusted, the spawn fails with the `oas trust` remedy rather
+  than starting without the setup. Advisory executable hooks stay
+  disabled-with-warning.
+- When a required hook fails and its compensation cannot finish, the instance
+  home is **retained**, not deleted — it holds the credentials and metadata a
+  retry needs, and removing it would turn a transient cleanup failure into
+  permanent external residue. It is marked `.oas-rollback-incomplete.json`, so
+  `oas status` reports it as retained state rather than a live instance, and
+  `oas retire <instance>` retries the cleanup.
 - `requires` declares what must exist before the capability works. Two kinds:
   - a **host command** (`command`), satisfied by a binary on `PATH`;
   - a **runtime package** (`runtime` + `package`, optionally `marketplace`),
