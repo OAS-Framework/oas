@@ -3588,6 +3588,38 @@ const SETTLE_IN_WORK = /cd work\/? once|and stay there|where you live|Start in `
 /** Compare wording, not line wrapping: the contract is what the agent reads. */
 const flat = (t) => t.replace(/\s+/g, " ");
 
+/** `aw` belongs to an optional capability, so kernel-composed text may cite it as
+ * an EXAMPLE of an active capability's command and never command it. The
+ * predicate is extracted and tested below: my first two versions each admitted a
+ * violation — one accepted a NEGATED clause ("If no messaging capability is
+ * active, run aw here"), the other skipped any sentence containing "aware"
+ * (reviewer-focus-4d6f4dd). */
+function awMentionIsConditional(sentence) {
+  // Token, not substring: "aweb"/"aware" are words, not the `aw` command.
+  if (!/(^|[^\w`])`?aw`?([^\w`]|$)/.test(sentence)) return true;
+  const negated = /\b(no|not|none|never|without|absent|lacks?|unless)\b[^.]*\b(active|available|installed|enabled)\b/i.test(sentence);
+  const scoped = /\bfor example\b/i.test(sentence)
+    || /\b(when|if|where|once)\b[^.]*\b(is|are)\s+(active|available|installed|enabled)\b/i.test(sentence);
+  return scoped && !negated;
+}
+
+test("the aw-conditionality predicate accepts and rejects the right sentences (reviewer-focus-4d6f4dd)", () => {
+  for (const ok of [
+    "for example, when the aweb messaging capability is active, run `aw` there too.",
+    "If the messaging layer is active, send it with `aw mail send`.",
+    "Run OAS lifecycle commands from instance home.",              // no mention at all
+    "Please be aware of the branch you are on.",                   // "aware" is not the command
+    "The aweb channel wakes you when mail arrives.",               // "aweb" is not the command
+  ]) assert.ok(awMentionIsConditional(ok), `must accept: ${ok}`);
+  for (const bad of [
+    "Use `aw` there as well.",                                     // unconditional
+    "Run aw and OAS lifecycle commands from instance home.",       // unconditional, unquoted
+    "If no messaging capability is active, run aw here.",          // conditional but INVERTED
+    "Please be aware and run aw here.",                            // the exemption that hid it
+    "Never run `aw` unless the layer is active.",                  // negated scope
+  ]) assert.ok(!awMentionIsConditional(bad), `must reject: ${bad}`);
+});
+
 test("every work mode's generated instructions carry the home/work boundary (maintainer contract)", () => {
   const base = temp();
   const { repo, root } = fixtureSoul(base, "pi");
@@ -3692,12 +3724,8 @@ test("kernel-composed blocks never prescribe a knowledge protocol they cannot gu
       // spellings let "Use `aw`" or "Run aw" through, so check the property:
       // every sentence mentioning `aw` must carry a conditional (reviewer-focus-d589eec).
       for (const sentence of composeInstanceAgentsMd(soulDir, repo, "dev", mode, kind).text.split(/(?<=[.:])\s+/)) {
-        if (!/(^|[^a-z`])`?aw`?( |$|\b)/i.test(sentence) || /\baware|\bawait|\baway/i.test(sentence)) continue;
-        // The conditional must be ABOUT the capability, not any nearby use of the
-        // word "active" — "…from active capabilities … Use `aw` there as well"
-        // passed the looser check while commanding aw unconditionally.
-        assert.match(sentence, /\b(when|if)\b[^.]*\b(active|available|installed|enabled)\b|for example/i,
-          `${mode}/${kind}: every kernel mention of \`aw\` must be conditional, got: ${sentence.trim()}`);
+        assert.ok(awMentionIsConditional(sentence),
+          `${mode}/${kind}: every kernel mention of \`aw\` must be conditional on the capability, got: ${sentence.trim()}`);
       }
       assert.doesNotMatch(text, SETTLE_IN_WORK, `${mode}/${kind}`);
     }
@@ -3806,12 +3834,24 @@ test("the shipped oas.review names no knowledge or messaging provider (reviewer-
   // capability dependencies (maintainer ruling). So the capability cannot name
   // the stack around it — every surface it ships has to work with neither layer.
   const dir = resolve(new URL("../capabilities/oas-review", import.meta.url).pathname);
-  const surfaces = ["oas.json", "injects/review.md", "agents/reviewer/soul.yaml", "agents/reviewer/AGENTS.md"];
-  const PROVIDER = /\baweb\b|\baw mail\b|\baw chat\b|oas\.okf|okf harvest/i;
+  // EVERY shipped surface, discovered rather than listed — a skill added later
+  // must be held to the same rule.
+  const surfaces = [];
+  const walk = (d) => { for (const e of readdirSync(d, { withFileTypes: true })) {
+    const q = join(d, e.name);
+    if (e.isDirectory()) walk(q); else if (/\.(md|json|ya?ml)$/.test(e.name)) surfaces.push(q);
+  } };
+  walk(dir);
+  assert.ok(surfaces.length >= 6, `expected every shipped surface, saw ${surfaces.length}`);
+  // Brands AND protocols: "use OKF promotion" or "say so in the mail" assume a
+  // provider just as surely as naming aweb does (reviewer-focus-4d6f4dd).
+  const PROVIDER = /\baweb\b|\baw (mail|chat)\b|\bokf\b|\bharvest/i;
+  const PROTOCOL = /\bnotes\/|\bSTATE\.md|\blog\.md|\b(mail|mails|mailed|mailing)\b/i;
   for (const f of surfaces) {
-    const text = readFileSync(join(dir, f), "utf8");
-    const hit = text.split("\n").find((l) => PROVIDER.test(l));
-    assert.equal(hit, undefined, `${f} names a specific provider: ${hit}`);
+    for (const [what, re] of [["provider", PROVIDER], ["protocol", PROTOCOL]]) {
+      const hit = readFileSync(f, "utf8").split("\n").find((l) => re.test(l));
+      assert.equal(hit, undefined, `${relative(dir, f)} assumes a ${what}: ${hit}`);
+    }
   }
   // And the no-layer path must be stated, not left to inference.
   const soul = readFileSync(join(dir, "agents", "reviewer", "AGENTS.md"), "utf8");

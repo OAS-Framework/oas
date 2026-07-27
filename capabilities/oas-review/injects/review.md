@@ -48,9 +48,9 @@ oas spawn reviewer --work attached --work-dir "$PWD/work" \
   yourself.
 
   **Reviewers are the opposite: one per commit, then gone.** The post-commit
-  reviewer reviews its one diff, mails its verdict, and retires — it no
+  reviewer reviews its one diff, reports its verdict, and retires — it no
   longer exists when you fix its findings. To re-review a fix, spawn a NEW
-  reviewer on the fix commit (`--purpose <new-short-sha>`); never mail a
+  reviewer on the fix commit (`--purpose <new-short-sha>`); never message a
   retired reviewer or expect it to follow up.
 - **Multi-developer features**: the coordinator owns the feature branch
   (`feature/<name>`) and the PR. Branch `<you>/<name>` **from the feature
