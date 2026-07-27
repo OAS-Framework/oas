@@ -2262,3 +2262,80 @@ test("instance.json records expected == materialized, and the .claude/skills ali
   } finally { process.env.PATH = oldPath; }
   rmSync(base, { recursive: true, force: true });
 });
+
+test("a declared skill tree that exists but yields no skills fails closed (reviewer-400c1e6)", () => {
+  const base = temp();
+  const { repo, root } = fixtureSoul(base, "pi");
+  // The tree RESOLVES — so a mere existence check passes — but contributes
+  // nothing: no SKILL.md of its own, and no child directory with one. The
+  // capability would spawn with zero of its promised skills.
+  const dir = capability(repo, "hollow", { capability: "acme.hollow", skills: ["skills"] });
+  mkdirSync(join(dir, "skills", "not-a-skill"), { recursive: true });
+  write(join(dir, "skills", "not-a-skill", "README.md"), "no SKILL.md here\n");
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.hollow:\n      global: true\n");
+  const oldPath = process.env.PATH; process.env.PATH = fakeRuntimes(base);
+  try {
+    assert.throws(
+      () => spawnInstance(root, findAgent(root, "dev"), { instance: "dev-hollow", launch: false }),
+      (e) => e.code === "E_CAPABILITY_RESOURCE_MISSING" && /contains no skill/.test(e.message),
+    );
+    assert.equal(existsSync(join(root, "dev", "instances", "dev-hollow")), false);
+  } finally { process.env.PATH = oldPath; }
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("a skill directory represented by a symlink is reported, never silently dropped", () => {
+  const base = temp();
+  const { repo, root } = fixtureSoul(base, "pi");
+  // Materialization's readdir uses lstat semantics, so a symlinked child skill
+  // dir is not copied. Preflight must therefore call the tree empty rather than
+  // let the capability start without it. The link stays INSIDE the capability's
+  // integrity boundary — an escaping one is already rejected, more strictly, by
+  // the containment check.
+  const dir = capability(repo, "linked", { capability: "acme.linked", skills: ["skills"] });
+  write(join(dir, "real", "aliased-skill", "SKILL.md"), "---\nname: aliased-skill\ndescription: Reached only through a symlink.\n---\nbody\n");
+  mkdirSync(join(dir, "skills"), { recursive: true });
+  symlinkSync(join("..", "real", "aliased-skill"), join(dir, "skills", "aliased-skill"));
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.linked:\n      global: true\n");
+  const oldPath = process.env.PATH; process.env.PATH = fakeRuntimes(base);
+  try {
+    assert.throws(
+      () => spawnInstance(root, findAgent(root, "dev"), { instance: "dev-linked", launch: false }),
+      (e) => e.code === "E_CAPABILITY_RESOURCE_MISSING" && /symlinked skill directory does not count/.test(e.message),
+    );
+  } finally { process.env.PATH = oldPath; }
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("an empty soul skills/ dir is not a broken promise, unlike a declared capability tree", () => {
+  const base = temp();
+  const { repo, root, soul } = fixtureSoul(base, "pi");
+  mkdirSync(join(soul, "skills"), { recursive: true }); // exists, empty, declares nothing
+  const oldPath = process.env.PATH; process.env.PATH = fakeRuntimes(base);
+  try {
+    const r = spawnInstance(root, findAgent(root, "dev"), { instance: "dev-emptysoul", launch: false });
+    assert.ok(existsSync(join(r.home, "instance.json")), "spawn succeeds");
+    retireInstance(root, "dev-emptysoul", { tmuxSession: "oas-test-nosuch" });
+  } finally { process.env.PATH = oldPath; }
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("a promised skill still counts when an override satisfies its name from another source", () => {
+  const base = temp();
+  const { repo, root, soul } = fixtureSoul(base, "pi");
+  // Both the soul and a capability offer "shared"; config picks the winner.
+  // The capability's promise is satisfied by NAME, so reconciliation must not
+  // demand that the capability's own copy won.
+  write(join(soul, "skills", "shared", "SKILL.md"), "---\nname: shared\ndescription: Soul version.\n---\nsoul\n");
+  capability(repo, "dup", { capability: "acme.dup", skills: ["skills"] },
+    { "skills/shared/SKILL.md": "---\nname: shared\ndescription: Capability version.\n---\ncap\n" });
+  write(join(repo, "oas-config.yaml"),
+    "skill-overrides:\n  shared: soul\ncapabilities:\n  additive:\n    acme.dup:\n      global: true\n");
+  const oldPath = process.env.PATH; process.env.PATH = fakeRuntimes(base);
+  try {
+    const r = spawnInstance(root, findAgent(root, "dev"), { instance: "dev-dup", launch: false });
+    assert.match(readFileSync(join(r.home, ".agents", "skills", "shared", "SKILL.md"), "utf8"), /Soul version/);
+    retireInstance(root, "dev-dup", { tmuxSession: "oas-test-nosuch" });
+  } finally { process.env.PATH = oldPath; }
+  rmSync(base, { recursive: true, force: true });
+});
