@@ -26,12 +26,18 @@ import {
   readCapabilityLocks, writeCapabilityLock,
   parsePackageSource, inspectGitSourceRoot, acquirePackage, restorePackages, listInstalledPackages, readPackageLocks, residueEntryViolation,
   approveCapability, updatePackage, removePackage, migrateLegacyLock, applyLegacyLockMigration,
-  packageIntegrity, packageDepsIntegrity, installedPackagesDir,
+  packageIntegrity, packageDepsIntegrity, installedPackagesDir, loadPackageManifestAt,
   resolveOasConfig, resolveWorkMode, composeInstanceAgentsMd, parseYamlNested, packagedInject, teamAgentRoots,
   findTeamAgent, findTeamInstance, findCapabilityAgent, findInstanceHome, listCapabilityAgents, workspaceOf,
   ensureRoot, findRoot, findAgent, listAgents, listInstances, listAgentDefs, createAgent as coreCreateAgent,
   spawnInstance, retireInstance, upsertLocalAgent, defaultRepo, RELATIONS,
 } from "../lib/core.mjs";
+import {
+  aggregateMissingRequirements, diffConfigTexts, discoverWorkspaceScopes,
+  lockedPackageCapabilities, parseProfileProvenance, profileProvenanceHeader,
+  readProfileText, requirementInstallPlan, resolveProfilePackage,
+  runRequirementInstall, selectProfile, validateProfile,
+} from "../lib/packages.mjs";
 
 const args = process.argv.slice(2);
 const cmd = args[0];
@@ -77,6 +83,11 @@ function shortPath(p) {
   return p.startsWith(home) ? "~" + p.slice(home.length) : p;
 }
 
+/** Shell-safe single-quoting for copyable human commands (paths may contain spaces/metacharacters). */
+function shellQuote(s) {
+  return /^[A-Za-z0-9._/~-]+$/.test(s) ? s : `'${String(s).replace(/'/g, `'\\''`)}'`;
+}
+
 function offerTmuxMouseScrolling() {
   if (args.includes("--no-tmux-mouse")) return;
   const configPath = tmuxConfigPath();
@@ -116,7 +127,7 @@ function resolveForDoctor(ctx, soulName, { json } = {}) {
     }
     const retiredId = Object.keys(RETIRED_CAPABILITIES).find((id) => String(e.message).includes(`"${id}"`) && String(e.message).includes("retired"));
     if (!retiredId) throw e;
-    if (json) { console.log(JSON.stringify({ context: ctx, error: e.message, retired: [retiredId] }, null, 2)); process.exit(1); }
+    if (json) { console.log(JSON.stringify({ schemaVersion: 1, context: ctx, error: e.message, retired: [retiredId] }, null, 2)); process.exit(1); }
     die(`${e.message}`);
   }
 }
@@ -127,13 +138,110 @@ function doctorComposition(ctx, soulName) {
   if (!agent) throw new Error(`unknown soul "${soulName}" for doctor composition`);
   return composeInstanceAgentsMd(join(agent._dir, "soul"), ctx, agent.name, agent.work || "checkout", agent.kind);
 }
+/** WS2 package-layer doctor data — the ONE source for both human and --json
+ * doctor output: lock v2 packages, adopted-profile provenance, available-but-
+ * unapplied profiles, and missing host requirements with structured plans. */
+function doctorPackagesData(ctx, chain) {
+  // reviewer-455ba15 fix 4: the ENGINE diagnostics the human doctor renders
+  // (invalid locks, missing artifacts, integrity/runtime-closure drift,
+  // capability-list mismatches, untrusted surfaces, legacy/residue states)
+  // are computed HERE so doctor --json exposes them structurally — machine
+  // consumers see every state the human report calls broken. Fail-closed
+  // reads are diagnosed, never consumed as data and never swallowed.
+  let pkgLocks = { packages: {}, legacy: [] };
+  let installedPkgs = [];
+  let lockBroken = null;
+  try { pkgLocks = readPackageLocks(ctx); installedPkgs = listInstalledPackages(ctx); }
+  catch (e) {
+    const prov = Array.isArray(e.provenance) ? e.provenance[0] : undefined;
+    lockBroken = { code: e.code || "invalid-lock", message: String(e.message || e), file: prov?.file || null, provenance: e.provenance || null };
+  }
+  const packages = [];
+  for (const p of installedPkgs) {
+    const lock = pkgLocks.packages[p.package];
+    const problems = [];
+    if (!lock) problems.push({ code: "invalid-lock", detail: "installed but not locked — reacquire it" });
+    else {
+      const integ = packageIntegrity(p.dir);
+      if (integ !== lock.integrity) problems.push({ code: "integrity-drift", detail: `integrity drift — installed ${integ}, locked ${lock.integrity}; all capability approvals are invalid` });
+      const depsNow = packageDepsIntegrity(p.dir);
+      if ((lock.depsIntegrity || undefined) !== depsNow) problems.push({ code: "integrity-drift", detail: `materialized runtime closure ${depsNow ? "differs from" : "missing vs"} the locked depsIntegrity — run oas install to re-materialize` });
+      const have = new Set(p.capabilities.map((c) => c.id));
+      for (const c of lock.capabilities || []) if (!have.has(c)) problems.push({ code: "capability-list-mismatch", detail: `locked capability "${c}" is missing from the package manifest` });
+      for (const c of p.capabilities) {
+        const executable = Object.keys(c.manifest.commands || {}).length || Object.keys(c.manifest.hooks || {}).length;
+        if (executable && !(lock.trustedCapabilities || []).includes(c.id) && packageIntegrity(p.dir) === lock.integrity) problems.push({ code: "untrusted-surface", detail: `capability ${c.id}: executable surface UNTRUSTED — \`oas trust ${c.id}\`` });
+      }
+    }
+    packages.push({
+      id: p.package, version: p.version || null, level: p.level, source: lock?.source || null,
+      commit: lock?.commit || null, capabilities: p.capabilities.map((c) => c.id),
+      status: problems.length ? "broken" : "ok", problems,
+    });
+  }
+  for (const [id, lock] of Object.entries(pkgLocks.packages)) {
+    if (!installedPkgs.some((p) => p.package === id)) {
+      packages.push({ id, version: lock.version || null, level: lock._level, source: lock.source || null, commit: lock.commit || null, capabilities: lock.capabilities || [], status: "broken", problems: [{ code: "missing-locked-package", detail: `locked in ${lock._file} but not installed — run oas install` }] });
+    }
+  }
+  // Legacy v1 files and v2 residue — the ENGINE's doctor shapes (its tests pin
+  // status/action fields): empty/nonempty v1 = pending LOCK-FORMAT migration
+  // (maintainer ruling — distinct from capability residue); v2 residue entries
+  // carry pending-migration or invalid-lock with the retry/fix action.
+  const legacyLockFiles = pkgLocks.legacy
+    .filter((l) => l.lockfileVersion !== 2)
+    .map((l) => ({ file: l.file, level: l.level, lockfileVersion: l.lockfileVersion ?? 1, empty: !Object.keys(l.capabilities || {}).length, status: "pending-format-migration", action: `oas migrate --dir ${l.level}` }));
+  const migrationResidue = pkgLocks.legacy
+    .filter((l) => l.lockfileVersion === 2)
+    .flatMap((l) => Object.entries(l.capabilities || {}).map(([id, lock]) => {
+      const violation = residueEntryViolation(lock);
+      return violation
+        ? { id, file: l.file, level: l.level, source: lock?.source || null, status: "invalid-lock", violation, action: `fix or remove the entry in ${l.file} (never auto-repaired)` }
+        : { id, file: l.file, level: l.level, source: lock.source, status: "pending-migration", action: `oas migrate --dir ${l.level}` };
+    }));
+  const profileProvenance = [];
+  const adoptedPackages = new Set();
+  for (const cfg of chain) {
+    const prov = parseProfileProvenance(readFileSync(cfg._file, "utf8"));
+    if (!prov) continue;
+    profileProvenance.push({ file: cfg._file, package: prov.package, ref: prov.ref || null, profile: prov.profile });
+    adoptedPackages.add(prov.package);
+  }
+  const unappliedProfiles = [];
+  for (const p of installedPkgs) {
+    if (adoptedPackages.has(p.package)) continue;
+    const profiles = Object.keys(p.manifest?.configs || {});
+    if (profiles.length) unappliedProfiles.push({ package: p.package, profiles });
+  }
+  const missingHostRequirements = aggregateMissingRequirements([ctx]).map((req) => ({
+    command: req.command, why: req.why || null, docs: req.docs || null,
+    requestedBy: req.requestedBy,
+    plan: req.plan && !req.plan.unavailable
+      ? { manager: req.plan.manager, argv: req.plan.argv, source: req.plan.source, version: req.plan.version || null, scope: req.plan.scope }
+      : null,
+    invalid: req.invalid || null,
+    conflict: req.conflict || null,
+    unavailable: req.plan?.unavailable || null,
+    // Context-complete + shell-safe: the copyable command pins the resolved
+    // scope with --dir so it cannot target another deployment from a
+    // different cwd. Command and ctx are validated/quoted for safe copying.
+    consentCommand: req.plan && !req.plan.unavailable && !req.invalid && !req.conflict
+      ? `oas install --accept-requirement ${req.command} --dir ${shellQuote(ctx)}`
+      : null,
+  }));
+  return { lockError: lockBroken, packages, legacyLockFiles, migrationResidue, profileProvenance, unappliedProfiles, missingHostRequirements };
+}
+
 function doctorJson(dir) {
   const ctx = resolve(dir || process.cwd());
   const soulName = flag("soul");
   const r = resolveForDoctor(ctx, soulName, { json: true });
   const mans = capabilityManifests(ctx);
   const composition = doctorComposition(ctx, soulName);
+  const chain = configChain(ctx);
+  const pkg = doctorPackagesData(ctx, chain);
   console.log(JSON.stringify({
+    schemaVersion: 1,
     context: ctx,
     team: r.team || null,
     chain: r.chain.map((c) => ({ file: c._file, level: c._level, levelKind: levelOf(c._level) })),
@@ -147,33 +255,22 @@ function doctorJson(dir) {
     injects: r.injects,
     capabilities: r.capabilities.map((c) => ({ id: c.id, layer: c.layer, command: c.command, origin: c.origin, provenance: c.provenance, settings: c.settings, skills: c.skills, inject: c.inject, hooks: Object.keys(c.hooks || {}), trust: c.trust })),
     acquired: Object.fromEntries(Object.entries(mans).map(([n, m]) => [n, { layer: m.layer, command: m.command, version: m.version, dir: m._dir, origin: m._origin, description: m.description }])),
-    retiredLocks: (() => { try { return Object.entries(readCapabilityLocks(ctx)) } catch { return []; } })()
+retiredLocks: (() => { try { return Object.entries(readCapabilityLocks(ctx)); } catch { return []; } })()
       .filter(([id]) => retiredCapabilityReason(id))
       .map(([id, lock]) => ({ id, file: lock._file, reason: retiredCapabilityReason(id) })),
-    ...(() => {
-      // Doctor JSON catches the typed fail-closed error and diagnoses (finding 3).
-      try {
-        const legacy = readPackageLocks(ctx).legacy;
-        return {
-          migrationResidue: legacy.filter((l) => l.lockfileVersion === 2).flatMap((l) =>
-            Object.entries(l.capabilities).map(([id, lock]) => {
-              const violation = residueEntryViolation(lock);
-              return violation
-                ? { id, file: l.file, level: l.level, source: lock?.source || null, status: "invalid-lock", violation, action: `fix or remove the entry in ${l.file} (never auto-repaired)` }
-                : { id, file: l.file, level: l.level, source: lock.source, status: "pending-migration", action: `oas migrate --dir ${l.level}` };
-            })),
-          // Empty/nonempty v1 files: pending LOCK-FORMAT migration (maintainer
-          // ruling — distinct from capability residue).
-          legacyLockFiles: legacy.filter((l) => l.lockfileVersion !== 2).map((l) => ({ file: l.file, level: l.level, lockfileVersion: l.lockfileVersion ?? 1, empty: !Object.keys(l.capabilities || {}).length, status: "pending-format-migration", action: `oas migrate --dir ${l.level}` })),
-          lockError: null,
-        };
-      } catch (e) {
-        return { migrationResidue: [], legacyLockFiles: [], lockError: { code: e.code || "invalid-lock", message: e.message, provenance: e.provenance || null } };
-      }
-    })(),
     retiredArtifacts: Object.entries(mans)
       .filter(([id]) => retiredCapabilityReason(id))
       .map(([id, m]) => ({ id, dir: m._dir, origin: m._origin, reason: retiredCapabilityReason(id) })),
+    // Shared WS2+engine package payload (fix 4: human and JSON doctor derive
+    // from ONE computation; fail-closed reads are diagnosed via lockError —
+    // doctorPackagesData carries the engine's residue/legacy-lock shapes).
+    packages: pkg.packages,
+    lockError: pkg.lockError,
+    legacyLockFiles: pkg.legacyLockFiles,
+    migrationResidue: pkg.migrationResidue,
+    profileProvenance: pkg.profileProvenance,
+    unappliedProfiles: pkg.unappliedProfiles,
+    missingHostRequirements: pkg.missingHostRequirements,
     composedInstructions: composition?.text,
     instructionBlocks: composition?.blocks,
   }, null, 2));
@@ -269,56 +366,46 @@ function doctor(dir) {
   }
   if (existsSync(LEGACY_HOME_CAPABILITIES_DIR)) console.log(`  WARNING: legacy ~/.oas/capabilities exists and is no longer discovered — reinstall its packages at a config scope and remove it`);
 
-  // Distribution packages: package failures are distinguished from capability failures.
-  // Doctor is the DIAGNOSIS surface: it catches the typed invalid-lock error the
-  // fail-closed read/list paths raise and renders it actionably (finding 3).
+  // Distribution packages: package failures are distinguished from capability
+  // failures. Doctor is the DIAGNOSIS surface — human and JSON render the SAME
+  // doctorPackagesData computation (reviewer-455ba15 fix 4); fail-closed
+  // invalid-lock raises are diagnosed here, never consumed as data.
   console.log("\nInstalled packages:");
-  let pkgLocks = { packages: {}, legacy: [] };
-  let pkgs = [];
-  let lockBroken;
-  try { pkgLocks = readPackageLocks(ctx); pkgs = listInstalledPackages(ctx); }
-  catch (e) {
-    lockBroken = e;
-    const prov = Array.isArray(e.provenance) ? e.provenance[0] : undefined;
-    console.log(`  ERROR: ${e.message} [${e.code || "invalid-lock"}]`);
-    if (prov?.file) console.log(`         fix or remove the offending entry in ${shortPath(prov.file)} — the lock is never auto-repaired; package operations fail closed until it is valid`);
+  const pkg = doctorPackagesData(ctx, chain);
+  if (pkg.lockError) {
+    console.log(`  ERROR: ${pkg.lockError.message} [${pkg.lockError.code}]`);
+    if (pkg.lockError.file) console.log(`         fix or remove the offending entry in ${shortPath(pkg.lockError.file)} — the lock is never auto-repaired; package operations fail closed until it is valid`);
   }
-  if (!lockBroken && !pkgs.length && !Object.keys(pkgLocks.packages).length && !pkgLocks.legacy.length) console.log("  (none)");
-  for (const p of pkgs) {
-    const lock = pkgLocks.packages[p.package];
-    console.log(`  ${p.package}@${p.version}  [${levelOf(p.level)} ${shortPath(p.level)}]`);
-    if (!lock) { console.log(`             ERROR: installed but not locked — reacquire it [manifest graph error]`); continue; }
-    const integ = packageIntegrity(p.dir);
-    if (integ !== lock.integrity) console.log(`             ERROR: integrity drift — installed ${integ}, locked ${lock.integrity}; all capability approvals are invalid [integrity-drift]`);
-    // Runtime closure presence/staleness (runtime API addendum §2): node_modules
-    // is derived; deviation from the locked digest is repairable via bare `oas install`.
-    const depsNow = packageDepsIntegrity(p.dir);
-    if ((lock.depsIntegrity || undefined) !== depsNow) console.log(`             ERROR: materialized runtime closure ${depsNow ? "differs from" : "missing vs"} the locked depsIntegrity — run \`oas install\` to re-materialize [integrity-drift]`);
-    const have = new Set(p.capabilities.map((c) => c.id));
-    for (const c of lock.capabilities || []) if (!have.has(c)) console.log(`             ERROR: locked capability "${c}" is missing from the package manifest [capability-list-mismatch]`);
-    for (const c of p.capabilities) {
-      const executable = Object.keys(c.manifest.commands || {}).length || Object.keys(c.manifest.hooks || {}).length;
-      if (executable && !(lock.trustedCapabilities || []).includes(c.id) && integ === lock.integrity) console.log(`             capability ${c.id}: executable surface UNTRUSTED — \`oas trust ${c.id}\``);
+  if (!pkg.lockError && !pkg.packages.length && !pkg.legacyLockFiles.length && !pkg.migrationResidue.length) console.log("  (none)");
+  for (const p of pkg.packages) {
+    console.log(`  ${p.id}@${p.version}  [${levelOf(p.level)} ${shortPath(p.level)}]`);
+    for (const prob of p.problems) {
+      if (prob.code === "untrusted-surface") console.log(`             ${prob.detail}`);
+      else console.log(`             ERROR: ${prob.detail} [${prob.code}]`);
     }
   }
-  for (const [id, lock] of Object.entries(pkgLocks.packages)) {
-    if (!pkgs.some((p) => p.package === id)) console.log(`  ERROR: package ${id} is locked in ${shortPath(lock._file)} but not installed — run \`oas install\` [missing locked package]`);
+  for (const l of pkg.legacyLockFiles) {
+    if (l.empty) console.log(`  WARNING: ${shortPath(l.file)} is an empty lockfileVersion ${l.lockfileVersion} file — pending lock-format migration: run \`oas migrate --dir ${shortPath(l.level)}\` (converts to canonical v2, no residue)`);
+    else console.log(`  WARNING: ${shortPath(l.file)} is lockfileVersion ${l.lockfileVersion} — \`oas migrate\` maps its capability locks to packages`);
   }
-  for (const l of pkgLocks.legacy) {
-    if (l.lockfileVersion !== 2) {
-      // Empty v1 = pending LOCK-FORMAT migration (never capability residue).
-      if (!Object.keys(l.capabilities || {}).length) console.log(`  WARNING: ${shortPath(l.file)} is an empty lockfileVersion ${l.lockfileVersion ?? 1} file — pending lock-format migration: run \`oas migrate --dir ${shortPath(l.level)}\` (converts to canonical v2, no residue)`);
-      else console.log(`  WARNING: ${shortPath(l.file)} is lockfileVersion ${l.lockfileVersion ?? 1} — \`oas migrate\` maps its capability locks to packages`);
-    }
-    else if (Object.keys(l.capabilities).length) {
-      for (const [rid, rlock] of Object.entries(l.capabilities)) {
-        const violation = residueEntryViolation(rlock);
-        if (violation) console.log(`  ERROR: residue entry ${rid} in ${shortPath(l.file)} is malformed (${violation}) — never auto-repaired; fix or remove the entry [invalid-lock]`);
-        else console.log(`  NOTE: ${rid} in ${shortPath(l.file)} is legacy migration residue (${rlock.source}) — pending migration: re-run \`oas migrate --dir ${shortPath(l.level)}\` when its official package publishes, or remove the entry if the capability is abandoned`);
-      }
+  for (const res of pkg.migrationResidue) {
+    if (res.status === "invalid-lock") console.log(`  ERROR: residue entry ${res.id} in ${shortPath(res.file)} is malformed (${res.violation}) — never auto-repaired; fix or remove the entry [invalid-lock]`);
+    else console.log(`  NOTE: ${res.id} in ${shortPath(res.file)} is legacy migration residue (${res.source}) — pending migration: re-run \`oas migrate --dir ${shortPath(res.level)}\` when its official package publishes, or remove the entry if the capability is abandoned`);
+  }
+  for (const prov of pkg.profileProvenance) {
+    console.log(`\nConfig profile provenance: ${shortPath(prov.file)} adopted ${prov.package}${prov.ref ? `@${prov.ref}` : ""} profile "${prov.profile}" (snapshot — compare with \`oas config diff\`)`);
+  }
+  for (const u of pkg.unappliedProfiles) {
+    console.log(`\nNOTE: package ${u.package} exports config profile${u.profiles.length > 1 ? "s" : ""} (${u.profiles.join(", ")}) not applied at any scope — adopt one with \`oas init --package ${u.package}${u.profiles.length > 1 ? " --config <name>" : ""}\` at a fresh scope`);
+  }
+  if (pkg.missingHostRequirements.length) {
+    console.log("\nMissing host commands (active capabilities):");
+    for (const req of pkg.missingHostRequirements) {
+      console.log(`  ${req.command} — ${req.why || "required"} (requested by: ${req.requestedBy.map((r) => r.capability).join(", ")})`);
+      if (req.plan) console.log(`             install with consent: ${req.consentCommand}  (runs: ${req.plan.argv.join(" ")})`);
+      else if (req.docs) console.log(`             install docs: ${req.docs}`);
     }
   }
-  // Capability provenance mismatch: a config from: installed capability that no visible package or store provides is already reported above.
 
   if (soulName) {
     const composition = doctorComposition(ctx, soulName);
@@ -495,7 +582,13 @@ const cmdFail = (code, msg) => (JSON_MODE ? jsonFail(code, msg) : die(msg));
 function install() {
   const src = args[1];
   const dir = dirFlag();
-  if (!src || src.startsWith("--")) { restore(dir); return; }
+  if (!src || src.startsWith("--")) {
+    // Usage errors surface BEFORE any restore/network side effect: a malformed
+    // --accept-requirement must not mutate the deployment and then report E_USAGE.
+    flagAll("accept-requirement");
+    reconcile(dir);
+    return;
+  }
   const retiredReason = retiredCapabilityReason(src);
   if (retiredReason) cmdFail("retired-capability", retiredReason);
   // Package source? (git/path with an oas-package.json, or a catalog id) — otherwise legacy capability acquisition.
@@ -559,6 +652,56 @@ function install() {
   else if (r.manifest.commands || r.manifest.hooks) console.log(`Executable surface is blocked until: oas trust ${r.manifest.capability} --dir ${shortPath(dir)}`);
 }
 
+/** Lock-file levels from dir upward (closest last — outermost first), like restoreCapabilities' walk. */
+function lockLevelsUp(dir) {
+  const levels = [];
+  for (let d = resolve(dir); ; d = dirname(d)) {
+    if (existsSync(join(d, OAS_LOCK_FILE))) levels.push(d);
+    if (dirname(d) === d) break;
+  }
+  return levels.reverse();
+}
+
+/** Check/restore one level's v2 package locks via the ENGINE's restorePackages
+ * (exact restore, no ref advancement, staging + integrity/capability/deps
+ * verification inside). The engine walks the lock chain from the given dir;
+ * reconciliation calls it per deduplicated level and keeps that level's rows. */
+/** Map engine restore rows to WS2 report items (kind package). */
+const pkgRow = (r) => ({
+  id: r.package, level: r.level, package: true, dir: r.dir,
+  status: r.status === "ok" ? "present" : r.status, reason: r.reason, code: r.code,
+});
+
+/** Restore-and-partition for reconciliation (reviewer-455ba15 fix 1): the
+ * engine's restorePackages walks the WHOLE lock chain from a directory and has
+ * no exact-level option, so invoke it ONCE per deepest scope and PARTITION the
+ * report rows by lock level — never re-invoke per level (each re-invocation
+ * re-runs restore side effects for every ancestor lock). Returns a Map
+ * level(resolved) → rows. */
+function partitionedPackageRestore(deepestDir) {
+  const byLevel = new Map();
+  const add = (level, row) => {
+    const key = resolve(level);
+    if (!byLevel.has(key)) byLevel.set(key, []);
+    byLevel.get(key).push(row);
+  };
+  for (const r of restorePackages(deepestDir)) add(r.level, pkgRow(r));
+  // EMPTY v1 lock files surface too (maintainer ruling): the engine's restore
+  // report only rows NON-empty v1 files. Walk the raw lock chain (a lock-only
+  // scope has no config, so configChain-based reads cannot see it) and emit a
+  // LEGACY row for each empty v1 file so reconciliation shows the pending
+  // lock-format migration.
+  for (const level of lockLevelsUp(deepestDir)) {
+    try {
+      const parsed = JSON.parse(readFileSync(join(level, OAS_LOCK_FILE), "utf8"));
+      if (parsed.lockfileVersion !== 2 && !Object.keys(parsed.capabilities || {}).length) {
+        add(level, { id: null, level, package: true, status: "legacy", reason: `empty lockfileVersion ${parsed.lockfileVersion ?? 1} file — pending lock-format migration: oas migrate --dir ${level}` });
+      }
+    } catch { /* malformed locks raise via restorePackages above */ }
+  }
+  return byLevel;
+}
+
 function installPackage(dir, src, opts = {}) {
   const bail = (e) => (JSON_MODE ? jsonFail(e.code || "invalid-source", e.message || e) : die(e.message || e));
   let r;
@@ -579,48 +722,283 @@ function installPackage(dir, src, opts = {}) {
   return true;
 }
 
-/** Bare `oas install`: exact restore of the current chain — locked packages
- * (lock v2) plus legacy locked capabilities (v1). NO team-boundary recursion. */
+/** Bare `oas install` chain restore: engine packages (lock v2) + legacy locked
+ * capabilities (v1). Returns { report, failed }; output goes to stdout (human)
+ * or stderr (JSON mode) — the reconcile envelope owns stdout in JSON mode. */
 function restore(dir) {
-  let pkgReport, report;
-  try { pkgReport = restorePackages(dir); report = restoreCapabilities(dir); }
-  catch (e) { JSON_MODE ? jsonFail(e.code || "invalid-lock", e.message || e) : die(e.message || e); return; }
-  // EVERY unsuccessful status is a failure (reviewer-6f0a3bd: "unrestorable"
-  // and "retired" must not report ok); each carries an appropriate frozen code.
-  const UNSUCCESSFUL = { failed: undefined, unrestorable: "invalid-source", retired: "retired-capability" };
-  const failures = [...pkgReport, ...report]
-    .filter((r) => Object.hasOwn(UNSUCCESSFUL, r.status))
-    .map((r) => ({ ...r, code: r.code || UNSUCCESSFUL[r.status] || "integrity-drift" }));
+  const note = (msg) => (JSON_MODE ? console.error(msg) : console.log(msg));
+  // Fail-closed locks: restorePackages/restoreCapabilities RAISE typed
+  // invalid-lock — let the reconcile boundary surface the code verbatim
+  // (never softened to empty); this throw is caught by reconcile().
+  const pkgReport = restorePackages(dir).map((r) => ({
+    id: r.package, level: r.level, package: true, dir: r.dir,
+    status: r.status === "ok" ? "present" : r.status, reason: r.reason, code: r.code,
+  }));
+  const report = [...restoreCapabilities(dir), ...pkgReport];
+  if (!report.length) note("Nothing to restore — no locked capabilities in the config chain.");
+  let failed = 0;
+  for (const r of report) {
+    const what = r.package ? `package ${r.id ?? "(lock)"}` : r.id;
+    if (r.status === "present") note(`ok        ${what}  (${shortPath(r.dir)})`);
+    else if (r.status === "restored") note(`restored  ${what} → ${shortPath(r.dir)}${r.integrity ? `  (${r.integrity})` : ""}`);
+    else if (r.status === "legacy") note(`LEGACY    ${shortPath(join(r.level, OAS_LOCK_FILE))}: ${r.reason}`);
+    else if (r.status === "retired") { failed++; note(`RETIRED   ${what}  ${r.reason}`); }
+    else { failed++; note(`FAILED    ${what}  ${r.reason}`); }
+  }
+  return { report, failed };
+}
+
+/** Unsuccessful restore statuses and their frozen taxonomy codes (reviewer-6f0a3bd:
+ * "unrestorable" and "retired" must not report ok). */
+const UNSUCCESSFUL_RESTORE = { failed: undefined, unrestorable: "invalid-source", retired: "retired-capability" };
+
+/** One artifact report item → the machine shape (kind capability|package). */
+const artifactJson = (r) => ({
+  id: r.id, kind: r.package ? "package" : "capability", level: r.level,
+  status: r.status, ...(r.dir ? { dir: r.dir } : {}), ...(r.reason ? { reason: r.reason } : {}),
+  ...(Object.hasOwn(UNSUCCESSFUL_RESTORE, r.status) ? { code: r.code || UNSUCCESSFUL_RESTORE[r.status] || "integrity-drift" } : {}),
+});
+
+/** Emit the reconcile/restore result: human exit or the single-envelope JSON contract.
+ * Full success → { ok: true, result }. ANY artifact or consented-install failure →
+ * nonzero with error.code E_RECONCILE_FAILED and the SAME complete report under
+ * error.details — partial outcomes are never lost. */
+function emitReconcileResult({ boundary, boundaryKind, scopes, requirements, failures }) {
+  const result = { boundary, boundaryKind, scopes, requirements, failures };
   if (JSON_MODE) {
     if (failures.length) {
-      // Frozen failure envelope shape EXACTLY { schemaVersion, ok:false, error };
-      // propagate the first failure's taxonomy code (per-artifact detail in message).
-      const first = failures[0];
-      jsonFail(first.code, failures.map((f) => `${f.package || f.id || "(lock)"}: ${f.reason}`).join("; "));
-      return;
+      console.log(JSON.stringify({ schemaVersion: 1, ok: false, error: { code: "E_RECONCILE_FAILED", message: `${failures.length} failure${failures.length > 1 ? "s" : ""} during restore/reconciliation`, details: result } }));
+      process.exit(1);
     }
-    jsonOk({ packages: pkgReport, capabilities: report });
+    jsonOk(result);
     return;
   }
-  if (!pkgReport.length && !report.length) { console.log("Nothing to restore — no locked packages or capabilities in the config chain."); return; }
-  // Human mode uses the SAME unsuccessful-status classification as JSON mode
-  // (reviewer-7b2cd36): retired/unrestorable count as failures for the exit
-  // code while keeping their actionable rendering.
-  let failed = 0;
-  for (const r of pkgReport) {
-    if (r.status === "ok") console.log(`ok        package ${r.package}  (${shortPath(r.dir)})`);
-    else if (r.status === "restored") console.log(`restored  package ${r.package} → ${shortPath(r.dir)}`);
-    else if (r.status === "legacy") console.log(`LEGACY    ${shortPath(join(r.level, OAS_LOCK_FILE))}: ${r.reason}`);
-    else { failed++; console.log(`FAILED    package ${r.package ?? "(lock)"}  ${r.reason}`); }
+  if (failures.length) {
+    console.log("\nFailures by scope:");
+    for (const f of failures) console.log(`  ${shortPath(f.scope)}: ${f.id} — ${f.reason}`);
+    die(`${failures.length} failure${failures.length > 1 ? "s" : ""} during restore/reconciliation`);
   }
-  for (const r of report) {
-    if (r.status === "present") console.log(`ok        ${r.id}  (${shortPath(r.dir)})`);
-    else if (r.status === "restored") console.log(`restored  ${r.id} → ${shortPath(r.dir)}  (${r.integrity})`);
-    else if (r.status === "retired") { failed++; console.log(`RETIRED   ${r.id}  ${r.reason}`); }
-    else if (r.status === "unrestorable") { failed++; console.log(`FAILED    ${r.id}  ${r.reason}`); }
-    else { failed++; console.log(`FAILED    ${r.id}  ${r.reason}`); }
+}
+
+/** Bare `oas install` at a team boundary: reconcile the whole workspace — restore the
+ * boundary scope's graph (its ancestor chain), then every descendant scope's own
+ * lock graph EXACTLY ONCE, in deterministic path order, with pruned discovery;
+ * verify v2 package locks against the installed package store; validate
+ * config-referenced capabilities against visible locked packages; aggregate
+ * missing requirements and failures by scope.
+ * Non-team scopes keep current-chain behavior unless --recursive names a boundary. */
+/** Bare `oas install` (no source): current-chain restore or team-boundary
+ * reconciliation. JSON-mode boundary: ANY throw before emitReconcileResult
+ * (malformed lock/config, discovery failures) must still yield the single
+ * envelope — never empty stdout with a stack trace. */
+function reconcile(dir) {
+  try { reconcileInner(dir); }
+  catch (e) {
+    if (JSON_MODE) {
+      console.log(JSON.stringify({ schemaVersion: 1, ok: false, error: { code: e.code || "E_RECONCILE_FAILED", message: String(e.message || e) } }));
+      process.exit(1);
+    }
+    die(e.message || e);
   }
-  if (failed) die(`${failed} artifact${failed > 1 ? "s" : ""} could not be restored`);
+}
+
+function reconcileInner(dir) {
+  const cfgFile = join(dir, "oas-config.yaml");
+  const declaresTeamHere = existsSync(cfgFile) && !!parseYamlNested(readFileSync(cfgFile, "utf8")).team;
+  const recursive = args.includes("--recursive");
+  if (!declaresTeamHere && !recursive) {
+    // Current-chain behavior, plus the requirements gate for this chain's active capabilities.
+    const { report, failed } = restore(dir);
+    const requirements = requirementsGate([dir]);
+    const failures = [
+      // "legacy" is informational (v1 locks restore via the capability path);
+      // every other unsuccessful status is a failure (incl. retired/unrestorable
+      // per reviewer-6f0a3bd — they must not report ok).
+      ...report.filter((r) => Object.hasOwn(UNSUCCESSFUL_RESTORE, r.status)).map((r) => ({ scope: r.level, id: r.package ? `package ${r.id}` : r.id, reason: r.reason, code: r.code || UNSUCCESSFUL_RESTORE[r.status] })),
+      ...requirements.filter((q) => q.outcome === "failed").map((q) => ({ scope: dir, id: `requirement ${q.command}`, reason: q.reason || "consented install failed" })),
+    ];
+    void failed;
+    emitReconcileResult({
+      boundary: dir, boundaryKind: "chain",
+      scopes: [{ scope: dir, artifacts: report.map(artifactJson) }],
+      requirements, failures,
+    });
+    return;
+  }
+  const boundary = dir;
+  const note = (msg) => (JSON_MODE ? console.error(msg) : console.log(msg));
+  // The chosen boundary is printed BEFORE any network or host work — always.
+  note(`Workspace reconciliation boundary: ${shortPath(boundary)}${declaresTeamHere ? " (team scope)" : " (--recursive)"}`);
+  const scopes = [boundary, ...discoverWorkspaceScopes(boundary)];
+  const failures = [];
+  const scopeReports = [];
+  let reportedAny = false;
+  const restoredLevels = new Set(); // each lock level's graph restores exactly once
+  const packageCheckedLevels = new Set(); // each level's package-lock rows consumed exactly once
+  // reviewer-455ba15 fix 1 — partition-not-rerun: run the engine's chain-walking
+  // package restore as FEW times as the API allows and hand out each level's
+  // rows exactly once. One invocation covers a scope's entire ancestor chain;
+  // rows are stashed so no level is ever REPORTED twice and no already-walked
+  // level triggers a re-invocation. RESIDUAL (pending WS1's exact-levels API,
+  // relayed as a want): a descendant owning its own lock necessarily re-walks
+  // its ancestors inside the engine — present/valid ancestor artifacts re-verify
+  // with local reads only, but a FAILED ancestor fetch may retry once per
+  // lock-owning descendant. The exact-once reporting contract holds.
+  const pendingPkgRows = new Map(); // level(resolved) → rows not yet consumed
+  const packageRowsFor = (scope, levels) => {
+    const wanted = levels.map((l) => resolve(l)).filter((l) => !packageCheckedLevels.has(l));
+    if (!wanted.length) return [];
+    if (wanted.some((l) => !pendingPkgRows.has(l))) {
+      // One restore invocation covers scope's whole chain; stash every level's
+      // rows so later scopes never re-invoke for already-walked levels.
+      for (const [lvl, rows] of partitionedPackageRestore(scope)) {
+        if (!pendingPkgRows.has(lvl)) pendingPkgRows.set(lvl, rows);
+      }
+    }
+    const out = [];
+    for (const l of wanted) {
+      packageCheckedLevels.add(l);
+      out.push(...(pendingPkgRows.get(l) || []));
+    }
+    return out;
+  };
+  for (const scope of scopes) {
+    // Boundary: full ancestor chain (current-chain semantics). Descendants: their
+    // own level only — every level between boundary and descendant is either the
+    // boundary chain or an earlier discovered scope, so no level repeats and no
+    // failed ancestor restore is retried (or hidden) per descendant.
+    const chainLevels = scope === boundary ? undefined : [scope];
+    const report = restoreCapabilities(scope, chainLevels ? { levels: chainLevels.filter((l) => !restoredLevels.has(resolve(l))) } : undefined)
+      .filter((r) => !restoredLevels.has(resolve(r.level)));
+    // v2 package locks: every lock level this scope covers (the boundary covers
+    // its whole ancestor chain), each restored/verified exactly once.
+    report.push(...packageRowsFor(scope, scope === boundary ? lockLevelsUp(boundary) : [scope]));
+    for (const r of report) {
+      reportedAny = true;
+      const what = r.package ? `package ${r.id ?? "(lock)"}` : r.id;
+      if (r.status === "present") note(`ok        ${what}  [${shortPath(r.level)}]`);
+      else if (r.status === "restored") note(`restored  ${what} → ${shortPath(r.dir)}  [${shortPath(r.level)}]`);
+      else if (r.status === "legacy") note(`LEGACY    ${shortPath(join(r.level, OAS_LOCK_FILE))}: ${r.reason}`);
+      else if (r.status === "retired") { failures.push({ scope: r.level, id: what, reason: r.reason, code: "retired-capability" }); note(`RETIRED   ${what}  ${r.reason}  [${shortPath(r.level)}]`); }
+      else { failures.push({ scope: r.level, id: what, reason: r.reason, code: r.code }); note(`FAILED    ${what}  ${r.reason}  [${shortPath(r.level)}]`); }
+    }
+    if (scope === boundary) for (const cfg of configChain(boundary)) restoredLevels.add(resolve(cfg._level));
+    for (const r of report) restoredLevels.add(resolve(r.level));
+    restoredLevels.add(resolve(scope));
+    // Validate: every config-referenced installed capability supplied by a visible locked package/capability lock.
+    if (existsSync(join(scope, "oas-config.yaml"))) {
+      try {
+        const supplied = lockedPackageCapabilities(scope);
+        const capLocks = readCapabilityLocks(scope);
+        for (const cfg of configChain(scope)) {
+          if (resolve(cfg._level) !== resolve(scope)) continue;
+          for (const [slot, entry] of Object.entries(cfg.capabilities?.layers || {})) {
+            if (entry && typeof entry === "object" && entry.from === "installed" && !supplied.has(entry.capability) && !capLocks[entry.capability]) {
+              failures.push({ scope, id: entry.capability, reason: `referenced by capabilities.layers.${slot} but supplied by no visible locked package` });
+            }
+          }
+          for (const [id, entry] of Object.entries(cfg.capabilities?.additive || {})) {
+            if (entry && typeof entry === "object" && entry.from === "installed" && !supplied.has(id) && !capLocks[id]) {
+              failures.push({ scope, id, reason: "referenced in config but supplied by no visible locked package" });
+            }
+          }
+        }
+      } catch (e) { failures.push({ scope, id: "(config)", reason: e.message }); }
+    }
+    scopeReports.push({ scope, artifacts: report.map(artifactJson) });
+  }
+  if (!reportedAny && scopes.length === 1) note("Nothing to restore — no locked capabilities or packages found in the boundary.");
+  const requirements = requirementsGate(scopes);
+  for (const q of requirements) {
+    if (q.outcome === "failed") failures.push({ scope: boundary, id: `requirement ${q.command}`, reason: q.reason || "consented install failed" });
+  }
+  emitReconcileResult({
+    boundary, boundaryKind: declaresTeamHere ? "team" : "recursive",
+    scopes: scopeReports, requirements, failures,
+  });
+}
+
+/** Host-requirement consent gate. Requirements are considered only for capabilities
+ * activated somewhere in the reconciled scopes, deduplicated by command. Interactive
+ * runs prompt per requirement with the exact command/source/version and state scope;
+ * non-interactive runs NEVER install by default — automation names each accepted
+ * requirement via --accept-requirement <command>; --no-requirements skips entirely.
+ * Skipping leaves an actionable doctor warning (doctor recomputes missing commands).
+ * Returns structured entries with a stable outcome enum:
+ *   "installed"        consented install ran and the command verified on PATH
+ *   "failed"           consented install errored or PATH verification missed (→ reconcile failure)
+ *   "consent-required" not explicitly accepted — nothing installed
+ *   "skipped"          --no-requirements, or no safe installer for this host
+ * JSON plan data equals the human prompt plan (argv/source/version/scope/requestedBy;
+ * never shell text). In JSON mode all prose goes to stderr. */
+function requirementsGate(scopes) {
+  // Malformed repeatable flags are usage errors regardless of which branch
+  // runs — validate up front so --no-requirements cannot mask them.
+  const accepted = new Set(flagAll("accept-requirement"));
+  const missing = aggregateMissingRequirements(scopes);
+  if (!missing.length) return [];
+  const note = (msg) => (JSON_MODE ? console.error(msg) : console.log(msg));
+  const entryOf = (req, outcome, extra = {}) => ({
+    command: req.command, why: req.why || null,
+    plan: req.plan && !req.plan.unavailable
+      ? { manager: req.plan.manager, argv: req.plan.argv, source: req.plan.source, version: req.plan.version || null, scope: req.plan.scope }
+      : null,
+    requestedBy: req.requestedBy, docs: req.docs || null, outcome, ...extra,
+  });
+  // Fail-closed identity/conflict policy (E_REQUIREMENT_POLICY): invalid command
+  // tokens and same-command conflicting plans are NEVER consentable or installable
+  // — they fail reconciliation deterministically with provenance, even under
+  // --no-requirements (skipping consent does not skip safety validation).
+  const policyEntries = [];
+  for (const req of missing) {
+    if (req.invalid) {
+      note(`  INVALID requirement command ${JSON.stringify(req.command)} — ${req.invalid} (requested by: ${req.requestedBy.map((r) => `${r.capability} [${shortPath(r.scope)}]`).join(", ")})`);
+      policyEntries.push(entryOf(req, "failed", { reason: req.invalid, code: "E_REQUIREMENT_POLICY" }));
+    } else if (req.conflict) {
+      note(`  CONFLICT for command "${req.command}": capabilities request non-identical install plans — no install is offered`);
+      for (const p of req.conflict.plans) note(`      ${p.capability} [${shortPath(p.scope)}]: ${p.argv ? p.argv.join(" ") : p.unavailable || "no plan"}`);
+      policyEntries.push(entryOf(req, "failed", { reason: "conflicting install plans for the same command", code: "E_REQUIREMENT_POLICY", conflict: req.conflict }));
+    }
+  }
+  const consentable = missing.filter((req) => !req.invalid && !req.conflict);
+  if (args.includes("--no-requirements")) return [...policyEntries, ...consentable.map((req) => entryOf(req, "skipped", { reason: "--no-requirements" }))];
+  const interactive = !JSON_MODE && process.stdin.isTTY && process.stdout.isTTY;
+  const out = [...policyEntries];
+  if (consentable.length) note(`\nMissing host commands for active capabilities (${consentable.length}):`);
+  for (const req of consentable) {
+    const requesters = req.requestedBy.map((r) => `${r.capability} [${shortPath(r.scope)}]`).join(", ");
+    note(`  ${req.command} — ${req.why || "required"} (requested by: ${requesters})`);
+    const plan = req.plan;
+    if (!plan || plan.unavailable) {
+      note(`    no safe installer: ${plan?.unavailable || "no recipe"}${req.docs ? ` — install docs: ${req.docs}` : ""}`);
+      out.push(entryOf(req, "skipped", { reason: plan?.unavailable || "no safe installer" }));
+      continue;
+    }
+    note(`    installer: ${plan.argv.join(" ")}  (source: ${plan.source}${plan.version ? `, version ${plan.version}` : ""}; ${plan.scope})`);
+    let consent = accepted.has(req.command);
+    if (!consent && interactive) {
+      process.stdout.write(`    Run this install now? [y/N] `);
+      const buf = Buffer.alloc(64);
+      let answer = "";
+      try { answer = buf.toString("utf8", 0, readSync(process.stdin.fd, buf, 0, 64)).trim().toLowerCase(); } catch { /* EOF */ }
+      consent = answer === "y" || answer === "yes";
+    }
+    if (!consent) {
+      note(`    skipped — ${interactive ? "not consented" : "non-interactive; pass --accept-requirement " + req.command + " to install"}; \`oas doctor\` will keep warning until ${req.command} is on PATH`);
+      out.push(entryOf(req, "consent-required"));
+      continue;
+    }
+    try {
+      const r = runRequirementInstall(plan, JSON_MODE ? { stdio: ["ignore", 2, 2] } : {});
+      if (r.onPath) { note(`    installed — ${req.command} verified on PATH`); out.push(entryOf(req, "installed", { onPath: true })); }
+      else { note(`    FAILED: install ran but ${req.command} is still not on PATH — check your shell PATH/prefix`); out.push(entryOf(req, "failed", { onPath: false, reason: "install ran but the command is not on PATH" })); }
+    } catch (e) {
+      note(`    FAILED: ${e.message}`);
+      out.push(entryOf(req, "failed", { onPath: false, reason: e.message }));
+    }
+  }
+  note("Requirement consent is separate from capability trust — installing a binary does not activate or approve any capability.");
+  return out;
 }
 
 /** oas trust <capability> | oas trust <package> --all-capabilities */
@@ -670,6 +1048,209 @@ function trust() {
   catch (e) { cmdFail(e.code || "invalid-lock", e.message || e); return; }
   if (JSON_MODE) { jsonOk({ capability: manifest.capability, integrity, legacy: true }); return; }
   console.log(`Trusted executable commands/hooks for ${manifest.capability} at ${integrity}.`);
+}
+
+// ---------- package config profiles (oas init --package / oas config diff) ----------
+/** Collect every value of a repeatable flag (e.g. --accept-requirement a --accept-requirement b).
+ * A missing or flag-shaped value is a usage error — one E_USAGE envelope in JSON mode. */
+function flagAll(name) {
+  const out = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] !== `--${name}`) continue;
+    if (args[i + 1] && !args[i + 1].startsWith("--")) out.push(args[i + 1]);
+    else (JSON_MODE ? jsonFail("E_USAGE", `--${name} needs a value`) : die(`--${name} needs a value`));
+  }
+  return out;
+}
+
+/** Capability ids supplied by a package's dependency closure, read from visible locks (phase 1).
+ * The scope's own lock is merged in directly: during init no oas-config.yaml exists
+ * there yet, so configChain-based reading cannot see same-lock dependencies. */
+/** Capability ids supplied by a package's dependency closure, resolved through
+ * the ENGINE's lock graph (dependencies recorded by identity) plus the indexed
+ * installed store. During init the scope may have a lock without a config;
+ * readPackageLocks walks the chain and the scope itself. */
+/** Dependency-closure PROVIDER RECORDS for profile validation, resolved from
+ * the acquired root's LOCK entry (identity-valued dependencies) and the
+ * engine-indexed store — reviewer-455ba15 fixes 2+3: no source-string
+ * reverse-engineering (a dependency's source need not encode its identity),
+ * and each provider carries its capability MANIFESTS so layer agreement
+ * validates against the real provider, not just an ID match.
+ * Returns { capabilities: Map<capabilityId, capManifest|null> }. */
+function dependencyClosureProviders(rootId, dir) {
+  // The scope's own lock is read directly: during init no oas-config.yaml
+  // exists there yet, so configChain-based reads cannot see that level.
+  const locks = { ...readPackageLocks(dir).packages };
+  const ownLock = {};
+  try {
+    const parsed = JSON.parse(readFileSync(join(dir, OAS_LOCK_FILE), "utf8"));
+    if (parsed.lockfileVersion === 2) for (const [id, e] of Object.entries(parsed.packages || {})) { ownLock[id] = e; locks[id] = e; }
+  } catch { /* no own lock (or fail-closed raise — init surfaces it at acquire) */ }
+  const byId = new Map(listInstalledPackages(dir).map((p) => [p.package, p]));
+  // Own-scope store OVERWRITES byId for every identity in the target scope's
+  // OWN lock (reviewer-ea6a77a): listInstalledPackages cannot index a
+  // configless level, so it may have returned an OUTER package with the same
+  // identity — the merged lock graph selects the inner entry, so provider
+  // manifests must come from the own-scope artifact, never the shadowed outer.
+  for (const id of Object.keys(ownLock)) {
+    const d = join(installedPackagesDir(dir), id);
+    if (!existsSync(join(d, "oas-package.json"))) continue;
+    try {
+      const m = loadPackageManifestAt(d);
+      byId.set(id, { package: id, capabilities: (m._capabilities || []).map((c) => ({ id: c.id, manifest: c.manifest })) });
+    } catch { /* invalid installed manifest surfaces via doctor */ }
+  }
+  const capabilities = new Map(); // capability id → capability manifest (or null when only lock metadata is visible)
+  const seen = new Set();
+  const visit = (pkgId) => {
+    if (!pkgId || seen.has(pkgId)) return;
+    seen.add(pkgId);
+    const entry = locks[pkgId];
+    const pkg = byId.get(pkgId);
+    if (pkg) for (const c of pkg.capabilities) capabilities.set(c.id, c.manifest || null);
+    else if (entry) for (const c of entry.capabilities || []) { if (!capabilities.has(c)) capabilities.set(c, null); }
+    // Lock-graph dependencies are package identities (engine contract).
+    for (const dep of entry?.dependencies || []) visit(dep);
+  };
+  for (const dep of locks[rootId]?.dependencies || []) visit(dep);
+  return { capabilities };
+}
+
+/** oas init --package <source> [--config <name>]: preview, validate, and snapshot one package config profile.
+ * JSON mode: one compact envelope; WS2 codes E_PROFILE_INVALID / E_PROFILE_AMBIGUOUS /
+ * E_PROFILE_NOT_FOUND (E_CONFIG_EXISTS is raised by init() before this); engine
+ * error codes (invalid-package-manifest, path-escape, invalid-source, …) pass
+ * through verbatim; fully noninteractive (no tmux prompt). */
+function initPackage(src, dir, file) {
+  const bail = (code, msg) => (JSON_MODE ? jsonFail(code, msg) : die(msg));
+  const note = (msg) => (JSON_MODE ? console.error(msg) : console.log(msg));
+  const configFlag = flag("config");
+  if (configFlag === true) bail("E_USAGE", "--config needs a profile name");
+  // During init the target scope may carry a lock/store WITHOUT an
+  // oas-config.yaml — configChain-based engine reads cannot see that level
+  // (init-acquires-before-config-exists), so read the scope's own lock v2
+  // directly for the id checks.
+  const ownLockV2 = (() => {
+    try {
+      const parsed = JSON.parse(readFileSync(join(dir, OAS_LOCK_FILE), "utf8"));
+      return parsed.lockfileVersion === 2 ? parsed.packages || {} : {};
+    } catch { return {}; }
+  })();
+  const installedAt = (id) => {
+    const d = join(installedPackagesDir(dir), id);
+    return ownLockV2[id] && existsSync(join(d, "oas-package.json")) ? d : undefined;
+  };
+  const isUrlOrCatalog = /^(https?:\/\/|git@|ssh:\/\/|git:)/.test(src) || (!src.startsWith(".") && !src.startsWith("/") && !src.startsWith("~") && !src.startsWith("path:") && !ownLockV2[src] && !readPackageLocks(dir).packages[src] && !listInstalledPackages(dir).some((p) => p.package === src));
+  try {
+    // Gate 1: adoption leaves the root + dependency closure exact-locked via
+    // the ENGINE's acquirePackage — which now supports git, catalog, AND local
+    // sources. Acquisition runs BEFORE the config snapshot is published (a
+    // failed acquire/lock must not leave a config behind), and its exact-
+    // integrity reuse rejects same-ID/different-source drift. Already-installed
+    // ids are resolved from the store without re-fetching.
+    let manifest, commit;
+    const installedDir = !isUrlOrCatalog && (installedAt(src) || listInstalledPackages(dir).find((p) => p.package === src)?.dir);
+    if (installedDir) {
+      manifest = loadPackageManifestAt(installedDir);
+      commit = (ownLockV2[src] || readPackageLocks(dir).packages[src])?.commit || "local";
+    } else {
+      let acq;
+      try { acq = acquirePackage(dir, src); }
+      catch (e) { bail(e.code || "E_ACQUIRE_FAILED", e.message); }
+      note(`Acquired + locked package closure: ${acq.installed.map((p) => `${p.package}@${p.version}`).join(", ")} → ${shortPath(acq.lockFile)}`);
+      const rootRec = acq.installed.find((p) => p.package === acq.root);
+      manifest = loadPackageManifestAt(rootRec.dir);
+      commit = rootRec.commit;
+    }
+    let profile;
+    try { profile = selectProfile(manifest, configFlag); }
+    catch (e) { bail(e.code || "E_PROFILE_AMBIGUOUS", e.message); }
+    let errors;
+    try { errors = validateProfile(manifest, profile, { dependencyProviders: dependencyClosureProviders(manifest.package, dir).capabilities }); }
+    catch (e) { bail(e.code || "E_PROFILE_INVALID", e.message); }
+    if (errors.length) bail("E_PROFILE_INVALID", `profile "${profile.name}" of package ${manifest.package} failed validation:\n  - ${errors.join("\n  - ")}`);
+    let body;
+    try { body = readProfileText(manifest, profile); }
+    catch (e) { bail(e.code || "E_PROFILE_INVALID", e.message); }
+    const capabilities = (manifest._capabilities || []).map((c) => c.id);
+    // Preview before writing: package, profile, exported capabilities.
+    note(`Package ${manifest.package}@${manifest.version} — profile "${profile.name}"${profile.description ? `: ${profile.description}` : ""}`);
+    note(`  exports capabilities: ${capabilities.join(", ") || "(none)"}`);
+    const text = `${profileProvenanceHeader({ pkg: manifest.package, version: manifest.version, profile: profile.name, commit })}\n` +
+      body.replace(/^name:.*$/m, `name: ${basename(dir)}`).replace(/\n*$/, "\n");
+    writeFileSync(file, text);
+    note(`Created ${shortPath(file)} (${levelOf(dir)} level) from package profile ${manifest.package}:${profile.name}`);
+    note("The snapshot is an ordinary scoped config — edit it, retarget or disable any capability; package updates never rewrite it.");
+    // After the snapshot exists, the scope IS a config level — but merge the own
+    // lock read too for the paranoid path (lock written moments ago).
+    const locks = { ...readPackageLocks(dir).packages };
+    try {
+      const parsed = JSON.parse(readFileSync(join(dir, OAS_LOCK_FILE), "utf8"));
+      if (parsed.lockfileVersion === 2) for (const [id, e] of Object.entries(parsed.packages || {})) locks[id] = { ...e, _file: join(dir, OAS_LOCK_FILE) };
+    } catch { /* no own lock */ }
+    if (!locks[manifest.package]) note(`NOTE: package ${manifest.package} is not locked at this scope yet — acquire it with \`oas install ${src}\` so its capabilities restore.`);
+    if (JSON_MODE) {
+      const lockEntry = locks[manifest.package];
+      jsonOk({
+        package: manifest.package, version: manifest.version, commit: commit || null,
+        profile: profile.name, file, capabilities,
+        lockFile: lockEntry?._file || null,
+        lockedPackages: Object.keys(locks),
+      });
+      return;
+    }
+  } finally { /* engine acquisition stages its own temp dirs */ }
+  offerTmuxMouseScrolling();
+}
+
+/** oas config diff --package <id> --config <name>: report-only diff of the local snapshot vs the package's current profile.
+ * The snapshot's provenance header supplies --package/--config defaults.
+ * JSON mode: one envelope; zero differences = exit 0 with differingLines 0. */
+function configDiffCmd() {
+  const bail = (code, msg) => (JSON_MODE ? jsonFail(code, msg) : die(msg));
+  if (args[1] !== "diff") bail("E_USAGE", "usage: oas config diff --package <id> --config <name> [--dir <dir>] [--json]");
+  const dir = resolve(flag("dir") || process.cwd());
+  const file = join(dir, "oas-config.yaml");
+  if (!existsSync(file)) bail("E_NO_CONFIG", `no oas-config.yaml at ${shortPath(dir)} — nothing to diff`);
+  const localText = readFileSync(file, "utf8");
+  const provenance = parseProfileProvenance(localText);
+  const pkgId = flag("package") || provenance?.package;
+  if (!pkgId || pkgId === true) bail("E_USAGE", "usage: oas config diff --package <id> --config <name> (the snapshot's provenance header supplies defaults when present)");
+  const configFlag = flag("config");
+  if (configFlag === true) bail("E_USAGE", "--config needs a profile name");
+  const profileName = configFlag || provenance?.profile;
+  const tmp = /^(https?:\/\/|git@|ssh:\/\/)/.test(pkgId) ? mkdtempSync(join(tmpdir(), "oas-package-")) : undefined;
+  try {
+    let resolved;
+    try { resolved = resolveProfilePackage(pkgId, dir, { clone: tmp }); }
+    catch (e) { bail(e.code || "E_PACKAGE_UNRESOLVED", e.message); }
+    let profile;
+    try { profile = selectProfile(resolved.manifest, profileName); }
+    catch (e) { bail(e.code || "E_PROFILE_AMBIGUOUS", e.message); }
+    let packageText;
+    try { packageText = readProfileText(resolved.manifest, profile); }
+    catch (e) { bail(e.code || "E_PROFILE_INVALID", e.message); }
+    // Strip the local provenance header for a meaningful comparison.
+    const localBody = localText.replace(/^# package: .*\n/, "");
+    const diff = diffConfigTexts(localBody, packageText);
+    const changed = diff.filter((d) => d.kind !== "same");
+    if (JSON_MODE) {
+      jsonOk({
+        package: resolved.manifest.package, profile: profile.name,
+        version: resolved.manifest.version, file,
+        differingLines: changed.length, diff,
+      });
+      return;
+    }
+    console.log(`oas config diff — local ${shortPath(file)} vs ${resolved.manifest.package}@${resolved.manifest.version} profile "${profile.name}" (report only; nothing is merged or overwritten)\n`);
+    if (!changed.length) { console.log("No differences."); return; }
+    for (const d of diff) {
+      if (d.kind === "local") console.log(`+ ${d.line}`);
+      else if (d.kind === "package") console.log(`- ${d.line}`);
+      else console.log(`  ${d.line}`);
+    }
+    console.log(`\n${changed.length} differing line${changed.length > 1 ? "s" : ""} (+ local only, - package profile only). Snapshots deliberately drift; adopt package changes by hand if wanted.`);
+  } finally { if (tmp) rmSync(tmp, { recursive: true, force: true }); }
 }
 
 /** oas list — installed packages, exported capabilities, scopes. */
@@ -804,7 +1385,15 @@ function init() {
   const raw = args.includes("--raw");
   const dir = dirFlag();
   const file = join(dir, "oas-config.yaml");
-  if (existsSync(file)) die(`${shortPath(file)} already exists — edit it or use \`oas use\``);
+  const pkgSrc = flag("package");
+  if (existsSync(file)) {
+    const msg = `${shortPath(file)} already exists — edit it or use \`oas use\``;
+    if (JSON_MODE && pkgSrc) jsonFail("E_CONFIG_EXISTS", msg);
+    die(msg);
+  }
+
+  if (pkgSrc && pkgSrc !== true) { initPackage(pkgSrc, dir, file); return; }
+  if (pkgSrc === true) (JSON_MODE ? jsonFail("E_USAGE", "--package needs a package id, local path, or git URL") : die("--package needs a package id, local path, or git URL"));
 
   const template = flag("template");
   if (template && template !== true) {
@@ -1379,6 +1968,7 @@ else if (cmd === "update") { const t = args[1] && !args[1].startsWith("--") ? ar
 else if (cmd === "type") typeCmd();
 else if (cmd === "inject") injectCmd();
 else if (cmd === "install") install();
+else if (cmd === "config") configDiffCmd();
 else if (cmd === "trust") trust();
 else if (cmd === "list") listCmd();
 else if (cmd === "remove") removeCmd();
@@ -1428,9 +2018,18 @@ Usage:
   oas install [<source>] [--dir <d>]        acquire + exact-lock a package closure
                                             (git:host/org/repo@ref, git URL, local
                                             path, official catalog id) or a legacy
-                                            marketplace capability; bare \`oas install\`
-                                            exactly restores this chain's locked
-                                            packages + capabilities; never activates
+                                            marketplace capability; never activates
+      [--recursive] [--no-requirements]     bare \`oas install\` exactly restores this
+      [--accept-requirement <cmd> ...]      chain's locked packages + capabilities; at a
+      [--json]                              team: scope (or with --recursive) it reconciles
+                                            the whole workspace — descendant scopes restore
+                                            once in path order (pruned discovery), then the
+                                            host-requirement consent gate runs;
+                                            --no-requirements = package-only (CI);
+                                            non-interactive runs never install host tools
+                                            unless each requirement is named explicitly;
+                                            --json = one envelope (failures carry the full
+                                            report under error.details)
   oas list [--dir <d>] [--json]             installed packages, exported capabilities,
                                             scopes, trust state
   oas update <package> [--dir <d>]          transactional package update: temp fetch,
@@ -1440,6 +2039,11 @@ Usage:
                                             dependent packages reference it)
   oas migrate [--dry-run] [--dir <d>]       map this scope's v1 capability locks to
                                             package locks (preserves config activation)
+  oas config diff [--package <id|url|path>] report how the local snapshot differs from the
+      [--config <name>] [--dir <d>] [--json] package's current profile — never merges/overwrites;
+                                            an adopted snapshot's provenance header supplies
+                                            --package/--config defaults; --json emits one
+                                            envelope (differingLines 0 = no drift)
   oas trust <capability> [--dir <dir>]      approve that capability's commands/hooks at
                                             the provider package's exact integrity
   oas trust <package> --all-capabilities    explicit bulk approval with a full
@@ -1453,11 +2057,13 @@ Usage:
   oas inject eject <cap|work-mode|oas>      copy a packaged injection to the conventional
       [--dir <d>]                           .agents/injections/ path and set injection-override
   oas init [--raw] [--dir <dir>]            create an oas-config.yaml here
-      [--template <name|path|git-url>]      seed from a template config (named via
-      [--knowledge <id|none>]               outer templates: map, a local file, or a
-      [--messaging <id|none>]               git repo's default-branch oas-config.yaml);
-      [--tasks <id|none>]                   or per-layer overrides of the defaults;
-      [--tmux-mouse|--no-tmux-mouse]        prompts to enable normal tmux scrolling
+      [--package <id|path|git-url>]         adopt a package config profile as a local
+      [--config <name>] [--json]            snapshot (default profile unless --config;
+      [--template <name|path|git-url>]      refuses to overwrite an existing config;
+      [--knowledge <id|none>]               --json = one result envelope, noninteractive);
+      [--messaging <id|none>]               or seed from a template config (named via
+      [--tasks <id|none>]                   outer templates: map, a local file, or a
+      [--tmux-mouse|--no-tmux-mouse]        git repo's default-branch oas-config.yaml)
   oas root                                  print this package's install root
                                             (adapters resolve the kernel from it)
   oas <namespace> <command> [args…]         run an operational command only when its

@@ -88,6 +88,13 @@ All kernel/CLI behavior tests live in `test/capabilities.test.mjs`
   (`{ ok: false, error: { ... } }`), not stderr text. Parse stdout for stable
   error codes; reserve stderr assertions for non-JSON `die()` paths and JSON
   mode progress notes.
+- Dedupe regressions must count the side effect being deduped, not only output.
+  For package/capability restore dedupe, use a nested descendant topology under
+  the lock's scope and a recording `cp` shim on `PATH` with a wrong-integrity
+  lock so every retry is observable (copy, integrity failure, cleanup). A
+  boundary plus one member can pass before the fix because it visits the lock
+  only once anyway; shape the fixture so the pre-fix path attempts the same
+  acquisition more than once.
 - Regression tests must exercise the layer where the bug lived. For CLI-surface
   bugs, spawn `bin/oas.mjs` with `spawnSync(...)` (for example `--work attached
   --relation unrelated --json`) and assert the CLI-visible effect, such as
