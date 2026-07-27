@@ -15,8 +15,8 @@ not code changes.
   branch, delivered as a PR — never direct pushes to its main branch. That
   repo is the single place you may touch git state, and only for
   soul/knowledge updates.
-- Your episodic files (STATE.md/log.md/notes/) live in your instance home
-  and need no git ceremony.
+- Your own working state lives in your instance home, not in any member repo,
+  and needs no git ceremony.
 
 This mode fits coordinators, dispatchers, architects, and analysts whose
 scope is the workspace itself; if a task needs actual edits in one repo, ask

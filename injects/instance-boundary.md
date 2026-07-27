@@ -7,22 +7,23 @@ root, and not the work tree. Anything that says "your home" means this directory
 
 - **Your brain and your state live here**: `AGENTS.md` (your composed
   instructions), `soul/` (your durable knowledge), `TASK.md` (this task),
-  `instance.json` (what you were given and from where), and your episodic files
-  — `STATE.md`, `log.md`, `notes/`. Those belong here, not in the work tree.
+  `instance.json` (what you were given and from where), and whatever working
+  state your role keeps — your knowledge layer names those files, if you have
+  one. They belong here, not in the work tree.
 - **Run `aw` and OAS operational/lifecycle commands from instance home** —
-  `oas status`, `oas doctor`, `oas spawn`, `oas retire`, `oas okf harvest`, and
-  every `aw mail`/`aw chat`. They resolve their scope from the directory you run
+  `oas status`, `oas doctor`, `oas spawn`, `oas retire`, every `aw mail`/`aw
+  chat`, and any other `oas` subcommand your capabilities add. They resolve
+  their scope from the directory you run
   them in, so running them from the work tree points them at the wrong
   deployment. To act on a different package or config scope deliberately, pass
   an explicit resolved path: `oas <cmd> --dir <path>`.
-- **Treat the home's `soul` link as read-only.** One path updates a soul, in
-  every custody: you write what you learn to `notes/`, and the harvester
-  promotes it. Where the soul itself then changes is the harvester's business —
-  a branch and a PR for a committed soul, a direct edit for an uncommitted local
-  one. Editing through the link yourself skips that judgement and leaves no
-  record of what changed or why. Soul content that lives in THIS repository is
-  ordinary code: change it on tracked paths under `work/`, reviewed like the
-  rest.
+- **The home's `soul` link is not your edit surface.** It is there so you can
+  READ your durable knowledge. Writing through it changes durable state outside
+  your branch, where no review sees it and nothing records what changed or why.
+  If your TASK is to change soul content that lives in this repository, that is
+  ordinary code work — do it on tracked paths under `work/`, reviewed like the
+  rest. How your own learnings reach your soul is your knowledge layer's
+  business, and its instructions below say so if you have one.
 
 **`<instance-home>/work` is your repository or workspace view** — whatever your
 work mode grants you of the code.

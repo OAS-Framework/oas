@@ -3581,8 +3581,7 @@ const BOUNDARY_MUST_SAY = [
   "It is not your user home (`~`), not the repository root, and not the work tree",
   "Run `aw` and OAS operational/lifecycle commands from instance home",
   "oas <cmd> --dir <path>",                               // the deliberate alternate scope
-  "Treat the home's `soul` link as read-only",            // treated as, not claimed to be
-  "you write what you learn to `notes/`, and the harvester promotes it",   // ONE mutation path, every custody
+  "The home's `soul` link is not your edit surface",      // not "read-only": it is writable, and that is the point
 ];
 // The instruction that taught the root-placement bug, in any shipped surface.
 const SETTLE_IN_WORK = /cd work\/? once|and stay there|where you live|Start in `work\/`/i;
@@ -3660,23 +3659,69 @@ test("a REAL spawned packaged reviewer gets the boundary and keeps its own repor
   rmSync(base, { recursive: true, force: true });
 });
 
-test("a local soul is told ONE soul-mutation path, not two (reviewer-focus-699fdb6)", () => {
+// Notes and `oas okf harvest` come from the oas.okf capability. An instance
+// without it has neither, and a capability service agent has its knowledge layer
+// SUPPRESSED by design — the shipped reviewer is told in its own soul not to
+// write notes/ and not to run any harvest. So the kernel-composed blocks must
+// stay knowledge-provider-neutral: prescribing that protocol unconditionally
+// tells those instances to use machinery they do not have, or that their own
+// instructions forbid (reviewer-focus-b512782).
+const KNOWLEDGE_PROTOCOL = /`notes\/`|okf harvest|the harvester promotes/i;
+
+test("kernel-composed blocks never prescribe a knowledge protocol they cannot guarantee (reviewer-focus-b512782)", () => {
   const base = temp();
   const { repo, root } = fixtureSoul(base, "pi");
-  // kind "local" adds a block the four mode compositions never see — and it used
-  // to say soul updates are plain edits through ./soul/ while the boundary said
-  // to treat that link as read-only. The same instance was handed both rules.
-  const text = flat(composeInstanceAgentsMd(join(root, "dev", "soul"), repo, "dev", "worktree", "local").text);
-  assert.ok(text.includes("Local soul (uncommitted)"), "precondition: the local block composed");
-  for (const must of BOUNDARY_MUST_SAY) {
-    assert.ok(text.includes(flat(must)), `local soul: must say ${JSON.stringify(must)}`);
+  const soulDir = join(root, "dev", "soul");
+  // No oas.okf capability anywhere in this fixture: whatever these blocks say,
+  // no notes/ dir is scaffolded and no `oas okf harvest` exists.
+  const kernelOnly = (mode, kind) => flat(composeInstanceAgentsMd(soulDir, repo, "dev", mode, kind).text);
+  for (const mode of ["worktree", "checkout", "attached", "workspace"]) {
+    for (const kind of [undefined, "local", "capability"]) {
+      const text = kernelOnly(mode, kind);
+      for (const must of BOUNDARY_MUST_SAY) {
+        assert.ok(text.includes(flat(must)), `${mode}/${kind}: must say ${JSON.stringify(must)}`);
+      }
+      assert.doesNotMatch(text, KNOWLEDGE_PROTOCOL,
+        `${mode}/${kind}: kernel blocks must not prescribe notes//harvest — no knowledge layer is composed here`);
+      assert.doesNotMatch(text, SETTLE_IN_WORK, `${mode}/${kind}`);
+    }
   }
-  // One path, stated the same way by both blocks.
-  assert.ok(text.includes(flat("you write what you learn to `notes/`, and the harvester promotes it")));
-  assert.ok(text.includes(flat("you write what you learn to `notes/` and call the harvester")),
-    "the local block must prescribe the same path, not direct soul edits");
-  assert.doesNotMatch(text, /Your soul updates are plain file edits/,
-    "the retired instruction to edit the soul directly must be gone");
+  // The local block states CUSTODY (no commit, no PR, immediate effect) without
+  // prescribing who writes, and no longer tells the agent to edit its own soul.
+  const local = kernelOnly("worktree", "local");
+  assert.ok(local.includes("Local soul (uncommitted)"), "precondition: the local block composed");
+  assert.doesNotMatch(local, /Your soul updates are plain file edits/,
+    "the retired direct-edit instruction must stay gone");
+  assert.ok(local.includes(flat("no git commit, no PR, because this directory is not version-controlled")));
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("with the knowledge layer active, ONE block owns the protocol (reviewer-focus-b512782)", () => {
+  const base = temp();
+  const { repo, root } = fixtureSoul(base, "pi");
+  const src = resolve(new URL("../capabilities/oas-okf", import.meta.url).pathname);
+  const dst = join(repo, ".agents", "capabilities", "owned", "oas-okf");
+  mkdirSync(dirname(dst), { recursive: true });
+  cpSync(src, dst, { recursive: true });
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  layers:\n    knowledge:\n      capability: oas.okf\n      global: true\n");
+  const soulDir = join(root, "dev", "soul");
+
+  // Persistent + worktree + OKF: the combination the earlier local-only test
+  // could not reach. The knowledge block prescribes the protocol; the kernel
+  // boundary defers to it and speaks only about ASSIGNED soul work.
+  const text = flat(composeInstanceAgentsMd(soulDir, repo, "dev", "worktree").text);
+  assert.match(text, KNOWLEDGE_PROTOCOL, "the knowledge layer supplies the protocol");
+  assert.ok(text.includes(flat("How your own learnings reach your soul is your knowledge layer's business")),
+    "and the boundary defers rather than competing with it");
+  assert.ok(text.includes(flat("If your TASK is to change soul content that lives in this repository")),
+    "assigned soul-maintenance work is distinguished from promotion of learnings");
+
+  // Capability service agent: the knowledge layer is suppressed by design, so
+  // the protocol must not reach it from ANY block.
+  const cap = flat(composeInstanceAgentsMd(soulDir, repo, "dev", "attached", "capability").text);
+  assert.doesNotMatch(cap, KNOWLEDGE_PROTOCOL,
+    "a capability agent's knowledge layer is suppressed — nothing may prescribe notes//harvest to it");
+  for (const must of BOUNDARY_MUST_SAY) assert.ok(cap.includes(flat(must)), `capability: must still say ${JSON.stringify(must)}`);
   rmSync(base, { recursive: true, force: true });
 });
 

@@ -9,14 +9,11 @@ What this changes — and what it does not:
 
 - **Work is unchanged.** Your `./work`, branches, commits, and task flow are
   exactly those of any other instance. Commit your repository work normally.
-- **How your soul is updated is unchanged too**: you write what you learn to
-  `notes/` and call the harvester, which promotes it into the soul for you.
-  Custody only changes what the harvester then has to do — for a local soul it
-  edits the soul directly, with no commit and no PR, and the update takes effect
-  for every future instance of this soul on this machine immediately.
-- **So the `soul` link stays hands-off for you.** Editing it yourself skips the
-  promotion judgement the harvester exists to apply, and leaves no record of
-  what changed or why.
+- **Custody changes delivery, not your job.** Whatever updates your soul writes
+  here directly — no git commit, no PR, because this directory is not
+  version-controlled — and the change takes effect for every future instance of
+  this soul on this machine immediately. There is no branch to review it on,
+  which is the reason the `soul` link is not yours to edit by hand.
 - **Durability is your machine's.** Your soul has no remote backup; if it
   matters long-term, tell your human it deserves promotion to a committed
   soul in `agents/`.
