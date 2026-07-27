@@ -98,7 +98,7 @@ test("reader parity (clean fixture, unconditional): kernel resolves and matches 
   mkdirSync(join(capDir, "skills", "how-to"), { recursive: true });
   writeFileSync(join(capDir, "skills", "how-to", "SKILL.md"), "---\nname: how-to\ndescription: d\n---\n# s\n");
   writeFileSync(join(scope, "repo-a", "oas-config.yaml"),
-    "name: repo-a\ncapabilities:\n  additive:\n    clean.cap:\n      from: path:../.agents/capabilities/owned/clean-cap\n");
+    "name: repo-a\ncapabilities:\n  additive:\n    clean.cap:\n      from: owned\n");
 
   // Kernel MUST resolve on the clean fixture — no conditional escape here.
   const k = core.resolveOasConfig(join(scope, "repo-a"));
@@ -330,4 +330,52 @@ test("no shipped desktop source imports the checkout kernel or accepts a framewo
     assert.ok(!src.includes("OAS_DESKTOP_FRAMEWORK_ROOT"), `${f}: accepts the framework-root env override`);
     assert.ok(!/FRAMEWORK_ROOT|REPO_ROOT/.test(src), `${f}: infers a repo/framework root`);
   }
+});
+
+test("desktop hides tampered locked capability agents while kernel fails closed", () => {
+  const scope = mkdtempSync(join(tmpdir(), "oas-reader-agent-trust-"));
+  writeFileSync(join(scope, "oas-config.yaml"), "name: trust\ncapabilities:\n  additive:\n    locked.agent:\n      from: installed\n");
+  const capDir = join(scope, ".agents", "capabilities", "installed", "locked-agent");
+  mkdirSync(join(capDir, "agents", "helper"), { recursive: true });
+  writeFileSync(join(capDir, "oas.json"), JSON.stringify({ capability: "locked.agent", version: "1.0.0", description: "d", agents: ["agents/helper"] }));
+  writeFileSync(join(capDir, "agents", "helper", "soul.yaml"), "name: helper\nkind: local\n");
+  writeFileSync(join(capDir, "agents", "helper", "AGENTS.md"), "SAFE\n");
+  writeFileSync(join(scope, "oas-lock.json"), JSON.stringify({ lockfileVersion: 1, capabilities: {
+    "locked.agent": { source: "path:/fixture", version: "1.0.0", integrity: core.capabilityIntegrity(capDir), trustedExecutables: false },
+  } }));
+  const root = join(scope, "agents"); mkdirSync(root);
+  assert.equal(core.listCapabilityAgents(scope).length, 1, "kernel allows instruction-only surface at exact integrity without executable approval");
+  assert.equal(reader.listCapabilityAgents(scope).length, 1);
+  writeFileSync(join(capDir, "agents", "helper", "AGENTS.md"), "TAMPERED\n");
+  const kernelList = core.listCapabilityAgents(scope);
+  assert.deepEqual(kernelList, [], "kernel degrades tampered provider independently");
+  assert.equal(kernelList.diagnostics[0].capability, "locked.agent");
+  assert.deepEqual(reader.listCapabilityAgents(scope), [], "desktop degrades tampered provider to invisible");
+  assert.equal(reader.findCapabilityAgent(scope, root, "helper"), undefined, "desktop find cannot expose tampered agent");
+  fsExtra.rmSync(scope, { recursive: true, force: true });
+});
+
+test("desktop discards whole invalid lock files before capability-agent trust", () => {
+  const scope = mkdtempSync(join(tmpdir(), "oas-reader-invalid-lock-"));
+  writeFileSync(join(scope, "oas-config.yaml"), "name: trust\ncapabilities:\n  additive:\n    valid.agent:\n      from: installed\n");
+  const capDir = join(scope, ".agents", "capabilities", "installed", "valid-agent");
+  mkdirSync(join(capDir, "agents", "helper"), { recursive: true });
+  writeFileSync(join(capDir, "oas.json"), JSON.stringify({ capability: "valid.agent", version: "1.0.0", description: "d", agents: ["agents/helper"] }));
+  writeFileSync(join(capDir, "agents", "helper", "soul.yaml"), "name: helper\nkind: local\n");
+  const good = { source: "path:/fixture", version: "1.0.0", integrity: core.capabilityIntegrity(capDir), trustedExecutables: false };
+  const file = join(scope, "oas-lock.json");
+  const invalidBodies = [
+    "{", "null", "1", "[]",
+    JSON.stringify({ lockfileVersion: 3, capabilities: { "valid.agent": good } }),
+    JSON.stringify({ lockfileVersion: 2, packages: null, capabilities: { "valid.agent": good } }),
+    JSON.stringify({ lockfileVersion: 1, capabilities: [] }),
+    JSON.stringify({ lockfileVersion: 1, capabilities: { "valid.agent": good, "bad.agent": null } }),
+    JSON.stringify({ lockfileVersion: 1, capabilities: { "valid.agent": { ...good, integrity: "bad" } } }),
+  ];
+  for (const body of invalidBodies) {
+    writeFileSync(file, body);
+    assert.deepEqual(reader.listCapabilityAgents(scope), [], `invalid whole lock invisible: ${body}`);
+    assert.equal(reader.findCapabilityAgent(scope, join(scope, "agents"), "helper"), undefined);
+  }
+  fsExtra.rmSync(scope, { recursive: true, force: true });
 });

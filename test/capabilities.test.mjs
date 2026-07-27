@@ -141,7 +141,7 @@ test("pi and Claude instances receive the same exact local skills and generated 
     const claude = spawnInstance(root, agent, { instance: "dev-claude", runtime: "claude", launch: false });
     for (const meta of [pi, claude]) {
       const names = readdirSync(join(meta.home, ".agents", "skills")).sort();
-      assert.deepEqual(names, ["oas", "oas-config", "private", "review"]);
+      assert.deepEqual(names, ["oas", "oas-config", "oas-packages", "private", "review"]);
       assert.equal(lstatSync(join(meta.home, ".agents", "skills", "review")).isDirectory(), true);
       assert.equal(existsSync(join(meta.home, ".agents", "skills", "pollution")), false);
       assert.equal(lstatSync(join(meta.home, "AGENTS.md")).isSymbolicLink(), false);
@@ -514,7 +514,7 @@ test("executable and nested skill paths cannot escape the package integrity boun
   });
   write(join(repo, "outside.mjs"), "console.log('outside lock')\n");
   writeCapabilityLock(repo, "acme.escape", {
-    source: "path:escape", integrity: capabilityIntegrity(dir), trustedExecutables: true,
+    source: "path:escape", version: "1.0.0", integrity: capabilityIntegrity(dir), trustedExecutables: true,
   });
   write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.escape:\n      global: true\n");
   assert.throws(() => resolveOasConfig(repo, "dev"), /path escapes its integrity boundary/);
@@ -1910,4 +1910,59 @@ test("local souls get memory scaffolding from oas-okf; capability agents stay me
       core.retireInstance(root, "reviewer-1", { tmuxSession: "oas-test-nosuch" });
     } finally { process.env.PATH = oldPath; }
   });
+});
+
+test("capability-agent trust isolates providers and preserves path/owned structural trust", async () => {
+  const core = await import("../lib/core.mjs");
+  const base = temp(); const { repo, root } = fixtureSoul(base);
+
+  // Developer-owned path provider: instruction agents are structurally trusted
+  // without a lock, while its executable command policy remains unchanged.
+  const pathDir = join(base, "path-cap");
+  write(join(pathDir, "oas.json"), JSON.stringify({ capability: "path.agent", version: "1.0.0", description: "path", agents: ["agents/helper"], commands: { run: "run.mjs" } }));
+  write(join(pathDir, "agents", "helper", "soul.yaml"), "name: helper\nkind: capability\nwork: checkout\nruntime: pi\n");
+  write(join(pathDir, "agents", "helper", "AGENTS.md"), "# path helper\n");
+  write(join(pathDir, "run.mjs"), "// executable remains subject to old policy\n");
+
+  // Owned provider parity.
+  capability(repo, "own-agent", { capability: "owned.agent", agents: ["agents/ownhelper"] }, {
+    "agents/ownhelper/soul.yaml": "name: ownhelper\nkind: capability\nwork: checkout\nruntime: pi\n",
+    "agents/ownhelper/AGENTS.md": "# owned helper\n",
+  });
+
+  // Locked installed provider with two names; tamper after locking.
+  const badDir = join(repo, ".agents", "capabilities", "installed", "bad-agent");
+  write(join(badDir, "oas.json"), JSON.stringify({ capability: "bad.agent", version: "1.0.0", description: "bad", agents: ["agents/helper", "agents/badonly"] }));
+  for (const name of ["helper", "badonly"]) {
+    write(join(badDir, "agents", name, "soul.yaml"), `name: ${name}\nkind: capability\nwork: checkout\nruntime: pi\n`);
+    write(join(badDir, "agents", name, "AGENTS.md"), `# ${name}\n`);
+  }
+  writeCapabilityLock(repo, "bad.agent", { source: "path:/fixture", version: "1.0.0", integrity: capabilityIntegrity(badDir), trustedExecutables: false });
+  write(join(badDir, "agents", "badonly", "AGENTS.md"), "TAMPERED\n");
+
+  const config = (badFirst) => `capabilities:\n  additive:\n${badFirst ? "    bad.agent:\n      from: installed\n" : ""}    path.agent:\n      from: path:${pathDir}\n    owned.agent:\n      from: owned\n${badFirst ? "" : "    bad.agent:\n      from: installed\n"}`;
+  for (const badFirst of [true, false]) {
+    write(join(repo, "oas-config.yaml"), config(badFirst));
+    const helper = core.findCapabilityAgent(repo, root, "helper");
+    assert.equal(helper.capability, "path.agent", `trusted match survives invalid provider ${badFirst ? "before" : "after"}`);
+    assert.equal(core.findCapabilityAgent(repo, root, "does-not-exist"), undefined, "unrelated invalid provider never poisons not-found");
+  }
+  assert.throws(() => core.findCapabilityAgent(repo, root, "badonly"), (e) => e.code === "integrity-drift", "matched tampered provider rejects");
+  assert.equal(core.capabilityTrust(core.capabilityManifest("path.agent", repo), repo).trusted, false, "path executable policy remains lock/approval-gated");
+
+  const listed = core.listCapabilityAgents(repo);
+  assert.deepEqual(listed.map((a) => `${a.capability}:${a.name}`).sort(), ["owned.agent:ownhelper", "path.agent:helper"]);
+  assert.equal(listed.diagnostics.length, 1, "invalid provider reported once");
+  assert.equal(listed.diagnostics[0].capability, "bad.agent");
+  assert.match(listed.diagnostics[0].message, /integrity/);
+  assert.ok(listed.diagnostics[0].provenance, "diagnostic carries provenance");
+
+  const agent = core.findCapabilityAgent(repo, root, "helper");
+  const oldPath = process.env.PATH; process.env.PATH = fakeRuntimes(base);
+  try {
+    const spawned = core.spawnInstance(root, { ...agent, repo }, { instance: "helper-path", launch: false });
+    assert.match(readFileSync(join(spawned.home, "AGENTS.md"), "utf8"), /path helper/);
+    core.retireInstance(root, "helper-path", { tmuxSession: "oas-test-nosuch" });
+  } finally { process.env.PATH = oldPath; }
+  rmSync(base, { recursive: true, force: true });
 });
