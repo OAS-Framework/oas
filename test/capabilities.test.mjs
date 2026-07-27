@@ -41,11 +41,18 @@ function fakeRuntimes(base) {
   return `${bin}:${process.env.PATH}`;
 }
 
-/** A `pi` stub that answers `pi list` the way pi does: two-space spec line with
- * an optional "(filtered)" marker, then the resolved install directory. */
+/** A `pi` stub that answers `pi list` the way pi actually does: a two-space spec
+ * line with an optional "(filtered)" marker, and the install path line ONLY when
+ * the package is really installed — pi's list command guards it with
+ * `if (pkg.installedPath)`. A stub that always printed a path made a
+ * configured-but-never-installed package look installed, which is how a stale
+ * row slipped through the gate (reviewer-6ad0dde). */
 function fakePiWithPackages(base, rows) {
   const bin = join(base, "bin"); mkdirSync(bin, { recursive: true });
-  const body = ["User packages:", ...rows.flatMap((r) => [`  ${r.source}${r.filtered ? " (filtered)" : ""}`, `    ${r.dir}`])].join("\n");
+  const body = ["User packages:", ...rows.flatMap((r) => [
+    `  ${r.source}${r.filtered ? " (filtered)" : ""}`,
+    ...(r.dir ? [`    ${r.dir}`] : []),
+  ])].join("\n");
   write(join(bin, "pi"), `#!/bin/sh\nif [ "$1" = "list" ]; then cat <<'EOF'\n${body}\nEOF\nfi\nexit 0\n`);
   write(join(bin, "claude"), "#!/bin/sh\nexit 0\n");
   execFileSync("chmod", ["-R", "+x", bin]);
@@ -2527,16 +2534,16 @@ test("a stale settings row whose files were never installed fails the spawn (rev
   write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.chan:\n      global: true\n");
   const piDir = join(base, "pi-agent");
   write(join(piDir, "settings.json"), JSON.stringify({ packages: ["npm:fake-channel"] }));
-  // pi names a directory, but nothing was ever installed there (offline install,
-  // or the tree was removed). Presence in settings would have passed this gate.
-  const ghostDir = join(piDir, "npm", "node_modules", "fake-channel");
+  // Configured but never installed: pi prints the source line and NO path line,
+  // exactly as its list command does when installedPath is unset. Presence in
+  // settings — or a parser that shrugs at the missing line — would pass this.
   const oldPath = process.env.PATH;
-  process.env.PATH = fakePiWithPackages(base, [{ source: "npm:fake-channel", dir: ghostDir }]);
+  process.env.PATH = fakePiWithPackages(base, [{ source: "npm:fake-channel" }]);
   const oldPi = process.env.PI_CODING_AGENT_DIR; process.env.PI_CODING_AGENT_DIR = piDir;
   try {
     assert.throws(
       () => spawnInstance(root, findAgent(root, "dev"), { instance: "dev-ghost", launch: false }),
-      (e) => e.code === "E_RUNTIME_RESOURCE_MISSING" && /nothing is installed there/.test(e.message),
+      (e) => e.code === "E_RUNTIME_RESOURCE_MISSING" && /reports no installed location, so it was never installed/.test(e.message),
     );
   } finally {
     process.env.PATH = oldPath;
@@ -2569,6 +2576,61 @@ test("a non-empty resource filter is recorded as auditable, not second-guessed",
     assert.equal(pkg.filtered, true, "the narrowing is visible for audit");
     assert.equal(pkg.dir, pkgDir, "provenance records where the runtime says it lives");
     retireInstance(root, "dev-filt", { tmuxSession: "oas-test-nosuch" });
+  } finally {
+    process.env.PATH = oldPath;
+    if (oldPi === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = oldPi;
+  }
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("a directory pi names but that does not exist also fails the spawn", () => {
+  const base = temp();
+  const { repo, root } = fixtureSoul(base, "pi");
+  capability(repo, "chan", {
+    capability: "acme.chan",
+    requires: [{ runtime: "pi", package: "npm:fake-channel", why: "channel extension" }],
+  });
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.chan:\n      global: true\n");
+  const piDir = join(base, "pi-agent");
+  write(join(piDir, "settings.json"), JSON.stringify({ packages: ["npm:fake-channel"] }));
+  const oldPath = process.env.PATH;
+  process.env.PATH = fakePiWithPackages(base, [{ source: "npm:fake-channel", dir: join(piDir, "npm", "node_modules", "gone") }]);
+  const oldPi = process.env.PI_CODING_AGENT_DIR; process.env.PI_CODING_AGENT_DIR = piDir;
+  try {
+    assert.throws(
+      () => spawnInstance(root, findAgent(root, "dev"), { instance: "dev-gonedir", launch: false }),
+      (e) => e.code === "E_RUNTIME_RESOURCE_MISSING" && /but nothing is installed there/.test(e.message),
+    );
+  } finally {
+    process.env.PATH = oldPath;
+    if (oldPi === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = oldPi;
+  }
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("when pi cannot be run, a config entry is not accepted as an installation", () => {
+  const base = temp();
+  const { repo, root } = fixtureSoul(base, "pi");
+  capability(repo, "chan", {
+    capability: "acme.chan",
+    requires: [{ runtime: "pi", package: "npm:fake-channel", why: "channel extension" }],
+  });
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.chan:\n      global: true\n");
+  const piDir = join(base, "pi-agent");
+  write(join(piDir, "settings.json"), JSON.stringify({ packages: ["npm:fake-channel"] }));
+  // `pi list` fails, so only settings are readable — which record intent, never
+  // installation. Fail closed rather than trust a config file.
+  const bin = join(base, "bin"); mkdirSync(bin, { recursive: true });
+  write(join(bin, "pi"), "#!/bin/sh\nexit 3\n");
+  write(join(bin, "claude"), "#!/bin/sh\nexit 0\n");
+  execFileSync("chmod", ["-R", "+x", bin]);
+  const oldPath = process.env.PATH; process.env.PATH = `${bin}:${process.env.PATH}`;
+  const oldPi = process.env.PI_CODING_AGENT_DIR; process.env.PI_CODING_AGENT_DIR = piDir;
+  try {
+    assert.throws(
+      () => spawnInstance(root, findAgent(root, "dev"), { instance: "dev-noverify", launch: false }),
+      (e) => e.code === "E_RUNTIME_RESOURCE_MISSING" && /could not verify it is installed/.test(e.message),
+    );
   } finally {
     process.env.PATH = oldPath;
     if (oldPi === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = oldPi;
