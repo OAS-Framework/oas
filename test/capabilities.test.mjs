@@ -2058,3 +2058,80 @@ test("spawnInstance refuses to create an instance home inside a linked worktree"
   execFileSync("git", ["-C", repo, "worktree", "remove", "--force", wt]);
   rmSync(base, { recursive: true, force: true });
 });
+
+test("spawnInstance validates the AGENT DIR, not just the root (reviewer-2366d09)", () => {
+  const base = temp();
+  const { repo, root, wt, wtRoot } = repoWithWorktree(base);
+  // The hole: canonicalize the root, but keep an agent resolved from the LINKED
+  // root. A root-only guard passes and the home is still built under
+  // `agent._dir/instances/…` — inside the worktree.
+  const linkedAgent = findAgent(wtRoot, "dev");
+  assert.equal(linkedAgent._dir, join(wtRoot, "dev"), "the agent carries the linked dir");
+  const oldPath = process.env.PATH; process.env.PATH = fakeRuntimes(base);
+  try {
+    assert.throws(
+      () => spawnInstance(root, linkedAgent, { instance: "dev-mixed", launch: false }),
+      (e) => e.code === "E_NO_CANONICAL_ROOT" && /agent directory for "dev"/.test(e.message),
+      "canonical root + linked agent dir must still fail closed",
+    );
+    assert.equal(existsSync(join(wtRoot, "dev", "instances", "dev-mixed")), false, "no home in the worktree");
+  } finally { process.env.PATH = oldPath; }
+  execFileSync("git", ["-C", repo, "worktree", "remove", "--force", wt]);
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("a failed Git probe fails closed instead of passing as a non-Git scope (reviewer-2366d09)", async () => {
+  const core = await import("../lib/core.mjs");
+  const base = temp();
+  const { repo, root, wt, wtRoot } = repoWithWorktree(base);
+  // git unavailable / dubious ownership / unreadable metadata: rev-parse fails
+  // while the location is still plainly Git-owned. Treating that as "not a repo"
+  // would let the linked worktree through — the fail-open this guards.
+  const bin = join(base, "bin"); mkdirSync(bin, { recursive: true });
+  write(join(bin, "git"), `#!/bin/sh\necho "fatal: detected dubious ownership" >&2\nexit 128\n`);
+  execFileSync("chmod", ["+x", join(bin, "git")]);
+  const oldPath = process.env.PATH;
+  process.env.PATH = `${bin}:${oldPath}`;
+  try {
+    assert.throws(
+      () => core.canonicalAgentsRoot(wtRoot),
+      (e) => e.code === "E_NO_CANONICAL_ROOT" && /could not be read/.test(e.message),
+      "a Git-owned location with an unreadable repository must not pass as non-Git",
+    );
+    // A genuinely non-Git scope (no .git marker anywhere above) still passes through.
+    const plain = join(base, "plain", "agents"); mkdirSync(plain, { recursive: true });
+    assert.equal(core.canonicalAgentsRoot(plain), plain);
+  } finally { process.env.PATH = oldPath; }
+  execFileSync("git", ["-C", repo, "worktree", "remove", "--force", wt]);
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("OAS_INSTANCE_HOME is exported to the runtime and to lifecycle hooks, aliases retained", () => {
+  const base = temp();
+  const { repo, root, soul } = fixtureSoul(base, "pi");
+  // A hook that records the env it was given.
+  const probe = `import {writeFileSync} from 'node:fs';
+writeFileSync(process.env.OAS_CONTEXT + '/hook-env.json', JSON.stringify({
+  instanceHome: process.env.OAS_INSTANCE_HOME || null,
+  legacyHome: process.env.OAS_HOME || null,
+  storeDir: process.env.OAS_HOME_DIR || null,
+}));
+console.log('{}');`;
+  capability(repo, "envprobe", { capability: "acme.envprobe", hooks: { spawn: "hook.mjs" } }, { "hook.mjs": probe });
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.envprobe:\n      global: true\n");
+  const oldPath = process.env.PATH; process.env.PATH = fakeRuntimes(base);
+  try {
+    const r = spawnInstance(root, findAgent(root, "dev"), { instance: "dev-env", launch: false });
+    const seen = JSON.parse(readFileSync(join(repo, "hook-env.json"), "utf8"));
+    assert.equal(seen.instanceHome, r.home, "hooks receive the runtime-neutral name");
+    assert.equal(seen.legacyHome, r.home, "OAS_HOME stays a compatibility alias for shipped capability hooks");
+    // The package STORE root is a different concept and must never be conflated.
+    assert.notEqual(seen.storeDir, r.home);
+    // Every runtime gets the neutral name; the pi-branded ones remain as aliases
+    // because the separately published @oas-framework/pi extension reads them.
+    assert.match(r.command, new RegExp(`OAS_INSTANCE_HOME='${r.home}'`));
+    assert.match(r.command, new RegExp(`PI_AGENT_HOME='${r.home}'`));
+    retireInstance(root, "dev-env", { tmuxSession: "oas-test-nosuch" });
+  } finally { process.env.PATH = oldPath; }
+  rmSync(base, { recursive: true, force: true });
+});
