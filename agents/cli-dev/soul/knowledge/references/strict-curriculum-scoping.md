@@ -19,6 +19,9 @@ curriculum enforcement:
   generated instance `AGENTS.md` through `--append-system-prompt <file>`. Built-in
   tools survive; `--no-tools` must not be used for launch or skill-inventory
   probes. See [pi strict launch](/lessons/pi-strict-launch-requires-no-extensions.md).
+  Do not enable that launch line before runtime extensions are capability
+  resources, because the aweb Pi extension currently comes only from user-global
+  Pi settings; see [the Pi runtime-extension blocker](/lessons/pi-strict-launch-blocked-on-runtime-extensions.md).
 - Claude Code: verified on Claude Code 2.1.220 that an isolated
   `CLAUDE_CONFIG_DIR` breaks OAuth/keychain auth. The working strict mechanism is
   `--setting-sources ""` against the deployment's real config dir, plus

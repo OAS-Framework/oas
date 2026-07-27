@@ -1,6 +1,9 @@
 # Knowledge Log
 
 ## 2026-07-27
+* **Creation**: [pi-strict-launch-blocked-on-runtime-extensions](/lessons/pi-strict-launch-blocked-on-runtime-extensions.md) records that Pi strict launch must not enable `--no-extensions` until runtime extensions are declared, materialized, and provenance-recorded by capabilities, because aweb Pi messaging currently depends on the user's global Pi extension.
+* **Update**: [pi-strict-launch-requires-no-extensions](/lessons/pi-strict-launch-requires-no-extensions.md) links the verified strict-launch line to the runtime-extension blocker.
+* **Update**: [strict-curriculum-scoping](/references/strict-curriculum-scoping.md) records the aweb Pi extension sequencing blocker for the strict curriculum release gate.
 * **Creation**: [canonical-agents-root-git-identity](/lessons/canonical-agents-root-git-identity.md) records that canonicalAgentsRoot identifies the primary checkout from the first Git worktree porcelain record and must map linked-worktree roots with realpath containment checks.
 * **Update**: [instance-homes-follow-cwd-into-linked-worktrees](/lessons/instance-homes-follow-cwd-into-linked-worktrees.md) links to the implemented canonical deployment-root redirect.
 * **Creation**: [claude-strict-launch-setting-sources](/lessons/claude-strict-launch-setting-sources.md) records the verified Claude Code strict curriculum mechanism: `--setting-sources ""` keeps auth while excluding ambient skills/context, and selected plugins must be re-added with `--plugin-dir`.

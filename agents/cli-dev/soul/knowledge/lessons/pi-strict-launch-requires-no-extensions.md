@@ -47,6 +47,11 @@ or with a probe meant to enumerate skills.
 
 # Related
 
+Do not turn this launch line on in production until [runtime extensions are
+capability resources](/lessons/pi-strict-launch-blocked-on-runtime-extensions.md):
+without a capability-declared Pi extension resource, `--no-extensions` would
+disable aweb messaging.
+
 See [Claude Code strict launch uses --setting-sources](/lessons/claude-strict-launch-setting-sources.md)
 for the corresponding Claude runtime isolation rule. The governing release gate
 is in [strict curriculum scoping](/references/strict-curriculum-scoping.md): an
