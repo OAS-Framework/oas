@@ -1704,6 +1704,13 @@ function retireCmd() {
     if (hit && resolve(hit.root) !== resolve(root)) { root = hit.root; console.log(`(cross-repo: instance homes at ${shortPath(root)})`); }
   }
   const r = retireInstance(root, name, { self: isSelf, deleteBranch: args.includes("--delete-branch"), keepDir: args.includes("--keep-dir"), force: args.includes("--force") });
+  // Forced removal past an incomplete cleanup: the home is gone because the
+  // operator said so, but the external state it owed is still out there and
+  // nobody else will mention it again.
+  if (r.forcedIncomplete) {
+    console.error(`Removed ${r.retired} under --force with cleanup INCOMPLETE — this external state was NOT cleaned up and is now yours to remove by hand:`);
+    for (const f of r.forcedIncomplete) console.error(`  ${f}`);
+  }
   if (args.includes("--json")) { console.log(JSON.stringify(r, null, 2)); if (r.rollbackIncomplete) process.exit(1); return; }
   // An unsuccessful cleanup retry must NOT read as a completed retirement: the
   // home and its external state are still there, and a zero exit would tell

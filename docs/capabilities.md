@@ -85,14 +85,23 @@ A self-contained package has an `oas.json`:
   finish keeps the home again, names what is outstanding, and exits nonzero.
 - The **escape hatch is `oas retire <instance> --force`**, for a home OAS cannot
   identify at all: no `instance.json` and no **usable** cleanup descriptor. Usable
-  means it can actually drive the retry, checked to the depth the retry consumes
-  it: a context `repo`, a recognised `work` mode (an unknown one would skip the
-  rollback-owned Git cleanup and call it done), and — when the descriptor carries
-  its own capability set — real capability entries covering the capabilities that
-  failed (an empty or malformed set reruns no hook, then clears the quarantine and
-  deletes the credential it was holding). A marker failing any of that is no more
-  retryable than a missing one, and is treated as missing so the escape hatch
-  works. Without `--force` that state fails closed with
+  means it satisfies the versioned cleanup contract the rollback writes, checked
+  to the depth the retry consumes it: `version`, a context `repo`, a recognised
+  `work` mode (plus a `branch` for `worktree` — an unknown mode would skip the
+  rollback-owned Git cleanup and call it done), a real non-empty capability set,
+  and the record of which retire hooks still owe cleanup. A marker failing any of
+  that is no more retryable than a missing one, and is treated as missing so the
+  escape hatch works.
+- A retry clears the quarantine only by **proving the outstanding work happened**:
+  every retire hook the marker records as owing cleanup must have run and reported
+  success, and the rollback-owned Git steps must verify. A retry that resolves no
+  capabilities — a hand-edited descriptor, or config drift since the spawn — is an
+  incomplete cleanup, not a clean one, and the home stays.
+- Because some cleanups can never succeed (a capability offering no way to undo its
+  own setup, a permanently unreachable remote), **`--force` also overrides
+  retention**: the home is removed, and everything still outstanding is printed as
+  state the operator now owns. Nothing is ever permanently unremovable through OAS,
+  and nothing is silently dropped. Without `--force` that state fails closed with
   `E_UNIDENTIFIED_INSTANCE_HOME` rather than deleting whatever credentials the
   directory still holds; `--force` removes it and leaves any external state for
   the operator to clean up by hand.

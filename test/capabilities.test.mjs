@@ -3330,39 +3330,63 @@ test("a home with no instance.json and no cleanup descriptor is not silently del
   rmSync(base, { recursive: true, force: true });
 });
 
-test("--force clears a home whose quarantine marker cannot drive a retry (reviewer-adff009, reviewer-45ff039r2, reviewer-0ad27d1)", () => {
+test("--force clears a home whose quarantine marker cannot drive a retry (reviewer-adff009, reviewer-45ff039r2, reviewer-0ad27d1, reviewer-dd03a98)", () => {
   const base = temp();
   const { root } = fixtureSoul(base, "pi");
-  // A marker that cannot drive the retry identifies nothing, so retire must
-  // still refuse by default — but --force is the documented escape and it has
-  // to actually work. Treating such a marker as a retryable quarantine made the
-  // retry impossible AND the home permanently unremovable: the retry ran
-  // without a context repo, reported the cleanup incomplete, and retained the
-  // home again on every attempt, forced or not.
+  // The cleanup descriptor is a strict contract with exactly one producer (the
+  // required-hook rollback), so each case below is that contract with ONE field
+  // broken. A marker that cannot drive the retry identifies nothing: retire must
+  // refuse by default, and --force — the documented escape — has to work.
+  // Tolerating any of these produced a retry that resolved nothing, reported no
+  // failures, and CLEARED the quarantine: the credential deleted while the
+  // external state it was held for survived.
   //
-  // "Parses as JSON" is not the bar — each of these is valid JSON and none of
-  // them can rerun a single hook.
+  // The positive control is not here but in the real-spawn quarantine tests
+  // above, which drive this same contract end to end.
+  const valid = () => ({
+    reason: "required spawn hook failed and compensation did not complete",
+    failed: [{ capability: "acme.chan", event: "spawn" }],
+    cleanup: {
+      version: 1, repo: join(base, "repo"), work: "checkout", branch: "main",
+      outstanding: { hooks: ["acme.chan"] },
+      capabilityRuntime: [{ id: "acme.chan", hooks: { retire: "hook.mjs retire" } }],
+      capabilityMeta: { "acme.chan": { alias: "probe" } },
+    },
+  });
+  const broken = (fn) => { const m = valid(); fn(m); return JSON.stringify(m); };
   const unusable = {
-    truncated: '{"cleanup": {"repo":',
-    "no descriptor": '{"reason": "required spawn hook failed"}',
-    "empty descriptor": '{"cleanup": {}}',
-    "array descriptor": '{"cleanup": []}',
-    "descriptor with no repo": '{"cleanup": {"branch": "agents/dev-broken"}}',
-    "descriptor with a mistyped repo": '{"cleanup": {"repo": 17}}',
-    "descriptor with a blank repo": '{"cleanup": {"repo": "   "}}',
-    "descriptor with a mistyped branch": '{"cleanup": {"repo": "/tmp/x", "branch": ["a"]}}',
-    "descriptor with a mistyped capabilityRuntime": '{"cleanup": {"repo": "/tmp/x", "capabilityRuntime": {}}}',
-    // Nested malformation (reviewer-0ad27d1): the outer shape is fine and the
-    // retry would run — having resolved NOTHING. That is worse than retention:
-    // the quarantine clears, the credential goes, the external state stays.
-    "capability entries that are not capabilities": '{"failed": [{"capability": "acme.chan"}], "cleanup": {"repo": "/tmp/x", "capabilityRuntime": [{}]}}',
-    "a null capability entry": '{"failed": [{"capability": "acme.chan"}], "cleanup": {"repo": "/tmp/x", "capabilityRuntime": [null]}}',
-    "an id-less capability entry": '{"failed": [{"capability": "acme.chan"}], "cleanup": {"repo": "/tmp/x", "capabilityRuntime": [{"id": "  "}]}}',
-    "an empty capability set": '{"failed": [{"capability": "acme.chan"}], "cleanup": {"repo": "/tmp/x", "capabilityRuntime": []}}',
-    "a capability set missing the capability that failed": '{"failed": [{"capability": "acme.chan"}], "cleanup": {"repo": "/tmp/x", "capabilityRuntime": [{"id": "acme.other"}]}}',
-    // An unrecognised work mode skips the rollback-owned Git steps entirely and
-    // then reports the cleanup complete.
-    "an unknown work mode": '{"failed": [{"capability": "acme.chan"}], "cleanup": {"repo": "/tmp/x", "work": "wortree", "capabilityRuntime": [{"id": "acme.chan"}]}}',
+    "truncated JSON": '{"cleanup": {"repo":',
+    "no descriptor at all": '{"reason": "required spawn hook failed"}',
+    "an array descriptor": '{"cleanup": []}',
+    "an empty descriptor": '{"cleanup": {}}',
+    // The contract version: a marker this kernel cannot interpret must not drive
+    // a retry on a guess.
+    "no contract version": broken((m) => { delete m.cleanup.version; }),
+    "a future contract version": broken((m) => { m.cleanup.version = 2; }),
+    // repo: retire resolves capabilities and reruns every hook from it.
+    "no context repo": broken((m) => { delete m.cleanup.repo; }),
+    "a blank context repo": broken((m) => { m.cleanup.repo = "   "; }),
+    "a mistyped context repo": broken((m) => { m.cleanup.repo = 17; }),
+    // work/branch: the rollback-owned Git steps. An unrecognised mode skips them
+    // silently and calls the cleanup complete.
+    "no work mode": broken((m) => { delete m.cleanup.work; }),
+    "an unknown work mode": broken((m) => { m.cleanup.work = "wortree"; }),
+    "a worktree with no branch": broken((m) => { m.cleanup.work = "worktree"; delete m.cleanup.branch; }),
+    "a worktree with a mistyped branch": broken((m) => { m.cleanup.work = "worktree"; m.cleanup.branch = ["a"]; }),
+    // capabilityRuntime IS the capability set handed to runLifecycleHooks.
+    "no capability set": broken((m) => { delete m.cleanup.capabilityRuntime; }),
+    "a mistyped capability set": broken((m) => { m.cleanup.capabilityRuntime = {}; }),
+    "an empty capability set": broken((m) => { m.cleanup.capabilityRuntime = []; }),
+    "capability entries that are not capabilities": broken((m) => { m.cleanup.capabilityRuntime = [{}]; }),
+    "a null capability entry": broken((m) => { m.cleanup.capabilityRuntime = [null]; }),
+    "an id-less capability entry": broken((m) => { m.cleanup.capabilityRuntime = [{ id: "  " }]; }),
+    "a capability set missing the outstanding capability": broken((m) => { m.cleanup.capabilityRuntime = [{ id: "acme.other" }]; }),
+    // outstanding.hooks is what the retry must PROVE it reran.
+    "no outstanding record": broken((m) => { delete m.cleanup.outstanding; }),
+    "a mistyped outstanding record": broken((m) => { m.cleanup.outstanding = ["acme.chan"]; }),
+    "a mistyped outstanding hook list": broken((m) => { m.cleanup.outstanding = { hooks: "acme.chan" }; }),
+    "a mistyped outstanding hook id": broken((m) => { m.cleanup.outstanding = { hooks: [{ id: "acme.chan" }] }; }),
+    "a mistyped capabilityMeta": broken((m) => { m.cleanup.capabilityMeta = []; }),
   };
   for (const [label, marker] of Object.entries(unusable)) {
     const home = join(root, "dev", "instances", "dev-broken");
@@ -3380,6 +3404,61 @@ test("--force clears a home whose quarantine marker cannot drive a retry (review
     assert.equal(r.removedDir, true, `${label}: removedDir`);
     assert.equal(existsSync(home), false, `${label}: the operator's escape hatch actually removes the home`);
   }
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("a retry that reruns NO outstanding hook fails closed, and --force is the way out (reviewer-dd03a98)", () => {
+  const base = temp();
+  const { repo, root } = fixtureSoul(base, "pi");
+  const remote = join(base, "remote-identity");
+  capability(repo, "chan", {
+    capability: "acme.chan",
+    hooks: { spawn: { command: "hook.mjs spawn", required: true }, retire: "hook.mjs retire" },
+  }, {
+    "hook.mjs": `import {writeFileSync} from 'node:fs';
+if (process.env.OAS_EVENT === 'spawn') { writeFileSync(${JSON.stringify(remote)}, 'joined'); console.log(JSON.stringify({ meta: { alias: 'probe' } })); process.exit(1); }
+console.log(JSON.stringify({ meta: { retired: false, reason: 'self-delete-failed' } })); process.exit(1);`,
+  });
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.chan:\n      global: true\n");
+  const oldPath = process.env.PATH; process.env.PATH = fakeRuntimes(base);
+  const home = join(root, "dev", "instances", "dev-nohook");
+  try {
+    assert.throws(() => spawnInstance(root, findAgent(root, "dev"), { instance: "dev-nohook", launch: false }),
+      (e) => e.code === "E_REQUIRED_HOOK_FAILED");
+    const markerPath = join(home, ".oas-rollback-incomplete.json");
+    const marker = JSON.parse(readFileSync(markerPath, "utf8"));
+    assert.deepEqual(marker.cleanup.outstanding.hooks, ["acme.chan"], "the marker records WHICH hook still owes cleanup");
+
+    // The descriptor stays structurally valid and still names the outstanding
+    // capability — it simply carries no retire hook for it. Whether that comes
+    // from a hand-edited marker or from config drift since the spawn, the retry
+    // resolves nothing to run: zero hooks, zero failures. Reporting that as a
+    // completed cleanup deletes the credential while the remote identity lives on.
+    marker.cleanup.capabilityRuntime = [{ id: "acme.chan" }];
+    writeFileSync(markerPath, JSON.stringify(marker, null, 2));
+
+    const r = retireInstance(root, "dev-nohook", { tmuxSession: "oas-test-nosuch" });
+    assert.ok(r.rollbackIncomplete?.some((f) => /acme\.chan: did not run/.test(f)),
+      `a hook that never ran cannot count as cleanup done, got ${JSON.stringify(r.rollbackIncomplete)}`);
+    assert.equal(r.removedDir, false);
+    assert.equal(existsSync(home), true, "the home survives");
+    assert.equal(existsSync(remote), true, "and so does the external state nobody cleaned up");
+
+    // ...and because that state can persist forever, the operator must still have
+    // a way out. --force removes the home and NAMES what it is leaving behind,
+    // rather than reporting a clean retirement.
+    const env = { ...process.env, PI_AGENTS_TMUX_SESSION: "oas-test-nosuch" };
+    delete env.PI_AGENTS_ROOT;
+    const cli = spawnSync(process.execPath, [CLI, "retire", "dev-nohook", "--dir", root, "--force", "--json"], { encoding: "utf8", env });
+    assert.equal(cli.status, 0, `a forced removal succeeded, so it exits 0: ${cli.stderr}`);
+    const f = JSON.parse(cli.stdout);
+    assert.equal(f.rollbackIncomplete, undefined);
+    assert.ok(f.forcedIncomplete?.length, "forced removal reports what was left outstanding");
+    assert.equal(f.removedDir, true);
+    assert.match(cli.stderr, /NOT cleaned up/, "and says so to the human, not only in the JSON");
+    assert.match(cli.stderr, /acme\.chan/, "naming the state they now own");
+    assert.equal(existsSync(home), false, "the home is gone because the operator said so");
+  } finally { process.env.PATH = oldPath; }
   rmSync(base, { recursive: true, force: true });
 });
 
