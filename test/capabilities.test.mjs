@@ -237,6 +237,13 @@ test("claude runtime resolves oas-claude-config and hooks contribute launch args
     assert.match(meta.command, /claude-personal/);
     assert.match(meta.command, /--extra-flag/);
     assert.doesNotMatch(meta.command, /--never-used/);
+    // "--" must terminate option parsing BEFORE the prompt: hook-contributed
+    // flags can be greedy/variadic (aweb's --dangerously-load-development-
+    // channels), and without the separator the TASK.md prompt is consumed
+    // as the flag's next value — claude exits with a parse error and the
+    // spawn looks silently stuck (operator report, dev-coordinator-claude-
+    // sessions).
+    assert.match(meta.command, /--extra-flag -- "\$\(cat TASK\.md\)"/, "prompt is separated from hook launch args by --");
   } finally { process.env.PATH = oldPath; }
 });
 
@@ -354,8 +361,14 @@ test("model preference lists resolve to the first available provider/model", asy
   // single entries and empties pass through untouched (no probe)
   assert.equal(resolveModelPreference("", "pi"), "");
   assert.equal(resolveModelPreference("github-copilot/claude-fable-5:high", "pi"), "github-copilot/claude-fable-5:high");
-  // non-pi runtimes take the first preference
-  assert.equal(resolveModelPreference("a/b:high, c/d", "claude"), "a/b:high");
+  // claude: pi-style patterns TRANSLATE or DROP — claude takes aliases/bare
+  // ids only (operator report: a pi-pattern soul default runtime-overridden
+  // to claude made claude reject the model at launch)
+  assert.equal(resolveModelPreference("anthropic/claude-opus-4-5:high", "claude"), "claude-opus-4-5", "anthropic pattern → bare id, thinking stripped");
+  assert.equal(resolveModelPreference("opus", "claude"), "opus", "alias passes through");
+  assert.equal(resolveModelPreference("claude-fable-5", "claude"), "claude-fable-5", "bare id passes through");
+  assert.equal(resolveModelPreference("github-copilot/claude-fable-5:high", "claude"), "", "non-anthropic provider entry drops to claude default");
+  assert.equal(resolveModelPreference("github-copilot/x, anthropic/claude-sonnet-4-5, opus", "claude"), "claude-sonnet-4-5", "first usable list entry wins");
   // pi probing: fake `pi` whose --list-models only knows provider2/model-x
   const base = temp(); const bin = join(base, "bin"); mkdirSync(bin, { recursive: true });
   write(join(bin, "pi"), "#!/bin/sh\necho 'provider2  model-x  1M  128K  yes  yes'\n");

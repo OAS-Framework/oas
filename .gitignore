@@ -8,6 +8,11 @@ agents/tmp-agents/   # legacy name
 # aweb identity material (signing keys) — never committed, at any depth
 .aw/
 
+# Local machine preference: names the claude binary OAS launches for
+# runtime: claude souls (account selection, e.g. "claude-personal") —
+# personal config by contract, never committed (lib/core.mjs resolveClaudeBinary).
+oas-claude-config
+
 # OS noise
 .DS_Store
 node_modules/
