@@ -61,31 +61,38 @@ light, WCAG AA); views style themselves against tokens only, scoped under
   actions grouped by context, click-to-record (Esc cancels, Backspace
   unbinds), conflict warnings via `findConflict`, per-row reset + reset-all.
 
-## Split panes and the hideable sidebar (shell-level)
+## Editor groups (splits) and the hideable sidebar (shell-level)
 
-Splits reproject existing TERMINAL tabs as flex cells of `#tabhost`
-(`split-layout.mjs` is the pure model; `split-dom.mjs` the DOM projection).
-A split always seeds from the CURRENT tab — `requestSplit` puts the active
-terminal tab in `members[0]`, so the tab you split from stays the first,
-visible, active pane; the pending slot absorbs the next terminal you open.
-Clickable controls mirror the chords with no duplicated logic: the tab-strip
-buttons (`#tab-actions`: split right / split down / close split) and the
-sidebar toggles (rail-footer button + the thin `#sidebar-restore` edge
-button shown while hidden) all dispatch the registered actions through
-`runAction(id)` — context-gated exactly like chord dispatch — and their
-enablement dry-runs the same model transition via
-`split-controls.mjs` `splitControlsState`. While a split is visible the
-member tabs move into a dedicated full-width pane row above the strip
-(`#pane-tabs`, editor-group style, `projectTabStrip`): each member's real
-tab element sits in a `.tab-group` in pane order, and because the pane row's
-ONLY flex content is the pane groups, the groups divide exactly the width
-the panes divide in `#tabhost` (the split controls and non-member tabs live
-in the ordinary `#tabbar-row` below and never skew the pane track). Row
-orientation aligns literally; col maps group order left→right to pane order
-top→bottom. A pending slot keeps an empty spacer group; non-member tabs
-keep their flat look below (still clickable — activating one covers the
-split). One chrome per tab means the tab-a11y roving/aria/close semantics
-are untouched; the non-split strip renders exactly as before.
+Splits follow VS Code editor-group semantics (`split-layout.mjs` is the
+pure model; `split-dom.mjs` the DOM projection). A split creates PERSISTENT
+GROUPS on the tab layer: each group owns an ordered tab list and its own
+active tab, and renders its own tab strip (`.group-tabbar`, a per-group
+tablist holding the group's REAL tab elements) above its pane inside a
+`.group-cell` flex cell of `#tabhost`. The first split seeds group 1 with
+ALL of the layer's current terminal tabs (the current tab stays active) and
+creates a new empty group that takes focus — the next terminal opened from
+any path (sidebar roster, palette, quick-open) lands in the FOCUSED group
+(`openTabInFocusedGroup`); group focus follows the active tab (`focusTab`).
+Switching tabs within a group, or focusing another group, never dismantles
+the split — the layout belongs to the tab layer, not to any tab. The former
+pending-slot indirection (split → absorb next terminal) is gone: an empty
+focused group with a placeholder plays that role directly. While the split
+is visible the top `#tabstrip` row is hidden (each group has its own strip;
+keeping the old row would render an empty phantom chrome bar) and the split
+controls (`#tab-actions`) ride the focused group's strip. Activating a
+non-terminal tab covers the split without destroying group state; closing a
+group's last tab collapses the group, and down to one group the flat
+single-strip layout returns byte-identical to the non-split shell
+(regression-pinned). Closing a group's active tab activates its adjacent
+group-mate (else the neighbor group's active tab) — never an unrelated
+newer terminal. Clickable controls mirror the chords with no duplicated
+logic: the split buttons and the sidebar toggles (rail-footer button + the
+thin `#sidebar-restore` edge button shown while hidden) all dispatch the
+registered actions through `runAction(id)` — context-gated exactly like
+chord dispatch — and their enablement dry-runs the same model transition
+via `split-controls.mjs` `splitControlsState`. One chrome per tab means the
+tab-a11y roving/aria/close semantics hold PER GROUP (each group strip is a
+tablist with a single selected, tabbable trigger; arrows walk the group).
 
 ## Terminal focus discipline (shell-level)
 

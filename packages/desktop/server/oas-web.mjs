@@ -14,6 +14,7 @@
  *   POST /api/keys/<instance>       { data } → raw key bytes into the session (no Enter)
  *   POST /api/interrupt/<instance>  sends Ctrl-C (Escape for pi/claude prompts stays manual)
 
+ *   POST /api/models                { runtime: pi|claude } → advisory model catalog for the spawn modal
  *   GET  /api/cli                   CLI discovery status (bin, version, required range, tried)
  *   POST /api/cli/reprobe           re-run discovery; body { bin? } prioritizes a user-chosen binary
  *   POST /api/harvest/<instance>    `oas okf harvest --json` with cwd fixed to the instance home
@@ -165,6 +166,78 @@ function agentsData(wsId) {
   }
   agents.sort((a, b) => a.name.localeCompare(b.name));
   return { workspace: ws ? { id: ws.id, name: ws.name } : null, agents };
+}
+
+/* ── Model catalog (spawn-modal dropdown) ──
+   pi: the authenticated `pi --list-models` catalog — ids are
+   "provider/model" exactly as `oas spawn --model` (and pi --model) accept
+   them. claude: the claude CLI's model ALIASES plus the anthropic-provider
+   ids from the pi catalog when pi is installed (claude accepts full
+   claude-* model names). Advisory ONLY: the renderer keeps the field
+   free-text (comma-separated preference lists stay valid) and the server
+   never gates /api/spawn on catalog membership. Failures resolve to an
+   empty list — a missing pi must not break the spawn modal.
+   SECURITY (review 9b1e3ff): every cache miss executes a child process
+   (pi, possibly a login shell), so this is a POST — POST /api/models
+   { runtime } → { runtime, models: [{ id, label }] } — behind the server's
+   Origin guard: a GET with its own Origin check is bypassable by <img>/
+   no-cors requests that omit the header, letting a hostile page fan out
+   child processes against the fixed loopback port. All concurrent misses
+   COALESCE behind one in-flight catalog promise — at most one probe runs
+   regardless of request fan-in. */
+const CLAUDE_MODEL_ALIASES = ["opus", "sonnet", "haiku", "sonnet[1m]"];
+const MODELS_TTL_MS = 60_000;
+const modelsCache = new Map(); // runtime → { at, models }
+function execCapture(cmd, cmdArgs) {
+  return new Promise((ok) => {
+    execFile(cmd, cmdArgs, { encoding: "utf8", timeout: 10_000, shell: false, maxBuffer: 4 * 1024 * 1024 },
+      (err, stdout) => ok(err ? null : String(stdout)));
+  });
+}
+/* OASWEB_MODELPARSE_BEGIN — `pi --list-models` stdout → ["provider/model"]
+   (header dropped). Extracted by test/desktop-server.test.mjs via block
+   markers. */
+function parsePiModelList(out) {
+  const models = [];
+  for (const line of String(out || "").split("\n")) {
+    const cols = line.trim().split(/\s+/);
+    if (cols.length < 2 || cols[0] === "provider") continue;
+    models.push(`${cols[0]}/${cols[1]}`);
+  }
+  return models;
+}
+/* OASWEB_MODELPARSE_END */
+async function piModelCatalog() {
+  // Direct PATH first; a GUI-launched Electron often lacks the login PATH,
+  // so fall back to the user's login shell (same pattern as the CLI probe).
+  let out = await execCapture("pi", ["--list-models"]);
+  if (out === null) {
+    const sh = process.env.SHELL || "/bin/sh";
+    out = await execCapture(sh, ["-l", "-c", "pi --list-models"]);
+  }
+  return parsePiModelList(out);
+}
+// Coalesced probe: concurrent cache misses share ONE child-process run.
+let piCatalogInflight = null;
+function piModelCatalogOnce() {
+  if (!piCatalogInflight) {
+    piCatalogInflight = piModelCatalog().finally(() => { piCatalogInflight = null; });
+  }
+  return piCatalogInflight;
+}
+async function modelsData(runtime) {
+  const cached = modelsCache.get(runtime);
+  if (cached && Date.now() - cached.at < MODELS_TTL_MS) return cached.models;
+  const catalog = await piModelCatalogOnce();
+  const models = runtime === "pi"
+    ? catalog.map((id) => ({ id, label: id }))
+    : [
+        ...CLAUDE_MODEL_ALIASES.map((id) => ({ id, label: `${id} (alias)` })),
+        ...catalog.filter((id) => id.startsWith("anthropic/"))
+          .map((id) => ({ id: id.slice("anthropic/".length), label: id.slice("anthropic/".length) })),
+      ];
+  modelsCache.set(runtime, { at: Date.now(), models });
+  return models;
 }
 
 /** Spawn an instance of an available agent through the discovered `oas` CLI
@@ -830,6 +903,14 @@ const server = createServer(async (req, res) => {
     if (bm && req.method === "GET") {
       const d = brainData(bm[1], url.searchParams.get("ws") || undefined);
       return d ? send(res, 200, d) : send(res, 404, { error: `unknown agent "${bm[1]}"` });
+    }
+    if (req.method === "POST" && path === "/api/models") {
+      // POST (not GET) so the CSRF Origin guard above covers this
+      // command-running route — see the model-catalog SECURITY note.
+      const body = await readBody(req);
+      const runtime = typeof body.runtime === "string" && body.runtime ? body.runtime : "pi";
+      if (runtime !== "pi" && runtime !== "claude") return send(res, 400, { error: `unknown runtime "${runtime}" (pi|claude)` });
+      return send(res, 200, { runtime, models: await modelsData(runtime) });
     }
     if (req.method === "GET" && path === "/api/cli") {
       return send(res, 200, cliStatus());

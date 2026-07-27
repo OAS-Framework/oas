@@ -3,7 +3,7 @@ type: Lesson
 title: Split panes as flex-cell reprojection of existing tab panes
 description: Desktop split panes reproject existing tab panes as flex cells of #tabhost; keep the split model bounded to renderer-visible slots and choose split-adjacent fallbacks before removing an active member.
 tags: [desktop, renderer, splits, terminal]
-timestamp: 2026-07-26
+timestamp: 2026-07-27
 ---
 
 # Split panes as flex-cell reprojection of existing tab panes
@@ -61,3 +61,7 @@ the DOM mid-click.
 CSS gotcha: `.tab-pane` is `position:absolute; inset:0` — split cells must
 override with `position:relative; inset:auto; flex:1 1 0; min-width/height:0`
 or flex sizing does nothing.
+
+# Related concepts
+
+- [Editor-group split model replaces the pending-slot arrangement](/lessons/editor-group-split-model.md) supersedes the pending-slot split model for VS Code-style editor groups.
