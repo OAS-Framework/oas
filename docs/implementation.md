@@ -107,15 +107,20 @@ one: no user, project, ancestor or package skill catalogs. It is not a claim
 that nothing else can reach the session — extensions stay ambient (below), and
 what they contribute stays with them.
 
-Every generated `AGENTS.md` opens the operational contract with the runtime-neutral
-**home/work boundary** (`injects/instance-boundary.md`), for every work mode and
-for capability service agents alike: `<instance-home>` (`$OAS_INSTANCE_HOME`) holds
-the brain, task, provenance and episodic state and is where `aw` and OAS
-lifecycle commands are run from — they resolve scope from the working directory,
-and `--dir <path>` is the deliberate way to reach another one — while
-`<instance-home>/work` is the only place git, edits, builds, tests and commits
-happen. Each work-mode block then adds only that mode's ownership and branch
-rules.
+After the canonical soul and kernel text, every generated `AGENTS.md` states the
+runtime-neutral **home/work boundary** (`injects/instance-boundary.md`) — for
+every work mode and for capability service agents alike — immediately before the
+work-mode block it frames: `<instance-home>` (`$OAS_INSTANCE_HOME`) holds the
+brain, task, provenance and episodic state, and is where `aw` and OAS
+operational/lifecycle commands are run from, since they resolve scope from the
+working directory (`--dir <path>` reaches another deliberately); the home's
+`soul` link is to be treated as read-only because writes through it bypass the
+branch and review path; and `<instance-home>/work` is the repository or workspace
+view where repository reading, editing, building, testing, git and commits
+happen. It bounds *repository* work rather than forbidding all output elsewhere —
+episodic state lives in the home, and a service agent's own artifacts (a report
+written to a temp file before mailing it) are its role's business. What each mode
+actually permits is the work-mode block's call, which follows immediately.
 
 `--no-context-files` also suppresses the instance's *own* composed `AGENTS.md`,
 so that is delivered explicitly; the work tree's `AGENTS.md` stays readable by
@@ -163,9 +168,11 @@ The generated order is:
 
 1. canonical soul content;
 2. kernel OAS block;
-3. actual spawn work-mode block;
-4. active capability blocks in resolver order; and
-5. unconditional config blocks outermost to innermost.
+3. local-soul block (local souls only);
+4. **home/work boundary block** — runtime-neutral, every mode and every kind;
+5. actual spawn work-mode block;
+6. active capability blocks in resolver order; and
+7. unconditional config blocks outermost to innermost.
 
 Every generated block carries its source path. `oas doctor --soul <name>` uses
 the same composer and prints/returns the final text. Config-dependent prose is

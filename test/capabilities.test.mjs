@@ -1,9 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import {
   capabilityIntegrity, capabilityManifest, composeInstanceAgentsMd, createAgent, findAgent, findInstanceHomes, resolveOasConfig,
   listInstances, resolveClaudeBinary, resolveWorkMode, retireInstance, runLifecycleHooks, spawnInstance, writeCapabilityLock,
@@ -3572,67 +3572,111 @@ console.log(JSON.stringify({ meta: { retired: false, reason: 'self-delete-failed
   rmSync(base, { recursive: true, force: true });
 });
 
-// The founder-approved home/work boundary, as EXACT generated text. These
-// strings are the contract an agent reads at wake-up: an instance that learns
-// the wrong one runs `aw`/`oas` from the work tree and misresolves its
-// deployment — the root-placement bug, taught rather than coded.
+// The founder-approved home/work boundary. These assertions are about what the
+// composed text MEANS for the agent reading it, not which literals it contains:
+// a contract that merely restates its own strings passes while contradicting the
+// mode it was composed for (reviewer-focus-c6e3680).
 const BOUNDARY_MUST_SAY = [
   "$OAS_INSTANCE_HOME",                                   // the runtime-neutral name
   "It is not your user home (`~`), not the repository root, and not the work tree",
   "Run `aw` and OAS operational/lifecycle commands from instance home",
   "oas <cmd> --dir <path>",                               // the deliberate alternate scope
-  "Git, reading, editing, building, testing and committing all happen in `work/`",
-  "never the home's `soul` symlink",                      // durable edits go through tracked paths
+  "Treat the home's `soul` link as read-only",            // treated as, not claimed to be
 ];
+// The instruction that taught the root-placement bug, in any shipped surface.
+const SETTLE_IN_WORK = /cd work\/? once|and stay there|where you live|Start in `work\/`/i;
 /** Compare wording, not line wrapping: the contract is what the agent reads. */
 const flat = (t) => t.replace(/\s+/g, " ");
-// The instruction that taught the bug. It must not come back, in any mode.
-const BOUNDARY_MUST_NOT_SAY = /cd work\/? once|and stay there|where you live/i;
 
 test("every work mode's generated instructions carry the home/work boundary (maintainer contract)", () => {
   const base = temp();
   const { repo, root } = fixtureSoul(base, "pi");
   const soulDir = join(root, "dev", "soul");
   for (const mode of ["worktree", "checkout", "attached", "workspace"]) {
-    const { text } = composeInstanceAgentsMd(soulDir, repo, "dev", mode);
+    const text = flat(composeInstanceAgentsMd(soulDir, repo, "dev", mode).text);
     for (const must of BOUNDARY_MUST_SAY) {
-      assert.ok(flat(text).includes(flat(must)), `${mode}: generated instructions must say ${JSON.stringify(must)}`);
+      assert.ok(text.includes(flat(must)), `${mode}: generated instructions must say ${JSON.stringify(must)}`);
     }
-    assert.doesNotMatch(text, BOUNDARY_MUST_NOT_SAY, `${mode}: must not teach "cd work and stay there"`);
+    assert.doesNotMatch(text, SETTLE_IN_WORK, `${mode}: must not teach settling in the work tree`);
     assert.ok(text.includes(`Work mode: ${mode}`), `${mode}: and still carries its own mode block`);
-    // Order matters: the boundary is the frame the mode rules sit inside.
-    assert.ok(text.indexOf("## Your two directories") < text.indexOf(`Work mode: ${mode}`),
-      `${mode}: the boundary precedes the mode's ownership rules`);
+    assert.ok(text.indexOf("Your two directories") < text.indexOf(`Work mode: ${mode}`),
+      `${mode}: the boundary precedes the mode rules it frames`);
+    // The boundary must DEFER to the mode on what is permitted. An unqualified
+    // "everything happens in work/" is false for workspace mode (read-only, not
+    // a repo) and forbids the episodic state the same text puts in the home.
+    assert.ok(text.includes(flat("What your mode permits is the mode block's call")),
+      `${mode}: the boundary must defer to the mode on permitted operations`);
+    assert.doesNotMatch(text, /Nothing you produce belongs anywhere else/,
+      `${mode}: an absolute output ban contradicts episodic state and role artifacts`);
   }
   rmSync(base, { recursive: true, force: true });
 });
 
-test("capability service agents get the boundary too — reviewers run aw from home (maintainer contract)", () => {
+test("the boundary does not contradict a read-only workspace instance (reviewer-focus-c6e3680)", () => {
   const base = temp();
   const { repo, root } = fixtureSoul(base, "pi");
-  const capDir = capability(repo, "rev", { capability: "acme.review", agents: ["agents/reviewer"] }, {
-    "agents/reviewer/soul.yaml": "name: reviewer\nkind: capability\nwork: attached\nruntime: pi\ndescription: Fresh reviewer.\n",
-    "agents/reviewer/AGENTS.md": "# Reviewer\n\nReview fresh.\n",
-  });
-  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.review:\n      global: true\n");
-  // kind "capability" suppresses the KNOWLEDGE layer (no episodic memory), and
-  // that exclusion must not take the boundary with it: a reviewer that mails its
-  // verdict from the work tree resolves the wrong deployment.
-  const { text } = composeInstanceAgentsMd(join(capDir, "agents", "reviewer"), repo, "reviewer", "attached", "capability");
-  for (const must of BOUNDARY_MUST_SAY) assert.ok(flat(text).includes(flat(must)), `capability reviewer: must say ${JSON.stringify(must)}`);
-  assert.doesNotMatch(text, BOUNDARY_MUST_NOT_SAY);
-  assert.ok(text.includes("Work mode: attached"));
+  const text = flat(composeInstanceAgentsMd(join(root, "dev", "soul"), repo, "dev", "workspace").text);
+  // Workspace `work` is the deployment scope, not a repo, and it is read-only.
+  assert.ok(text.includes("never edit or commit inside them"), "the mode's read-only rule survives");
+  assert.ok(text.includes(flat("`<instance-home>/work` is your repository or workspace view")),
+    "and the boundary calls it a repository OR WORKSPACE view, not simply the repository");
+  assert.doesNotMatch(text, /work` is the repository\b/, "no unqualified 'work is the repository' claim");
   rmSync(base, { recursive: true, force: true });
 });
 
-test("no packaged work-mode injection teaches settling in the work tree (maintainer contract)", () => {
-  // The regression is one line in one file, so pin the property at the source:
-  // every packaged mode briefing, present and future.
-  const dir = resolve(new URL("../injects", import.meta.url).pathname);
-  const modes = readdirSync(dir).filter((f) => f.startsWith("work-") && f.endsWith(".md"));
-  assert.ok(modes.length >= 4, `expected every work mode to ship a briefing, saw ${modes.join(", ")}`);
-  for (const f of modes) {
-    assert.doesNotMatch(readFileSync(join(dir, f), "utf8"), BOUNDARY_MUST_NOT_SAY, `${f} teaches the root-placement bug`);
+test("a REAL spawned packaged reviewer gets the boundary and keeps its own report path (reviewer-focus-c6e3680)", () => {
+  const base = temp();
+  const { repo, root } = fixtureSoul(base, "pi");
+  // The SHIPPED oas-review capability, spawned through the real service path —
+  // not a synthetic composer call. Its own instructions require writing a report
+  // to a temp file before mailing it, so a boundary forbidding output outside
+  // work/ would contradict the very agent it ships beside.
+  const src = resolve(new URL("../capabilities/oas-review", import.meta.url).pathname);
+  const dst = join(repo, ".agents", "capabilities", "owned", "oas-review");
+  mkdirSync(dirname(dst), { recursive: true });
+  cpSync(src, dst, { recursive: true });
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    oas.review:\n      global: true\n");
+  const oldPath = process.env.PATH; process.env.PATH = fakeRuntimes(base);
+  try {
+    return import("../lib/core.mjs").then((core) => {
+      const agent = core.findCapabilityAgent(repo, root, "reviewer");
+      assert.ok(agent, "the shipped reviewer resolves");
+      const res = core.spawnInstance(root, { ...agent, repo }, { instance: "reviewer-boundary", work: "checkout", launch: false });
+      const text = flat(readFileSync(join(res.home, "AGENTS.md"), "utf8"));
+      for (const must of BOUNDARY_MUST_SAY) {
+        assert.ok(text.includes(flat(must)), `spawned reviewer: must say ${JSON.stringify(must)}`);
+      }
+      assert.doesNotMatch(text, SETTLE_IN_WORK);
+      // Its mandated artifact must remain possible.
+      assert.match(text, /--body-file/, "the reviewer's own report instruction survives composition");
+      assert.doesNotMatch(text, /Nothing you produce belongs anywhere else/,
+        "and the boundary must not forbid the temp file that instruction requires");
+      core.retireInstance(root, "reviewer-boundary", { tmuxSession: "oas-test-nosuch" });
+      rmSync(base, { recursive: true, force: true });
+    });
+  } finally { process.env.PATH = oldPath; }
+});
+
+test("no shipped instructional surface teaches settling in the work tree (maintainer contract)", () => {
+  // One line in one file caused this; pin the property across every surface an
+  // agent or operator can read, present and future.
+  const pkg = resolve(new URL("..", import.meta.url).pathname);
+  const surfaces = [];
+  const walk = (dir, filter) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const p = join(dir, e.name);
+      if (e.isDirectory()) walk(p, filter);
+      else if (filter(e.name)) surfaces.push(p);
+    }
+  };
+  walk(join(pkg, "injects"), (n) => n.endsWith(".md"));
+  walk(join(pkg, "docs"), (n) => n.endsWith(".md"));
+  walk(join(pkg, "skills"), (n) => n === "SKILL.md");
+  walk(join(pkg, "capabilities"), (n) => n.endsWith(".md"));
+  surfaces.push(join(pkg, "README.md"));
+  assert.ok(surfaces.length > 10, `expected the full instructional surface, saw ${surfaces.length}`);
+  for (const f of surfaces) {
+    assert.doesNotMatch(readFileSync(f, "utf8"), SETTLE_IN_WORK, `${relative(pkg, f)} teaches the root-placement bug`);
   }
 });
 

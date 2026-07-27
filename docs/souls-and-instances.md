@@ -163,7 +163,24 @@ final status.
 ## Work modes
 
 A work mode decides what `./work` points at and what discipline the agent must
-follow.
+follow. Every mode sits inside the same home/work boundary, which the generated
+instructions state first (`injects/instance-boundary.md`):
+
+- `<instance-home>` — the gitignored instance directory, `$OAS_INSTANCE_HOME` —
+  holds the brain (`AGENTS.md`, `soul/`), the task, the provenance
+  (`instance.json`) and the episodic state (`STATE.md`, `log.md`, `notes/`), and
+  is where `aw` and OAS operational/lifecycle commands are run, because they
+  resolve scope from the working directory (`--dir <path>` to target another
+  one deliberately).
+- `<instance-home>/work` — the repository or workspace view — is where
+  repository reading, editing, building, testing, git and commits happen, to the
+  extent the mode below permits.
+- The home's `soul` link is to be treated as read-only: writes through it bypass
+  the branch and review path. Durable soul edits go through tracked paths under
+  `work/`, or through the harvester when the soul lives outside the repo.
+
+Agents move between the two as the task needs; the boundary is what each
+directory is for, not a place to settle in.
 
 ### `worktree` — isolated branch
 
@@ -174,9 +191,9 @@ Use this for agents that will edit code or docs independently.
 
 Rules:
 
-- Start in `work/` and stay there.
-- Build, test, and commit from `work/`.
-- Never edit from the main checkout or the home root.
+- Build, test, and commit from `work/`, on your own branch.
+- Never run git from the repo's main checkout — it resolves to the wrong branch
+  and skips review.
 - Do not create extra worktrees. Ask for another instance if parallel work is
   needed.
 
@@ -261,10 +278,19 @@ Three things stay independent, and are meant to:
 Roots that Git does not own are unaffected: a non-Git agents root stores
 instances exactly where it sits.
 
-Every instance is told its own home as **`OAS_INSTANCE_HOME`** (absolute), in the
-runtime environment and in every lifecycle hook. Instructions refer to it as
-`<instance-home>`; `PI_AGENT_HOME` and `OAS_HOME` remain as compatibility
-aliases. It is not `OAS_HOME_DIR`, which is the package store root.
+Every instance is told its own home as **`OAS_INSTANCE_HOME`** (absolute), and
+instructions refer to it as `<instance-home>`. The two environments differ, so
+they are stated separately:
+
+- **Runtime session**: `OAS_INSTANCE_HOME` and `PI_AGENT_HOME` (plus
+  `OAS_INSTANCE`/`PI_AGENT_INSTANCE`). The `PI_`-prefixed names are
+  compatibility aliases for the separately published pi extension.
+- **Lifecycle hooks**: `OAS_INSTANCE_HOME` and `OAS_HOME`, alongside the rest of
+  the hook contract. `OAS_HOME` predates `OAS_INSTANCE_HOME` and is kept because
+  shipped capability hooks read it; it is **not** exported to runtime sessions.
+
+Neither is `OAS_HOME_DIR`, which is the package store root — do not conflate
+them.
 
 When placement cannot be established — Git owns the location but the repository
 cannot be read, a linked worktree whose primary checkout is missing, or a
