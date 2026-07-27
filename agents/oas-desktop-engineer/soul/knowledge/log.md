@@ -1,6 +1,8 @@
 # Knowledge Log
 
 ## 2026-07-27
+* **Update**: merged the per-modal async fill race from the oas-desktop-engineer-claude-code-spawn notes into [Guard async render completions on both success and error paths](/lessons/guard-both-completion-paths.md): per-modal tokens are too coarse for repeated fills inside one modal; each fill request needs its own monotonic generation and out-of-order deferred-response regression.
+* **Creation**: promoted [Command-running routes must be POST + coalesced](/lessons/command-running-get-csrf-fanout.md) from the oas-desktop-engineer-claude-code-spawn notes.
 * **Creation**: promoted [Model selection UI must stay advisory](/lessons/model-selection-advisory-datalist.md) from the oas-desktop-engineer-claude-code-spawn notes.
 * **Update**: [Spawn endpoint root allowlist, empty-task semantics, and CLI-unavailable degradation](/architecture/spawn-endpoint.md) now records that model input is free text and `/api/spawn` must not validate model preferences against the advisory catalog.
 

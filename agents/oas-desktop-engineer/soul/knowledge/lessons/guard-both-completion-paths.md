@@ -32,15 +32,21 @@ renders:
 4. Treat selection-only and generation-only checks as incomplete. A generation
    token works only if each action receives a fresh token, and errors are just
    as capable of stale UI writes as successful responses.
+5. Pick the generation's scope by the thing that can supersede itself. A
+   per-modal token is too coarse when the same open modal can issue repeated
+   async fills; each fill call needs its own monotonic request generation,
+   captured at dispatch and checked before applying results.
 
 # Regression pattern
 
 Control response order with manually resolved promises. Start two overlapping
 selection loads, resolve the newer load first, then complete the older load late
 in both modes: stale success after newer render and stale rejection after newer
-render. The newer render must survive both completions. Before trusting the
-coverage, mutation-check the test by reverting the guard shape or generation
-minting and confirm the test fails.
+render. The newer render must survive both completions. For repeated async fills
+inside one modal, keep the modal open, dispatch two fill requests, resolve the
+newer deferred response first, and assert the older response cannot overwrite
+it. Before trusting the coverage, mutation-check the test by reverting the guard
+shape or generation minting and confirm the test fails.
 
 # Related
 
