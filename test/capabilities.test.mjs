@@ -2175,3 +2175,90 @@ test("symlinks on the path to the home cannot smuggle it into a linked worktree 
   execFileSync("git", ["-C", repo, "worktree", "remove", "--force", wt]);
   rmSync(base, { recursive: true, force: true });
 });
+
+// ---------- composition preflight: declared resources must exist ----------
+
+test("a capability whose declared skill does not resolve fails the spawn closed, with no scaffold", () => {
+  const base = temp();
+  const { repo, root } = fixtureSoul(base, "pi");
+  // The reported shape: a manifest declaring skills under a dependency path that
+  // only exists after an ad-hoc install. In a fresh worktree it resolves to
+  // nothing, and the instance used to be born without them while the
+  // capability's injection still told the agent to load them.
+  capability(repo, "ghost", {
+    capability: "acme.ghost",
+    skills: ["node_modules/@vendor/pkg/skills/ghost-skill"],
+  });
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.ghost:\n      global: true\n");
+  const oldPath = process.env.PATH; process.env.PATH = fakeRuntimes(base);
+  try {
+    assert.throws(
+      () => spawnInstance(root, findAgent(root, "dev"), { instance: "dev-ghost", launch: false }),
+      (e) => e.code === "E_CAPABILITY_RESOURCE_MISSING"
+        && /skill-tree "node_modules\/@vendor\/pkg\/skills\/ghost-skill" declared by acme.ghost/.test(e.message),
+    );
+    // Preflight runs before the home exists, so there is nothing to roll back.
+    assert.equal(existsSync(join(root, "dev", "instances", "dev-ghost")), false, "no instance home");
+  } finally { process.env.PATH = oldPath; }
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("preflight distinguishes declared-and-missing from declared-nothing and injection-override: none", () => {
+  const base = temp();
+  const { repo, root } = fixtureSoul(base, "pi");
+  // Declares no skills and no injection at all — contributes nothing, and that
+  // is not a missing resource.
+  capability(repo, "quiet", { capability: "acme.quiet" });
+  // Declares an injection that DOES resolve.
+  capability(repo, "loud", { capability: "acme.loud", inject: "injects/loud.md" }, { "injects/loud.md": "## Loud\n" });
+  write(join(repo, "oas-config.yaml"),
+    "capabilities:\n  additive:\n    acme.quiet:\n      global: true\n    acme.loud:\n      global: true\n");
+  const oldPath = process.env.PATH; process.env.PATH = fakeRuntimes(base);
+  try {
+    const r = spawnInstance(root, findAgent(root, "dev"), { instance: "dev-quiet", launch: false });
+    const meta = JSON.parse(readFileSync(join(r.home, "instance.json"), "utf8"));
+    assert.ok(meta.composition, "instance.json records the composition");
+    assert.ok(meta.composition.expected.some((e) => e.source === "acme.loud" && e.type === "injection"),
+      "a resolved injection is recorded as expected with its provenance");
+    assert.equal(meta.composition.expected.some((e) => e.source === "acme.quiet"), false,
+      "a capability declaring nothing contributes nothing");
+    assert.match(readFileSync(join(r.home, "AGENTS.md"), "utf8"), /## Loud/);
+    retireInstance(root, "dev-quiet", { tmuxSession: "oas-test-nosuch" });
+
+    // injection-override: none is an explicit choice, not a missing resource.
+    write(join(repo, "oas-config.yaml"),
+      "capabilities:\n  additive:\n    acme.loud:\n      global: true\n      injection-override: none\n");
+    const r2 = spawnInstance(root, findAgent(root, "dev"), { instance: "dev-none", launch: false });
+    assert.doesNotMatch(readFileSync(join(r2.home, "AGENTS.md"), "utf8"), /## Loud/);
+    retireInstance(root, "dev-none", { tmuxSession: "oas-test-nosuch" });
+  } finally { process.env.PATH = oldPath; }
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("instance.json records expected == materialized, and the .claude/skills alias is verified", () => {
+  const base = temp();
+  const { repo, root, soul } = fixtureSoul(base, "pi");
+  write(join(soul, "skills", "soul-skill", "SKILL.md"), "---\nname: soul-skill\ndescription: A soul-private skill.\n---\nbody\n");
+  capability(repo, "withskill", { capability: "acme.withskill", skills: ["skills"] },
+    { "skills/cap-skill/SKILL.md": "---\nname: cap-skill\ndescription: A capability skill.\n---\nbody\n" });
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.withskill:\n      global: true\n");
+  const oldPath = process.env.PATH; process.env.PATH = fakeRuntimes(base);
+  try {
+    const r = spawnInstance(root, findAgent(root, "dev"), { instance: "dev-mat", launch: false });
+    const meta = JSON.parse(readFileSync(join(r.home, "instance.json"), "utf8"));
+    const names = meta.composition.materialized.skills.map((s) => s.name);
+    assert.ok(names.includes("soul-skill") && names.includes("cap-skill"), `selected skills materialized: ${names}`);
+    for (const s of meta.composition.materialized.skills) {
+      assert.ok(existsSync(join(r.home, ".agents", "skills", s.name, "SKILL.md")), `${s.name} is a real copy`);
+    }
+    // .agents/skills is canonical; .claude/skills aliases it and must resolve
+    // exactly onto it — the founder's canonical layout.
+    assert.equal(lstatSync(join(r.home, ".claude", "skills")).isSymbolicLink(), true);
+    assert.equal(realpathSync(join(r.home, ".claude", "skills")), realpathSync(join(r.home, ".agents", "skills")));
+    assert.equal(readlinkSync(join(r.home, "CLAUDE.md")), "AGENTS.md");
+    // Every expected resource carries provenance for audit.
+    for (const e of meta.composition.expected) assert.ok(e.type && e.source && e.declared, `provenance on ${JSON.stringify(e)}`);
+    retireInstance(root, "dev-mat", { tmuxSession: "oas-test-nosuch" });
+  } finally { process.env.PATH = oldPath; }
+  rmSync(base, { recursive: true, force: true });
+});
