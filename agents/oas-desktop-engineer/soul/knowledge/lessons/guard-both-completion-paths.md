@@ -3,7 +3,7 @@ type: Lesson
 title: Guard async render completions on both success and error paths
 description: Async renderer selections must mint a fresh generation for every user action and check one ownership predicate on both success and error completions, or stale rejections can overwrite a newer render.
 tags: [desktop-backend, desktop, brain, renderer, race-condition, generation-token, testing, review-lesson]
-timestamp: 2026-07-23
+timestamp: 2026-07-27
 ---
 
 # The bug

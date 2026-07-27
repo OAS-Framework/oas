@@ -1,7 +1,7 @@
 ---
 type: Concept
-title: Spawn endpoint root allowlist, empty-task semantics, and CLI-unavailable degradation
-description: POST /api/spawn treats browser-supplied agentsRoot as a selector into the server's workspace roots, preserves task "" as the awaiting-instructions spawn shape, and returns a stable cli-unavailable 503 until the CLI mutation adapter lands.
+title: Spawn endpoint root allowlist, empty-task semantics, and installed-CLI degradation
+description: POST /api/spawn treats browser-supplied agentsRoot as a selector into the server's workspace roots, preserves task "" as the awaiting-instructions spawn shape, and returns a stable cli-unavailable 503 whenever no compatible installed oas CLI is discovered.
 tags: [desktop-backend, spawn, endpoint, security, task]
 timestamp: 2026-07-27
 ---
@@ -17,7 +17,7 @@ a selector into a server-side allowlist, not a path-injection surface.
 
 Apply the same allowlist pattern to any future panel endpoint that accepts a
 path-shaped parameter from the browser. Keep this validation in process even
-when the mutation adapter is unavailable, so root and agent mistakes stay
+when no compatible CLI is installed, so root and agent mistakes stay
 meaningful client errors instead of collapsing into generic service degradation.
 
 # Model field semantics
@@ -61,13 +61,19 @@ post-spawn instance actions](/lessons/post-spawn-roster-snapshot-lag.md).
 
 Unknown roots or agent names return HTTP 409 with the validation message
 truncated to 300 characters, matching the shape of other panel error responses.
-`spawnInstance` itself did not move into the app-owned deployment reader: until
-the compatible CLI adapter lands, requests that pass validation fail with stable
-`{ code: "cli-unavailable" }` degradation mapped to HTTP 503. Tests should pin
+The mutation itself runs through the shipped CLI adapter
+(`cli-adapter.mjs::cliSpawn`, called by `oas-web.mjs::spawnAgent`) against the
+discovered installed `oas` binary — the app never bundles a kernel. When CLI
+discovery has not settled on a compatible binary, requests that pass validation
+fail with stable `{ code: "cli-unavailable" }` degradation mapped to HTTP 503:
+the code means "install or choose a compatible oas CLI", not "bad request".
+Adapter envelope failures surface their own stable codes (e.g. `E_BAD_ARGS`,
+`E_RELATIVE_AMBIGUOUS`) as 409. Tests should pin
 that distinction so the UI can treat bad input differently from unavailable OAS
 mutation capability.
 
 The previous direct-kernel path was verified end to end in v0.8.0 by spawning an
 instance through the panel API, observing it in `/api/panel`, capturing its tmux
-pane through `/api/session`, and retiring it with `oas retire`. Future end-to-end
-spawn verification belongs with the CLI adapter.
+pane through `/api/session`, and retiring it with `oas retire`. End-to-end spawn
+coverage for the CLI boundary lives in `test/desktop-cli-integration.test.mjs`
+(fake-CLI envelopes through the HTTP surface).
