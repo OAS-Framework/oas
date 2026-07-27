@@ -443,6 +443,75 @@ test("Spawn modal: every option always visible; runtime/model pass through; defa
   }
 });
 
+test("Spawn modal: model dropdown offers the runtime's catalog and swaps on runtime change; free text stays valid", async () => {
+  const dom = new JSDOM("<!doctype html><html><head></head><body><div id=host></div></body></html>", { url: "http://localhost" });
+  const oldDocument = globalThis.document;
+  const oldWindow = globalThis.window;
+  const oldSetInterval = globalThis.setInterval;
+  globalThis.document = dom.window.document;
+  globalThis.window = dom.window;
+  globalThis.setInterval = () => ({ fake: true });
+  const common = await import("../renderer/views/common.mjs");
+  const spawn = await import("../renderer/views/spawn.mjs");
+  await seedCliAvailable();
+  const previousWs = common.currentWorkspace();
+  const agent = { name: "dev", agentsRoot: "/a", description: "d", runtime: "pi", work: "worktree", repo: true, repoName: "r" };
+  const modelRequests = [];
+  const catalogs = {
+    pi: [{ id: "anthropic/claude-opus-4-5", label: "anthropic/claude-opus-4-5" }, { id: "openai/gpt-5.2", label: "openai/gpt-5.2" }],
+    claude: [{ id: "opus", label: "opus (alias)" }, { id: "claude-opus-4-5", label: "claude-opus-4-5" }],
+  };
+  const ctx = {
+    api: (pathname, opts = {}) => {
+      if (pathname === "/api/cli" || pathname === "/api/cli/reprobe") return Promise.resolve(CLI_OK);
+      if (pathname.startsWith("/api/models")) {
+        const runtime = new URL(pathname, "http://x").searchParams.get("runtime");
+        modelRequests.push(runtime);
+        return Promise.resolve({ ok: true, status: 200, json: async () => ({ runtime, models: catalogs[runtime] || [] }) });
+      }
+      if (opts.method === "POST") return Promise.resolve({ ok: true, status: 200, json: async () => ({ instance: "dev-1", launched: false }) });
+      return Promise.resolve({ ok: true, status: 200, json: async () => pathname.startsWith("/api/agents")
+        ? { agents: [agent] }
+        : { instances: [], workspace: { id: "w" }, workspaces: [] } });
+    },
+    openTerminal: () => {},
+  };
+  try {
+    common.setWorkspace("w");
+    spawn.mount(dom.window.document.getElementById("host"), ctx);
+    await tick(); await tick();
+    const doc = dom.window.document;
+    doc.querySelector(".spawn-act").click();
+    await tick(); await tick();
+    // opening the modal fetched the catalog for the agent's DEFAULT runtime
+    assert.deepEqual(modelRequests, ["pi"], "catalog fetched for the agent default runtime");
+    const dl = doc.querySelector("#spawn-model-options");
+    assert.ok(dl, "datalist present");
+    const input = doc.querySelector(".fmodel");
+    assert.equal(input.getAttribute("list"), "spawn-model-options", "model input wired to the datalist");
+    assert.deepEqual([...dl.querySelectorAll("option")].map((o) => o.value),
+      ["anthropic/claude-opus-4-5", "openai/gpt-5.2"], "pi catalog rendered");
+    // switching the runtime override swaps the options
+    const fruntime = doc.querySelector(".fruntime");
+    fruntime.value = "claude";
+    fruntime.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    await tick(); await tick();
+    assert.deepEqual(modelRequests, ["pi", "claude"], "runtime change refetches the catalog");
+    assert.deepEqual([...dl.querySelectorAll("option")].map((o) => o.value),
+      ["opus", "claude-opus-4-5"], "claude catalog replaces the pi options");
+    // free text remains valid — the field is advisory, never a hard select
+    input.value = "anthropic/custom,openai/gpt-5.2";
+    assert.equal(input.value, "anthropic/custom,openai/gpt-5.2");
+  } finally {
+    spawn.unmount();
+    common.setWorkspace(previousWs);
+    globalThis.setInterval = oldSetInterval;
+    dom.window.close();
+    if (oldDocument === undefined) delete globalThis.document; else globalThis.document = oldDocument;
+    if (oldWindow === undefined) delete globalThis.window; else globalThis.window = oldWindow;
+  }
+});
+
 test("Spawn modal: pre-relations CLI gates the RELATED options + picker disabled with the required version named — 'unrelated' stays selectable, nothing hidden", async () => {
   const dom = new JSDOM("<!doctype html><html><head></head><body><div id=host></div></body></html>", { url: "http://localhost" });
   const oldDocument = globalThis.document;

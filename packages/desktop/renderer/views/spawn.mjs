@@ -76,6 +76,8 @@ const CSS = `
 `;
 
 let state = null;
+// Monotonic token: which spawn-modal "open" owns async fills (model list).
+let spawnModalGen = 0;
 
 /* ── Quick Open handoff (renderer/quick-open.mjs) ──────────────────
    Selecting a soul in Quick Open must land the user IN this view's spawn
@@ -550,7 +552,8 @@ function openSpawnModal(s, a) {
             <option value="claude">claude</option>
           </select></label>
         <label>Model (optional — defaults to the agent's definition${a.model ? `: ${escapeHtml(a.model)}` : ""})
-          <input class="field fmodel" autocomplete="off"></label>
+          <input class="field fmodel" autocomplete="off" list="spawn-model-options"></label>
+        <datalist id="spawn-model-options"></datalist>
         <div class="frow">
           <button class="act fspawn">Spawn</button>
           <button class="act fcancel">Cancel</button>
@@ -567,6 +570,36 @@ function openSpawnModal(s, a) {
   // PROPERTY, never via innerHTML attribute text.
   modal.querySelector(".fmodel").placeholder = a.model || "runtime default";
   const f = modal; // field lookups span the whole modal
+
+  // Model dropdown (datalist): advisory options from GET /api/models for
+  // the EFFECTIVE runtime (the override select, else the agent default).
+  // Free text stays valid — comma-separated preference lists and unknown
+  // models are the user's call; the list only shows what the runtime can
+  // actually run (pi: authenticated provider/model catalog; claude:
+  // anthropic aliases + claude-* ids). Options are built with
+  // createElement/textContent — catalog ids never travel through innerHTML
+  // (same injection posture as the reference picker). A modal token guards
+  // the async fill: a response landing after close/reopen must not touch a
+  // list it no longer owns.
+  const modelToken = ++spawnModalGen;
+  const fillModelOptions = async () => {
+    const runtime = f.querySelector(".fruntime").value || a.runtime || "pi";
+    try {
+      const d = await apiJson(s.ctx, `/api/models?runtime=${encodeURIComponent(runtime)}`);
+      if (modelToken !== spawnModalGen || s.modalEl !== modal) return;
+      const dl = f.querySelector("#spawn-model-options");
+      if (!dl) return;
+      dl.textContent = "";
+      for (const m of d.models || []) {
+        const opt = doc.createElement("option");
+        opt.value = m.id;
+        if (m.label && m.label !== m.id) opt.label = m.label;
+        dl.append(opt);
+      }
+    } catch { /* advisory only — no catalog, no dropdown, field still works */ }
+  };
+  fillModelOptions();
+  f.querySelector(".fruntime").addEventListener("change", fillModelOptions);
 
   // One source of truth for the relation controls' render state, applied at
   // open AND on every CLI change while the modal is open (review 5526b70):
