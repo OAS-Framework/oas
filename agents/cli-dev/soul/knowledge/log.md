@@ -1,6 +1,7 @@
 # Knowledge Log
 
 ## 2026-07-27
+* **Update**: [work-tree-relative-capability-skills-fail-open](/lessons/work-tree-relative-capability-skills-fail-open.md) merges the preflight-before-mkdir spawn transaction lesson: keep declared and resolved capability resources distinct, compose the curriculum before home creation, model intentional omissions in expected-vs-materialized checks, and record composition provenance in instance.json.
 * **Creation**: [claude-project-skill-discovery-root-bound](/references/claude-project-skill-discovery-root-bound.md) records Claude Code's repository-root project-skill discovery bound, the missing skill-exclude control, and the founder ruling to use `claudeMdExcludes` for memory while recording accepted skill deviation in provenance.
 * **Creation**: [placement-guards-resolve-destination](/lessons/placement-guards-resolve-destination.md) records that canonical-home and containment guards must validate the realpath-resolved destination, not only lexical paths, immediately before side effects.
 * **Creation**: [pi-strict-launch-blocked-on-runtime-extensions](/lessons/pi-strict-launch-blocked-on-runtime-extensions.md) records that Pi strict launch must not enable `--no-extensions` until runtime extensions are declared, materialized, and provenance-recorded by capabilities, because aweb Pi messaging currently depends on the user's global Pi extension.

@@ -50,6 +50,21 @@ Observed symptoms:
 The self-concealing case is losing the messaging skills: the agent most needs
 those skills to report that its own composition is broken.
 
+## Declared versus resolved
+
+`capabilitySkillDirs()` returns only paths that resolved, so "declared nothing"
+and "declared three skills, none of which exist" both collapse to `[]`. Preserve
+the declaration channel separately from the resolved-only convenience view:
+
+```js
+capabilityDeclaredSkills(id, ctx) // -> [{ declared, path | undefined }]
+capabilitySkillDirs(id, ctx)      // unchanged: resolved-only view
+```
+
+Carry the same distinction for injections: keep the manifest's raw `inject:` as
+`injectDeclared` beside the resolved `inject`. Whenever a lookup can legitimately
+return nothing, an empty result must not be ambiguous with failed resolution.
+
 ## Four silent filters
 
 At `lib/core.mjs` commit `a036634`, four sites could drop expected capability
@@ -66,17 +81,26 @@ resources without making spawn fail:
 
 Use a transaction shape of **preflight → materialize → assert → commit**:
 
-1. Enumerate every active capability resource expected for the selected soul
-   before any side effect such as `mkdir`.
+1. Compose the instance curriculum as a pure preflight (`composeInstanceAgentsMd()`
+   only reads the soul, config chain, and capability content) and enumerate every
+   active capability resource expected for the selected soul before any side
+   effect such as `mkdir`.
 2. Resolve resources only from locked/materialized package closures, not from
-   arbitrary spawn-time worktree disk state.
+   arbitrary spawn-time worktree disk state, and keep declaration records rather
+   than relying on resolved-only arrays.
 3. Materialize the selected resources into the instance.
-4. Assert expected-vs-materialized equality after materialization.
+4. Assert expected-vs-materialized equality after materialization, including the
+   intentional exclusions. For example, `composeInstanceAgentsMd()` deliberately
+   drops knowledge-layer injections for capability agents because they are
+   ephemeral; an assertion that ignores that rule turns correct composition into
+   `E_COMPOSITION_INCOMPLETE`.
 5. Record both sets in `instance.json` with provenance.
 
 Preflight-before-`mkdir` is the cheapest rollback boundary: the common missing
 resource case leaves no scaffold to compensate. Missing required resources must
-fail spawn closed, with rollback and no zombie instance.
+fail spawn closed, with rollback and no zombie instance. Any check that truly
+must happen after creation should reduce rollback to removing the scaffold by
+comparing `expected == materialized`.
 
 Declaring resources under `node_modules/` is a **manifest defect**, not a runtime
 condition. The founder-decided sourcing for `oas-aweb` is to vendor reviewed,
@@ -86,6 +110,15 @@ sync tooling. Do not re-open shipping `@awebai/pi`/`@awebai/aw` and their native
 or platform dependency closure just to obtain Markdown skills. Because this
 changes capability source bytes, refresh package version, source, and integrity
 with the implementation; see [capability source edits require lock refresh](/lessons/capability-source-edits-require-lock-refresh.md).
+
+## Composition record
+
+`instance.json` records the selected curriculum after spawn as
+`composition.expected` (type, source, declared, resolved, origin, level) and
+`composition.materialized` (the real copies, the canonical `.agents/skills`
+tree, and the verified `.claude/skills` alias). That makes an instance's
+curriculum auditable after the fact without re-resolving config that may have
+changed.
 
 # Related
 
