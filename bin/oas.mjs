@@ -24,7 +24,7 @@ import {
   acquireCapability, restoreCapabilities, marketplaceCapabilities,
   capabilityManifests, capabilityManifest, capabilityMissingRequires, capabilityIntegrity, capabilityTrust, capabilityExecutablePath,
   readCapabilityLocks, writeCapabilityLock,
-  parsePackageSource, acquirePackage, restorePackages, listInstalledPackages, readPackageLocks, residueEntryViolation,
+  parsePackageSource, inspectGitSourceRoot, acquirePackage, restorePackages, listInstalledPackages, readPackageLocks, residueEntryViolation,
   approveCapability, updatePackage, removePackage, migrateLegacyLock, applyLegacyLockMigration,
   packageIntegrity, packageDepsIntegrity, installedPackagesDir,
   resolveOasConfig, resolveWorkMode, composeInstanceAgentsMd, parseYamlNested, packagedInject, teamAgentRoots,
@@ -506,10 +506,15 @@ function install() {
   const isCatalogPackage = parsedSrc?.kind === "catalog" && !isMarketplaceCap;
   if (parsedSrc && (parsedSrc.kind === "git" || isLocalPackage || isCatalogPackage)) {
     // Remote Git may be either a distribution package or the documented
-    // legacy standalone-capability repository. Try package acquisition first;
-    // fall back ONLY when the fetched root lacks oas-package.json.
+    // legacy standalone-capability repository. Inspect the fetched ROOT before
+    // any scope lock preflight; never infer root layout from closure errors.
     if (parsedSrc.kind === "git") {
-      if (installPackage(dir, src, { fallbackOnMissingManifest: true })) return;
+      let layout;
+      try { layout = inspectGitSourceRoot(src); }
+      catch (e) { cmdFail(e.code || "invalid-source", e.message || e); return; }
+      if (layout.package) { installPackage(dir, src); return; }
+      if (!layout.capability) { cmdFail("invalid-package-manifest", `Git source ${src} has neither oas-package.json nor oas.json at its root`); return; }
+      // Standalone capability: continue to the legacy acquisition path below.
     } else { installPackage(dir, src); return; }
   }
   let known;
@@ -544,14 +549,11 @@ function install() {
   else if (r.manifest.commands || r.manifest.hooks) console.log(`Executable surface is blocked until: oas trust ${r.manifest.capability} --dir ${shortPath(dir)}`);
 }
 
-function installPackage(dir, src, { fallbackOnMissingManifest = false } = {}) {
+function installPackage(dir, src) {
   const bail = (e) => (JSON_MODE ? jsonFail(e.code || "invalid-source", e.message || e) : die(e.message || e));
   let r;
   try { r = acquirePackage(dir, src); }
-  catch (e) {
-    if (fallbackOnMissingManifest && e.code === "invalid-package-manifest" && /has no oas-package\.json distribution manifest/.test(String(e.message))) return false;
-    bail(e); return true;
-  }
+  catch (e) { bail(e); return true; }
   if (JSON_MODE) { jsonOk({ root: r.root, installed: r.installed, lockFile: r.lockFile, depWarnings: r.depWarnings || [] }); return true; }
   for (const p of r.installed) {
     console.log(`${p.kept ? "ok       " : "Acquired "}${p.package}@${p.version} → ${shortPath(p.dir)}`);

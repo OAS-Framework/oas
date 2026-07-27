@@ -2689,3 +2689,36 @@ test("CLI Git install falls back transactionally to documented standalone capabi
   assert.ok(!existsSync(join(installedPackagesDir(s), "legacy.git")), "no distribution-package artifact was committed during package probe");
   rmSync(base, { recursive: true, force: true });
 });
+
+test("Git root probe precedes v1 lock preflight and never falls back for dependency manifest errors", () => {
+  const base = temp(); const s = scope(base);
+  const standalone = (name, id) => {
+    const repo = join(base, name);
+    write(join(repo, "oas.json"), JSON.stringify({ capability: id, version: "1.0.0", description: "legacy" }));
+    gitify(repo); return repo;
+  };
+  const one = standalone("one", "legacy.one");
+  const two = standalone("two", "legacy.two");
+  for (const repo of [one, two]) {
+    const r = cli(s, "install", `file://${repo}`, "--dir", s, "--json");
+    assert.equal(r.status, 0, r.stderr || r.stdout);
+  }
+  const v1 = JSON.parse(readFileSync(join(s, OAS_LOCK_FILE), "utf8"));
+  assert.ok(v1.capabilities["legacy.one"] && v1.capabilities["legacy.two"], "second standalone install bypasses package v1 preflight via root probe");
+
+  // Dual-layout root is a PACKAGE. A non-package dependency must fail package
+  // validation, never reinterpret the root's oas.json as legacy fallback.
+  const dep = standalone("not-a-package-dep", "dep.legacy");
+  const depCommit = execFileSync("git", ["-C", dep, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  const dual = pkgSource(join(base, "dual"), { package: "dual.pkg", dependencies: [`file://${dep}@${depCommit}`] });
+  write(join(dual, "oas.json"), JSON.stringify({ capability: "dual.legacy", version: "1.0.0", description: "must not fallback" }));
+  gitify(dual);
+  const dualScope = scope(base, "dual-scope");
+  const bad = cli(dualScope, "install", `file://${dual}`, "--dir", dualScope, "--json");
+  assert.notEqual(bad.status, 0);
+  assert.match(bad.stdout, /invalid-package-manifest/);
+  const dualLock = join(dualScope, OAS_LOCK_FILE);
+  const after = existsSync(dualLock) ? JSON.parse(readFileSync(dualLock, "utf8")) : {};
+  assert.equal(after.capabilities?.["dual.legacy"], undefined, "dependency error never falls back to dual-layout legacy root");
+  rmSync(base, { recursive: true, force: true });
+});

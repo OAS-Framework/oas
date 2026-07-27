@@ -331,3 +331,24 @@ test("no shipped desktop source imports the checkout kernel or accepts a framewo
     assert.ok(!/FRAMEWORK_ROOT|REPO_ROOT/.test(src), `${f}: infers a repo/framework root`);
   }
 });
+
+test("desktop hides tampered locked capability agents while kernel fails closed", () => {
+  const scope = mkdtempSync(join(tmpdir(), "oas-reader-agent-trust-"));
+  writeFileSync(join(scope, "oas-config.yaml"), "name: trust\ncapabilities:\n  additive:\n    locked.agent:\n      from: installed\n");
+  const capDir = join(scope, ".agents", "capabilities", "installed", "locked-agent");
+  mkdirSync(join(capDir, "agents", "helper"), { recursive: true });
+  writeFileSync(join(capDir, "oas.json"), JSON.stringify({ capability: "locked.agent", version: "1.0.0", description: "d", agents: ["agents/helper"] }));
+  writeFileSync(join(capDir, "agents", "helper", "soul.yaml"), "name: helper\nkind: local\n");
+  writeFileSync(join(capDir, "agents", "helper", "AGENTS.md"), "SAFE\n");
+  writeFileSync(join(scope, "oas-lock.json"), JSON.stringify({ lockfileVersion: 1, capabilities: {
+    "locked.agent": { source: "path:/fixture", version: "1.0.0", integrity: core.capabilityIntegrity(capDir), trustedExecutables: false },
+  } }));
+  const root = join(scope, "agents"); mkdirSync(root);
+  assert.equal(core.listCapabilityAgents(scope).length, 1, "kernel allows instruction-only surface at exact integrity without executable approval");
+  assert.equal(reader.listCapabilityAgents(scope).length, 1);
+  writeFileSync(join(capDir, "agents", "helper", "AGENTS.md"), "TAMPERED\n");
+  assert.throws(() => core.listCapabilityAgents(scope), (e) => e.code === "integrity-drift");
+  assert.deepEqual(reader.listCapabilityAgents(scope), [], "desktop degrades tampered provider to invisible");
+  assert.equal(reader.findCapabilityAgent(scope, root, "helper"), undefined, "desktop find cannot expose tampered agent");
+  fsExtra.rmSync(scope, { recursive: true, force: true });
+});
