@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import {
   capabilityIntegrity, capabilityManifest, composeInstanceAgentsMd, createAgent, findAgent, findInstanceHomes, resolveOasConfig,
   listInstances, resolveClaudeBinary, resolveWorkMode, retireInstance, runLifecycleHooks, spawnInstance, writeCapabilityLock,
@@ -3602,9 +3602,17 @@ const flat = (t) => t.replace(/\s+/g, " ");
 const APPROVED_AW_SENTENCE =
   "for example, when the aweb messaging capability is active, run `aw` there too.";
 /** Token, not substring: "aweb"/"aware" are words, not the `aw` command. */
-const mentionsAwToken = (t) => /(^|[^\w`])`?aw`?([^\w`]|$)/.test(t);
+const AW_TOKEN = /(^|[^\w`])`?aw`?([^\w`]|$)/g;
+const awTokenCount = (t) => (flat(t).match(AW_TOKEN) || []).length;
+/** Containment was not enough: a sentence may hold the approved clause AND a
+ * second command ("run `aw` even when no messaging capability is active; for
+ * example, …"), which `includes` happily approved (reviewer-focus-0b0f6d1). The
+ * approved clause carries exactly ONE `aw` token, so the sentence must carry
+ * exactly one too — and it must be that one. */
 function awMentionIsApproved(sentence) {
-  if (!mentionsAwToken(sentence)) return true;
+  const count = awTokenCount(sentence);
+  if (count === 0) return true;
+  if (count !== 1) return false;
   return flat(sentence).toLowerCase().includes(APPROVED_AW_SENTENCE);
 }
 
@@ -3625,7 +3633,11 @@ test("the aw-mention allowlist accepts only the approved sentence (reviewer-focu
     "For example, run `aw`.",                                      // "for example" alone scopes nothing
     "If messaging is active, use foo; otherwise run aw.",          // condition scopes the OTHER clause
     "Run `aw` only with an active messaging capability.",          // arguably fine — still not the approved text
+    // The approved clause plus a second command: containment alone approved it.
+    "run `aw` even when no messaging capability is active; for example, when the aweb messaging capability is active, run `aw` there too.",
   ]) assert.ok(!awMentionIsApproved(bad), `must reject: ${bad}`);
+  // Belt and braces at the composition level: the kernel ships exactly one.
+  assert.equal(awTokenCount(APPROVED_AW_SENTENCE), 1, "the approved clause itself carries exactly one `aw` token");
 });
 
 test("every work mode's generated instructions carry the home/work boundary (maintainer contract)", () => {
@@ -3842,47 +3854,83 @@ test("the shipped oas.review names no knowledge or messaging provider (reviewer-
   // capability dependencies (maintainer ruling). So the capability cannot name
   // the stack around it — every surface it ships has to work with neither layer.
   const dir = resolve(new URL("../capabilities/oas-review", import.meta.url).pathname);
-  // EVERY shipped file, not a filtered subset: a manifest may point `inject` at
-  // any path, and an extension filter silently skips what it does not recognise
-  // (reviewer-focus-6a6b891). Unknown extensions FAIL rather than being ignored,
-  // so a new kind of surface forces a decision instead of slipping through.
+  // EVERY shipped file, not a filtered subset. Two evasions closed here: an
+  // extension filter silently skips what it does not recognise, and a manifest
+  // may point `inject` at ANY path — a rogue `.png` was read as UTF-8 at runtime
+  // while the test classified it as binary and skipped it (reviewer-focus-0b0f6d1).
   const files = [];
   const walk = (d) => { for (const e of readdirSync(d, { withFileTypes: true })) {
     const q = join(d, e.name);
     if (e.isDirectory()) walk(q); else files.push(q);
   } };
   walk(dir);
+  const manifest = JSON.parse(readFileSync(join(dir, "oas.json"), "utf8"));
+  // Anything the MANIFEST declares is instructional text by definition — the
+  // runtime reads it as UTF-8 whatever it is called — so it is scanned
+  // regardless of suffix, and must be an exact member of the walked set.
+  const declared = new Set();
+  for (const rel of [manifest.inject, ...(manifest.agents || []), ...(manifest.skills || [])].filter(Boolean)) {
+    const abs = join(dir, rel);
+    const members = files.filter((f) => f === abs || f.startsWith(abs + sep));
+    assert.ok(members.length, `manifest declares ${rel}, which the walk did not find`);
+    for (const m of members) declared.add(m);
+  }
   const KNOWN_TEXT = /\.(md|json|ya?ml|txt)$/;
   const KNOWN_BINARY = /\.(png|jpg|gif|ico|woff2?)$/;
-  const unknown = files.filter((f) => !KNOWN_TEXT.test(f) && !KNOWN_BINARY.test(f));
+  const unknown = files.filter((f) => !declared.has(f) && !KNOWN_TEXT.test(f) && !KNOWN_BINARY.test(f));
   assert.deepEqual(unknown, [], `unknown shipped surface — classify it, do not skip it: ${unknown.join(", ")}`);
-  // The manifest's own declared surfaces must be among them.
-  const manifest = JSON.parse(readFileSync(join(dir, "oas.json"), "utf8"));
-  for (const declared of [manifest.inject, ...(manifest.agents || []), ...(manifest.skills || [])].filter(Boolean)) {
-    assert.ok(files.some((f) => f.startsWith(join(dir, declared))), `manifest declares ${declared}, which the walk missed`);
-  }
-  const surfaces = files.filter((f) => KNOWN_TEXT.test(f));
+  const surfaces = files.filter((f) => declared.has(f) || KNOWN_TEXT.test(f));
   assert.ok(surfaces.length >= 6, `expected every shipped surface, saw ${surfaces.length}`);
-  // Brands AND protocols: "use OKF promotion", "say so in the mail", "the `aw`
-  // CLI", "@awebai/pi", "through chat" all assume a provider just as surely as
-  // naming aweb does.
+
+  // A denylist cannot establish neutrality — SMTP, Slack, email and direct
+  // messages all sailed past the previous one — so the DELIVERY instructions,
+  // where a provider assumption actually matters, are pinned as exact snapshots.
+  // Editing them is meant to require updating this test: that is the review gate.
+  const snapshot = (file, from, to) => {
+    const text = readFileSync(join(dir, file), "utf8");
+    const i = text.indexOf(from), j = text.indexOf(to, i);
+    assert.ok(i >= 0 && j > i, `${file}: delivery passage not found (${from})`);
+    return flat(text.slice(i, j + to.length));
+  };
+  assert.equal(
+    snapshot("agents/reviewer/AGENTS.md", "4. Deliver the report", "the spawner owns onward routing."),
+    flat(`4. Deliver the report **to your spawner**: the instance named as
+   \`parentInstance\` in your \`./instance.json\`.
+
+   - **If a messaging layer is active**, its own instructions are composed into
+     these ones — send the report with the command it documents, subject
+     \`review <short-sha>: <VERDICT>\`. Write the report to a temp file first and
+     send that file if the command supports it; report bodies contain backticks
+     and diff excerpts that inline arguments mangle.
+   - **If none is active**, print the full report as your final message. The
+     transcript IS the delivery, and your spawner reads it there.
+
+   Either way that report is your only deliverable — no report files in the
+   tree, no PR comments; the spawner owns onward routing.`),
+    "the reviewer's delivery instruction changed — re-approve it: it must name no provider and must define the no-layer path",
+  );
+  assert.equal(
+    snapshot("injects/review.md", "- The reviewer reviews", "re-review before the work is ready."),
+    flat(`- The reviewer reviews **that commit's diff only** and reports its verdict
+  (\`APPROVE\` / \`APPROVE WITH NITS\` / \`NEEDS CHANGES\`) back to you the way your
+  deployment delivers messages: over your messaging layer when one is active,
+  and otherwise in its own session transcript, which is where you read it.
+  When a messaging layer IS active, do not wait actively — finish your turn and
+  go idle; the layer wakes you when the verdict arrives. \`NEEDS CHANGES\` means
+  fix, commit, and re-review before the work is ready.`),
+    "the discipline block's verdict-delivery instruction changed — re-approve it",
+  );
+
+  // Cheap defence in depth over the REST of the surfaces, now including the
+  // providers a denylist forgets: transports, not just this deployment's brands.
   const PROVIDER = /\baweb\b|@awebai|\baw\b|\bokf\b|\bharvest/i;
-  const PROTOCOL = /\bnotes\/|\bSTATE\.md|\blog\.md|\bmail\w*\b|\binbox\b|\bchat\b|\bthread\b|\bchannel\b/i;
+  const PROTOCOL = /\bnotes\/|\bSTATE\.md|\blog\.md|\bmail\w*\b|\binbox\b|\bchat\b|\bthread\b|\bchannel\b|\bsmtp\b|\bslack\b|\bemail\b|\bdirect message\b|\bdiscord\b|\bwebhook\b/i;
   for (const f of surfaces) {
     for (const [what, re] of [["provider", PROVIDER], ["protocol", PROTOCOL]]) {
       const hit = readFileSync(f, "utf8").split("\n").find((l) => re.test(l));
       assert.equal(hit, undefined, `${relative(dir, f)} assumes a ${what}: ${hit}`);
     }
   }
-  // And the no-layer path must be stated as ONE coherent instruction, not two
-  // fragments a /s match happens to span across unrelated text.
-  const soul = readFileSync(join(dir, "agents", "reviewer", "AGENTS.md"), "utf8");
-  const noLayerPara = soul.split(/\n\s*\n/).find((para) => /none is active/i.test(para));
-  assert.ok(noLayerPara && /print the full report as your final message/i.test(noLayerPara)
-    && /transcript/i.test(noLayerPara),
-    `the reviewer must define transcript delivery in the no-layer instruction itself, got: ${noLayerPara}`);
-  assert.match(readFileSync(join(dir, "injects", "review.md"), "utf8"), /otherwise in its own session transcript/,
-    "and the discipline block must say where a verdict lands without a layer");
 });
 
 test("the accepted trust boundary is DOCUMENTED, not left as a code comment (maintainer contract)", () => {
