@@ -1,5 +1,9 @@
 # Knowledge Log
 
+## 2026-07-27
+* **Creation**: promoted [Editor-group split model replaces the pending-slot arrangement](/lessons/editor-group-split-model.md) from the oas-desktop-engineer-editor-groups notes.
+* **Update**: linked [Split panes as flex-cell reprojection of existing tab panes](/lessons/split-panes-flex-reprojection.md) and [Split tab-strip alignment moves real tab elements into per-pane groups](/lessons/split-tab-strip-real-tab-groups.md) to the editor-group split model that supersedes their pending-slot/shared-strip approach for VS Code-style groups.
+
 ## 2026-07-26
 * **Fix**: merged the maintainer mergeability hold-discipline note into [Maintainer mergeability loops need live-head verification and a hold discipline](/lessons/maintainer-handback-stewardship-race.md) and [Crossed mail coordination needs repository verification and single replies](/lessons/crossed-mail-coordination.md): current-main handback loops verify against the live PR head, answer stale verdicts once with git evidence, hold when instructed instead of rebasing speculatively, rebase only onto explicitly mailed successor SHAs, union append-only `log.md` conflicts, and fetch main before opening PRs to prevent branch scope drift.
 * **Update**: merged the split-strip alignment correction into [Split tab-strip alignment moves real tab elements into per-pane groups](/lessons/split-tab-strip-real-tab-groups.md): the pane-group flex track must be a dedicated full-width row containing only one flex child per pane, with controls and non-member tabs outside so they cannot skew alignment.
