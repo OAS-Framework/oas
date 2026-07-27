@@ -2989,6 +2989,37 @@ exit 0
   }
 });
 
+test("a WELL-FORMED join response cannot reflect the invite token into the output (reviewer-a6aa1c5)", () => {
+  const base = temp();
+  const hook = resolve(new URL("../capabilities/oas-aweb/bin/oas-aweb.mjs", import.meta.url).pathname);
+  const bin = join(base, "bin"); mkdirSync(bin, { recursive: true });
+  // Suppressing the FAILURE paths achieves nothing if a successful reply is
+  // copied into meta and the briefing verbatim. Here every command succeeds and
+  // the response is valid JSON — it simply echoes the invite token back as the
+  // alias, and the hook printed it twice on exit 0.
+  const TOKEN = "inv_SUPERSECRET_TOKEN_9f3a";
+  write(join(bin, "aw"), `#!/bin/sh
+if [ "$1" = "team" ] && [ "$2" = "list" ]; then echo '{"active_team":"default:acme.aweb.ai","memberships":[{"team_id":"default:acme.aweb.ai","alias":"x"}]}'; exit 0; fi
+if [ "$1" = "team" ] && [ "$2" = "invite" ]; then echo '{"token":"${TOKEN}"}'; exit 0; fi
+if [ "$1" = "team" ] && [ "$2" = "join" ]; then echo '{"team_id":"${TOKEN}","alias":"${TOKEN}"}'; exit 0; fi
+exit 0
+`);
+  execFileSync("chmod", ["+x", join(bin, "aw")]);
+  const root = join(base, "awroot"); mkdirSync(join(root, ".aw"), { recursive: true });
+  const r = spawnSync(process.execPath, [hook, "spawn"], {
+    encoding: "utf8",
+    env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, OAS_EVENT: "spawn", OAS_INSTANCE: "probe", OAS_HOME: root, OAS_WORKSPACE: root, OAS_CONTEXT: root, OAS_TEAM_SCOPE: root, OAS_TEAM_NAME: "default", OAS_TEAM_ID: "" },
+  });
+  assert.doesNotMatch(r.stdout, new RegExp(TOKEN), "no emitted field may carry the token");
+  assert.doesNotMatch(r.stderr, new RegExp(TOKEN));
+  // The spawn still succeeds, using what WE asked for — the requested alias and
+  // team are always known, so a rejected field has an honest fallback.
+  assert.equal(r.status, 0, `a successful join stays successful: ${r.stderr}`);
+  assert.match(r.stdout, /"alias":"probe"/, "the requested alias stands in");
+  assert.match(r.stdout, /default:acme\.aweb\.ai/, "as does the requested team");
+  rmSync(base, { recursive: true, force: true });
+});
+
 test("an alias minted with no local key is incomplete cleanup, not 'nothing to delete'", () => {
   const base = temp();
   const hook = resolve(new URL("../capabilities/oas-aweb/bin/oas-aweb.mjs", import.meta.url).pathname);
@@ -3608,6 +3639,45 @@ test("instance homes stay inside the deployment: every layout, every symlink esc
       );
       assert.equal(readdirSync(foreign).length, before, `${label}: nothing was created outside`);
     }
+  } finally { process.env.PATH = oldPath; }
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("a path swapped AFTER validation is caught before anything is written (reviewer-a6aa1c5)", () => {
+  const base = temp();
+  const { repo, root } = fixtureSoul(base, "pi");
+  const foreign = join(base, "foreign"); gitRepo(foreign);
+  // The placement checks run before composition and the runtime preflight, both
+  // of which shell out — a real window. The fake `pi` swaps instances/ for a link
+  // to the foreign repo WHILE the preflight is running, which is exactly the
+  // race: mkdirSync then follows the link, and everything after it (scaffolding,
+  // the identity hook and its key) would land outside the deployment.
+  capability(repo, "chan", { capability: "acme.chan", requires: [{ runtime: "pi", package: "npm:@acme/chan", why: "channel" }] });
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.chan:\n      global: true\n");
+  const bin = join(base, "bin"); mkdirSync(bin, { recursive: true });
+  const instances = join(root, "dev", "instances");
+  const pkgDir = join(base, "pkg"); mkdirSync(pkgDir, { recursive: true });
+  write(join(bin, "pi"), `#!/bin/sh
+if [ "$1" = "list" ]; then
+  rm -rf ${JSON.stringify(instances)}
+  ln -s ${JSON.stringify(foreign)} ${JSON.stringify(instances)}
+  echo "User packages:"
+  echo "  npm:@acme/chan"
+  echo "    ${pkgDir}"
+fi
+exit 0
+`);
+  write(join(bin, "claude"), "#!/bin/sh\nexit 0\n");
+  execFileSync("chmod", ["-R", "+x", bin]);
+  const oldPath = process.env.PATH; process.env.PATH = `${bin}:${process.env.PATH}`;
+  try {
+    assert.throws(
+      () => spawnInstance(root, findAgent(root, "dev"), { instance: "dev-race", launch: false }),
+      (e) => e.code === "E_NO_CANONICAL_ROOT" && /after it was validated|not at/.test(e.message),
+      "a destination that changed after validation must not be used",
+    );
+    assert.deepEqual(readdirSync(foreign).filter((f) => f !== ".git" && f !== ".gitignore"), [],
+      "and nothing — not even the empty home — is left outside the deployment");
   } finally { process.env.PATH = oldPath; }
   rmSync(base, { recursive: true, force: true });
 });

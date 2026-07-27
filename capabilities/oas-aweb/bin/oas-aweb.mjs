@@ -173,13 +173,26 @@ if (event === "spawn") {
     // so neither their output nor their diagnostics may reach a log.
     const inv = parseSecretJson(run(["aw", "team", "invite", "--team-id", team, "--json"], root, 45000, { secretSafe: true }), "aw team invite");
     if (!inv?.token || typeof inv.token !== "string") fatal("aw team invite returned no usable token, so no identity could be minted");
-    const joined = parseSecretJson(run(["aw", "team", "join", inv.token, "--name", instance, "--json"], home, 45000, { secrets: [inv.token], secretSafe: true }), "aw team join");
-    if (!joined || typeof joined !== "object") fatal("aw team join returned no usable result, so no identity could be minted", minted);
+    const raw = parseSecretJson(run(["aw", "team", "join", inv.token, "--name", instance, "--json"], home, 45000, { secrets: [inv.token], secretSafe: true }), "aw team join");
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) fatal("aw team join returned no usable result, so no identity could be minted", minted);
+    // The RESPONSE is not a safe place to take strings from. Suppressing the
+    // failure paths does nothing if a successful reply is copied into meta and
+    // the briefing verbatim: a response echoing the invite token back as the
+    // alias would print it twice, on exit 0 (reviewer-a6aa1c5). Accept a field
+    // only if it is a plausible value of its own kind and is not carrying the
+    // token; otherwise fall back to what WE asked for, which is always known.
+    const clean = (v) => (typeof v === "string" && v.trim() && !v.includes(inv.token) ? v.trim() : undefined);
+    const joined = {
+      alias: (() => { const a = clean(raw.alias); return a && /^[a-z0-9][a-z0-9._-]{0,127}$/i.test(a) ? a : instance; })(),
+      // Team ids are "<name>:<domain>"; anything else is not one, and the
+      // requested team is the honest fallback.
+      team_id: (() => { const t = clean(raw.team_id); return t && /^[^\s:]+:[^\s:]+$/.test(t) ? t : team; })(),
+    };
     // External state now exists. Record it immediately so any later failure can
     // still report it for compensation.
-    minted = { team: joined.team_id, alias: joined.alias || instance };
+    minted = { team: joined.team_id, alias: joined.alias };
     run(["aw", "init", "--do-not-touch-agents-md"], home);
-    const alias = joined.alias || instance;
+    const alias = joined.alias;
     const mismatch = joined.team_id !== team
       ? ` [WARNING: joined ${joined.team_id}, expected ${team}]` : "";
     // Runtime integration: for Claude Code sessions the aweb-channel plugin

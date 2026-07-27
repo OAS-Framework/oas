@@ -1,7 +1,7 @@
 {
   "capability": "oas.aweb",
   "command": "aweb",
-  "version": "1.8.3",
+  "version": "1.8.4",
   "compatibility": {
     "oas": ">=0.6.2"
   },
