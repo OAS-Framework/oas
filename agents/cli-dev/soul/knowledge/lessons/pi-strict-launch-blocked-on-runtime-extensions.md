@@ -51,6 +51,13 @@ The existing spawn-hook `launch` map is the seam that already works for runtime
 arguments, but hook-contributed args carry no provenance. The resource class is
 the correct home for provenance and fail-closed materialization.
 
+A later founder ruling made the package-presence half explicit: the aweb
+capability must declare the aweb Pi package as a runtime-scoped package
+requirement instead of relying on the user's global Pi settings. That is not the
+same as a host-command requirement, and it still does not by itself supply the
+`-e <path>` argument needed under `--no-extensions`; see
+[runtime-package requirements](/lessons/runtime-package-requirements.md).
+
 Open question for the founder: the aweb Pi extension is executable code shipped
 as an npm package, not Markdown. The vendoring decision for the aweb skills does
 not automatically decide where the locked extension copy comes from.

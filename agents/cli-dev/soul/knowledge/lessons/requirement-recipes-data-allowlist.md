@@ -3,7 +3,7 @@ type: Lesson
 title: Requirement install recipes as data — allowlist plans, argv-only execution, PATH verify
 description: Host-requirement installers are planned by an allowlisted manager table that validates package/formula names against strict regexes and returns argv arrays; consent, execution (execFileSync, no shell), and post-install PATH verification are separate steps so noninteractive fail-safe and per-requirement acceptance flags fall out naturally.
 tags: [requirements, consent, security, install]
-timestamp: 2026-07-26
+timestamp: 2026-07-27
 ---
 
 # Lesson
@@ -31,6 +31,12 @@ Testing trick: put a fake `npm` shim on PATH that writes its argv to a file and
 drops a fake binary into the same bin dir. That proves both "consent runs the
 exact argv" and "PATH verification succeeds/fails honestly" without touching
 the host.
+
+# Runtime-package boundary
+
+This lesson is about host-command requirements. Runtime packages such as the Pi
+aweb extension need separate detection, verification, and identity rules because
+they never become commands on PATH; see [runtime-package requirements](/lessons/runtime-package-requirements.md).
 
 Version extraction from `@scope/pkg@1.2.3` needs `/.@([^@]+)$/`, not
 `split("@")`, because scoped packages start with `@`.

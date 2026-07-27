@@ -1,6 +1,8 @@
 # Knowledge Log
 
 ## 2026-07-27
+* **Creation**: [runtime-package-requirements](/lessons/runtime-package-requirements.md) records that Pi runtime-package requirements need runtime settings detection, non-PATH post-install verification, selector-normalized identity, and fail-closed invalid-spec handling.
+* **Update**: [pi-strict-launch-blocked-on-runtime-extensions](/lessons/pi-strict-launch-blocked-on-runtime-extensions.md), [requirement-recipes-data-allowlist](/lessons/requirement-recipes-data-allowlist.md), and [strict-curriculum-scoping](/references/strict-curriculum-scoping.md) link the runtime-package requirement boundary to the Pi strict-launch blocker and host-command requirement lesson.
 * **Update**: [work-tree-relative-capability-skills-fail-open](/lessons/work-tree-relative-capability-skills-fail-open.md) merges the preflight-before-mkdir spawn transaction lesson: keep declared and resolved capability resources distinct, compose the curriculum before home creation, model intentional omissions in expected-vs-materialized checks, and record composition provenance in instance.json.
 * **Creation**: [claude-project-skill-discovery-root-bound](/references/claude-project-skill-discovery-root-bound.md) records Claude Code's repository-root project-skill discovery bound, the missing skill-exclude control, and the founder ruling to use `claudeMdExcludes` for memory while recording accepted skill deviation in provenance.
 * **Creation**: [placement-guards-resolve-destination](/lessons/placement-guards-resolve-destination.md) records that canonical-home and containment guards must validate the realpath-resolved destination, not only lexical paths, immediately before side effects.

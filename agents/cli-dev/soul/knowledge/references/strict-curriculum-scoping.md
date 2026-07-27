@@ -22,6 +22,8 @@ curriculum enforcement:
   Do not enable that launch line before runtime extensions are capability
   resources, because the aweb Pi extension currently comes only from user-global
   Pi settings; see [the Pi runtime-extension blocker](/lessons/pi-strict-launch-blocked-on-runtime-extensions.md).
+  The package-presence fix is a Pi runtime-package requirement, not a PATH-based
+  host-command requirement; see [runtime-package requirements](/lessons/runtime-package-requirements.md).
 - Claude Code: verified on Claude Code 2.1.220 that an isolated
   `CLAUDE_CONFIG_DIR` breaks OAuth/keychain auth. The working strict mechanism is
   `--setting-sources ""` against the deployment's real config dir, plus
