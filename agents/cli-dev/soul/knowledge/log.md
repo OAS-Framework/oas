@@ -1,6 +1,11 @@
 # Knowledge Log
 
 ## 2026-07-27
+* **Creation**: [claude-strict-launch-setting-sources](/lessons/claude-strict-launch-setting-sources.md) records the verified Claude Code strict curriculum mechanism: `--setting-sources ""` keeps auth while excluding ambient skills/context, and selected plugins must be re-added with `--plugin-dir`.
+* **Creation**: [pi-strict-launch-requires-no-extensions](/lessons/pi-strict-launch-requires-no-extensions.md) records that Pi extension discovery can leak skills through `resources_discover`, so strict launch requires `--no-extensions` plus selected `-e` extensions.
+* **Creation**: [instance-homes-follow-cwd-into-linked-worktrees](/lessons/instance-homes-follow-cwd-into-linked-worktrees.md) records that CWD-based root discovery can home instances inside linked worktrees, and separates deployment root, invocation scope, and work context.
+* **Update**: [work-tree-relative-capability-skills-fail-open](/lessons/work-tree-relative-capability-skills-fail-open.md) merges the missing-resource-versus-missing-manifest asymmetry, four silent spawn filters, fail-closed materialization shape, and founder-decided aweb skill vendoring source.
+* **Update**: [strict-curriculum-scoping](/references/strict-curriculum-scoping.md) records the verified Pi and Claude strict-launch mechanisms and the aweb skill vendoring ruling for the 0.19.0 curriculum release gate.
 * **Update**: [strict-curriculum-scoping](/references/strict-curriculum-scoping.md) merges the 0.19.0 release-gate ruling that complete active-capability skills, injections, and plugins must resolve from locked/materialized sources, appear in Pi and Claude real runtimes with provenance, fail closed when missing, and exclude inactive capabilities.
 * **Creation**: [work-tree-relative-capability-skills-fail-open](/lessons/work-tree-relative-capability-skills-fail-open.md) records that work-tree-relative capability skill paths can fail open at spawn when dependencies are not installed, silently omitting messaging skills from the composed instance.
 * **Creation**: [prove-auto-merge-preserved-both-deltas](/lessons/prove-auto-merge-preserved-both-deltas.md) records the reverse-apply check for proving that an auto-merged file still contains each side's post-base delta before reporting integration success.
