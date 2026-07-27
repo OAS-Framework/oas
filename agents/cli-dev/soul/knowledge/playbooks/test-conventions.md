@@ -3,7 +3,7 @@ type: Playbook
 title: Test conventions in test/capabilities.test.mjs
 description: Kernel and CLI tests run node:test against temp directories with fixture souls, fake/runtime tmux shims on PATH, spawnSync of bin/oas.mjs for CLI behavior, and regression coverage at the layer where bugs occurred.
 tags: [testing, conventions, fixtures, cli, regression, tmux]
-timestamp: 2026-07-26
+timestamp: 2026-07-27
 ---
 
 # The house style
@@ -100,6 +100,13 @@ All kernel/CLI behavior tests live in `test/capabilities.test.mjs`
 - A clean checkout needs dependencies installed in both the repo root and
   `packages/desktop`; otherwise desktop tests can fail with missing transitive
   ESM packages such as `marked` before the kernel/CLI change under test runs.
+- Package-lock fixtures that contain intentionally fake scanner inputs
+  (unreachable tarball URLs, bogus integrity, omitted dev/peer entries, etc.)
+  are scanner-only fixtures: assert them by calling the exported scanner
+  directly. Any lock used in an `npm ci` materialization test must be a valid,
+  purely local closure (`file:` / `link: true` entries only), and portability
+  checks should run with `npm_config_cache=$(mktemp -d)` so a warm local cache
+  cannot hide CI-only failures.
 - Config-chain discovery needs an `oas-config.yaml` at the level — a lock or
   installed store alone is invisible (see the init-acquisition lesson).
 - Capability fixture packages under `.agents/capabilities/` are discovered only
