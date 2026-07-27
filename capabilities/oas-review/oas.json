@@ -1,6 +1,6 @@
 {
   "capability": "oas.review",
-  "version": "1.2.3",
+  "version": "1.2.0",
   "compatibility": { "oas": ">=0.16.0" },
   "description": "Post-commit review discipline: a fresh reviewer agent (defined by this capability) reviews each new commit's diff, reports its verdict to its spawner over the deployment's messaging layer (or in its transcript when there is none), and retires — plus the shared developer delivery discipline.",
   "requires": [],
