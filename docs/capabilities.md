@@ -89,12 +89,15 @@ A self-contained package has an `oas.json`:
   to the depth the retry consumes it: `version`, a context `repo`, a recognised
   `work` mode (plus a `branch` for `worktree` — an unknown mode would skip the
   rollback-owned Git cleanup and call it done), a real non-empty capability set,
-  and the record of which retire hooks still owe cleanup. A marker failing any of
+  and the record of what still owes cleanup — retire hooks by capability id, plus
+  the rollback-owned Git steps (`worktree`, `branch`) where the mode has them. That
+  record can never be empty: a quarantine exists because something is outstanding,
+  and one claiming otherwise would give the retry nothing to prove. A marker failing any of
   that is no more retryable than a missing one, and is treated as missing so the
   escape hatch works.
 - A retry clears the quarantine only by **proving the outstanding work happened**:
   every retire hook the marker records as owing cleanup must have run and reported
-  success, and the rollback-owned Git steps must verify. A retry that resolves no
+  success, and every Git step it records must be re-run and verified. A retry that resolves no
   capabilities — a hand-edited descriptor, or config drift since the spawn — is an
   incomplete cleanup, not a clean one, and the home stays.
 - Because some cleanups can never succeed (a capability offering no way to undo its

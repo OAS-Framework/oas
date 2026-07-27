@@ -3295,6 +3295,10 @@ console.log(JSON.stringify({ meta: { retired: true } }));`,
     const marker = JSON.parse(readFileSync(markerPath, "utf8"));
     marker.cleanup.work = "worktree";
     marker.cleanup.branch = "dev-git-leftover";
+    // A Git-ONLY quarantine: hooks finished, the branch did not go. It is the one
+    // shape whose outstanding hook list is legitimately empty, and it must stay
+    // retryable — the Git verification is its proof (reviewer-2baa631).
+    marker.cleanup.outstanding = { hooks: [], git: ["branch"] };
     writeFileSync(markerPath, JSON.stringify(marker, null, 2));
 
     writeFileSync(allow, "ok");                 // hooks will now succeed
@@ -3348,7 +3352,7 @@ test("--force clears a home whose quarantine marker cannot drive a retry (review
     failed: [{ capability: "acme.chan", event: "spawn" }],
     cleanup: {
       version: 1, repo: join(base, "repo"), work: "checkout", branch: "main",
-      outstanding: { hooks: ["acme.chan"] },
+      outstanding: { hooks: ["acme.chan"], git: [] },
       capabilityRuntime: [{ id: "acme.chan", hooks: { retire: "hook.mjs retire" } }],
       capabilityMeta: { "acme.chan": { alias: "probe" } },
     },
@@ -3385,7 +3389,20 @@ test("--force clears a home whose quarantine marker cannot drive a retry (review
     "no outstanding record": broken((m) => { delete m.cleanup.outstanding; }),
     "a mistyped outstanding record": broken((m) => { m.cleanup.outstanding = ["acme.chan"]; }),
     "a mistyped outstanding hook list": broken((m) => { m.cleanup.outstanding = { hooks: "acme.chan" }; }),
-    "a mistyped outstanding hook id": broken((m) => { m.cleanup.outstanding = { hooks: [{ id: "acme.chan" }] }; }),
+    "a mistyped outstanding hook id": broken((m) => { m.cleanup.outstanding = { hooks: [{ id: "acme.chan" }], git: [] }; }),
+    "a missing outstanding git list": broken((m) => { delete m.cleanup.outstanding.git; }),
+    "a mistyped outstanding git list": broken((m) => { m.cleanup.outstanding.git = "branch"; }),
+    "an unknown outstanding git item": broken((m) => { m.cleanup.outstanding.git = ["stash"]; }),
+    // The rollback owns Git steps only for a worktree, so debt claimed anywhere
+    // else describes a quarantine that could not have happened.
+    "git debt in a non-worktree mode": broken((m) => { m.cleanup.outstanding.git = ["branch"]; }),
+    // NOTHING outstanding is a proof obligation of zero: the retry runs, proves
+    // nothing, and deletes the home and its credential. The ID-only capability
+    // entry is the shape that makes it look plausible (reviewer-2baa631).
+    "nothing outstanding at all": broken((m) => {
+      m.cleanup.outstanding = { hooks: [], git: [] };
+      m.cleanup.capabilityRuntime = [{ id: "acme.chan" }];
+    }),
     "a mistyped capabilityMeta": broken((m) => { m.cleanup.capabilityMeta = []; }),
   };
   for (const [label, marker] of Object.entries(unusable)) {
