@@ -16,7 +16,14 @@ the local catalog probe.
 
 The Spawn modal model field therefore stays a free-text `.fmodel` input. The
 catalog is only an advisory `<datalist id="spawn-model-options">` populated from
-`GET /api/models?runtime=pi|claude`. The server must not gate `POST /api/spawn`
+`POST /api/models` with body `{ runtime: "pi" | "claude" }`. The route is a POST
+— never a GET — because a cache miss executes a child process (pi, possibly a
+login shell) and must sit behind the server's POST-only CSRF Origin guard: a GET
+on the fixed loopback port is reachable by hostile pages via no-cors requests
+and can fan out unbounded child processes (review 9b1e3ff blocker). All
+concurrent cache misses must coalesce behind ONE in-flight catalog promise so
+request fan-in never multiplies probes. The server must not gate
+`POST /api/spawn`
 on catalog membership; catalog failures resolve to an empty list so a missing or
 unavailable model-listing command does not break spawning.
 
@@ -36,8 +43,12 @@ provider-prefixed ids into a Claude spawn are likely to see launch-time rejectio
 # Renderer guardrails
 
 Rebuild datalist options when the runtime selector changes. Guard asynchronous
-fills with a modal-generation token so a late response cannot mutate a reopened
-modal, and construct options with `createElement` plus `textContent` because
+fills with a PER-REQUEST monotonic generation token — a per-modal token is too
+coarse: runtime flips inside one open modal race each other, and a slow earlier
+response must never overwrite a later runtime's list (review bcf8255
+important). Only the latest request may paint; also drop responses landing
+after the modal closes or is replaced. Construct options with `createElement`
+plus `textContent` because
 catalog ids are external data.
 
 # Related concepts

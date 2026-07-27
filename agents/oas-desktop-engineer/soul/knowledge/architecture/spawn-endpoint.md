@@ -23,7 +23,9 @@ meaningful client errors instead of collapsing into generic service degradation.
 # Model field semantics
 
 The optional model value is still free-text spawn input, not an enum. The
-renderer may offer an advisory catalog from `GET /api/models?runtime=...`, but
+renderer may offer an advisory catalog from `POST /api/models` (body
+`{ runtime }` — a POST so the command-running route sits behind the CSRF Origin
+guard, with concurrent misses coalesced into one probe), but
 `POST /api/spawn` must pass the provided model preference through without checking
 catalog membership. Hard-selecting or server-validating the value would break
 comma-separated model preference lists and valid models absent from the probe; see
