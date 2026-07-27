@@ -32,6 +32,7 @@ read what the current task needs, not everything.
 ## Lessons
 * [lessons/symlink-containment-walker-throws.md](lessons/symlink-containment-walker-throws.md) - A symlink-containment walker that recurses through contained link targets must narrow lstat probe try/catch blocks so path-escape errors thrown by deeper recursion fail closed instead of being silently swallowed.
 * [lessons/coordinator-stale-verification-loop.md](lessons/coordinator-stale-verification-loop.md) - When a coordinator repeatedly verifies stale commits and demands already-landed work, answer with branch-head, ancestry, and blob-level evidence plus explicit ACKs for the named mails.
+* [lessons/crossed-mail-freeze-discipline.md](lessons/crossed-mail-freeze-discipline.md) - Under repeated HOLD/GO/HOLD cycles with out-of-order mail delivery, use state-report-and-freeze: report exactly what is pushed vs local, keep freeze-time fixes as local unpushed commits, and treat incoming instructions as possibly stale.
 
 * [lessons/caller-controlled-instance-name-containment.md](lessons/caller-controlled-instance-name-containment.md) - findInstanceHome must reject names outside the instance-name charset and verify a realpath-resolved hit is the named immediate child of instances/ before any kernel function uses a caller-supplied instance name as a path.
 * [lessons/marketplace-trust-and-hoisted-paths.md](lessons/marketplace-trust-and-hoisted-paths.md) - marketplace-over-bundled migration: trust at acquisition and the lock-sourced hoisted-path exemption.

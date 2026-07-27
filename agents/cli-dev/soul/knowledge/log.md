@@ -1,6 +1,8 @@
 # Knowledge Log
 
 ## 2026-07-27
+* **Creation**: skills/crossed-mail-freeze-discipline — adds the HOLD/GO crossed-mail freeze protocol for exact state reports, unpushed freeze-time fixes, and stale-instruction checks.
+* **Creation**: [crossed-mail-freeze-discipline](/lessons/crossed-mail-freeze-discipline.md) records the state-report-and-freeze posture for crossed HOLD/GO mail, local unpushed fixes during freezes, and self-verification of moving-head claims.
 * **Update**: [gate2-seam-teardown-execution](/lessons/gate2-seam-teardown-execution.md) merges the adopt-then-adapt re-merge lesson for sibling-owned shared test suites: adopt their suite file wholesale, re-apply a small greppable adaptation set, and classify failures as missing adaptations or real contract conflicts.
 * **Update**: [package-engine-implementation-gotchas](/lessons/package-engine-implementation-gotchas.md) records transactional Git-root package probing, direct resolved-root identity comparison, and exact parser normalized forms.
 * **Update**: [capability-defined-agents](/architecture/capability-defined-agents.md) links installed capability-agent soul reads to provider integrity and dependency-closure trust checks.
