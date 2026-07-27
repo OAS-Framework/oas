@@ -6,9 +6,9 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSyn
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import {
-  acquirePackage, applyLegacyLockMigration, approveCapability, capabilityIntegrity, capabilityManifests, capabilityManifest, capabilityTrust,
+  acquireCapability, acquirePackage, applyLegacyLockMigration, approveCapability, capabilityIntegrity, capabilityManifests, capabilityManifest, capabilityTrust,
   capabilitySkillDirs, capabilityExecutablePath, listInstalledPackages, loadPackageManifestAt, migrateLegacyLock,
-  materializePackageDeps, packageDepsIntegrity, packageIntegrity, parsePackageSource, readPackageLocks, removePackage, resolveOasConfig, restoreCapabilities, restorePackages,
+  inspectGitSourceRoot, materializePackageDeps, packageDepsIntegrity, packageIntegrity, parsePackageSource, readPackageLocks, removePackage, resolveOasConfig, restoreCapabilities, restorePackages,
   findAgent, findCapabilityAgent, spawnInstance, updatePackage, validateLockEntry, writeCapabilityLock, writePackageLock, installedPackagesDir, OAS_LOCK_FILE,
 } from "../lib/core.mjs";
 
@@ -2720,5 +2720,37 @@ test("Git root probe precedes v1 lock preflight and never falls back for depende
   const dualLock = join(dualScope, OAS_LOCK_FILE);
   const after = existsSync(dualLock) ? JSON.parse(readFileSync(dualLock, "utf8")) : {};
   assert.equal(after.capabilities?.["dual.legacy"], undefined, "dependency error never falls back to dual-layout legacy root");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("Git root selection hands one immutable inspected snapshot across standalone↔package source mutation", () => {
+  const base = temp();
+  // standalone at inspection, mutated remote becomes dual/package afterwards
+  const standalone = join(base, "standalone");
+  write(join(standalone, "oas.json"), JSON.stringify({ capability: "snap.cap", version: "1.0.0", description: "d" }));
+  gitify(standalone);
+  const capSnap = inspectGitSourceRoot(`file://${standalone}`);
+  try {
+    write(join(standalone, "oas-package.json"), JSON.stringify({ package: "evil.pkg", version: "1.0.0", description: "d", compatibility: { oas: ">=0.1.0" }, capabilities: [] }));
+    gitCommit(standalone);
+    const s = scope(base, "cap-scope");
+    const r = acquireCapability(s, `file://${standalone}`, { rootSnapshot: capSnap });
+    assert.equal(r.manifest.capability, "snap.cap");
+    assert.equal(r.commit, capSnap.commit, "legacy acquisition uses inspected commit, not mutated remote head");
+    assert.ok(!existsSync(join(r.dest, "oas-package.json")), "selected standalone snapshot cannot become dual-layout on second fetch");
+  } finally { capSnap.cleanup(); }
+
+  // package at inspection, mutated remote becomes standalone afterwards
+  const pkg = pkgSource(join(base, "pkg"), { package: "snap.pkg" }); gitify(pkg);
+  const pkgSnap = inspectGitSourceRoot(`file://${pkg}`);
+  try {
+    rmSync(join(pkg, "oas-package.json"));
+    write(join(pkg, "oas.json"), JSON.stringify({ capability: "wrong.cap", version: "1.0.0", description: "d" }));
+    gitCommit(pkg);
+    const s = scope(base, "pkg-scope");
+    const r = acquirePackage(s, `file://${pkg}`, { rootSnapshot: pkgSnap });
+    assert.equal(r.root, "snap.pkg");
+    assert.equal(r.installed[0].commit, pkgSnap.commit, "package acquisition uses inspected commit, not mutated remote head");
+  } finally { pkgSnap.cleanup(); }
   rmSync(base, { recursive: true, force: true });
 });
