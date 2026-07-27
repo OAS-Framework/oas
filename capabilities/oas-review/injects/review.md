@@ -42,9 +42,9 @@ oas spawn reviewer --work attached --work-dir "$PWD/work" \
   ```
 
   Go idle for the verdict. **The maintainer instance stays alive across
-  RETURN rounds** — when you push fixes, notify the SAME maintainer (replying
-  on the existing thread if your messaging layer has threads); do not spawn
-  another for this PR. You never merge to main
+  RETURN rounds** — when you push fixes, notify the SAME maintainer, continuing
+  the existing exchange rather than starting a new one; do not spawn another for
+  this PR. You never merge to main
   yourself.
 
   **Reviewers are the opposite: one per commit, then gone.** The post-commit
