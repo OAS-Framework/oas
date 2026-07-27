@@ -14,7 +14,7 @@
  *   POST /api/keys/<instance>       { data } → raw key bytes into the session (no Enter)
  *   POST /api/interrupt/<instance>  sends Ctrl-C (Escape for pi/claude prompts stays manual)
 
- *   GET  /api/models?runtime=pi|claude  advisory model catalog for the spawn modal
+ *   POST /api/models                { runtime: pi|claude } → advisory model catalog for the spawn modal
  *   GET  /api/cli                   CLI discovery status (bin, version, required range, tried)
  *   POST /api/cli/reprobe           re-run discovery; body { bin? } prioritizes a user-chosen binary
  *   POST /api/harvest/<instance>    `oas okf harvest --json` with cwd fixed to the instance home
@@ -169,7 +169,6 @@ function agentsData(wsId) {
 }
 
 /* ── Model catalog (spawn-modal dropdown) ──
-   GET /api/models?runtime=pi|claude → { runtime, models: [{ id, label }] }.
    pi: the authenticated `pi --list-models` catalog — ids are
    "provider/model" exactly as `oas spawn --model` (and pi --model) accept
    them. claude: the claude CLI's model ALIASES plus the anthropic-provider
@@ -177,7 +176,15 @@ function agentsData(wsId) {
    claude-* model names). Advisory ONLY: the renderer keeps the field
    free-text (comma-separated preference lists stay valid) and the server
    never gates /api/spawn on catalog membership. Failures resolve to an
-   empty list — a missing pi must not break the spawn modal. */
+   empty list — a missing pi must not break the spawn modal.
+   SECURITY (review 9b1e3ff): every cache miss executes a child process
+   (pi, possibly a login shell), so this is a POST — POST /api/models
+   { runtime } → { runtime, models: [{ id, label }] } — behind the server's
+   Origin guard: a GET with its own Origin check is bypassable by <img>/
+   no-cors requests that omit the header, letting a hostile page fan out
+   child processes against the fixed loopback port. All concurrent misses
+   COALESCE behind one in-flight catalog promise — at most one probe runs
+   regardless of request fan-in. */
 const CLAUDE_MODEL_ALIASES = ["opus", "sonnet", "haiku", "sonnet[1m]"];
 const MODELS_TTL_MS = 60_000;
 const modelsCache = new Map(); // runtime → { at, models }
@@ -210,10 +217,18 @@ async function piModelCatalog() {
   }
   return parsePiModelList(out);
 }
+// Coalesced probe: concurrent cache misses share ONE child-process run.
+let piCatalogInflight = null;
+function piModelCatalogOnce() {
+  if (!piCatalogInflight) {
+    piCatalogInflight = piModelCatalog().finally(() => { piCatalogInflight = null; });
+  }
+  return piCatalogInflight;
+}
 async function modelsData(runtime) {
   const cached = modelsCache.get(runtime);
   if (cached && Date.now() - cached.at < MODELS_TTL_MS) return cached.models;
-  const catalog = await piModelCatalog();
+  const catalog = await piModelCatalogOnce();
   const models = runtime === "pi"
     ? catalog.map((id) => ({ id, label: id }))
     : [
@@ -889,8 +904,11 @@ const server = createServer(async (req, res) => {
       const d = brainData(bm[1], url.searchParams.get("ws") || undefined);
       return d ? send(res, 200, d) : send(res, 404, { error: `unknown agent "${bm[1]}"` });
     }
-    if (req.method === "GET" && path === "/api/models") {
-      const runtime = url.searchParams.get("runtime") || "pi";
+    if (req.method === "POST" && path === "/api/models") {
+      // POST (not GET) so the CSRF Origin guard above covers this
+      // command-running route — see the model-catalog SECURITY note.
+      const body = await readBody(req);
+      const runtime = typeof body.runtime === "string" && body.runtime ? body.runtime : "pi";
       if (runtime !== "pi" && runtime !== "claude") return send(res, 400, { error: `unknown runtime "${runtime}" (pi|claude)` });
       return send(res, 200, { runtime, models: await modelsData(runtime) });
     }

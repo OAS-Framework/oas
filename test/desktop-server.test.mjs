@@ -353,14 +353,16 @@ test("desktop server: parsePiModelList drops the header and yields provider/mode
   assert.deepEqual(parse(null), [], "missing catalog → empty list, never a throw");
 });
 
-test("desktop server: /api/models serves runtime-scoped catalogs (pi: provider/model; claude: aliases + anthropic ids) and 400s unknown runtimes", async () => {
-  const { mkdtempSync, writeFileSync, chmodSync } = await import("node:fs");
+test("desktop server: POST /api/models serves runtime-scoped catalogs, coalesces concurrent misses into ONE probe, guards Origin, and 400s unknown runtimes", async () => {
+  const { mkdtempSync, writeFileSync, chmodSync, readFileSync: rf } = await import("node:fs");
   const { tmpdir } = await import("node:os");
-  // Fake `pi` on PATH: a deterministic catalog. node must stay reachable for
-  // the server itself, so prepend the fake dir to the REAL PATH.
+  // Fake `pi` on PATH: a deterministic catalog that COUNTS its invocations
+  // (append-per-run marker) — the coalescing assertion reads it back. node
+  // must stay reachable for the server itself, so prepend to the REAL PATH.
   const bindir = mkdtempSync(join(tmpdir(), "oas-models-"));
   const fakePi = join(bindir, "pi");
-  writeFileSync(fakePi, `#!/bin/sh\ncat <<'EOF'\nprovider        model                       context\nanthropic       claude-opus-4-5             200K\nanthropic       claude-sonnet-4-5           200K\nopenai          gpt-5.2                     400K\nEOF\n`);
+  const countFile = join(bindir, "runs");
+  writeFileSync(fakePi, `#!/bin/sh\necho x >> ${countFile}\nsleep 0.3\ncat <<'EOF'\nprovider        model                       context\nanthropic       claude-opus-4-5             200K\nanthropic       claude-sonnet-4-5           200K\nopenai          gpt-5.2                     400K\nEOF\n`);
   chmodSync(fakePi, 0o755);
   const port = 4000 + Math.floor(Math.random() * 2000);
   const proc = spawn(process.execPath, [SRV, "start", "--port", String(port), "--dir", ROOT], {
@@ -374,20 +376,32 @@ test("desktop server: /api/models serves runtime-scoped catalogs (pi: provider/m
       try { await fetch(`http://127.0.0.1:${port}/api/panel`); up = true; } catch { /* retry */ }
     }
     assert.ok(up, "server came up");
-    const get = (q) => fetch(`http://127.0.0.1:${port}/api/models${q}`);
-    const pi = await (await get("?runtime=pi")).json();
+    const post = (runtime, headers = {}) => fetch(`http://127.0.0.1:${port}/api/models`, {
+      method: "POST", headers: { "content-type": "application/json", ...headers },
+      body: JSON.stringify(runtime === undefined ? {} : { runtime }),
+    });
+    // concurrent COLD misses (both runtimes) fan in to ONE child-process run
+    const burst = await Promise.all([post("pi"), post("claude"), post("pi"), post("claude"), post("pi")]);
+    for (const r of burst) assert.equal(r.status, 200);
+    const runs = rf(countFile, "utf8").trim().split("\n").length;
+    assert.equal(runs, 1, `concurrent misses coalesce into one probe (got ${runs} runs)`);
+    const pi = await (await post("pi")).json();
     assert.equal(pi.runtime, "pi");
     assert.deepEqual(pi.models.map((m) => m.id),
       ["anthropic/claude-opus-4-5", "anthropic/claude-sonnet-4-5", "openai/gpt-5.2"],
       "pi catalog is the full provider/model list");
-    const cl = await (await get("?runtime=claude")).json();
+    const cl = await (await post("claude")).json();
     assert.equal(cl.runtime, "claude");
     const ids = cl.models.map((m) => m.id);
     for (const alias of ["opus", "sonnet", "haiku"]) assert.ok(ids.includes(alias), `claude alias ${alias} offered`);
     assert.ok(ids.includes("claude-opus-4-5"), "anthropic ids offered WITHOUT the provider prefix");
     assert.ok(!ids.some((id) => id.startsWith("openai/") || id === "gpt-5.2"), "non-anthropic models never offered to claude");
-    assert.equal((await get("?runtime=codex")).status, 400, "unknown runtime → 400");
-    assert.equal((await get("")).json ? (await (await get("")).json()).runtime : null, "pi", "runtime defaults to pi");
+    assert.equal((await post("codex")).status, 400, "unknown runtime → 400");
+    assert.equal((await (await post(undefined)).json()).runtime, "pi", "runtime defaults to pi");
+    // command-running route sits behind the POST Origin guard — a hostile
+    // page can never fan out child processes cross-origin (review 9b1e3ff)
+    assert.equal((await post("pi", { origin: "http://evil.com" })).status, 403, "hostile origin rejected");
+    assert.equal((await fetch(`http://127.0.0.1:${port}/api/models?runtime=pi`)).status, 404, "no GET surface for the command-running route");
   } finally { proc.kill(); }
 });
 
@@ -404,9 +418,11 @@ test("desktop server: /api/models degrades to an empty list when pi is not insta
       try { await fetch(`http://127.0.0.1:${port}/api/panel`); up = true; } catch { /* retry */ }
     }
     assert.ok(up, "server came up");
-    const pi = await (await fetch(`http://127.0.0.1:${port}/api/models?runtime=pi`)).json();
+    const post = (runtime) => fetch(`http://127.0.0.1:${port}/api/models`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ runtime }) });
+    const pi = await (await post("pi")).json();
     assert.deepEqual(pi.models, [], "no pi → empty catalog, not an error");
-    const cl = await (await fetch(`http://127.0.0.1:${port}/api/models?runtime=claude`)).json();
+    const cl = await (await post("claude")).json();
     assert.ok(cl.models.some((m) => m.id === "opus"), "claude aliases still offered without pi");
   } finally { proc.kill(); }
 });

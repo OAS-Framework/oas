@@ -76,8 +76,6 @@ const CSS = `
 `;
 
 let state = null;
-// Monotonic token: which spawn-modal "open" owns async fills (model list).
-let spawnModalGen = 0;
 
 /* ── Quick Open handoff (renderer/quick-open.mjs) ──────────────────
    Selecting a soul in Quick Open must land the user IN this view's spawn
@@ -571,22 +569,27 @@ function openSpawnModal(s, a) {
   modal.querySelector(".fmodel").placeholder = a.model || "runtime default";
   const f = modal; // field lookups span the whole modal
 
-  // Model dropdown (datalist): advisory options from GET /api/models for
+  // Model dropdown (datalist): advisory options from POST /api/models for
   // the EFFECTIVE runtime (the override select, else the agent default).
+  // POST, not GET: the endpoint runs a child process on cache miss and must
+  // sit behind the server's Origin guard (review 9b1e3ff).
   // Free text stays valid — comma-separated preference lists and unknown
   // models are the user's call; the list only shows what the runtime can
   // actually run (pi: authenticated provider/model catalog; claude:
   // anthropic aliases + claude-* ids). Options are built with
   // createElement/textContent — catalog ids never travel through innerHTML
-  // (same injection posture as the reference picker). A modal token guards
-  // the async fill: a response landing after close/reopen must not touch a
-  // list it no longer owns.
-  const modelToken = ++spawnModalGen;
+  // (same injection posture as the reference picker). A PER-REQUEST
+  // generation guards the async fill: runtime flips inside one open modal
+  // race each other (review 9b1e3ff — a slow pi response must not overwrite
+  // a later claude list), and a response landing after close/reopen must
+  // not touch a list it no longer owns.
+  let modelReq = 0;
   const fillModelOptions = async () => {
+    const myReq = ++modelReq;
     const runtime = f.querySelector(".fruntime").value || a.runtime || "pi";
     try {
-      const d = await apiJson(s.ctx, `/api/models?runtime=${encodeURIComponent(runtime)}`);
-      if (modelToken !== spawnModalGen || s.modalEl !== modal) return;
+      const d = await postJson(s.ctx, "/api/models", { runtime });
+      if (myReq !== modelReq || s.modalEl !== modal) return; // superseded or modal replaced
       const dl = f.querySelector("#spawn-model-options");
       if (!dl) return;
       dl.textContent = "";
