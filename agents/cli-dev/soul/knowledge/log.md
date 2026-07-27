@@ -1,6 +1,8 @@
 # Knowledge Log
 
 ## 2026-07-27
+* **Creation**: [canonical-agents-root-git-identity](/lessons/canonical-agents-root-git-identity.md) records that canonicalAgentsRoot identifies the primary checkout from the first Git worktree porcelain record and must map linked-worktree roots with realpath containment checks.
+* **Update**: [instance-homes-follow-cwd-into-linked-worktrees](/lessons/instance-homes-follow-cwd-into-linked-worktrees.md) links to the implemented canonical deployment-root redirect.
 * **Creation**: [claude-strict-launch-setting-sources](/lessons/claude-strict-launch-setting-sources.md) records the verified Claude Code strict curriculum mechanism: `--setting-sources ""` keeps auth while excluding ambient skills/context, and selected plugins must be re-added with `--plugin-dir`.
 * **Creation**: [pi-strict-launch-requires-no-extensions](/lessons/pi-strict-launch-requires-no-extensions.md) records that Pi extension discovery can leak skills through `resources_discover`, so strict launch requires `--no-extensions` plus selected `-e` extensions.
 * **Creation**: [instance-homes-follow-cwd-into-linked-worktrees](/lessons/instance-homes-follow-cwd-into-linked-worktrees.md) records that CWD-based root discovery can home instances inside linked worktrees, and separates deployment root, invocation scope, and work context.

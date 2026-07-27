@@ -63,6 +63,8 @@ Do not drop the aliases yet:
 # Related
 
 [Kernel/CLI shape](/architecture/kernel-and-cli-shape.md) records the current
-closest-`agents/` root behavior. [Canonical worktree verification](/lessons/canonical-worktree-verification.md)
+closest-`agents/` root behavior. [Canonical agents root Git identity](/lessons/canonical-agents-root-git-identity.md)
+records the implemented redirect from linked-worktree roots to the primary
+checkout. [Canonical worktree verification](/lessons/canonical-worktree-verification.md)
 records a separate worktree identity gotcha: Git canonicalizes symlinked
 worktree paths, so rollback checks must keep the canonical record.
