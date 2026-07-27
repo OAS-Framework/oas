@@ -3041,3 +3041,28 @@ test("the shipped aweb capability declares the Claude channel instead of install
   assert.doesNotMatch(hook, /claude plugin marketplace add/, "no imperative marketplace registration");
   assert.doesNotMatch(hook, /claude plugin install/, "no imperative plugin install");
 });
+
+test("the aweb hook runs argv only, and detects `aw` without a shell builtin", () => {
+  const dir = resolve(new URL("../capabilities/oas-aweb", import.meta.url).pathname);
+  const hook = readFileSync(join(dir, "bin", "oas-aweb.mjs"), "utf8");
+  // This is a REQUIRED spawn hook: it gates every spawn, and team ids, aliases,
+  // instance names and invite tokens all flow through it. argv removes the
+  // injection class rather than relying on one quoting helper staying correct.
+  assert.doesNotMatch(hook, /execSync\(/, "no shell-string execution");
+  assert.doesNotMatch(hook, /shq\s*\(/, "no shell quoting helper left to get wrong");
+  // `command -v` is a SHELL BUILTIN — spawning it as a program depends on a
+  // /usr/bin/command binary that many hosts do not ship, and its absence would
+  // read as "aw is missing" on every one of them.
+  assert.doesNotMatch(hook, /"command",\s*"-v"/, "PATH lookup is resolved in-process");
+  assert.match(hook, /function onPath\(/);
+
+  // Drive it with a PATH that has no `aw`: the diagnosis must name the CLI.
+  const base = temp();
+  const r = spawnSync(process.execPath, [join(dir, "bin", "oas-aweb.mjs"), "spawn"], {
+    encoding: "utf8",
+    env: { PATH: "/usr/bin:/bin", OAS_EVENT: "spawn", OAS_INSTANCE: "probe", OAS_HOME: join(base, "nope") },
+  });
+  assert.notEqual(r.status, 0, "a missing aw CLI is fatal for a required spawn hook");
+  assert.match(r.stdout, /aw CLI not on PATH/);
+  rmSync(base, { recursive: true, force: true });
+});

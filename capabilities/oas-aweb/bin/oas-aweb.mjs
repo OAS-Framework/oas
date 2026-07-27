@@ -36,13 +36,28 @@
  * kernel feeds it to the retire hook to compensate partial state, and an
  * identity joined moments before the failure must still be deletable.
  */
-import { execSync } from "node:child_process";
-import { existsSync } from "node:fs";
-import { join, dirname, resolve } from "node:path";
+import { execFileSync } from "node:child_process";
+import { existsSync, statSync } from "node:fs";
+import { join, dirname, resolve, delimiter } from "node:path";
 
-const sh = (cmd, cwd, timeout = 45000) =>
-  execSync(cmd, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout }).trim();
-const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
+/** Run a command as ARGV — never a shell string. Team ids, aliases, instance
+ * names and invite tokens all flow through here; quoting them correctly is a
+ * property of one helper staying correct forever, while argv removes the class.
+ * This hook is a REQUIRED spawn hook, so it gates every spawn, which is reason
+ * enough not to rely on quoting. */
+const run = (argv, cwd, timeout = 45000) =>
+  execFileSync(argv[0], argv.slice(1), { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout }).trim();
+/** Is a command on PATH? Resolved in-process rather than by running
+ * `command -v`, which is a SHELL BUILTIN — spawning it as a program depends on
+ * a /usr/bin/command binary that many systems do not ship, and its absence
+ * would read as "aw is missing" on every such host. */
+function onPath(cmd) {
+  for (const dir of String(process.env.PATH || "").split(delimiter)) {
+    if (!dir) continue;
+    try { const st = statSync(join(dir, cmd)); if (st.isFile() && (st.mode & 0o111)) return true; } catch { /* keep looking */ }
+  }
+  return false;
+}
 const out = (o, code = 0) => { process.stdout.write(JSON.stringify(o) + "\n"); process.exit(code); };
 const warn = (m) => out({ warning: `oas-aweb: ${String(m).slice(0, 300)}` });
 /** Fatal for a REQUIRED spawn hook: emit metadata for compensation, then exit
@@ -98,7 +113,7 @@ const teamIdsOf = (listed) => teamMemberships(listed).map((m) => m.team_id || m.
 
 const AW_INSTALL = "install the aw CLI first — see https://aweb.ai/docs (or `oas aweb setup` for guided onboarding)";
 const isCommand = ["roster", "setup"].includes(event);
-try { sh("command -v aw"); } catch {
+if (!onPath("aw")) {
   if (isCommand) { console.error(`oas aweb ${event}: aw CLI not on PATH — ${AW_INSTALL}`); process.exit(1); }
   if (event === "spawn") fatal(`aw CLI not on PATH, so no identity could be minted and this instance would have no messaging — ${AW_INSTALL}`);
   warn(`aw CLI not on PATH — no identity minted; ${AW_INSTALL}`);
@@ -115,22 +130,22 @@ if (event === "spawn") {
     // The instance name IS the discoverable alias (the team roster doubles as the
     // cross-machine instance directory).
     let team = process.env.OAS_TEAM_ID || process.env.OAS_TEAM_NAME;
-    if (!team) team = JSON.parse(sh("aw team list --json", root)).active_team;
+    if (!team) team = JSON.parse(run(["aw", "team", "list", "--json"], root)).active_team;
     if (!team) fatal("cannot determine target team (no config team block, no active team at root), so no identity could be minted — set a team: block in oas-config.yaml, or activate a team at the aweb root");
     // A bare team name (no namespace) resolves against the root's memberships.
     if (!team.includes(":")) {
-      const teams = JSON.parse(sh("aw team list --json", root));
+      const teams = JSON.parse(run(["aw", "team", "list", "--json"], root));
       const match = teamIdsOf(teams).filter((tid) => String(tid).startsWith(`${team}:`));
       if (match.length === 1) team = match[0];
       else if (match.length > 1) fatal(`team name "${team}" is ambiguous at ${root}: ${match.join(", ")}, so no identity could be minted — set team.id in oas-config.yaml`);
       else fatal(`no membership matching team "${team}" at ${root}, so no identity could be minted — join or create it first (aweb-team-membership skill), or set team.id`);
     }
-    const inv = JSON.parse(sh(`aw team invite --team-id ${shq(team)} --json`, root));
-    const joined = JSON.parse(sh(`aw team join ${shq(inv.token)} --name ${shq(instance)} --json`, home));
+    const inv = JSON.parse(run(["aw", "team", "invite", "--team-id", team, "--json"], root));
+    const joined = JSON.parse(run(["aw", "team", "join", inv.token, "--name", instance, "--json"], home));
     // External state now exists. Record it immediately so any later failure can
     // still report it for compensation.
     minted = { team: joined.team_id, alias: joined.alias || instance };
-    sh("aw init --do-not-touch-agents-md", home);
+    run(["aw", "init", "--do-not-touch-agents-md"], home);
     const alias = joined.alias || instance;
     const mismatch = joined.team_id !== team
       ? ` [WARNING: joined ${joined.team_id}, expected ${team}]` : "";
@@ -171,7 +186,7 @@ if (event === "spawn") {
   try {
     // Self-delete from inside the home, authenticated by its own key — a remote
     // delete would 409 until the server marks the workspace stale.
-    sh(`aw workspace delete ${shq(meta.alias)}`, home);
+    run(["aw", "workspace", "delete", meta.alias], home);
     out({ meta: { retired: true } });
   } catch (e) {
     // Exit nonzero: during a required-hook rollback this is the signal that
@@ -186,10 +201,10 @@ if (event === "spawn") {
   // `oas status --team`; this is the network view.
   const root = awebRoot();
   if (!root) { console.error("oas aweb roster: no initialized aweb root (.aw) found"); process.exit(1); }
-  const team = process.env.OAS_TEAM_ID || process.env.OAS_TEAM_NAME || JSON.parse(sh("aw team list --json", root)).active_team;
+  const team = process.env.OAS_TEAM_ID || process.env.OAS_TEAM_NAME || JSON.parse(run(["aw", "team", "list", "--json"], root)).active_team;
   if (!team) { console.error("oas aweb roster: cannot determine team (no config team block, no active team)"); process.exit(1); }
-  const teamFlag = team.includes(":") ? `--team-id ${shq(team)}` : `--team ${shq(team)}`;
-  const r = JSON.parse(sh(`aw id team members ${teamFlag} --json`, root, 60000));
+  const teamFlag = team.includes(":") ? ["--team-id", team] : ["--team", team];
+  const r = JSON.parse(run(["aw", "id", "team", "members", ...teamFlag, "--json"], root, 60000));
   if (process.argv.includes("--json")) { console.log(JSON.stringify(r, null, 2)); process.exit(0); }
   console.log(`aweb team ${r.team_id || team} — member roster (cross-machine):`);
   const members = r.members || [];
@@ -216,7 +231,7 @@ if (event === "spawn") {
     process.exit(0);
   }
   let teams = { memberships: [] };
-  try { teams = JSON.parse(sh("aw team list --json", scope)); } catch { /* fall through */ }
+  try { teams = JSON.parse(run(["aw", "team", "list", "--json"], scope)); } catch { /* fall through */ }
   const want = teamId || teamName;
   const match = teamIdsOf(teams).find((tid) => String(tid) === want || String(tid).startsWith(`${want}:`));
   if (match) {
