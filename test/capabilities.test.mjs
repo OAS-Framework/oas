@@ -3258,3 +3258,100 @@ console.log(JSON.stringify({ meta: { retired: true } }));`,
   } finally { process.env.PATH = oldPath; }
   rmSync(base, { recursive: true, force: true });
 });
+
+test("a quarantine retry re-runs and VERIFIES the rollback-owned Git cleanup (reviewer-d6e916d)", () => {
+  const base = temp();
+  const { repo, root } = fixtureSoul(base, "pi");
+  const allow = join(base, "cleanup-works");
+  // Retire fails until the operator fixes the cause, so the spawn genuinely
+  // quarantines. Hooks then succeed on retry — which is the point: hook-only
+  // verification would clear the home while Git residue survives.
+  capability(repo, "chan", {
+    capability: "acme.chan",
+    hooks: { spawn: { command: "hook.mjs spawn", required: true }, retire: "hook.mjs retire" },
+  }, {
+    "hook.mjs": `import {existsSync} from 'node:fs';
+if (process.env.OAS_EVENT === 'spawn') { console.log(JSON.stringify({ meta: { alias: 'probe' } })); process.exit(1); }
+if (!existsSync(${JSON.stringify(allow)})) { console.log(JSON.stringify({ meta: { retired: false, reason: 'self-delete-failed' } })); process.exit(1); }
+console.log(JSON.stringify({ meta: { retired: true } }));`,
+  });
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.chan:\n      global: true\n");
+  execFileSync("git", ["-C", repo, "add", "-A"]);
+  execFileSync("git", ["-C", repo, "commit", "-qm", "cap"]);
+  const oldPath = process.env.PATH; process.env.PATH = fakeRuntimes(base);
+  const home = join(root, "dev", "instances", "dev-git");
+  try {
+    assert.throws(
+      () => spawnInstance(root, findAgent(root, "dev"), { instance: "dev-git", work: "worktree", launch: false }),
+      (e) => e.code === "E_REQUIRED_HOOK_FAILED" && /RETAINED/.test(e.message),
+    );
+    assert.equal(existsSync(home), true, "the spawn quarantined the home");
+
+    // Git residue the initial rollback left behind: a rollback-owned branch that
+    // still exists. Cleanup is NOT complete until it is gone, and the retry must
+    // delete it WITHOUT the normal-retire --delete-branch flag.
+    execFileSync("git", ["-C", repo, "branch", "dev-git-leftover"]);
+    const markerPath = join(home, ".oas-rollback-incomplete.json");
+    const marker = JSON.parse(readFileSync(markerPath, "utf8"));
+    marker.cleanup.work = "worktree";
+    marker.cleanup.branch = "dev-git-leftover";
+    writeFileSync(markerPath, JSON.stringify(marker, null, 2));
+
+    writeFileSync(allow, "ok");                 // hooks will now succeed
+    const r = retireInstance(root, "dev-git", { tmuxSession: "oas-test-nosuch" });
+    const branches = execFileSync("git", ["-C", repo, "branch", "--list"], { encoding: "utf8" });
+    assert.doesNotMatch(branches, /dev-git-leftover/, "the rollback-owned branch is deleted and verified on retry");
+    assert.equal(r.rollbackIncomplete, undefined, "and cleanup then reports complete");
+    assert.equal(existsSync(home), false);
+  } finally { process.env.PATH = oldPath; }
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("a home with no instance.json and no cleanup descriptor is not silently deleted", () => {
+  const base = temp();
+  const { root } = fixtureSoul(base, "pi");
+  // Reachable for real: the spawn path tolerates a failed marker write, leaving
+  // a retained home that identifies as nothing. Deleting it would destroy
+  // whatever external state it still owns.
+  const orphan = join(root, "dev", "instances", "dev-orphan");
+  mkdirSync(orphan, { recursive: true });
+  writeFileSync(join(orphan, "identity.key"), "secret");
+  assert.throws(
+    () => retireInstance(root, "dev-orphan", { tmuxSession: "oas-test-nosuch" }),
+    (e) => e.code === "E_UNIDENTIFIED_INSTANCE_HOME" && /no cleanup descriptor/.test(e.message),
+  );
+  assert.equal(existsSync(join(orphan, "identity.key")), true, "nothing was destroyed");
+  // force is the deliberate manual-cleanup escape.
+  retireInstance(root, "dev-orphan", { tmuxSession: "oas-test-nosuch", force: true });
+  assert.equal(existsSync(orphan), false);
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("`oas retire` reports an incomplete cleanup and exits nonzero, not 'Retired'", () => {
+  const base = temp();
+  const { repo, root } = fixtureSoul(base, "pi");
+  // Compensation keeps failing, so the home and its external state remain. A
+  // zero exit here tells a human — and any script — that the work is done.
+  capability(repo, "chan", {
+    capability: "acme.chan",
+    hooks: { spawn: { command: "hook.mjs spawn", required: true }, retire: "hook.mjs retire" },
+  }, {
+    "hook.mjs": `if (process.env.OAS_EVENT === 'spawn') { console.log(JSON.stringify({ meta: { alias: 'probe' } })); process.exit(1); }
+console.log(JSON.stringify({ meta: { retired: false, reason: 'self-delete-failed' } }));`,
+  });
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.chan:\n      global: true\n");
+  const oldPath = process.env.PATH; process.env.PATH = fakeRuntimes(base);
+  try {
+    assert.throws(() => spawnInstance(root, findAgent(root, "dev"), { instance: "dev-cli", launch: false }),
+      (e) => e.code === "E_REQUIRED_HOOK_FAILED");
+    const env = { ...process.env, PI_AGENTS_TMUX_SESSION: "oas-test-nosuch" };
+    delete env.PI_AGENTS_ROOT;
+    const r = spawnSync(process.execPath, [CLI, "retire", "dev-cli", "--dir", root], { encoding: "utf8", env });
+    assert.notEqual(r.status, 0, `an incomplete cleanup must exit nonzero, got ${r.status}: ${r.stdout}`);
+    assert.doesNotMatch(r.stdout, /^Retired /m, "and must not claim the instance was retired");
+    assert.match(r.stderr, /INCOMPLETE/);
+    assert.match(r.stderr, /self-delete-failed/, "the outstanding failure is named");
+    assert.equal(existsSync(join(root, "dev", "instances", "dev-cli")), true, "the home is still retained");
+  } finally { process.env.PATH = oldPath; }
+  rmSync(base, { recursive: true, force: true });
+});

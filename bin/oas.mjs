@@ -1693,7 +1693,7 @@ function spawnCmd() {
 
 function retireCmd() {
   const name = args[1];
-  if (!name || name.startsWith("--")) die("usage: oas retire <instance> [--self] [--delete-branch] [--keep-dir] [--json]");
+  if (!name || name.startsWith("--")) die("usage: oas retire <instance> [--self] [--delete-branch] [--keep-dir] [--force] [--json]");
   const isSelf = process.env.PI_AGENT_INSTANCE === name || process.env.OAS_INSTANCE === name;
   if (isSelf && !args.includes("--self")) die(`"${name}" is the calling instance — self-retire is irreversible; if your task is complete and you were told to retire, re-run with --self (finish your memory files FIRST; your session dies ~8s after)`);
   if (!isSelf && args.includes("--self")) die(`--self given but "${name}" is not the calling instance`);
@@ -1703,8 +1703,17 @@ function retireCmd() {
     const hit = findTeamInstance(dirFlag(), name);
     if (hit && resolve(hit.root) !== resolve(root)) { root = hit.root; console.log(`(cross-repo: instance homes at ${shortPath(root)})`); }
   }
-  const r = retireInstance(root, name, { self: isSelf, deleteBranch: args.includes("--delete-branch"), keepDir: args.includes("--keep-dir") });
-  if (args.includes("--json")) { console.log(JSON.stringify(r, null, 2)); return; }
+  const r = retireInstance(root, name, { self: isSelf, deleteBranch: args.includes("--delete-branch"), keepDir: args.includes("--keep-dir"), force: args.includes("--force") });
+  if (args.includes("--json")) { console.log(JSON.stringify(r, null, 2)); if (r.rollbackIncomplete) process.exit(1); return; }
+  // An unsuccessful cleanup retry must NOT read as a completed retirement: the
+  // home and its external state are still there, and a zero exit would tell
+  // both a human and any script that the work is done.
+  if (r.rollbackIncomplete) {
+    console.error(`Cleanup for ${r.retired} is INCOMPLETE — the instance home is retained at ${join(root, r.agent, "instances", r.retired)} because external state may still exist:`);
+    for (const f of r.rollbackIncomplete) console.error(`  ${f}`);
+    console.error(`Fix the cause and re-run \`oas retire ${r.retired}\`; the home holds the state that cleanup needs.`);
+    process.exit(1);
+  }
   console.log(`Retired ${r.retired} (agent ${r.agent})${r.worktreeRemoved ? ", worktree removed" : ""}${r.branchDeleted ? ", branch deleted" : ""}${r.harvested?.length ? `, harvested: ${r.harvested.join(", ")}` : ""}`);
   if (isSelf) console.log("This window dies in ~8s — say any goodbyes now.");
 }
