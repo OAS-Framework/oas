@@ -2962,3 +2962,82 @@ test("an alias minted with no local key is incomplete cleanup, not 'nothing to d
   assert.match(noAlias.stdout, /nothing-to-delete/);
   rmSync(base, { recursive: true, force: true });
 });
+
+// ---------- Claude runtime packages (consented, never installed at spawn) ----------
+
+/** A `claude` stub answering `plugin list` in Claude's real format. */
+function fakeClaudeWithPlugins(base, rows) {
+  const bin = join(base, "bin"); mkdirSync(bin, { recursive: true });
+  const body = ["Installed plugins:", "", ...rows.flatMap((r) => [
+    `  ❯ ${r.name}`, `    Version: 1.0.0`, `    Scope: user`,
+    `    Status: ${r.disabled ? "✘ disabled" : "✔ enabled"}`, "",
+  ])].join("\n");
+  write(join(bin, "claude"), `#!/bin/sh\nif [ "$1" = "plugin" ] && [ "$2" = "list" ]; then cat <<'EOF'\n${body}\nEOF\nexit 0; fi\nif [ "$1" = "plugin" ]; then echo "REFUSED: spawn must not install plugins" >&2; exit 9; fi\nexit 0\n`);
+  write(join(bin, "pi"), "#!/bin/sh\nexit 0\n");
+  execFileSync("chmod", ["-R", "+x", bin]);
+  return `${bin}:${process.env.PATH}`;
+}
+
+test("a Claude capability plugin is verified at spawn, never installed there", () => {
+  const base = temp();
+  const { repo, root } = fixtureSoul(base, "claude");
+  capability(repo, "chan", {
+    capability: "acme.chan",
+    requires: [{ runtime: "claude", package: "chan@acme-marketplace", marketplace: "acme/claude-plugins", why: "push events" }],
+  });
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.chan:\n      global: true\n");
+  const oldPath = process.env.PATH;
+  // The stub REFUSES any `claude plugin` subcommand other than list, so an
+  // imperative install during spawn would fail loudly rather than pass silently.
+  process.env.PATH = fakeClaudeWithPlugins(base, [{ name: "chan@acme-marketplace" }]);
+  try {
+    const r = spawnInstance(root, findAgent(root, "chan") || findAgent(root, "dev"), { instance: "dev-cc", launch: false });
+    const meta = JSON.parse(readFileSync(join(r.home, "instance.json"), "utf8"));
+    const pkg = meta.composition.materialized.runtimePackages[0];
+    assert.equal(pkg.runtime, "claude");
+    assert.equal(pkg.package, "chan@acme-marketplace");
+    retireInstance(root, "dev-cc", { tmuxSession: "oas-test-nosuch" });
+  } finally { process.env.PATH = oldPath; }
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("a missing or DISABLED Claude plugin fails the spawn with the consent remedy", () => {
+  const base = temp();
+  const { repo, root } = fixtureSoul(base, "claude");
+  capability(repo, "chan", {
+    capability: "acme.chan",
+    requires: [{ runtime: "claude", package: "chan@acme-marketplace", marketplace: "acme/claude-plugins", why: "push events" }],
+  });
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.chan:\n      global: true\n");
+  const oldPath = process.env.PATH;
+  try {
+    // Absent entirely: the remedy names the consent command AND both install steps.
+    process.env.PATH = fakeClaudeWithPlugins(base, []);
+    assert.throws(
+      () => spawnInstance(root, findAgent(root, "dev"), { instance: "dev-miss", launch: false }),
+      (e) => e.code === "E_RUNTIME_RESOURCE_MISSING"
+        && /--accept-requirement claude:chan@acme-marketplace/.test(e.message)
+        && /claude plugin marketplace add acme\/claude-plugins && claude plugin install chan@acme-marketplace/.test(e.message),
+    );
+    // Installed but switched off will not load, so it does not satisfy the requirement.
+    process.env.PATH = fakeClaudeWithPlugins(base, [{ name: "chan@acme-marketplace", disabled: true }]);
+    assert.throws(
+      () => spawnInstance(root, findAgent(root, "dev"), { instance: "dev-off", launch: false }),
+      (e) => e.code === "E_RUNTIME_RESOURCE_MISSING" && /installed but DISABLED/.test(e.message),
+    );
+  } finally { process.env.PATH = oldPath; }
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("the shipped aweb capability declares the Claude channel instead of installing it", () => {
+  const dir = resolve(new URL("../capabilities/oas-aweb", import.meta.url).pathname);
+  const manifest = JSON.parse(readFileSync(join(dir, "oas.json"), "utf8"));
+  const req = (manifest.requires || []).find((r) => r.runtime === "claude");
+  assert.ok(req, "the Claude channel plugin is a declared requirement");
+  assert.equal(req.package, "aweb-channel@awebai-marketplace");
+  assert.equal(req.marketplace, "awebai/claude-plugins");
+  // …and the hook no longer mutates the operator's Claude installation at spawn.
+  const hook = readFileSync(join(dir, "bin", "oas-aweb.mjs"), "utf8");
+  assert.doesNotMatch(hook, /claude plugin marketplace add/, "no imperative marketplace registration");
+  assert.doesNotMatch(hook, /claude plugin install/, "no imperative plugin install");
+});

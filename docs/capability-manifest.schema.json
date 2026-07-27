@@ -92,12 +92,13 @@
               "runtime": {
                 "type": "string",
                 "enum": [
-                  "pi"
+                  "pi",
+                  "claude"
                 ]
               },
               "package": {
                 "type": "string",
-                "description": "Source spec, e.g. \"npm:@scope/name\". A version selector is allowed and is ignored for identity."
+                "description": "Source spec in that runtime's own naming: \"npm:@scope/name\" for pi, \"plugin@marketplace\" for Claude."
               },
               "why": {
                 "type": "string"
@@ -105,6 +106,10 @@
               "install": {
                 "type": "string",
                 "description": "Documentation URL shown alongside the consent prompt."
+              },
+              "marketplace": {
+                "type": "string",
+                "description": "Optional source to register before installing (Claude marketplaces). Shown at the consent prompt, since registering a third-party source is part of what is being agreed to."
               }
             },
             "additionalProperties": false

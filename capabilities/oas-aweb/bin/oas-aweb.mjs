@@ -134,18 +134,18 @@ if (event === "spawn") {
     const alias = joined.alias || instance;
     const mismatch = joined.team_id !== team
       ? ` [WARNING: joined ${joined.team_id}, expected ${team}]` : "";
-    // Runtime integration: for Claude Code sessions, wire the aweb-channel plugin
-    // (real-time push events; `aw run claude` is deprecated). Idempotent installs;
-    // the launch map contributes the plugin flag to the instance's session command.
-    let launch;
-    let channelWarning;
-    if ((process.env.OAS_RUNTIME || "") === "claude") {
-      try {
-        try { sh("claude plugin marketplace add awebai/claude-plugins", home, 60000); } catch { /* already added */ }
-        try { sh("claude plugin install aweb-channel@awebai-marketplace", home, 60000); } catch { /* already installed */ }
-        launch = { claude: "--dangerously-load-development-channels plugin:aweb-channel@awebai-marketplace" };
-      } catch (e) { channelWarning = `oas-aweb: channel plugin setup failed — session starts without push events (aw CLI still works): ${String(e.message || e).slice(0, 160)}`; }
-    }
+    // Runtime integration: for Claude Code sessions the aweb-channel plugin
+    // carries real-time push events. This hook does NOT install it. The plugin
+    // is a DECLARED runtime requirement (oas.json), consented once at
+    // `oas install` and verified by the kernel before spawn — installing it here
+    // would mutate the operator's Claude configuration without asking, inside a
+    // spawn, which is exactly the silent host mutation the consent gate exists
+    // to prevent. By the time this runs the kernel has already proven the plugin
+    // is present and enabled, so contributing the flag is safe.
+    const launch = (process.env.OAS_RUNTIME || "") === "claude"
+      ? { claude: "--dangerously-load-development-channels plugin:aweb-channel@awebai-marketplace" }
+      : undefined;
+    const channelWarning = undefined;
     out({
       meta: { team: joined.team_id, alias },
       brief: `Comms: you have an aweb identity — alias "${alias}" on team ${joined.team_id}.${mismatch} Use \`aw mail\`/\`aw chat\` for messaging (see the aweb-messaging skill); coordination stays in your deployment's task layer.`,

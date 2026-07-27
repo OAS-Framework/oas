@@ -217,7 +217,7 @@ function doctorPackagesData(ctx, chain) {
     command: req.command, why: req.why || null, docs: req.docs || null,
     requestedBy: req.requestedBy,
     plan: req.plan && !req.plan.unavailable
-      ? { manager: req.plan.manager, argv: req.plan.argv, source: req.plan.source, version: req.plan.version || null, scope: req.plan.scope }
+      ? { manager: req.plan.manager, argv: req.plan.argv, steps: req.plan.steps || [req.plan.argv], source: req.plan.source, version: req.plan.version || null, scope: req.plan.scope }
       : null,
     invalid: req.invalid || null,
     conflict: req.conflict || null,
@@ -977,7 +977,10 @@ function requirementsGate(scopes) {
       out.push(entryOf(req, "skipped", { reason: plan?.unavailable || "no safe installer" }));
       continue;
     }
-    note(`    installer: ${plan.argv.join(" ")}  (source: ${plan.source}${plan.version ? `, version ${plan.version}` : ""}; ${plan.scope})`);
+    // Show EVERY step: installing a Claude plugin also registers a third-party
+    // marketplace, and consent to that must be visible, not implied.
+    const shown = (plan.steps?.length ? plan.steps : [plan.argv]).map((a) => a.join(" ")).join("  &&  ");
+    note(`    installer: ${shown}  (source: ${plan.source}${plan.version ? `, version ${plan.version}` : ""}; ${plan.scope})`);
     let consent = accepted.has(req.command);
     if (!consent && interactive) {
       process.stdout.write(`    Run this install now? [y/N] `);
