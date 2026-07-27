@@ -939,7 +939,8 @@ function requirementsGate(scopes) {
   if (!missing.length) return [];
   const note = (msg) => (JSON_MODE ? console.error(msg) : console.log(msg));
   const entryOf = (req, outcome, extra = {}) => ({
-    command: req.command, why: req.why || null,
+    command: req.command, kind: req.kind || "host-command",
+    runtime: req.runtime || null, package: req.package || null, why: req.why || null,
     plan: req.plan && !req.plan.unavailable
       ? { manager: req.plan.manager, argv: req.plan.argv, source: req.plan.source, version: req.plan.version || null, scope: req.plan.scope }
       : null,
@@ -964,7 +965,7 @@ function requirementsGate(scopes) {
   if (args.includes("--no-requirements")) return [...policyEntries, ...consentable.map((req) => entryOf(req, "skipped", { reason: "--no-requirements" }))];
   const interactive = !JSON_MODE && process.stdin.isTTY && process.stdout.isTTY;
   const out = [...policyEntries];
-  if (consentable.length) note(`\nMissing host commands for active capabilities (${consentable.length}):`);
+  if (consentable.length) note(`\nMissing requirements for active capabilities (${consentable.length}):`);
   for (const req of consentable) {
     const requesters = req.requestedBy.map((r) => `${r.capability} [${shortPath(r.scope)}]`).join(", ");
     note(`  ${req.command} — ${req.why || "required"} (requested by: ${requesters})`);
@@ -984,14 +985,17 @@ function requirementsGate(scopes) {
       consent = answer === "y" || answer === "yes";
     }
     if (!consent) {
-      note(`    skipped — ${interactive ? "not consented" : "non-interactive; pass --accept-requirement " + req.command + " to install"}; \`oas doctor\` will keep warning until ${req.command} is on PATH`);
+      note(`    skipped — ${interactive ? "not consented" : "non-interactive; pass --accept-requirement " + req.command + " to install"}; \`oas doctor\` will keep warning until ${req.command} is ${req.kind === "runtime-package" ? `installed for ${req.runtime}` : "on PATH"}`);
       out.push(entryOf(req, "consent-required"));
       continue;
     }
     try {
       const r = runRequirementInstall(plan, JSON_MODE ? { stdio: ["ignore", 2, 2] } : {});
-      if (r.onPath) { note(`    installed — ${req.command} verified on PATH`); out.push(entryOf(req, "installed", { onPath: true })); }
-      else { note(`    FAILED: install ran but ${req.command} is still not on PATH — check your shell PATH/prefix`); out.push(entryOf(req, "failed", { onPath: false, reason: "install ran but the command is not on PATH" })); }
+      // A runtime package is verified in its runtime's package list, never on
+      // PATH — saying "on PATH" for one would be false either way it lands.
+      const where = req.kind === "runtime-package" ? `installed for ${req.runtime}` : "on PATH";
+      if (r.onPath) { note(`    installed — ${req.command} verified ${where}`); out.push(entryOf(req, "installed", { onPath: true })); }
+      else { note(`    FAILED: install ran but ${req.command} is still not ${where}${req.kind === "runtime-package" ? "" : " — check your shell PATH/prefix"}`); out.push(entryOf(req, "failed", { onPath: false, reason: `install ran but the requirement is still not ${where}` })); }
     } catch (e) {
       note(`    FAILED: ${e.message}`);
       out.push(entryOf(req, "failed", { onPath: false, reason: e.message }));

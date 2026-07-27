@@ -38,7 +38,12 @@ A self-contained package has an `oas.json`:
   "description": "Messaging through Team Chat.",
   "layer": "messaging",
   "requires": [
-    { "command": "team-chat", "why": "send and receive messages" }
+    { "command": "team-chat", "why": "send and receive messages" },
+    {
+      "runtime": "pi",
+      "package": "npm:team-chat-pi",
+      "why": "real-time push events in pi sessions"
+    }
   ],
   "skills": ["skills"],
   "inject": "injects/team-chat.md",
@@ -58,7 +63,20 @@ A self-contained package has an `oas.json`:
 - `skills` entries can be skill directories or roots containing skills.
 - `inject` is optional instance instruction Markdown.
 - Only `soul-scaffold`, `spawn`, and `retire` hooks are accepted.
-- `requires` reports external tools; OAS does not install them silently.
+- `requires` declares what must exist before the capability works. Two kinds:
+  - a **host command** (`command`), satisfied by a binary on `PATH`;
+  - a **runtime package** (`runtime` + `package`), satisfied by that runtime's
+    own package manager. It is raised only for deployments that use the named
+    runtime — a Claude-only deployment is never asked to install a pi package —
+    and is verified in the runtime's package list, never on `PATH`. A version
+    selector is allowed and ignored for identity, so `@latest` and a pinned
+    version are one requirement.
+- OAS never installs a requirement silently. `oas install` prompts per
+  requirement with the exact argv, source and scope; automation passes
+  `--accept-requirement <name>` (the name is the command, or
+  `<runtime>:<package>`), and `--no-requirements` skips the gate. Declining
+  leaves an actionable `oas doctor` warning. Consent to install is separate
+  from capability trust.
 - Target names never appear in a package manifest.
 
 `capability` is the only manifest identity field. The machine-readable

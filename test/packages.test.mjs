@@ -7,7 +7,7 @@ import { dirname, join, resolve } from "node:path";
 import { resolveOasConfig, capabilityIntegrity, acquirePackage, loadPackageManifestAt, parsePackageSource, readPackageLocks } from "../lib/core.mjs";
 import {
   aggregateMissingRequirements, commandOnPath, diffConfigTexts, discoverWorkspaceScopes,
-  lockedPackageCapabilities, normalizeRequirement,
+  lockedPackageCapabilities, normalizeRequirement, packageSpecIdentity, runtimePackageInstalled,
   parseProfileProvenance, profileProvenanceHeader, requirementInstallPlan,
   resolveProfilePackage, runRequirementInstall, selectProfile, validateProfile,
 } from "../lib/packages.mjs";
@@ -1438,4 +1438,104 @@ test("commandOnPath finds executables only via PATH lookup", () => {
   assert.equal(commandOnPath("sh"), true);
   assert.equal(commandOnPath("definitely-not-a-real-cmd-xyz"), false);
   assert.equal(commandOnPath("/bin/sh"), false, "path-shaped commands are not PATH lookups");
+});
+
+// ---------- runtime-package requirements (satisfied by a runtime, not by PATH) ----------
+
+test("packageSpecIdentity collapses version selectors, keeping scoped names intact", () => {
+  assert.equal(packageSpecIdentity("npm:@awebai/pi@latest"), "npm:@awebai/pi");
+  assert.equal(packageSpecIdentity("npm:@awebai/pi@0.2.1"), "npm:@awebai/pi");
+  assert.equal(packageSpecIdentity("npm:@awebai/pi"), "npm:@awebai/pi");
+  assert.equal(packageSpecIdentity("npm:pi-web-search@^1.2.0"), "npm:pi-web-search");
+});
+
+test("a runtime package is detected in the runtime's own package list, not on PATH", () => {
+  const base = temp();
+  const env = { ...process.env, HOME: base };
+  // pi records installed packages as bare source strings or { source } objects.
+  write(join(base, ".pi", "agent", "settings.json"), JSON.stringify({
+    packages: ["npm:pi-web-search", { source: "npm:@awebai/pi@latest", skills: ["skills/aweb-messaging"] }],
+  }));
+  assert.equal(runtimePackageInstalled("pi", "npm:@awebai/pi", env), true, "matches across a version selector");
+  assert.equal(runtimePackageInstalled("pi", "npm:@awebai/pi@0.2.1", env), true);
+  assert.equal(runtimePackageInstalled("pi", "npm:pi-web-search", env), true, "bare string entries count");
+  assert.equal(runtimePackageInstalled("pi", "npm:not-installed", env), false);
+  assert.equal(runtimePackageInstalled("nosuchruntime", "npm:@awebai/pi", env), false, "unknown runtime is never satisfied");
+  // Unreadable settings must read as "not installed" — never a false positive.
+  write(join(base, ".pi", "agent", "settings.json"), "{ this is not json");
+  assert.equal(runtimePackageInstalled("pi", "npm:@awebai/pi", env), false);
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("a runtime-package requirement plans an argv install scoped to its runtime", () => {
+  const plan = requirementInstallPlan({
+    runtime: "pi", package: "npm:@awebai/pi", why: "aweb channel extension for pi sessions",
+  });
+  assert.deepEqual(plan.argv, ["pi", "install", "npm:@awebai/pi"], "argv only — no shell, no sudo");
+  assert.equal(plan.runtime, "pi");
+  assert.equal(plan.command, "pi:npm:@awebai/pi", "identity is runtime-scoped");
+  assert.match(plan.scope, /pi packages/);
+  // Unknown runtimes and unsafe specs are never given an executable plan.
+  assert.match(requirementInstallPlan({ runtime: "nope", package: "npm:x" }).unavailable, /unknown runtime/);
+  assert.match(requirementInstallPlan({ runtime: "pi", package: "npm:x; rm -rf /" }).unavailable, /not a plain source token/);
+  assert.match(requirementInstallPlan({ runtime: "pi", package: "../../etc/passwd" }).unavailable, /not a plain source token/);
+});
+
+test("runtime-package requirements aggregate, dedupe by identity, and drop once installed", () => {
+  const base = temp();
+  const repo = join(base, "repo");
+  const capDir = join(repo, ".agents", "capabilities", "owned", "chan");
+  write(join(capDir, "oas.json"), JSON.stringify({
+    capability: "acme.chan", version: "1.0.0", compatibility: { oas: ">=0.6.2" }, description: "Channel.",
+    requires: [{ runtime: "pi", package: "npm:@awebai/pi@latest", why: "channel extension" }],
+  }));
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.chan:\n      global: true\n");
+  gitRepo(repo);
+
+  const missingHome = temp(); // no pi settings at all
+  const missing = aggregateMissingRequirements([repo], { env: { ...process.env, HOME: missingHome } });
+  const req = missing.find((m) => m.command === "pi:npm:@awebai/pi");
+  assert.ok(req, `runtime requirement is raised: ${missing.map((m) => m.command)}`);
+  assert.equal(req.kind, "runtime-package");
+  assert.deepEqual(req.plan.argv, ["pi", "install", "npm:@awebai/pi@latest"]);
+  assert.equal(req.requestedBy[0].capability, "acme.chan", "provenance names the requesting capability");
+
+  // Already installed (even at a different version selector) → not raised.
+  const okHome = temp();
+  write(join(okHome, ".pi", "agent", "settings.json"), JSON.stringify({ packages: [{ source: "npm:@awebai/pi@0.2.1" }] }));
+  const none = aggregateMissingRequirements([repo], { env: { ...process.env, HOME: okHome } });
+  assert.equal(none.some((m) => m.command === "pi:npm:@awebai/pi"), false, "a satisfied requirement is not raised");
+
+  for (const d of [base, missingHome, okHome]) rmSync(d, { recursive: true, force: true });
+});
+
+test("an unknown runtime in a requirement is fail-closed, never consentable", () => {
+  const base = temp();
+  const repo = join(base, "repo");
+  const capDir = join(repo, ".agents", "capabilities", "owned", "bad");
+  write(join(capDir, "oas.json"), JSON.stringify({
+    capability: "acme.bad", version: "1.0.0", compatibility: { oas: ">=0.6.2" }, description: "Bad.",
+    requires: [{ runtime: "deno-but-not-real", package: "npm:whatever", why: "nope" }],
+  }));
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.bad:\n      global: true\n");
+  gitRepo(repo);
+  const found = aggregateMissingRequirements([repo], { env: { ...process.env, HOME: temp() } });
+  const bad = found.find((m) => m.invalid);
+  assert.ok(bad, "invalid requirement is surfaced");
+  assert.equal(bad.plan, null, "no executable plan is offered");
+  assert.match(bad.invalid, /unknown runtime/);
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("the aweb capability declares its pi channel package as a requirement", () => {
+  // The behavior this whole mechanism exists for: using aweb from pi must
+  // require the aweb pi package, instead of silently depending on whatever the
+  // user happens to have installed globally.
+  const manifest = JSON.parse(readFileSync(resolve(new URL("../capabilities/oas-aweb/oas.json", import.meta.url).pathname), "utf8"));
+  const req = (manifest.requires || []).find((r) => r.runtime === "pi");
+  assert.ok(req, "oas-aweb declares a pi runtime requirement");
+  assert.equal(packageSpecIdentity(req.package), "npm:@awebai/pi");
+  assert.ok(req.why && req.why.length > 20, "the prompt tells the user why it is needed");
+  const plan = requirementInstallPlan(req);
+  assert.deepEqual(plan.argv, ["pi", "install", "npm:@awebai/pi"]);
 });

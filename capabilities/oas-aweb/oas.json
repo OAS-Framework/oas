@@ -12,6 +12,12 @@
       "command": "aw",
       "why": "identity minting at spawn, self-delete at retire, and all agent messaging",
       "install": "https://aweb.ai/docs (aw CLI)"
+    },
+    {
+      "runtime": "pi",
+      "package": "npm:@awebai/pi",
+      "why": "the aweb channel extension for pi sessions \u2014 real-time mail/chat awakenings; without it a pi instance can send with `aw` but is never woken by incoming messages",
+      "install": "https://aweb.ai/docs (installed into pi with `pi install npm:@awebai/pi`)"
     }
   ],
   "skills": [

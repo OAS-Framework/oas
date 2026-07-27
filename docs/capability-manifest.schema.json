@@ -57,23 +57,59 @@
     "requires": {
       "type": "array",
       "items": {
-        "type": "object",
-        "required": [
-          "command",
-          "why"
-        ],
-        "properties": {
-          "command": {
-            "type": "string"
+        "oneOf": [
+          {
+            "title": "host command requirement",
+            "description": "A command that must be present on PATH before the capability can work.",
+            "type": "object",
+            "required": [
+              "command",
+              "why"
+            ],
+            "properties": {
+              "command": {
+                "type": "string"
+              },
+              "why": {
+                "type": "string"
+              },
+              "install": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
           },
-          "why": {
-            "type": "string"
-          },
-          "install": {
-            "type": "string"
+          {
+            "title": "runtime package requirement",
+            "description": "A package that must be installed into a specific runtime's own package manager. Raised only for deployments using that runtime, satisfied by the runtime's package list rather than by PATH, and installed only with explicit consent.",
+            "type": "object",
+            "required": [
+              "runtime",
+              "package",
+              "why"
+            ],
+            "properties": {
+              "runtime": {
+                "type": "string",
+                "enum": [
+                  "pi"
+                ]
+              },
+              "package": {
+                "type": "string",
+                "description": "Source spec, e.g. \"npm:@scope/name\". A version selector is allowed and is ignored for identity."
+              },
+              "why": {
+                "type": "string"
+              },
+              "install": {
+                "type": "string",
+                "description": "Documentation URL shown alongside the consent prompt."
+              }
+            },
+            "additionalProperties": false
           }
-        },
-        "additionalProperties": false
+        ]
       }
     },
     "commands": {
