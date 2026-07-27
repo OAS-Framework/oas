@@ -2552,7 +2552,7 @@ test("a stale settings row whose files were never installed fails the spawn (rev
   rmSync(base, { recursive: true, force: true });
 });
 
-test("a non-empty resource filter is recorded as auditable, not second-guessed", () => {
+test("a non-empty extensions filter fails as unverifiable; a skills-only filter still passes", () => {
   const base = temp();
   const { repo, root } = fixtureSoul(base, "pi");
   capability(repo, "chan", {
@@ -2561,21 +2561,31 @@ test("a non-empty resource filter is recorded as auditable, not second-guessed",
   });
   write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.chan:\n      global: true\n");
   const piDir = join(base, "pi-agent");
-  // A deliberate, non-empty choice: pi owns the glob semantics, so OAS records
-  // it in provenance rather than guessing whether it covers this extension.
-  write(join(piDir, "settings.json"), JSON.stringify({ packages: [{ source: "npm:fake-channel", extensions: ["./dist/*.js"] }] }));
   const pkgDir = join(piDir, "npm", "node_modules", "fake-channel");
   write(join(pkgDir, "package.json"), JSON.stringify({ name: "fake-channel" }));
   const oldPath = process.env.PATH;
   process.env.PATH = fakePiWithPackages(base, [{ source: "npm:fake-channel", dir: pkgDir, filtered: true }]);
   const oldPi = process.env.PI_CODING_AGENT_DIR; process.env.PI_CODING_AGENT_DIR = piDir;
   try {
-    const r = spawnInstance(root, findAgent(root, "dev"), { instance: "dev-filt", launch: false });
+    // A non-empty extensions filter may name a wrong or nonexistent path, or
+    // simply omit the capability's extension. Proving otherwise means
+    // implementing pi's matcher, so this is unverifiable — not merely auditable.
+    write(join(piDir, "settings.json"), JSON.stringify({ packages: [{ source: "npm:fake-channel", extensions: ["./dist/*.js"] }] }));
+    assert.throws(
+      () => spawnInstance(root, findAgent(root, "dev"), { instance: "dev-filt", launch: false }),
+      (e) => e.code === "E_RUNTIME_RESOURCE_MISSING" && /filters its extensions/.test(e.message) && /skills-only filter is fine/.test(e.message),
+    );
+
+    // A filter on OTHER resource kinds is unrelated and must keep working —
+    // the real oas-aweb entry filters skills only, and pi still marks the row
+    // "(filtered)", so the two must not be conflated.
+    write(join(piDir, "settings.json"), JSON.stringify({ packages: [{ source: "npm:fake-channel", skills: ["skills/one"] }] }));
+    const r = spawnInstance(root, findAgent(root, "dev"), { instance: "dev-skillfilt", launch: false });
     const meta = JSON.parse(readFileSync(join(r.home, "instance.json"), "utf8"));
     const pkg = meta.composition.materialized.runtimePackages[0];
-    assert.equal(pkg.filtered, true, "the narrowing is visible for audit");
-    assert.equal(pkg.dir, pkgDir, "provenance records where the runtime says it lives");
-    retireInstance(root, "dev-filt", { tmuxSession: "oas-test-nosuch" });
+    assert.equal(pkg.filtered, true, "pi's own (filtered) marker is recorded…");
+    assert.equal(pkg.dir, pkgDir, "…along with where the runtime says it lives");
+    retireInstance(root, "dev-skillfilt", { tmuxSession: "oas-test-nosuch" });
   } finally {
     process.env.PATH = oldPath;
     if (oldPi === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = oldPi;
@@ -2635,5 +2645,26 @@ test("when pi cannot be run, a config entry is not accepted as an installation",
     process.env.PATH = oldPath;
     if (oldPi === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = oldPi;
   }
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("instance.json records the runtime posture — what is composed, curtailed, and ambient", () => {
+  const base = temp();
+  const oldPath = process.env.PATH; process.env.PATH = fakeRuntimes(base);
+  try {
+    for (const runtime of ["pi", "claude"]) {
+      const b = join(base, runtime);
+      const { root } = fixtureSoul(b, runtime);
+      const r = spawnInstance(root, findAgent(root, "dev"), { instance: `dev-${runtime}`, launch: false });
+      const posture = JSON.parse(readFileSync(join(r.home, "instance.json"), "utf8")).composition.materialized.runtimePosture;
+      assert.ok(posture.oasComposed, `${runtime} records the composed surface`);
+      assert.ok(posture.ambient?.length, `${runtime} states what remains ambient`);
+      assert.ok(posture.why, `${runtime} records why`);
+      if (runtime === "pi") assert.ok(posture.curtailed?.includes("user skills"), "pi curtails ambient skills");
+      // Claude keeps its own global and per-repo configuration by founder ruling.
+      else assert.ok(posture.ambient.some((a) => /plugins/.test(a)), "claude keeps user/project plugins");
+      retireInstance(root, `dev-${runtime}`, { tmuxSession: "oas-test-nosuch" });
+    }
+  } finally { process.env.PATH = oldPath; }
   rmSync(base, { recursive: true, force: true });
 });

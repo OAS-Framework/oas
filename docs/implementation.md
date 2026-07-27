@@ -115,12 +115,25 @@ does not have. OAS does not resolve their extension entry points — pi owns tha
 resolution, including globs and conventional directories.
 
 Claude discovers the same set natively through the instance's `.claude/skills`
-symlink. Claude Code resolves project skills from the working directory up to
-the repository root and offers no way to narrow that, so an OAS instance homed
-inside a repository that carries its own `.claude/skills` will also see those.
-That deviation is accepted and recorded in `instance.json` rather than
-rejected at spawn, since refusing to run in ordinary Claude-oriented
-repositories would be worse than the noise.
+symlink, and its composed instructions through `CLAUDE.md -> AGENTS.md`.
+
+Claude Code's **own configuration stays enabled**: user and project skills,
+plugins, settings and `CLAUDE.md` all resolve into an OAS session as they
+normally would. That is a deliberate product choice — those mechanisms are
+powerful and the operator decides whether to use them; a deployment that wants
+only the OAS-composed surface achieves it by configuring everything OAS-side.
+So OAS passes no `--setting-sources`, no exclusions, and no synthetic plugin.
+
+Measured behavior worth knowing when reasoning about an instance: project
+skills resolve from the working directory up to the **repository root**, so an
+instance homed inside a repository with its own `.claude/skills` sees those
+too. Project *settings* — hooks, plugins, permissions, custom agents — resolve
+from the instance home rather than from ancestors.
+
+Both runtimes record what they actually expose in `instance.json` under
+`composition.materialized.runtimePosture`: the OAS-composed set, what is
+curtailed, and what remains ambient. The deviation from strict composition is
+auditable rather than implied.
 
 ## Instructions
 
