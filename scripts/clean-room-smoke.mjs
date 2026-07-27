@@ -78,7 +78,7 @@ try {
   const spawned = core.spawnInstance(agentsRoot, agent, { instance: "probe-packed", repo: modernRepo, launch: false });
   const meta = JSON.parse(readFileSync(join(spawned.home, "instance.json"), "utf8"));
   const skills = readdirSync(join(spawned.home, ".agents", "skills")).sort();
-  if (JSON.stringify(skills) !== JSON.stringify(["memory-harvest", "oas", "oas-config", "okf", "private"])) throw new Error(`unexpected packed skills: ${skills.join(", ")}`);
+  if (JSON.stringify(skills) !== JSON.stringify(["memory-harvest", "oas", "oas-config", "oas-packages", "okf", "private"])) throw new Error(`unexpected packed skills: ${skills.join(", ")}`);
   if (lstatSync(join(spawned.home, "AGENTS.md")).isSymbolicLink()) throw new Error("instance AGENTS.md was not generated");
   if (readlinkSync(join(spawned.home, "CLAUDE.md")) !== "AGENTS.md") throw new Error("instance CLAUDE.md is not canonical");
   if (readFileSync(join(agent._dir, "soul", "AGENTS.md"), "utf8") !== canonical) throw new Error("spawn mutated packed canonical soul");
