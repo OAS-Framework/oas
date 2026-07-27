@@ -3330,7 +3330,7 @@ test("a home with no instance.json and no cleanup descriptor is not silently del
   rmSync(base, { recursive: true, force: true });
 });
 
-test("--force clears a home whose quarantine marker cannot drive a retry (reviewer-adff009, reviewer-45ff039r2)", () => {
+test("--force clears a home whose quarantine marker cannot drive a retry (reviewer-adff009, reviewer-45ff039r2, reviewer-0ad27d1)", () => {
   const base = temp();
   const { root } = fixtureSoul(base, "pi");
   // A marker that cannot drive the retry identifies nothing, so retire must
@@ -3352,6 +3352,17 @@ test("--force clears a home whose quarantine marker cannot drive a retry (review
     "descriptor with a blank repo": '{"cleanup": {"repo": "   "}}',
     "descriptor with a mistyped branch": '{"cleanup": {"repo": "/tmp/x", "branch": ["a"]}}',
     "descriptor with a mistyped capabilityRuntime": '{"cleanup": {"repo": "/tmp/x", "capabilityRuntime": {}}}',
+    // Nested malformation (reviewer-0ad27d1): the outer shape is fine and the
+    // retry would run — having resolved NOTHING. That is worse than retention:
+    // the quarantine clears, the credential goes, the external state stays.
+    "capability entries that are not capabilities": '{"failed": [{"capability": "acme.chan"}], "cleanup": {"repo": "/tmp/x", "capabilityRuntime": [{}]}}',
+    "a null capability entry": '{"failed": [{"capability": "acme.chan"}], "cleanup": {"repo": "/tmp/x", "capabilityRuntime": [null]}}',
+    "an id-less capability entry": '{"failed": [{"capability": "acme.chan"}], "cleanup": {"repo": "/tmp/x", "capabilityRuntime": [{"id": "  "}]}}',
+    "an empty capability set": '{"failed": [{"capability": "acme.chan"}], "cleanup": {"repo": "/tmp/x", "capabilityRuntime": []}}',
+    "a capability set missing the capability that failed": '{"failed": [{"capability": "acme.chan"}], "cleanup": {"repo": "/tmp/x", "capabilityRuntime": [{"id": "acme.other"}]}}',
+    // An unrecognised work mode skips the rollback-owned Git steps entirely and
+    // then reports the cleanup complete.
+    "an unknown work mode": '{"failed": [{"capability": "acme.chan"}], "cleanup": {"repo": "/tmp/x", "work": "wortree", "capabilityRuntime": [{"id": "acme.chan"}]}}',
   };
   for (const [label, marker] of Object.entries(unusable)) {
     const home = join(root, "dev", "instances", "dev-broken");

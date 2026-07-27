@@ -85,10 +85,14 @@ A self-contained package has an `oas.json`:
   finish keeps the home again, names what is outstanding, and exits nonzero.
 - The **escape hatch is `oas retire <instance> --force`**, for a home OAS cannot
   identify at all: no `instance.json` and no **usable** cleanup descriptor. Usable
-  means it can actually drive the retry — a marker that does not parse, carries no
-  `cleanup`, or carries one without a context `repo` (or with mistyped fields) is
-  no more retryable than a missing one, and is treated as missing so the escape
-  hatch works. Without `--force` that state fails closed with
+  means it can actually drive the retry, checked to the depth the retry consumes
+  it: a context `repo`, a recognised `work` mode (an unknown one would skip the
+  rollback-owned Git cleanup and call it done), and — when the descriptor carries
+  its own capability set — real capability entries covering the capabilities that
+  failed (an empty or malformed set reruns no hook, then clears the quarantine and
+  deletes the credential it was holding). A marker failing any of that is no more
+  retryable than a missing one, and is treated as missing so the escape hatch
+  works. Without `--force` that state fails closed with
   `E_UNIDENTIFIED_INSTANCE_HOME` rather than deleting whatever credentials the
   directory still holds; `--force` removes it and leaves any external state for
   the operator to clean up by hand.
