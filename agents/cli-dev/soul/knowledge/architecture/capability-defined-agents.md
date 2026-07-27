@@ -31,7 +31,10 @@ onto:
 # Implications
 
 - Never write into `_soulDir` (it lives in the installed/owned package tree
-  and is integrity-covered for installed packages).
+  and is integrity-covered for installed packages). Before reading or returning
+  an installed capability-agent soul, trust-check the package/capability lock
+  integrity and dependency closure rather than relying on declaration or
+  containment; see the [capability-agent trust lesson](/lessons/capability-agent-trust-and-source-routing.md).
 - Soul paths from a manifest go through `manifestPath` — subject to the
   containment check (and the marketplace hoisted-path exemption).
 - When adding features that enumerate agents (status, doctor), remember both

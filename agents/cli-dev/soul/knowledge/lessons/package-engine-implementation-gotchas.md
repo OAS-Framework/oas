@@ -15,6 +15,10 @@ timestamp: 2026-07-26
 - A pinned local git dependency spec can't be `path@commit` (parses as a
   path); use `file://<dir>@<commit>` so it takes the git branch of
   parsePackageSource. I added `file://` to the raw-git-URL regex for this.
+- Remote Git roots may be distribution packages (`oas-package.json`) or legacy
+  standalone capabilities (`oas.json`); package probing must be transactional
+  and fallback only on a missing package manifest. See the
+  [capability-agent trust/source routing lesson](/lessons/capability-agent-trust-and-source-routing.md).
 - Local dependency policy checks must classify the spelling before
   normalization. `~/bait` and `path:~/bait` from git/catalog manifests are
   host-ambient and must remain `relative:true` for no-local-base checks even
@@ -33,6 +37,10 @@ timestamp: 2026-07-26
   acquirePackage carries prior trustedCapabilities over ONLY when both the new
   source integrity and dependency digest equal the prior locked values; update
   with replace:true then gets approval invalidation for free.
+- Update identity checks must compare the resolved root identity directly with
+  the expected package instead of matching that ID somewhere in the dependency
+  closure; parser `normalized` output is public API and must exactly match the
+  lock form, including no trailing `@` for bare catalog IDs.
 - Exported contract signatures must be tested directly against the frozen doc.
   `capabilityTrust` drifted to an internal `(manifest, startDir)` shape; keep
   compatibility shims explicit when public signatures and internal shapes both

@@ -1,6 +1,9 @@
 # Knowledge Log
 
 ## 2026-07-27
+* **Update**: [package-engine-implementation-gotchas](/lessons/package-engine-implementation-gotchas.md) records transactional Git-root package probing, direct resolved-root identity comparison, and exact parser normalized forms.
+* **Update**: [capability-defined-agents](/architecture/capability-defined-agents.md) links installed capability-agent soul reads to provider integrity and dependency-closure trust checks.
+* **Creation**: [capability-agent-trust-and-source-routing](/lessons/capability-agent-trust-and-source-routing.md) records that declaration and path containment do not authenticate capability-agent instructions and that Git package probing must fail closed except for missing package manifests.
 * **Update**: [final-package-lifecycle-transaction-invariants](/lessons/final-package-lifecycle-transaction-invariants.md) records that post-commit convenience metadata such as package `.gitignore` maintenance must be best-effort because the lock and store are authoritative.
 * **Update**: [symlink-containment-walker-throws](/lessons/symlink-containment-walker-throws.md) merges reviewer-06f1160's resource-tree containment lesson: recurse through contained directory links with a visited realpath set and apply descendant-target validation to skill and capability-agent soul trees.
 * **Creation**: [final-package-lifecycle-transaction-invariants](/lessons/final-package-lifecycle-transaction-invariants.md) records final package lifecycle transaction invariants for no-op acquisition trust binding, target-scope removal rollback, and catalog selector preservation.
