@@ -150,7 +150,18 @@ test("pi and Claude instances receive the same exact local skills and generated 
       const diskMeta = JSON.parse(readFileSync(join(meta.home, "instance.json"), "utf8"));
       assert.ok(diskMeta.capabilities.some((c) => c.id === "acme.review"));
       assert.deepEqual(diskMeta.skills.map((s) => s.name), names);
-      if (meta.runtime === "pi") { assert.match(meta.command, /--skill /); assert.doesNotMatch(meta.command, /--no-skills/); }
+      if (meta.runtime === "pi") {
+        // Strict curriculum: ambient discovery off, the composed set added back
+        // explicitly, and the instance's own AGENTS.md delivered by flag because
+        // --no-context-files also suppresses it. (This assertion previously
+        // required --no-skills to be ABSENT, under the superseded
+        // ambient-coexistence decision.)
+        assert.match(meta.command, /--skill /);
+        assert.match(meta.command, /--no-skills/);
+        assert.match(meta.command, /--no-extensions/);
+        assert.match(meta.command, /--no-context-files/);
+        assert.match(meta.command, /--append-system-prompt/);
+      }
       else assert.doesNotMatch(meta.command, /CLAUDE_CONFIG_DIR/);
     }
     assert.equal(readFileSync(join(soul, "AGENTS.md"), "utf8"), canonical);
@@ -2357,5 +2368,102 @@ test("a SKILL.md that is not a regular file does not count as a skill (reviewer-
     );
     assert.equal(existsSync(join(root, "dev", "instances", "dev-fakedoc")), false);
   } finally { process.env.PATH = oldPath; }
+  rmSync(base, { recursive: true, force: true });
+});
+
+// ---------- runtime extensions: strict launch resolves them, or refuses ----------
+
+test("spawn fails closed when a capability's runtime package is missing, even after a Claude-only reconciliation", () => {
+  const base = temp();
+  const { repo, root } = fixtureSoul(base, "claude");   // soul default: claude
+  capability(repo, "chan", {
+    capability: "acme.chan",
+    requires: [{ runtime: "pi", package: "npm:@awebai/pi", why: "channel extension for pi sessions" }],
+  });
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.chan:\n      global: true\n");
+  const oldPath = process.env.PATH; process.env.PATH = fakeRuntimes(base);
+  const oldHome = process.env.HOME; process.env.HOME = join(base, "nohome"); // no pi packages
+  try {
+    // Claude is unaffected: it never needed the pi package.
+    const claude = spawnInstance(root, findAgent(root, "dev"), { instance: "dev-claude", launch: false });
+    retireInstance(root, "dev-claude", { tmuxSession: "oas-test-nosuch" });
+    assert.doesNotMatch(claude.command, /-e /);
+
+    // --runtime pi overrides the soul default long after install-time
+    // reconciliation decided this host was Claude-only. Spawn is the
+    // authoritative check, and it must refuse rather than launch a pi instance
+    // whose channel silently vanished under --no-extensions.
+    assert.throws(
+      () => spawnInstance(root, findAgent(root, "dev"), { instance: "dev-pi", runtime: "pi", launch: false }),
+      (e) => e.code === "E_RUNTIME_RESOURCE_MISSING"
+        && /acme\.chan requires the pi package npm:@awebai\/pi/.test(e.message)
+        && /--accept-requirement pi:npm:@awebai\/pi/.test(e.message),
+      "spawn names the exact separately-consentable remedy",
+    );
+    assert.equal(existsSync(join(root, "dev", "instances", "dev-pi")), false, "no scaffold left behind");
+  } finally { process.env.PATH = oldPath; process.env.HOME = oldHome; }
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("a resolved runtime extension is passed by path and recorded with provenance", () => {
+  const base = temp();
+  const { repo, root } = fixtureSoul(base, "pi");
+  capability(repo, "chan", {
+    capability: "acme.chan",
+    requires: [{ runtime: "pi", package: "npm:fake-channel", why: "channel extension" }],
+  });
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.chan:\n      global: true\n");
+  // A relocated pi install (PI_CODING_AGENT_DIR / PI_PACKAGE_DIR are supported)
+  // holding the package, its settings entry, and its declared extension file.
+  const piDir = join(base, "pi-agent");
+  write(join(piDir, "settings.json"), JSON.stringify({ packages: ["npm:fake-channel"] }));
+  const pkgDir = join(piDir, "npm", "node_modules", "fake-channel");
+  write(join(pkgDir, "package.json"), JSON.stringify({ name: "fake-channel", pi: { extensions: ["./dist/index.js"] } }));
+  write(join(pkgDir, "dist", "index.js"), "export default () => {};\n");
+  const oldPath = process.env.PATH; process.env.PATH = fakeRuntimes(base);
+  const oldPi = process.env.PI_CODING_AGENT_DIR; process.env.PI_CODING_AGENT_DIR = piDir;
+  try {
+    const r = spawnInstance(root, findAgent(root, "dev"), { instance: "dev-ext", launch: false });
+    // Ambient discovery off, the selected extension back by explicit path.
+    assert.match(r.command, /--no-extensions/);
+    assert.match(r.command, new RegExp(`-e '${join(pkgDir, "dist", "index.js")}'`));
+    const meta = JSON.parse(readFileSync(join(r.home, "instance.json"), "utf8"));
+    const ext = meta.composition.materialized.runtimeExtensions;
+    assert.equal(ext.length, 1, "recorded once");
+    assert.equal(ext[0].capability, "acme.chan");
+    assert.equal(ext[0].package, "npm:fake-channel");
+    assert.equal(ext[0].path, join(pkgDir, "dist", "index.js"), "provenance records the exact file, not just a settings row");
+    retireInstance(root, "dev-ext", { tmuxSession: "oas-test-nosuch" });
+  } finally {
+    process.env.PATH = oldPath;
+    if (oldPi === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = oldPi;
+  }
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("a declared extension that does not resolve refuses the launch rather than dropping it", () => {
+  const base = temp();
+  const { repo, root } = fixtureSoul(base, "pi");
+  capability(repo, "chan", {
+    capability: "acme.chan",
+    requires: [{ runtime: "pi", package: "npm:fake-channel", why: "channel extension" }],
+  });
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.chan:\n      global: true\n");
+  const piDir = join(base, "pi-agent");
+  write(join(piDir, "settings.json"), JSON.stringify({ packages: ["npm:fake-channel"] }));
+  const pkgDir = join(piDir, "npm", "node_modules", "fake-channel");
+  // Declares an entry point it does not ship.
+  write(join(pkgDir, "package.json"), JSON.stringify({ name: "fake-channel", pi: { extensions: ["./dist/index.js"] } }));
+  const oldPath = process.env.PATH; process.env.PATH = fakeRuntimes(base);
+  const oldPi = process.env.PI_CODING_AGENT_DIR; process.env.PI_CODING_AGENT_DIR = piDir;
+  try {
+    assert.throws(
+      () => spawnInstance(root, findAgent(root, "dev"), { instance: "dev-badext", launch: false }),
+      (e) => e.code === "E_RUNTIME_RESOURCE_MISSING" && /declares extension ".\/dist\/index\.js" which does not resolve/.test(e.message),
+    );
+  } finally {
+    process.env.PATH = oldPath;
+    if (oldPi === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = oldPi;
+  }
   rmSync(base, { recursive: true, force: true });
 });

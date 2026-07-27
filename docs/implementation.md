@@ -90,12 +90,29 @@ an inherited slot and remains distinct from absence.
    files, hooks, capability metadata, and forward-only spawn lineage in
    `instance.json`.
 
-Pi launches with `--skill <instance>/.agents/skills` as an explicit path;
-ambient discovery (user, packages, work tree) remains enabled so existing
-skills coexist with the OAS-composed set. The pi adapter contributes
-only `oas-getting-started` outside an instance and the local directory inside
-one. Claude discovers the same set through the instance's
-`.claude/skills` symlink alongside the user's own configuration.
+Pi launches in strict mode: `--no-skills --skill
+<instance-home>/.agents/skills --no-extensions --no-context-files
+--no-prompt-templates --append-system-prompt <instance-home>/AGENTS.md`. The
+instance sees exactly the composed set and nothing ambient.
+
+`--no-extensions` is required alongside `--no-skills`, because an extension's
+`resources_discover` hook contributes skill paths that survive skill-discovery
+suppression. Selected extensions return by explicit `-e <path>`, resolved from
+the runtime-package requirements that active capabilities declare (see
+[capabilities](capabilities.md)); a required package that is not installed
+fails the spawn with the consent command to fix it, rather than launching an
+instance whose capability silently vanished. `--no-context-files` also
+suppresses the instance's *own* composed `AGENTS.md`, so that is delivered
+explicitly; the work tree's `AGENTS.md` stays readable by the file tools —
+readable, not auto-injected.
+
+Claude discovers the same set natively through the instance's `.claude/skills`
+symlink. Claude Code resolves project skills from the working directory up to
+the repository root and offers no way to narrow that, so an OAS instance homed
+inside a repository that carries its own `.claude/skills` will also see those.
+That deviation is accepted and recorded in `instance.json` rather than
+rejected at spawn, since refusing to run in ordinary Claude-oriented
+repositories would be worse than the noise.
 
 ## Instructions
 

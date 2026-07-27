@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { resolveOasConfig, capabilityIntegrity, acquirePackage, loadPackageManifestAt, parsePackageSource, readPackageLocks } from "../lib/core.mjs";
 import {
-  aggregateMissingRequirements, commandOnPath, diffConfigTexts, discoverWorkspaceScopes,
+  aggregateMissingRequirements, capabilityRuntimeTargets, commandOnPath, diffConfigTexts, discoverWorkspaceScopes,
   lockedPackageCapabilities, normalizeRequirement, packageSpecIdentity, runtimePackageInstalled,
   parseProfileProvenance, profileProvenanceHeader, requirementInstallPlan,
   resolveProfilePackage, runRequirementInstall, selectProfile, validateProfile,
@@ -1481,34 +1481,6 @@ test("a runtime-package requirement plans an argv install scoped to its runtime"
   assert.match(requirementInstallPlan({ runtime: "pi", package: "../../etc/passwd" }).unavailable, /not a plain source token/);
 });
 
-test("runtime-package requirements aggregate, dedupe by identity, and drop once installed", () => {
-  const base = temp();
-  const repo = join(base, "repo");
-  const capDir = join(repo, ".agents", "capabilities", "owned", "chan");
-  write(join(capDir, "oas.json"), JSON.stringify({
-    capability: "acme.chan", version: "1.0.0", compatibility: { oas: ">=0.6.2" }, description: "Channel.",
-    requires: [{ runtime: "pi", package: "npm:@awebai/pi@latest", why: "channel extension" }],
-  }));
-  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.chan:\n      global: true\n");
-  gitRepo(repo);
-
-  const missingHome = temp(); // no pi settings at all
-  const missing = aggregateMissingRequirements([repo], { env: { ...process.env, HOME: missingHome } });
-  const req = missing.find((m) => m.command === "pi:npm:@awebai/pi");
-  assert.ok(req, `runtime requirement is raised: ${missing.map((m) => m.command)}`);
-  assert.equal(req.kind, "runtime-package");
-  assert.deepEqual(req.plan.argv, ["pi", "install", "npm:@awebai/pi@latest"]);
-  assert.equal(req.requestedBy[0].capability, "acme.chan", "provenance names the requesting capability");
-
-  // Already installed (even at a different version selector) → not raised.
-  const okHome = temp();
-  write(join(okHome, ".pi", "agent", "settings.json"), JSON.stringify({ packages: [{ source: "npm:@awebai/pi@0.2.1" }] }));
-  const none = aggregateMissingRequirements([repo], { env: { ...process.env, HOME: okHome } });
-  assert.equal(none.some((m) => m.command === "pi:npm:@awebai/pi"), false, "a satisfied requirement is not raised");
-
-  for (const d of [base, missingHome, okHome]) rmSync(d, { recursive: true, force: true });
-});
-
 test("an unknown runtime in a requirement is fail-closed, never consentable", () => {
   const base = temp();
   const repo = join(base, "repo");
@@ -1538,4 +1510,104 @@ test("the aweb capability declares its pi channel package as a requirement", () 
   assert.ok(req.why && req.why.length > 20, "the prompt tells the user why it is needed");
   const plan = requirementInstallPlan(req);
   assert.deepEqual(plan.argv, ["pi", "install", "npm:@awebai/pi"]);
+});
+
+/** A deployment whose souls have the given runtimes, with a pi-requiring capability. */
+function runtimeScopeFixture(base, souls, { target = "global" } = {}) {
+  const repo = join(base, "repo");
+  const capDir = join(repo, ".agents", "capabilities", "owned", "chan");
+  write(join(capDir, "oas.json"), JSON.stringify({
+    capability: "acme.chan", version: "1.0.0", compatibility: { oas: ">=0.6.2" }, description: "Channel.",
+    requires: [{ runtime: "pi", package: "npm:@awebai/pi@latest", why: "channel extension" }],
+  }));
+  for (const [name, spec] of Object.entries(souls)) {
+    const { runtime, type } = typeof spec === "string" ? { runtime: spec } : spec;
+    write(join(repo, "agents", name, "soul", "soul.yaml"),
+      `name: ${name}\nkind: persistent\nrepo: ${repo}\nwork: checkout\nruntime: ${runtime}\n${type ? `type: ${type}\n` : ""}`);
+    write(join(repo, "agents", name, "soul", "AGENTS.md"), `# ${name}\n`);
+  }
+  const binding = target === "global" ? "      global: true\n"
+    : target.startsWith("type:") ? `      agent-types:\n        ${target.slice(5)}:\n          enabled: true\n`
+    : `      souls:\n        ${target.slice(5)}:\n          enabled: true\n`;
+  const types = target.startsWith("type:") ? `agent-types:\n  ${target.slice(5)}: {}\n` : "";
+  write(join(repo, "oas-config.yaml"), `${types}capabilities:\n  additive:\n    acme.chan:\n${binding}`);
+  gitRepo(repo);
+  return repo;
+}
+const noPiPackages = () => ({ ...process.env, HOME: mkdtempSync(join(tmpdir(), "oas-nopi-")) });
+
+test("a Claude-only deployment is never prompted for a pi package", () => {
+  const base = temp();
+  const repo = runtimeScopeFixture(base, { writer: "claude", editor: "claude" });
+  const missing = aggregateMissingRequirements([repo], { env: noPiPackages() });
+  assert.equal(missing.some((m) => m.kind === "runtime-package"), false,
+    `no pi requirement for a Claude-only host: ${JSON.stringify(missing.map((m) => m.command))}`);
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("a pi deployment is prompted, with soul-level provenance", () => {
+  const base = temp();
+  const repo = runtimeScopeFixture(base, { coder: "pi" });
+  const missing = aggregateMissingRequirements([repo], { env: noPiPackages() });
+  const req = missing.find((m) => m.command === "pi:npm:@awebai/pi");
+  assert.ok(req, "the pi requirement is raised");
+  assert.deepEqual(req.plan.argv, ["pi", "install", "npm:@awebai/pi@latest"]);
+  assert.deepEqual(req.requestedBy[0].souls, ["coder"], "provenance names the soul that pulled it in");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("a mixed pi+claude deployment reports ONE deduped requirement naming only the pi souls", () => {
+  const base = temp();
+  const repo = runtimeScopeFixture(base, { coder: "pi", helper: "pi", reviewer: "claude" });
+  const missing = aggregateMissingRequirements([repo], { env: noPiPackages() });
+  const reqs = missing.filter((m) => m.kind === "runtime-package");
+  assert.equal(reqs.length, 1, "deduped to one requirement");
+  assert.deepEqual(reqs[0].requestedBy[0].souls.sort(), ["coder", "helper"], "claude souls are not listed as requesters");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("type and soul targeting scope the requirement to the souls actually targeted", () => {
+  const base = temp();
+  // Only the pi soul carries the targeted type.
+  const byType = runtimeScopeFixture(join(base, "a"),
+    { coder: { runtime: "pi", type: "developers" }, reviewer: "claude" }, { target: "type:developers" });
+  assert.ok(aggregateMissingRequirements([byType], { env: noPiPackages() }).some((m) => m.kind === "runtime-package"),
+    "raised when the targeted type is a pi soul");
+
+  // The targeted type belongs only to a claude soul → never raised.
+  const claudeType = runtimeScopeFixture(join(base, "b"),
+    { coder: "pi", reviewer: { runtime: "claude", type: "reviewers" } }, { target: "type:reviewers" });
+  assert.equal(aggregateMissingRequirements([claudeType], { env: noPiPackages() }).some((m) => m.kind === "runtime-package"), false,
+    "not raised when the targeted type is claude-only");
+
+  // Explicit soul targeting, claude soul only.
+  const bySoul = runtimeScopeFixture(join(base, "c"), { coder: "pi", reviewer: "claude" }, { target: "soul:reviewer" });
+  assert.equal(aggregateMissingRequirements([bySoul], { env: noPiPackages() }).some((m) => m.kind === "runtime-package"), false,
+    "not raised when only a claude soul is targeted");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("no souls yet: the requirement is not raised, and the policy is spawn's to enforce", () => {
+  const base = temp();
+  const repo = runtimeScopeFixture(base, {});   // capability active, zero souls
+  const targets = capabilityRuntimeTargets(repo, "acme.chan");
+  assert.equal(targets.souls, 0);
+  assert.equal(targets.runtimes.size, 0);
+  assert.equal(aggregateMissingRequirements([repo], { env: noPiPackages() }).some((m) => m.kind === "runtime-package"), false,
+    "a fresh deployment is not prompted for runtimes its future souls may never use");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("an already-installed pi package is not raised, across a version selector", () => {
+  const base = temp();
+  const repo = runtimeScopeFixture(base, { coder: "pi" });
+  const home = temp();
+  write(join(home, ".pi", "agent", "settings.json"), JSON.stringify({ packages: [{ source: "npm:@awebai/pi@0.2.1" }] }));
+  assert.equal(aggregateMissingRequirements([repo], { env: { ...process.env, HOME: home } }).some((m) => m.kind === "runtime-package"), false);
+  // …and pi's documented config-dir override is honored, not just $HOME.
+  const relocated = temp();
+  write(join(relocated, "settings.json"), JSON.stringify({ packages: ["npm:@awebai/pi"] }));
+  assert.equal(runtimePackageInstalled("pi", "npm:@awebai/pi", { HOME: temp(), PI_CODING_AGENT_DIR: relocated }), true,
+    "PI_CODING_AGENT_DIR relocates the settings file");
+  for (const d of [base, home, relocated]) rmSync(d, { recursive: true, force: true });
 });
