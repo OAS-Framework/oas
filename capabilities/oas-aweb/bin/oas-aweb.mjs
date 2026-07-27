@@ -45,7 +45,7 @@ import { join, dirname, resolve, delimiter } from "node:path";
  * property of one helper staying correct forever, while argv removes the class.
  * This hook is a REQUIRED spawn hook, so it gates every spawn, which is reason
  * enough not to rely on quoting. */
-const run = (argv, cwd, timeout = 45000, secrets = []) => {
+const run = (argv, cwd, timeout = 45000, { secrets = [], secretSafe = false } = {}) => {
   try {
     return execFileSync(argv[0], argv.slice(1), { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout }).trim();
   } catch (e) {
@@ -53,15 +53,28 @@ const run = (argv, cwd, timeout = 45000, secrets = []) => {
     // join <token> …"). This hook's failures are reported by the kernel and land
     // in CLI/Desktop logs, so a failed join disclosed a still-valid team invite
     // token to anyone reading them (reviewer-aggregate2). Rebuild the error from
-    // the command name, the status and stderr only — and scrub any secret the
-    // caller named, because the command's own stderr may echo it back.
+    // the command name and the status — never the argv.
+    //
+    // secretSafe drops the child's OUTPUT as well. Scrubbing known strings is not
+    // enough for a command that MINTS a secret: `aw team invite` can print a
+    // freshly-created token to stderr while failing, and at that point the caller
+    // has no value to scrub because the token is exactly what it never received
+    // (reviewer-1a6e82e). For those commands, status plus fixed context is all
+    // the diagnosis anyone gets.
     const scrub = (t) => secrets.filter(Boolean).reduce((acc, sec) => acc.split(sec).join("<redacted>"), String(t ?? ""));
-    const where = [argv[0], argv[1]].filter(Boolean).join(" ");  // program + subcommand: never an argument
-    const why = scrub(e.stderr).trim() || (e.status === undefined ? String(e.code || "failed") : "");
-    const err = new Error(`${where} failed${e.status === undefined ? "" : ` (exit ${e.status})`}${why ? `: ${why}` : ""}`);
+    const where = [argv[0], argv[1], argv[2]].filter((a) => a && !secrets.includes(a) && !a.startsWith("-")).join(" ");
+    const why = secretSafe ? "" : (scrub(e.stderr).trim() || (e.status === undefined ? String(e.code || "failed") : ""));
+    const err = new Error(`${where} failed${e.status === undefined ? "" : ` (exit ${e.status})`}${why ? `: ${why}` : ""}${secretSafe ? " (output withheld: this command handles credentials)" : ""}`);
     err.status = e.status;
     throw err;
   }
+};
+/** JSON.parse whose failure never quotes the input. Node includes an excerpt of
+ * the malformed text in a SyntaxError, which for these commands IS the credential
+ * (reviewer-1a6e82e). */
+const parseSecretJson = (text, what) => {
+  try { return JSON.parse(text); }
+  catch { throw new Error(`${what} returned output that is not valid JSON (withheld: this command handles credentials)`); }
 };
 /** Is a command on PATH? Resolved in-process rather than by running
  * `command -v`, which is a SHELL BUILTIN — spawning it as a program depends on
@@ -156,8 +169,12 @@ if (event === "spawn") {
       else if (match.length > 1) fatal(`team name "${team}" is ambiguous at ${root}: ${match.join(", ")}, so no identity could be minted — set team.id in oas-config.yaml`);
       else fatal(`no membership matching team "${team}" at ${root}, so no identity could be minted — join or create it first (aweb-team-membership skill), or set team.id`);
     }
-    const inv = JSON.parse(run(["aw", "team", "invite", "--team-id", team, "--json"], root));
-    const joined = JSON.parse(run(["aw", "team", "join", inv.token, "--name", instance, "--json"], home, 45000, [inv.token]));
+    // Both of these carry the invite token — one mints it, the other spends it —
+    // so neither their output nor their diagnostics may reach a log.
+    const inv = parseSecretJson(run(["aw", "team", "invite", "--team-id", team, "--json"], root, 45000, { secretSafe: true }), "aw team invite");
+    if (!inv?.token || typeof inv.token !== "string") fatal("aw team invite returned no usable token, so no identity could be minted");
+    const joined = parseSecretJson(run(["aw", "team", "join", inv.token, "--name", instance, "--json"], home, 45000, { secrets: [inv.token], secretSafe: true }), "aw team join");
+    if (!joined || typeof joined !== "object") fatal("aw team join returned no usable result, so no identity could be minted", minted);
     // External state now exists. Record it immediately so any later failure can
     // still report it for compensation.
     minted = { team: joined.team_id, alias: joined.alias || instance };

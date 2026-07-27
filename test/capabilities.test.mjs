@@ -2950,33 +2950,43 @@ exit 0
   rmSync(base, { recursive: true, force: true });
 });
 
-test("a failed team join never discloses the invite token (reviewer-aggregate2)", () => {
-  const base = temp();
+test("no failure path discloses the invite token (reviewer-aggregate2, reviewer-1a6e82e)", () => {
   const hook = resolve(new URL("../capabilities/oas-aweb/bin/oas-aweb.mjs", import.meta.url).pathname);
-  const bin = join(base, "bin"); mkdirSync(bin, { recursive: true });
-  // execFileSync puts the whole argv in the error message, and this hook's
-  // failures are surfaced by the kernel into CLI/Desktop logs. A join that fails
-  // must not carry a still-valid invite token there — including one the command
-  // echoes back in its own stderr.
   const TOKEN = "inv_SUPERSECRET_TOKEN_9f3a";
-  write(join(bin, "aw"), `#!/bin/sh
+  // execFileSync puts the whole argv in its error message, JSON.parse quotes the
+  // malformed input in its SyntaxError, and a command that MINTS a credential can
+  // print it while failing — at which point there is nothing for the caller to
+  // scrub, because the token is exactly what it never received. This hook's
+  // failures are surfaced by the kernel into CLI/Desktop logs, so every one of
+  // those paths is a disclosure.
+  const cases = {
+    "the join fails, echoing the token": `if [ "$1" = "team" ] && [ "$2" = "invite" ]; then echo '{"token":"${TOKEN}"}'; exit 0; fi
+if [ "$1" = "team" ] && [ "$2" = "join" ]; then echo "join rejected for token ${TOKEN}" 1>&2; exit 3; fi`,
+    "the INVITE fails after printing the token it minted": `if [ "$1" = "team" ] && [ "$2" = "invite" ]; then echo "minted ${TOKEN} then failed" 1>&2; exit 3; fi`,
+    "the invite returns malformed JSON containing the token": `if [ "$1" = "team" ] && [ "$2" = "invite" ]; then echo '{"token":"${TOKEN}"'; exit 0; fi`,
+    "the join returns malformed JSON containing the token": `if [ "$1" = "team" ] && [ "$2" = "invite" ]; then echo '{"token":"${TOKEN}"}'; exit 0; fi
+if [ "$1" = "team" ] && [ "$2" = "join" ]; then echo '{"alias":"probe" ${TOKEN}'; exit 0; fi`,
+  };
+  for (const [label, script] of Object.entries(cases)) {
+    const base = temp();
+    const bin = join(base, "bin"); mkdirSync(bin, { recursive: true });
+    write(join(bin, "aw"), `#!/bin/sh
 if [ "$1" = "team" ] && [ "$2" = "list" ]; then echo '{"active_team":"default:acme.aweb.ai","memberships":[{"team_id":"default:acme.aweb.ai","alias":"x"}]}'; exit 0; fi
-if [ "$1" = "team" ] && [ "$2" = "invite" ]; then echo '{"token":"${TOKEN}"}'; exit 0; fi
-if [ "$1" = "team" ] && [ "$2" = "join" ]; then echo "join rejected for token ${TOKEN}" 1>&2; exit 3; fi
+${script}
 exit 0
 `);
-  execFileSync("chmod", ["+x", join(bin, "aw")]);
-  const root = join(base, "awroot"); mkdirSync(join(root, ".aw"), { recursive: true });
-  const r = spawnSync(process.execPath, [hook, "spawn"], {
-    encoding: "utf8",
-    env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, OAS_EVENT: "spawn", OAS_INSTANCE: "probe", OAS_HOME: root, OAS_WORKSPACE: root, OAS_CONTEXT: root, OAS_TEAM_SCOPE: root, OAS_TEAM_NAME: "default", OAS_TEAM_ID: "" },
-  });
-  assert.notEqual(r.status, 0, "a failed join still fails the spawn");
-  assert.doesNotMatch(r.stdout, new RegExp(TOKEN), "the token must not reach stdout");
-  assert.doesNotMatch(r.stderr, new RegExp(TOKEN), "nor stderr — not from the argv, not from the command's own echo");
-  assert.match(r.stderr + r.stdout, /identity minting failed/, "while the failure itself is still reported");
-  assert.match(r.stderr + r.stdout, /<redacted>|exit 3/, "with enough to diagnose it");
-  rmSync(base, { recursive: true, force: true });
+    execFileSync("chmod", ["+x", join(bin, "aw")]);
+    const root = join(base, "awroot"); mkdirSync(join(root, ".aw"), { recursive: true });
+    const r = spawnSync(process.execPath, [hook, "spawn"], {
+      encoding: "utf8",
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, OAS_EVENT: "spawn", OAS_INSTANCE: "probe", OAS_HOME: root, OAS_WORKSPACE: root, OAS_CONTEXT: root, OAS_TEAM_SCOPE: root, OAS_TEAM_NAME: "default", OAS_TEAM_ID: "" },
+    });
+    assert.notEqual(r.status, 0, `${label}: the spawn still fails`);
+    assert.doesNotMatch(r.stdout, new RegExp(TOKEN), `${label}: the token must not reach stdout`);
+    assert.doesNotMatch(r.stderr, new RegExp(TOKEN), `${label}: nor stderr`);
+    assert.match(r.stderr + r.stdout, /identity minting failed|no usable/, `${label}: while the failure is still reported`);
+    rmSync(base, { recursive: true, force: true });
+  }
 });
 
 test("an alias minted with no local key is incomplete cleanup, not 'nothing to delete'", () => {
@@ -3527,6 +3537,77 @@ console.log(JSON.stringify({ meta: { retired: false, reason: 'self-delete-failed
     assert.match(cli.stderr, /NOT cleaned up/, "and says so to the human, not only in the JSON");
     assert.match(cli.stderr, /acme\.chan/, "naming the state they now own");
     assert.equal(existsSync(home), false, "the home is gone because the operator said so");
+  } finally { process.env.PATH = oldPath; }
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("instance homes stay inside the deployment: every layout, every symlink escape (reviewer-aggregate2, reviewer-1a6e82e)", () => {
+  const base = temp();
+  const { repo, root } = fixtureSoul(base, "pi");
+  // A SECOND primary Git repo standing in for "somewhere else entirely" — the
+  // escapes below are only interesting because the home would land in a real,
+  // unrelated deployment-looking place, taking any credential a hook writes.
+  const foreign = join(base, "foreign"); gitRepo(foreign);
+  const oldPath = process.env.PATH; process.env.PATH = fakeRuntimes(base);
+  const spawnHome = (agent, instance) =>
+    spawnInstance(root, agent, { instance, launch: false }).home;
+  try {
+    // --- Legitimate layouts still work. ------------------------------------
+    const persistent = spawnHome(findAgent(root, "dev"), "dev-ok");
+    assert.equal(realpathSync(persistent), join(realpathSync(join(root, "dev")), "instances", "dev-ok"));
+
+    // A local soul under the scope's SIBLING local-agents/.
+    const localSoul = join(base, "local-agents", "helper", "soul");
+    write(join(localSoul, "soul.yaml"), `name: helper\nkind: local\nrepo: ${repo}\nwork: checkout\nruntime: pi\n`);
+    write(join(localSoul, "AGENTS.md"), "# helper\n");
+    const localHome = spawnHome(findAgent(root, "helper"), "helper-ok");
+    assert.ok(realpathSync(localHome).includes(join("local-agents", "helper", "instances")), "sibling local-agents layout spawns");
+
+    // A legacy NESTED local dir, still read by the kernel.
+    const legacySoul = join(root, "tmp-agents", "scratch", "soul");
+    write(join(legacySoul, "soul.yaml"), `name: scratch\nkind: local\nrepo: ${repo}\nwork: checkout\nruntime: pi\n`);
+    write(join(legacySoul, "AGENTS.md"), "# scratch\n");
+    const legacyHome = spawnHome(findAgent(root, "scratch"), "scratch-ok");
+    assert.ok(realpathSync(legacyHome).includes(join("tmp-agents", "scratch", "instances")), "legacy nested layout spawns");
+
+    // --- Every escape is refused, and NOTHING is created outside. ----------
+    const escapes = {
+      // The instances/ dir itself redirects the home.
+      "a symlinked instances/ dir": () => {
+        const d = join(root, "esc1", "soul"); write(join(d, "soul.yaml"), `name: esc1\nkind: persistent\nrepo: ${repo}\nwork: checkout\nruntime: pi\n`);
+        write(join(d, "AGENTS.md"), "# esc1\n");
+        symlinkSync(foreign, join(root, "esc1", "instances"));
+        return findAgent(root, "esc1");
+      },
+      // The agent dir redirects one level up.
+      "a symlinked agent dir": () => {
+        const out = join(base, "outside-soul", "soul");
+        write(join(out, "soul.yaml"), `name: esc2\nkind: persistent\nrepo: ${repo}\nwork: checkout\nruntime: pi\n`);
+        write(join(out, "AGENTS.md"), "# esc2\n");
+        symlinkSync(join(base, "outside-soul"), join(root, "esc2"));
+        return findAgent(root, "esc2");
+      },
+      // The BASE redirects: resolving each base and trusting the result made the
+      // symlink's target an allowed deployment base (reviewer-1a6e82e).
+      "a symlinked legacy local base": () => {
+        const outside = join(base, "foreign-agents");
+        write(join(outside, "esc3", "soul", "soul.yaml"), `name: esc3\nkind: local\nrepo: ${repo}\nwork: checkout\nruntime: pi\n`);
+        write(join(outside, "esc3", "soul", "AGENTS.md"), "# esc3\n");
+        symlinkSync(outside, join(root, "local-agents"));
+        return findAgent(root, "esc3");
+      },
+    };
+    for (const [label, setup] of Object.entries(escapes)) {
+      const agent = setup();
+      assert.ok(agent, `${label}: precondition — the agent resolves, so only the placement guard can stop it`);
+      const before = readdirSync(foreign).length;
+      assert.throws(
+        () => spawnInstance(root, agent, { instance: `${agent.name}-x`, launch: false }),
+        (e) => e.code === "E_NO_CANONICAL_ROOT",
+        `${label}: the home would land outside the deployment`,
+      );
+      assert.equal(readdirSync(foreign).length, before, `${label}: nothing was created outside`);
+    }
   } finally { process.env.PATH = oldPath; }
   rmSync(base, { recursive: true, force: true });
 });
