@@ -1,6 +1,7 @@
 # Knowledge Log
 
 ## 2026-07-27
+* **Creation**: [work-tree-relative-capability-skills-fail-open](/lessons/work-tree-relative-capability-skills-fail-open.md) records that work-tree-relative capability skill paths can fail open at spawn when dependencies are not installed, silently omitting messaging skills from the composed instance.
 * **Creation**: [prove-auto-merge-preserved-both-deltas](/lessons/prove-auto-merge-preserved-both-deltas.md) records the reverse-apply check for proving that an auto-merged file still contains each side's post-base delta before reporting integration success.
 * **Creation**: skills/crossed-mail-freeze-discipline — adds the HOLD/GO crossed-mail freeze protocol for exact state reports, unpushed freeze-time fixes, and stale-instruction checks.
 * **Creation**: [crossed-mail-freeze-discipline](/lessons/crossed-mail-freeze-discipline.md) records the state-report-and-freeze posture for crossed HOLD/GO mail, local unpushed fixes during freezes, and self-verification of moving-head claims.
