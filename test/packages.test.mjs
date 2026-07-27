@@ -1698,3 +1698,35 @@ test("same plugin from DIFFERENT marketplace sources is a conflict, not a silent
   assert.equal(req.conflict.plans.length, 2, "both requesters are named for provenance");
   rmSync(base, { recursive: true, force: true });
 });
+
+test("post-install verification probes the same executable the install ran through (reviewer-165d668)", () => {
+  const base = temp();
+  // Two wrappers reporting OPPOSITE states: `claude-personal` (the configured
+  // one) has the plugin, the literal `claude` does not.
+  const bin = join(base, "bin"); mkdirSync(bin, { recursive: true });
+  const listing = (rows) => JSON.stringify(rows.map((id) => ({ id, version: "1.0.0", scope: "user", enabled: true, installPath: join(base, id) })));
+  for (const [name, rows] of [["claude", []], ["claude-personal", ["chan@acme-marketplace"]]]) {
+    write(join(bin, name), `#!/bin/sh
+if [ "$1" = "plugin" ] && [ "$2" = "list" ]; then echo '${listing(rows)}'; exit 0; fi
+exit 0
+`);
+  }
+  execFileSync("chmod", ["-R", "+x", bin]);
+  const oldPath = process.env.PATH; process.env.PATH = `${bin}:${process.env.PATH}`;
+  try {
+    const repo = join(base, "repo");
+    write(join(repo, "oas-claude-config"), "claude-personal\n");
+    const plan = requirementInstallPlan(
+      { runtime: "claude", package: "chan@acme-marketplace", marketplace: "acme/claude-plugins", why: "push events" },
+      { context: repo },
+    );
+    // The plan targets the configured wrapper…
+    assert.equal(plan.steps[0][0], "claude-personal");
+    assert.equal(plan.probe?.bin, "claude-personal", "…and carries it for verification");
+    // …so the install verifies against that wrapper, which HAS the plugin.
+    // Probing the literal `claude` here would report a successful install failed.
+    const r = runRequirementInstall(plan, { stdio: "ignore" });
+    assert.equal(r.onPath, true, "verified through the executable the install used");
+  } finally { process.env.PATH = oldPath; }
+  rmSync(base, { recursive: true, force: true });
+});
