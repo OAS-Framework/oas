@@ -1,9 +1,9 @@
 ---
 type: Lesson
 title: Package engine implementation gotchas in the OAS kernel
-description: Concrete pitfalls hit while implementing distribution packages — YAML subset config shape in tests, path-vs-git source disambiguation via file://, spawnInstance needs an agent object, hook meta lands in instance.json capabilityMeta, depsIntegrity closes the node_modules trust gap, empty npm closures create no node_modules, and restore preflight must parse the full visible lock chain.
+description: Concrete pitfalls hit while implementing distribution packages — YAML subset config shape in tests, path-vs-git source disambiguation via file://, spawnInstance needs an agent object, hook meta lands in instance.json capabilityMeta, depsIntegrity closes the node_modules trust gap, synthetic scanner locks must not reach npm ci, empty npm closures create no node_modules, and restore preflight must parse the full visible lock chain.
 tags: [packages, kernel, testing, trust]
-timestamp: 2026-07-26
+timestamp: 2026-07-27
 ---
 
 # Package engine implementation gotchas
@@ -51,6 +51,13 @@ timestamp: 2026-07-26
   artifact mutation, not parse one scope and immediately restore it; otherwise
   a valid outer lock can mutate artifacts before an inner malformed lock fails.
   See the [restore preflight visible-chain lesson](/lessons/restore-preflight-visible-chain.md).
+- Synthetic `package-lock.json` entries that exist only to test a lock scanner
+  (for example unreachable `resolved` URLs or bogus integrity on omitted
+  dev/peer packages) must not flow into a test that materializes the lock with
+  `npm ci`; clean-cache npm versions can still validate or resolve those
+  entries before the product assertion. Call the exported scanner directly for
+  detector-scope assertions, and keep any materialized lock a fully valid,
+  purely local closure (`file:` / `link: true` entries only).
 - An empty npm dependency closure can make `npm ci` create no `node_modules`
   directory. CI probes for package materialization should test resource path
   resolvability, not the existence of `node_modules` itself.

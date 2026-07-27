@@ -1,6 +1,8 @@
 # Knowledge Log
 
 ## 2026-07-27
+* **Update**: [test-conventions](/playbooks/test-conventions.md) records that synthetic scanner-only package-lock fixtures must not be materialized with npm ci, and that materialization tests need valid local closures plus fresh-cache verification.
+* **Update**: [package-engine-implementation-gotchas](/lessons/package-engine-implementation-gotchas.md) records that synthetic lock-scanner fixtures with fake URLs or integrity can fail clean-cache npm ci and should stay out of materialization tests.
 * **Update**: [package-engine-implementation-gotchas](/lessons/package-engine-implementation-gotchas.md) records transactional Git-root package probing, direct resolved-root identity comparison, and exact parser normalized forms.
 * **Update**: [capability-defined-agents](/architecture/capability-defined-agents.md) links installed capability-agent soul reads to provider integrity and dependency-closure trust checks.
 * **Creation**: [capability-agent-trust-and-source-routing](/lessons/capability-agent-trust-and-source-routing.md) records that declaration and path containment do not authenticate capability-agent instructions and that Git package probing must fail closed except for missing package manifests.
