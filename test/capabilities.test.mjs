@@ -3579,7 +3579,7 @@ console.log(JSON.stringify({ meta: { retired: false, reason: 'self-delete-failed
 const BOUNDARY_MUST_SAY = [
   "$OAS_INSTANCE_HOME",                                   // the runtime-neutral name
   "It is not your user home (`~`), not the repository root, and not the work tree",
-  "Run OAS operational/lifecycle commands, and commands from active capabilities, from instance home",
+  "commands from active capabilities, from instance home",   // the shape, not the sentence
   "oas <cmd> --dir <path>",                               // the deliberate alternate scope
   "The home's `soul` link is not your edit surface",      // not "read-only": it is writable, and that is the point
 ];
@@ -3651,7 +3651,8 @@ test("a REAL spawned packaged reviewer gets the boundary and keeps its own repor
     }
     assert.doesNotMatch(text, SETTLE_IN_WORK);
     // Its mandated artifact must remain possible.
-    assert.match(text, /--body-file/, "the reviewer's own report instruction survives composition");
+    assert.match(text, /Write the report to a temp file first/,
+      "the reviewer's own report artifact survives composition — the boundary must not forbid it");
     assert.doesNotMatch(text, /Nothing you produce belongs anywhere else/,
       "and the boundary must not forbid the temp file that instruction requires");
     core.retireInstance(root, "reviewer-boundary", { tmuxSession: "oas-test-nosuch" });
@@ -3686,10 +3687,18 @@ test("kernel-composed blocks never prescribe a knowledge protocol they cannot gu
       }
       assert.doesNotMatch(text, KNOWLEDGE_PROTOCOL,
         `${mode}/${kind}: kernel blocks must not prescribe notes//harvest — no knowledge layer is composed here`);
-      // aweb is a capability too: the kernel may cite `aw` as an example of an
-      // active capability's command, never command it outright.
-      assert.doesNotMatch(text, /Run `aw`|run `aw mail`|every `aw mail`/,
-        `${mode}/${kind}: the kernel must not command an optional messaging layer`);
+      // aweb is a capability too, so the kernel may CITE `aw` as an example of an
+      // active capability's command but never command it. Checking three
+      // spellings let "Use `aw`" or "Run aw" through, so check the property:
+      // every sentence mentioning `aw` must carry a conditional (reviewer-focus-d589eec).
+      for (const sentence of composeInstanceAgentsMd(soulDir, repo, "dev", mode, kind).text.split(/(?<=[.:])\s+/)) {
+        if (!/(^|[^a-z`])`?aw`?( |$|\b)/i.test(sentence) || /\baware|\bawait|\baway/i.test(sentence)) continue;
+        // The conditional must be ABOUT the capability, not any nearby use of the
+        // word "active" — "…from active capabilities … Use `aw` there as well"
+        // passed the looser check while commanding aw unconditionally.
+        assert.match(sentence, /\b(when|if)\b[^.]*\b(active|available|installed|enabled)\b|for example/i,
+          `${mode}/${kind}: every kernel mention of \`aw\` must be conditional, got: ${sentence.trim()}`);
+      }
       assert.doesNotMatch(text, SETTLE_IN_WORK, `${mode}/${kind}`);
     }
   }
@@ -3789,6 +3798,27 @@ test("no shipped instructional surface teaches settling in the work tree (mainta
   for (const f of surfaces) {
     assert.doesNotMatch(readFileSync(f, "utf8"), SETTLE_IN_WORK, `${relative(pkg, f)} teaches the root-placement bug`);
   }
+});
+
+test("the shipped oas.review names no knowledge or messaging provider (reviewer-focus-d589eec)", () => {
+  // oas.review is independently targetable: local config may disable or replace
+  // either layer, and `requires` is for host commands and runtime packages, not
+  // capability dependencies (maintainer ruling). So the capability cannot name
+  // the stack around it — every surface it ships has to work with neither layer.
+  const dir = resolve(new URL("../capabilities/oas-review", import.meta.url).pathname);
+  const surfaces = ["oas.json", "injects/review.md", "agents/reviewer/soul.yaml", "agents/reviewer/AGENTS.md"];
+  const PROVIDER = /\baweb\b|\baw mail\b|\baw chat\b|oas\.okf|okf harvest/i;
+  for (const f of surfaces) {
+    const text = readFileSync(join(dir, f), "utf8");
+    const hit = text.split("\n").find((l) => PROVIDER.test(l));
+    assert.equal(hit, undefined, `${f} names a specific provider: ${hit}`);
+  }
+  // And the no-layer path must be stated, not left to inference.
+  const soul = readFileSync(join(dir, "agents", "reviewer", "AGENTS.md"), "utf8");
+  assert.match(soul, /If none is active.*print the full report as your final message/s,
+    "the reviewer must define transcript delivery as the no-messaging-layer path");
+  assert.match(readFileSync(join(dir, "injects", "review.md"), "utf8"), /otherwise in its own session transcript/,
+    "and the discipline block must say where a verdict lands without a layer");
 });
 
 test("the accepted trust boundary is DOCUMENTED, not left as a code comment (maintainer contract)", () => {

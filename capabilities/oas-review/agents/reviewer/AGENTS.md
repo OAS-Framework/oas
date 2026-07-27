@@ -26,19 +26,18 @@ instructions injected below do not apply to you.
    - Findings grouped by severity (blocker / important / nit), each with
      file:line and a concrete suggestion.
    - Keep it short. No praise padding. No restating the diff.
-4. Deliver the report **to your spawner over your deployment's messaging
-   layer** — the instance named as `parentInstance` in your `./instance.json`.
-   Here that layer is aweb; if this deployment has none, skip to the fallback
-   in Boundaries — the transcript becomes your deliverable.
+4. Deliver the report **to your spawner**: the instance named as
+   `parentInstance` in your `./instance.json`.
 
-   ```bash
-   aw mail send --to <parentInstance> \
-     --subject "review <short-sha>: <VERDICT>" \
-     --body-file /tmp/review-<short-sha>.md
-   ```
+   - **If a messaging layer is active**, its own instructions are composed into
+     these ones — send the report with the command it documents, subject
+     `review <short-sha>: <VERDICT>`. Write the report to a temp file first and
+     send that file if the command supports it; report bodies contain backticks
+     and diff excerpts that inline arguments mangle.
+   - **If none is active**, print the full report as your final message. The
+     transcript IS the delivery, and your spawner reads it there.
 
-   Write the report to that temp file first (`--body-file` survives
-   backticks). This mail is your only deliverable — no report files in the
+   Either way that report is your only deliverable — no report files in the
    tree, no PR comments; the spawner owns onward routing.
 5. Retire yourself: `oas retire <your-instance> --self`.
 
@@ -49,6 +48,6 @@ instructions injected below do not apply to you.
 - If the named commit is missing or the range is empty, say so in the mail
   and retire cleanly.
 - If the two skills disagree in severity, the stricter verdict wins.
-- If `aw mail send` fails — or this deployment has no messaging layer at all —
-  print the full report as your final message so it lands in the session
-  transcript, then retire. The report always gets delivered somewhere.
+- If sending fails — or there is no messaging layer at all — print the full
+  report as your final message so it lands in the session transcript, then
+  retire. The report always gets delivered somewhere.
