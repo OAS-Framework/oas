@@ -3964,7 +3964,7 @@ test("a rollback AFTER launch quarantines too — every path, not just required 
   const remote = join(base, "remote-identity");
   const allow = join(base, "cleanup-works");
   capability(repo, "comp", { capability: "acme.comp", hooks: { spawn: "hook.mjs spawn", retire: "hook.mjs retire" } }, {
-    "hook.mjs": `import {writeFileSync, existsSync} from 'node:fs';
+    "hook.mjs": `import {writeFileSync, existsSync, rmSync} from 'node:fs';
 import {join} from 'node:path';
 if (process.env.OAS_EVENT === 'spawn') {
   writeFileSync(${JSON.stringify(remote)}, 'joined');
@@ -3973,6 +3973,9 @@ if (process.env.OAS_EVENT === 'spawn') {
   process.exit(0);
 }
 if (!existsSync(${JSON.stringify(allow)})) { console.log(JSON.stringify({ meta: { retired: false, reason: 'self-delete-failed' } })); process.exit(3); }
+// Actually undo the external state — a hook that only REPORTS success would let
+// the test pass while the remote identity survived.
+rmSync(${JSON.stringify(remote)}, { force: true });
 console.log(JSON.stringify({ meta: { retired: true } }));`,
   });
   write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.comp:\n      global: true\n");
@@ -3995,11 +3998,62 @@ console.log(JSON.stringify({ meta: { retired: true } }));`,
     assert.equal(marker.cleanup.version, 1, "the quarantine carries the same cleanup contract");
     assert.deepEqual(marker.cleanup.outstanding.hooks, ["acme.comp"], "naming the hook that still owes cleanup");
 
-    // The advertised retry must actually work from that marker.
+    // The home this path retains ALREADY HAS instance.json — it was written
+    // before the anchor step — and gating the marker on its absence made retire
+    // ignore the quarantine entirely, take the ordinary path where hook failures
+    // do not retain, and delete the credential (reviewer-final0130bc8).
+    assert.equal(existsSync(join(home, "instance.json")), true, "precondition: a live-looking home");
+    assert.equal(marker.cleanup.capabilityMeta["acme.comp"]?.alias, "probe",
+      "the descriptor keeps the SPAWN metadata a retry needs, not the failed compensation's report");
+
+    // FIRST retry, cause unfixed: must retain everything and not claim success.
+    const first = retireInstance(root, "dev-child", { tmuxSession: "oas-test-nosuch" });
+    assert.ok(first.rollbackIncomplete?.length, "a failing retry reports incomplete");
+    assert.equal(first.removedDir, false);
+    assert.equal(existsSync(join(home, "identity.key")), true, "the credential survives the failed retry");
+    assert.equal(existsSync(join(home, ".oas-rollback-incomplete.json")), true, "and so does the marker");
+    assert.equal(existsSync(remote), true, "and the external state it exists to undo");
+    const after = JSON.parse(readFileSync(join(home, ".oas-rollback-incomplete.json"), "utf8"));
+    assert.equal(after.cleanup.capabilityMeta["acme.comp"]?.alias, "probe",
+      "the spawn metadata is not displaced by the retry's own failure report");
+
+    // SECOND retry, cause fixed: external cleanup verified, then removal.
     writeFileSync(allow, "ok");
     const r = retireInstance(root, "dev-child", { tmuxSession: "oas-test-nosuch" });
     assert.equal(r.rollbackIncomplete, undefined, `the retry completes: ${JSON.stringify(r.rollbackIncomplete)}`);
+    assert.equal(existsSync(remote), false, "the remote state is actually gone");
     assert.equal(existsSync(home), false, "and only then is the home removed");
+  } finally { process.env.PATH = oldPath; }
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("a marker beside a live instance.json is authoritative, usable or not (reviewer-final0130bc8)", () => {
+  const base = temp();
+  const { repo, root } = fixtureSoul(base, "pi");
+  const oldPath = process.env.PATH; process.env.PATH = fakeRuntimes(base);
+  try {
+    // An UNUSABLE marker next to instance.json is evidence that cleanup was
+    // interrupted, not noise to skip: OAS cannot tell what remains, so it fails
+    // closed and `--force` is the deliberate escape.
+    const a = spawnInstance(root, findAgent(root, "dev"), { instance: "dev-broke", launch: false });
+    writeFileSync(join(a.home, "identity.key"), "secret");
+    writeFileSync(join(a.home, ".oas-rollback-incomplete.json"), '{"cleanup": {"repo":');
+    assert.throws(
+      () => retireInstance(root, "dev-broke", { tmuxSession: "oas-test-nosuch" }),
+      (e) => e.code === "E_UNIDENTIFIED_INSTANCE_HOME",
+      "an unusable marker must not be ignored just because instance.json exists",
+    );
+    assert.equal(existsSync(join(a.home, "identity.key")), true, "nothing destroyed");
+    retireInstance(root, "dev-broke", { tmuxSession: "oas-test-nosuch", force: true });
+    assert.equal(existsSync(a.home), false, "and --force still clears it");
+
+    // An ordinary live instance with NO marker retires normally — the guard must
+    // not turn every retire into a quarantine.
+    const b = spawnInstance(root, findAgent(root, "dev"), { instance: "dev-plain", launch: false });
+    const r = retireInstance(root, "dev-plain", { tmuxSession: "oas-test-nosuch" });
+    assert.equal(r.rollbackIncomplete, undefined, "no marker, no quarantine");
+    assert.equal(r.removedDir, true);
+    assert.equal(existsSync(b.home), false);
   } finally { process.env.PATH = oldPath; }
   rmSync(base, { recursive: true, force: true });
 });

@@ -943,8 +943,14 @@ function requirementsGate(scopes) {
   const entryOf = (req, outcome, extra = {}) => ({
     command: req.command, kind: req.kind || "host-command",
     runtime: req.runtime || null, package: req.package || null, why: req.why || null,
+    // `steps` is the ORDERED sequence runRequirementInstall actually executes;
+    // `argv` is only its last command. Serializing argv alone hid a
+    // `claude plugin marketplace add <source>` — a lower-trust source
+    // registration — from every client consenting through the JSON API
+    // (reviewer-final0130bc8). Always present, exactly as doctor renders it, so
+    // single- and multi-step plans have one shape.
     plan: req.plan && !req.plan.unavailable
-      ? { manager: req.plan.manager, argv: req.plan.argv, source: req.plan.source, version: req.plan.version || null, scope: req.plan.scope }
+      ? { manager: req.plan.manager, argv: req.plan.argv, steps: req.plan.steps || [req.plan.argv], source: req.plan.source, version: req.plan.version || null, scope: req.plan.scope }
       : null,
     requestedBy: req.requestedBy, docs: req.docs || null, outcome, ...extra,
   });

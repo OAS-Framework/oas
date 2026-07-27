@@ -980,12 +980,18 @@ test("install --json requirements: all four consent outcomes with structured pla
   assert.equal(e1.result.requirements.length, 1);
   const q1 = e1.result.requirements[0];
   assert.equal(q1.outcome, "consent-required");
-  assert.deepEqual(q1.plan, { manager: "npm-global", argv: ["npm", "install", "-g", "wanted-cli@1.0.0"], source: "npm registry (wanted-cli@1.0.0)", version: "1.0.0", scope: "user-level (npm global prefix)" });
+  // ONE shape for every plan: `steps` is the ordered sequence that will run and
+  // is always present; `argv` is its final command. A single-step plan carries a
+  // one-element `steps` rather than omitting it, so JSON clients never branch
+  // (reviewer-final0130bc8).
+  assert.deepEqual(q1.plan, { manager: "npm-global", argv: ["npm", "install", "-g", "wanted-cli@1.0.0"], steps: [["npm", "install", "-g", "wanted-cli@1.0.0"]], source: "npm registry (wanted-cli@1.0.0)", version: "1.0.0", scope: "user-level (npm global prefix)" });
   assert.deepEqual(q1.requestedBy.map((x) => x.capability), ["needy.cap"]);
   // skipped: --no-requirements
   const r2 = cli(["install", "--json", "--no-requirements", "--dir", w1], { cwd: w1, env });
   const e2 = JSON.parse(r2.stdout);
   assert.equal(e2.result.requirements[0].outcome, "skipped");
+  assert.deepEqual(e2.result.requirements[0].plan.steps, [["npm", "install", "-g", "wanted-cli@1.0.0"]],
+    "a skipped requirement still shows what WOULD run, in full");
   // installed: accepted, lands on PATH, onPath true
   const r3 = cli(["install", "--json", "--accept-requirement", "wanted-cli", "--dir", w1], { cwd: w1, env });
   assert.equal(r3.status, 0, r3.stdout);
@@ -1734,5 +1740,60 @@ exit 0
     const r = runRequirementInstall(plan, { stdio: "ignore" });
     assert.equal(r.onPath, true, "verified through the executable the install used");
   } finally { process.env.PATH = oldPath; }
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("the JSON consent plan shows every step the installer will run (reviewer-final0130bc8)", () => {
+  const base = temp();
+  const ws = join(base, "ws");
+  const bin = join(base, "bin"); mkdirSync(bin, { recursive: true });
+  // A Claude runtime package needs its MARKETPLACE registered before install —
+  // two commands, the first of which registers a lower-trust source. Serializing
+  // only the final argv meant a client consenting through the JSON API never saw
+  // that step, while runRequirementInstall ran it.
+  write(join(bin, "claude"), "#!/bin/sh\nif [ \"$1\" = \"plugin\" ] && [ \"$2\" = \"list\" ]; then echo '[]'; exit 0; fi\nexit 0\n");
+  chmodSync(join(bin, "claude"), 0o755);
+  write(join(bin, "pi"), "#!/bin/sh\nexit 0\n"); chmodSync(join(bin, "pi"), 0o755);
+  write(join(ws, "agents", "dev", "soul", "soul.yaml"), "name: dev\nkind: persistent\nruntime: claude\n");
+  write(join(ws, "agents", "dev", "soul", "AGENTS.md"), "# dev\n");
+  write(join(ws, ".agents", "capabilities", "owned", "chan", "oas.json"), JSON.stringify({
+    capability: "acme.chan", version: "1.0.0", description: "x",
+    requires: [{ runtime: "claude", package: "chan@acme-marketplace", marketplace: "acme/claude-plugins", why: "push events" }],
+  }));
+  write(join(ws, "oas-config.yaml"), "name: ws\nteam:\n  name: t\ncapabilities:\n  additive:\n    acme.chan:\n      from: owned\n      global: true\n");
+  const env = { ...process.env, PATH: `${bin}:${process.env.PATH}` };
+
+  const human = cli(["install", "--dir", ws], { cwd: ws, env });
+  assert.equal(human.status, 0, human.stderr);
+  assert.match(human.stdout, /claude plugin marketplace add acme\/claude-plugins/,
+    "the human plan names the source registration");
+
+  const r = cli(["install", "--json", "--dir", ws], { cwd: ws, env });
+  const env1 = JSON.parse(r.stdout);
+  assert.equal(env1.schemaVersion, 1);
+  const entry = (env1.result.requirements || []).find((e) => e.package === "chan@acme-marketplace");
+  assert.ok(entry, `the requirement is reported in JSON: ${r.stdout}`);
+  // PARITY: the ordered sequence the installer executes, not just its last command.
+  assert.deepEqual(entry.plan.steps, [
+    ["claude", "plugin", "marketplace", "add", "acme/claude-plugins"],
+    ["claude", "plugin", "install", "chan@acme-marketplace"],
+  ], "the JSON plan carries every step, in order");
+  assert.deepEqual(entry.plan.argv, entry.plan.steps.at(-1), "argv stays the final command");
+  // What the installer would actually run must equal what was shown.
+  const plan = requirementInstallPlan(
+    { runtime: "claude", package: "chan@acme-marketplace", marketplace: "acme/claude-plugins", why: "push events" },
+    { context: ws },
+  );
+  assert.deepEqual(entry.plan.steps, plan.steps, "the consented sequence IS the executed sequence");
+
+  // Single-step plans keep one shape: `steps` present, holding just that argv.
+  write(join(ws, ".agents", "capabilities", "owned", "chan", "oas.json"), JSON.stringify({
+    capability: "acme.chan", version: "1.0.0", description: "x",
+    requires: [{ command: "wanted-cli", why: "testing", install: { docs: "https://example.invalid", methods: [{ platform: process.platform, manager: "npm-global", package: "wanted-cli@1.0.0" }] } }],
+  }));
+  const single = JSON.parse(cli(["install", "--json", "--dir", ws], { cwd: ws, env }).stdout);
+  const one = (single.result.requirements || []).find((e) => e.command === "wanted-cli");
+  assert.ok(one, "single-step requirement reported");
+  assert.deepEqual(one.plan.steps, [one.plan.argv], "a single-step plan still carries steps, holding exactly its argv");
   rmSync(base, { recursive: true, force: true });
 });
