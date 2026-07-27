@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import {
@@ -1978,5 +1978,83 @@ test("capability-agent trust isolates providers and preserves path/owned structu
     assert.match(readFileSync(join(spawned.home, "AGENTS.md"), "utf8"), /path helper/);
     core.retireInstance(root, "helper-path", { tmuxSession: "oas-test-nosuch" });
   } finally { process.env.PATH = oldPath; }
+  rmSync(base, { recursive: true, force: true });
+});
+
+// ---------- canonical deployment root (instance homes never in a linked worktree) ----------
+
+/** A repo with a soul, plus a linked worktree of it. Mirrors the real shape:
+ *  agents/ is committed, agents/<soul>/instances/ is gitignored, so a home
+ *  created in the worktree is invisible AND dies with the tree. */
+function repoWithWorktree(base) {
+  const repo = join(base, "repo"); gitRepo(repo);
+  write(join(repo, ".gitignore"), "agents/*/instances/\n");
+  const root = join(repo, "agents");
+  write(join(root, "dev", "soul", "soul.yaml"), `name: dev\nkind: persistent\nrepo: ${repo}\nwork: checkout\nruntime: pi\n`);
+  write(join(root, "dev", "soul", "AGENTS.md"), "# Canonical dev\n");
+  execFileSync("git", ["-C", repo, "add", "-A"]);
+  execFileSync("git", ["-C", repo, "commit", "-qm", "soul"]);
+  const wt = join(base, "wt");
+  execFileSync("git", ["-C", repo, "worktree", "add", "-q", wt, "-b", "feature/x"]);
+  return { repo, root, wt, wtRoot: join(wt, "agents") };
+}
+
+test("canonicalAgentsRoot maps a linked worktree's agents root onto the primary checkout", async () => {
+  const core = await import("../lib/core.mjs");
+  const base = temp();
+  const { repo, root, wt, wtRoot } = repoWithWorktree(base);
+  // The bug this exists to prevent: discovery from the worktree yields the
+  // worktree's own agents/ dir.
+  assert.equal(core.findRoot(wt), wtRoot, "findRoot still follows the invocation directory");
+  // Canonicalization redirects it to the primary checkout, by Git identity —
+  // never by branch name.
+  // Git reports canonical paths, so the redirect lands on the primary
+  // checkout's REAL path (/private/var/... on macOS, not /var/...).
+  const real = (p) => realpathSync(p);
+  assert.equal(core.canonicalAgentsRoot(wtRoot), real(root));
+  assert.equal(core.ensureRoot(wt), real(root), "ensureRoot resolves the canonical deployment root");
+  assert.equal(core.ensureRoot(join(wt, "lib")), real(root), "…from any depth inside the worktree");
+  // The primary checkout is left exactly as it is.
+  assert.equal(core.canonicalAgentsRoot(root), root);
+  assert.equal(core.ensureRoot(repo), root);
+  execFileSync("git", ["-C", repo, "worktree", "remove", "--force", wt]);
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("canonicalAgentsRoot leaves non-git and out-of-tree roots untouched", async () => {
+  const core = await import("../lib/core.mjs");
+  const base = temp();
+  // Not a Git work tree at all: nothing to canonicalize, behavior unchanged.
+  const plain = join(base, "plain", "agents"); mkdirSync(plain, { recursive: true });
+  assert.equal(core.canonicalAgentsRoot(plain), plain);
+  // A local-only scope whose agents/ does not exist yet still resolves.
+  const localScope = join(base, "localonly");
+  mkdirSync(join(localScope, "local-agents"), { recursive: true });
+  assert.equal(core.canonicalAgentsRoot(join(localScope, "agents")), join(localScope, "agents"));
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("spawnInstance refuses to create an instance home inside a linked worktree", () => {
+  const base = temp();
+  const { repo, root, wt, wtRoot } = repoWithWorktree(base);
+  const agent = findAgent(wtRoot, "dev");
+  assert.ok(agent, "the soul is present in the worktree too — which is what makes the bug silent");
+  const oldPath = process.env.PATH; process.env.PATH = fakeRuntimes(base);
+  try {
+    // The kernel is its own validation boundary: direct callers (desktop server,
+    // adapters, tests) bypass the CLI's ensureRoot canonicalization.
+    assert.throws(
+      () => spawnInstance(wtRoot, agent, { instance: "dev-wt", launch: false }),
+      (e) => e.code === "E_NO_CANONICAL_ROOT" && /primary checkout/.test(e.message),
+    );
+    // Fail closed means fail clean: no home, not even a partial one.
+    assert.equal(existsSync(join(wtRoot, "dev", "instances", "dev-wt")), false, "no scaffold left in the worktree");
+    assert.equal(existsSync(join(root, "dev", "instances", "dev-wt")), false, "and none in the primary checkout");
+    // Spawning against the canonical root is unaffected.
+    const spawned = spawnInstance(root, findAgent(root, "dev"), { instance: "dev-ok", launch: false });
+    assert.equal(spawned.home, join(root, "dev", "instances", "dev-ok"));
+    retireInstance(root, "dev-ok", { tmuxSession: "oas-test-nosuch" });
+  } finally { process.env.PATH = oldPath; }
+  execFileSync("git", ["-C", repo, "worktree", "remove", "--force", wt]);
   rmSync(base, { recursive: true, force: true });
 });
