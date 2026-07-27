@@ -108,14 +108,14 @@ if (event === "spawn") {
     // cross-machine instance directory).
     let team = process.env.OAS_TEAM_ID || process.env.OAS_TEAM_NAME;
     if (!team) team = JSON.parse(sh("aw team list --json", root)).active_team;
-    if (!team) warn("cannot determine target team (no config team block, no active team at root)");
+    if (!team) fatal("cannot determine target team (no config team block, no active team at root), so no identity could be minted — set a team: block in oas-config.yaml, or activate a team at the aweb root");
     // A bare team name (no namespace) resolves against the root's memberships.
     if (!team.includes(":")) {
       const teams = JSON.parse(sh("aw team list --json", root));
       const match = (teams.teams || []).map((t) => t.team_id || t.id || t).filter((tid) => String(tid).startsWith(`${team}:`));
       if (match.length === 1) team = match[0];
-      else if (match.length > 1) warn(`team name "${team}" is ambiguous at ${root}: ${match.join(", ")} — set team.id in oas-config.yaml`);
-      else warn(`no membership matching team "${team}" at ${root} — join/create it first (aweb-team-membership skill), or set team.id`);
+      else if (match.length > 1) fatal(`team name "${team}" is ambiguous at ${root}: ${match.join(", ")}, so no identity could be minted — set team.id in oas-config.yaml`);
+      else fatal(`no membership matching team "${team}" at ${root}, so no identity could be minted — join or create it first (aweb-team-membership skill), or set team.id`);
     }
     const inv = JSON.parse(sh(`aw team invite --team-id ${shq(team)} --json`, root));
     const joined = JSON.parse(sh(`aw team join ${shq(inv.token)} --name ${shq(instance)} --json`, home));
@@ -152,13 +152,18 @@ if (event === "spawn") {
   }
 } else if (event === "retire") {
   const meta = JSON.parse(process.env.OAS_META || "{}");
-  if (!meta.alias || !existsSync(join(home, ".aw"))) out({ meta: { retired: false } });
+  if (!meta.alias || !existsSync(join(home, ".aw"))) out({ meta: { retired: false, reason: "nothing-to-delete" } });
   try {
     // Self-delete from inside the home, authenticated by its own key — a remote
     // delete would 409 until the server marks the workspace stale.
     sh(`aw workspace delete ${shq(meta.alias)}`, home);
     out({ meta: { retired: true } });
-  } catch (e) { warn(`self-delete failed (record will linger until stale): ${e.message || e}`); }
+  } catch (e) {
+    // Exit nonzero: during a required-hook rollback this is the signal that
+    // compensation did NOT complete, so the spawn is not reported as cleanly
+    // rolled back while a remote identity still exists.
+    out({ meta: { retired: false, reason: "self-delete-failed" }, warning: `oas-aweb: self-delete failed (the remote record will linger until stale): ${e.message || e}` }, 1);
+  }
 } else if (event === "roster") {
   // Cross-machine directory: every OAS-spawned instance joins the team with
   // alias = instance name, so the team's member roster lists live instances

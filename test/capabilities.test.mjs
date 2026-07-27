@@ -2828,3 +2828,84 @@ test("the manifest schema rejects `required` on non-spawn hooks, matching runtim
   assert.equal(validate(manifest({ "soul-scaffold": { command: "h.mjs s", required: true } })), false, "soul-scaffold may not");
   assert.equal(validate(manifest({ retire: "h.mjs retire" })), true, "the plain string form still validates");
 });
+
+test("the SHIPPED aweb hook is fatal on every terminal pre-mint path (reviewer-5b78764)", () => {
+  const base = temp();
+  const hook = resolve(new URL("../capabilities/oas-aweb/bin/oas-aweb.mjs", import.meta.url).pathname);
+  // A stub `aw` that reports an initialized root but NO team, so the hook gets
+  // past the root check and reaches team resolution — the paths that used to
+  // warn-and-exit-0 while minting nothing.
+  const bin = join(base, "bin"); mkdirSync(bin, { recursive: true });
+  write(join(bin, "aw"), `#!/bin/sh\nif [ "$1" = "team" ] && [ "$2" = "list" ]; then echo '{"teams":[],"active_team":null}'; exit 0; fi\nexit 0\n`);
+  execFileSync("chmod", ["+x", join(bin, "aw")]);
+  const root = join(base, "awroot"); mkdirSync(join(root, ".aw"), { recursive: true });
+  const run = (env) => spawnSync(process.execPath, [hook, "spawn"], {
+    encoding: "utf8",
+    env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, OAS_EVENT: "spawn", OAS_INSTANCE: "probe", OAS_HOME: root, OAS_WORKSPACE: root, OAS_CONTEXT: root, OAS_TEAM_SCOPE: root, ...env },
+  });
+
+  // Root present, no team resolvable at all.
+  const noTeam = run({ OAS_TEAM_ID: "", OAS_TEAM_NAME: "" });
+  assert.notEqual(noTeam.status, 0, `no active team must be fatal, got ${noTeam.status}: ${noTeam.stdout}`);
+  assert.match(noTeam.stdout, /no identity could be minted/);
+
+  // A bare team name with no matching membership.
+  const noMatch = run({ OAS_TEAM_NAME: "nosuchteam" });
+  assert.notEqual(noMatch.status, 0, `unresolved team must be fatal, got ${noMatch.status}: ${noMatch.stdout}`);
+  assert.match(noMatch.stdout, /no membership matching team/);
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("a compensation hook that reports incomplete cleanup is not announced as a clean rollback", () => {
+  const base = temp();
+  const { repo, root } = fixtureSoul(base, "pi");
+  // Retire exits 0 but says it could not undo its external state — the shape of
+  // aweb's self-delete failure. Announcing "spawn rolled back" here would be a
+  // lie, and the local key that could still delete it is about to be removed.
+  capability(repo, "chan", {
+    capability: "acme.chan",
+    hooks: { spawn: { command: "hook.mjs spawn", required: true }, retire: "hook.mjs retire" },
+  }, {
+    "hook.mjs": `if (process.env.OAS_EVENT === 'spawn') {
+  console.log(JSON.stringify({ meta: { alias: 'probe' }, warning: 'oas-chan: minting failed — run: chan setup' }));
+  process.exit(1);
+}
+console.log(JSON.stringify({ meta: { retired: false, reason: 'self-delete-failed' } }));`,
+  });
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.chan:\n      global: true\n");
+  const oldPath = process.env.PATH; process.env.PATH = fakeRuntimes(base);
+  try {
+    assert.throws(
+      () => spawnInstance(root, findAgent(root, "dev"), { instance: "dev-badcomp", launch: false }),
+      (e) => e.code === "E_REQUIRED_HOOK_FAILED"
+        && /rollback INCOMPLETE/.test(e.message)
+        && /external state may remain/.test(e.message)
+        // …and the hook's OWN diagnosis reaches the operator, not just "Command failed: node …".
+        && /run: chan setup/.test(e.message),
+      "the failure must name the cause and admit the incomplete cleanup",
+    );
+  } finally { process.env.PATH = oldPath; }
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("a compensation hook with nothing to undo still counts as a clean rollback", () => {
+  const base = temp();
+  const { repo, root } = fixtureSoul(base, "pi");
+  capability(repo, "chan", {
+    capability: "acme.chan",
+    hooks: { spawn: { command: "hook.mjs spawn", required: true }, retire: "hook.mjs retire" },
+  }, {
+    "hook.mjs": `if (process.env.OAS_EVENT === 'spawn') { console.log(JSON.stringify({ warning: 'nope' })); process.exit(1); }
+console.log(JSON.stringify({ meta: { retired: false, reason: 'nothing-to-delete' } }));`,
+  });
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.chan:\n      global: true\n");
+  const oldPath = process.env.PATH; process.env.PATH = fakeRuntimes(base);
+  try {
+    assert.throws(
+      () => spawnInstance(root, findAgent(root, "dev"), { instance: "dev-nooop", launch: false }),
+      (e) => /spawn rolled back/.test(e.message) && !/rollback INCOMPLETE/.test(e.message),
+      "nothing to undo is completion, not failure",
+    );
+  } finally { process.env.PATH = oldPath; }
+  rmSync(base, { recursive: true, force: true });
+});
