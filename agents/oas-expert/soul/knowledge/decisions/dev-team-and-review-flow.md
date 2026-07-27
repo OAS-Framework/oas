@@ -2,28 +2,35 @@
 type: Decision
 title: OAS development team — PR-only flow, review capability, capability-defined agents, model preference lists
 status: accepted
-description: The OAS repo gets a real development team (webpanel-dev, tui-dev, cli-dev on fable-5 high, a dev-coordinator, and oas-expert as maintainer) with PR-only merges to main gated by the maintainer's pr-review skill; a marketplace oas.review capability ships a fresh reviewer agent (gpt-5.6-sol) plus code-review and security-review skills with a post-commit injection; two kernel contracts enable it — capability-defined agents (manifest agents: field, read-only package souls, locally homed instances) and model preference lists (comma-separated provider fallbacks probed at spawn).
+description: The OAS repo uses Claude Code Opus developers for kernel, Desktop, and UX work, with GPT-5.6 Sol coordinator, reviewer, and maintainer roles; developers deliver through PRs gated by the maintainer review flow.
 tags: [team, review, pr, capability-agents, model-fallback, kernel]
-timestamp: 2026-07-21
+timestamp: 2026-07-27
 ---
 
-Decided with the founder, 2026-07-21.
+Decided with the founder, 2026-07-21; team/runtime assignment amended by the
+founder 2026-07-27 after the Desktop succession completed.
 
 # The team
 
-| Soul | Role | Mode | Model (preference list) |
+| Soul | Role | Mode | Runtime / model |
 |---|---|---|---|
-| webpanel-dev | oas.web expert | worktree | github-copilot/claude-fable-5:high → anthropic |
-| tui-dev | Control Pane expert | worktree | same |
-| cli-dev | kernel/CLI expert | worktree | same |
-| dev-coordinator | multi-dev feature planning + PRs | checkout | same |
-| reviewer (oas.review) | fresh post-commit review | attached | github-copilot/gpt-5.6-sol:high → openai |
-| oas-expert | maintainer + vision | checkout | (unchanged) |
+| cli-dev | kernel/CLI expert | worktree | Claude Code / `opus` |
+| oas-desktop-engineer | Desktop full-stack expert | worktree | Claude Code / `opus` |
+| ux-designer | product UX specialist | worktree | Claude Code / `opus` |
+| dev-coordinator | multi-dev feature planning + PRs | checkout | Pi / github-copilot gpt-5.6-sol → OpenAI |
+| reviewer (oas.review) | fresh post-commit review | attached | Pi / github-copilot gpt-5.6-sol → OpenAI |
+| oas-expert | maintainer + vision | checkout | Pi / github-copilot gpt-5.6-sol → OpenAI |
 
-Copilot-authenticated models are the default; the second entry falls back to
-the native provider when copilot is unavailable — resolved at spawn. That
-spawn-time contract does not cover mid-session provider/auth failures; see
-[Copilot-proxied models fail mid-session](/lessons/copilot-auth-fragility.md).
+Claude's `opus` alias deliberately tracks Claude Code's current Opus default
+(Opus 5 at this decision). OAS does not pin the dated provider model ID.
+Coordinator, reviewer, and maintainer retain the explicit
+`github-copilot/gpt-5.6-sol:high, openai/gpt-5.6-sol:high` preference list.
+That spawn-time fallback contract does not cover mid-session provider/auth
+failures; see [Copilot-proxied models fail mid-session](/lessons/copilot-auth-fragility.md).
+
+The retired `webpanel-dev` and `tui-dev` souls were removed after their useful
+knowledge moved into `oas-desktop-engineer`; their product surfaces had already
+been superseded by OAS Desktop.
 
 # Flow
 
@@ -72,8 +79,7 @@ verdict wins.
 
 # Knowledge seeding
 
-Developer souls were seeded via a fan-out workflow mining the oas-expert pi
-sessions that built each surface: 11 concepts (cli-dev), 8 (tui-dev),
-10 (webpanel-dev) — architecture, decisions-by-reference, hard-won gotchas
-(bracketed-paste sends, stale-response races, OSC 11 timing, init-acquisition
-ordering). All bundles OKF-validated.
+Developer souls were originally seeded via a fan-out workflow mining the
+sessions that built each surface. The donor TUI/web knowledge was later
+migrated topic-by-topic into the Desktop owner before those souls were removed.
+The current developer bundles remain OKF-validated.

@@ -4,4 +4,5 @@ description: The OAS framework expert — holds the what/why, the architecture, 
 repo: .
 work: checkout
 runtime: pi
+model: github-copilot/gpt-5.6-sol:high, openai/gpt-5.6-sol:high
 type: framework-authors

@@ -1,5 +1,8 @@
 # Knowledge Log
 
+## 2026-07-27
+* **Update**: [OAS development team — PR-only flow, review capability, capability-defined agents, model preference lists](/decisions/dev-team-and-review-flow.md) now assigns cli-dev, oas-desktop-engineer, and the promoted persistent ux-designer to Claude Code's `opus` alias; coordinator/maintainer/reviewer use GPT-5.6 Sol; superseded webpanel-dev and tui-dev souls are removed after knowledge succession.
+
 ## 2026-07-26
 * **Delivery**: PR #46 merged as `83ce16f` at exact head `2551f1d`; [repo state](/stewardship/repo-state.md) and the [delivery log](/stewardship/delivery-log.md) record the warning-free Desktop handback-race knowledge harvest, semantic/full gates, same-account approval comment, and deleted remote branch.
 * **Delivery**: PR #45 merged as `6f35e9e` at final exact head `9c4e995` after four mergeability-only RETURNs; [repo state](/stewardship/repo-state.md) and the [delivery log](/stewardship/delivery-log.md) record the Desktop readiness/modal/quiet-open fix, green exact-head checks, deleted remote branch, and clean scaffold-only probe.

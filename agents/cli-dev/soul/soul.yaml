@@ -4,5 +4,5 @@ description: Kernel and CLI expert developer — owns lib/core.mjs and bin/oas.m
 type: developers
 repo: .
 work: worktree
-runtime: pi
-model: github-copilot/claude-fable-5:high, anthropic/claude-fable-5:high
+runtime: claude
+model: opus

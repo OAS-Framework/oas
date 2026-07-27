@@ -1,0 +1,8 @@
+name: ux-designer
+kind: persistent
+description: OAS product UX specialist — owns interaction design, visual language, accessibility, and experience coherence
+type: developers
+repo: .
+work: worktree
+runtime: claude
+model: opus

@@ -4,5 +4,5 @@ description: OAS Desktop full-stack engineer — owns packages/desktop (Electron
 type: developers
 repo: .
 work: worktree
-runtime: pi
-model: github-copilot/claude-fable-5:high, anthropic/claude-fable-5:high
+runtime: claude
+model: opus
