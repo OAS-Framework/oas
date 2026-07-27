@@ -3582,6 +3582,7 @@ const BOUNDARY_MUST_SAY = [
   "Run `aw` and OAS operational/lifecycle commands from instance home",
   "oas <cmd> --dir <path>",                               // the deliberate alternate scope
   "Treat the home's `soul` link as read-only",            // treated as, not claimed to be
+  "you write what you learn to `notes/`, and the harvester promotes it",   // ONE mutation path, every custody
 ];
 // The instruction that taught the root-placement bug, in any shipped surface.
 const SETTLE_IN_WORK = /cd work\/? once|and stay there|where you live|Start in `work\/`/i;
@@ -3624,7 +3625,7 @@ test("the boundary does not contradict a read-only workspace instance (reviewer-
   rmSync(base, { recursive: true, force: true });
 });
 
-test("a REAL spawned packaged reviewer gets the boundary and keeps its own report path (reviewer-focus-c6e3680)", () => {
+test("a REAL spawned packaged reviewer gets the boundary and keeps its own report path (reviewer-focus-c6e3680)", async () => {
   const base = temp();
   const { repo, root } = fixtureSoul(base, "pi");
   // The SHIPPED oas-review capability, spawned through the real service path —
@@ -3638,23 +3639,45 @@ test("a REAL spawned packaged reviewer gets the boundary and keeps its own repor
   write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    oas.review:\n      global: true\n");
   const oldPath = process.env.PATH; process.env.PATH = fakeRuntimes(base);
   try {
-    return import("../lib/core.mjs").then((core) => {
-      const agent = core.findCapabilityAgent(repo, root, "reviewer");
-      assert.ok(agent, "the shipped reviewer resolves");
-      const res = core.spawnInstance(root, { ...agent, repo }, { instance: "reviewer-boundary", work: "checkout", launch: false });
-      const text = flat(readFileSync(join(res.home, "AGENTS.md"), "utf8"));
-      for (const must of BOUNDARY_MUST_SAY) {
-        assert.ok(text.includes(flat(must)), `spawned reviewer: must say ${JSON.stringify(must)}`);
-      }
-      assert.doesNotMatch(text, SETTLE_IN_WORK);
-      // Its mandated artifact must remain possible.
-      assert.match(text, /--body-file/, "the reviewer's own report instruction survives composition");
-      assert.doesNotMatch(text, /Nothing you produce belongs anywhere else/,
-        "and the boundary must not forbid the temp file that instruction requires");
-      core.retireInstance(root, "reviewer-boundary", { tmuxSession: "oas-test-nosuch" });
-      rmSync(base, { recursive: true, force: true });
-    });
+    // `await` INSIDE the try: returning the promise from the try block restores
+    // PATH before the body ever runs, so the test silently used whatever `pi`
+    // the machine happened to have installed (reviewer-focus-699fdb6).
+    const core = await import("../lib/core.mjs");
+    const agent = core.findCapabilityAgent(repo, root, "reviewer");
+    assert.ok(agent, "the shipped reviewer resolves");
+    const res = core.spawnInstance(root, { ...agent, repo }, { instance: "reviewer-boundary", work: "checkout", launch: false });
+    const text = flat(readFileSync(join(res.home, "AGENTS.md"), "utf8"));
+    for (const must of BOUNDARY_MUST_SAY) {
+      assert.ok(text.includes(flat(must)), `spawned reviewer: must say ${JSON.stringify(must)}`);
+    }
+    assert.doesNotMatch(text, SETTLE_IN_WORK);
+    // Its mandated artifact must remain possible.
+    assert.match(text, /--body-file/, "the reviewer's own report instruction survives composition");
+    assert.doesNotMatch(text, /Nothing you produce belongs anywhere else/,
+      "and the boundary must not forbid the temp file that instruction requires");
+    core.retireInstance(root, "reviewer-boundary", { tmuxSession: "oas-test-nosuch" });
   } finally { process.env.PATH = oldPath; }
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("a local soul is told ONE soul-mutation path, not two (reviewer-focus-699fdb6)", () => {
+  const base = temp();
+  const { repo, root } = fixtureSoul(base, "pi");
+  // kind "local" adds a block the four mode compositions never see — and it used
+  // to say soul updates are plain edits through ./soul/ while the boundary said
+  // to treat that link as read-only. The same instance was handed both rules.
+  const text = flat(composeInstanceAgentsMd(join(root, "dev", "soul"), repo, "dev", "worktree", "local").text);
+  assert.ok(text.includes("Local soul (uncommitted)"), "precondition: the local block composed");
+  for (const must of BOUNDARY_MUST_SAY) {
+    assert.ok(text.includes(flat(must)), `local soul: must say ${JSON.stringify(must)}`);
+  }
+  // One path, stated the same way by both blocks.
+  assert.ok(text.includes(flat("you write what you learn to `notes/`, and the harvester promotes it")));
+  assert.ok(text.includes(flat("you write what you learn to `notes/` and call the harvester")),
+    "the local block must prescribe the same path, not direct soul edits");
+  assert.doesNotMatch(text, /Your soul updates are plain file edits/,
+    "the retired instruction to edit the soul directly must be gone");
+  rmSync(base, { recursive: true, force: true });
 });
 
 test("no shipped instructional surface teaches settling in the work tree (maintainer contract)", () => {

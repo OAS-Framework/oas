@@ -15,11 +15,14 @@ root, and not the work tree. Anything that says "your home" means this directory
   them in, so running them from the work tree points them at the wrong
   deployment. To act on a different package or config scope deliberately, pass
   an explicit resolved path: `oas <cmd> --dir <path>`.
-- **Treat the home's `soul` link as read-only.** Writing through it changes your
-  canonical soul outside your branch, where no review sees it and no commit
-  records it. Durable soul edits belong on tracked paths under `work/`; when
-  your soul lives outside this repository, the harvester owns that path — you
-  write `notes/` and it promotes them.
+- **Treat the home's `soul` link as read-only.** One path updates a soul, in
+  every custody: you write what you learn to `notes/`, and the harvester
+  promotes it. Where the soul itself then changes is the harvester's business —
+  a branch and a PR for a committed soul, a direct edit for an uncommitted local
+  one. Editing through the link yourself skips that judgement and leaves no
+  record of what changed or why. Soul content that lives in THIS repository is
+  ordinary code: change it on tracked paths under `work/`, reviewed like the
+  rest.
 
 **`<instance-home>/work` is your repository or workspace view** — whatever your
 work mode grants you of the code.
