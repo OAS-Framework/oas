@@ -2135,3 +2135,43 @@ console.log('{}');`;
   } finally { process.env.PATH = oldPath; }
   rmSync(base, { recursive: true, force: true });
 });
+
+test("symlinks on the path to the home cannot smuggle it into a linked worktree (reviewer-249aa7b)", () => {
+  const base = temp();
+  const { repo, root, wt, wtRoot } = repoWithWorktree(base);
+  const oldPath = process.env.PATH; process.env.PATH = fakeRuntimes(base);
+  try {
+    // (1) An agent dir in the PRIMARY checkout that is a symlink to an agent in
+    // the linked worktree. Every lexical check sees the primary checkout.
+    symlinkSync(join(wtRoot, "dev"), join(root, "alias"));
+    const aliased = findAgent(root, "alias");
+    assert.equal(aliased._dir, join(root, "alias"), "lexically it is in the primary checkout");
+    assert.throws(
+      () => spawnInstance(root, aliased, { instance: "alias-x", launch: false }),
+      (e) => e.code === "E_NO_CANONICAL_ROOT" && /resolves to/.test(e.message),
+    );
+    assert.equal(existsSync(join(wtRoot, "dev", "instances", "alias-x")), false, "nothing created through the symlink");
+
+    // (2) The agent dir is genuinely in the primary checkout, but its
+    // instances/ dir is a symlink into the worktree.
+    const smuggler = join(root, "dev2");
+    write(join(smuggler, "soul", "soul.yaml"), `name: dev2\nkind: persistent\nrepo: ${repo}\nwork: checkout\nruntime: pi\n`);
+    write(join(smuggler, "soul", "AGENTS.md"), "# dev2\n");
+    mkdirSync(join(wtRoot, "dev", "instances"), { recursive: true });
+    symlinkSync(join(wtRoot, "dev", "instances"), join(smuggler, "instances"));
+    assert.throws(
+      () => spawnInstance(root, findAgent(root, "dev2"), { instance: "dev2-x", launch: false }),
+      (e) => e.code === "E_NO_CANONICAL_ROOT" && /resolves to/.test(e.message),
+    );
+    assert.equal(existsSync(join(wtRoot, "dev", "instances", "dev2-x")), false, "nothing created through the instances symlink");
+
+    // A plain symlinked agents root that stays within the primary checkout is
+    // still perfectly fine — this guard is about the destination, not symlinks.
+    const linkRoot = join(base, "agents-link"); symlinkSync(root, linkRoot);
+    const viaLink = spawnInstance(linkRoot, findAgent(linkRoot, "dev"), { instance: "dev-via-link", launch: false });
+    assert.equal(realpathSync(viaLink.home), join(realpathSync(root), "dev", "instances", "dev-via-link"));
+    retireInstance(linkRoot, "dev-via-link", { tmuxSession: "oas-test-nosuch" });
+  } finally { process.env.PATH = oldPath; }
+  execFileSync("git", ["-C", repo, "worktree", "remove", "--force", wt]);
+  rmSync(base, { recursive: true, force: true });
+});
