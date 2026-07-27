@@ -1,6 +1,7 @@
 # Knowledge Log
 
 ## 2026-07-27
+* **Update**: [strict-curriculum-scoping](/references/strict-curriculum-scoping.md) merges the 0.19.0 release-gate ruling that complete active-capability skills, injections, and plugins must resolve from locked/materialized sources, appear in Pi and Claude real runtimes with provenance, fail closed when missing, and exclude inactive capabilities.
 * **Creation**: [work-tree-relative-capability-skills-fail-open](/lessons/work-tree-relative-capability-skills-fail-open.md) records that work-tree-relative capability skill paths can fail open at spawn when dependencies are not installed, silently omitting messaging skills from the composed instance.
 * **Creation**: [prove-auto-merge-preserved-both-deltas](/lessons/prove-auto-merge-preserved-both-deltas.md) records the reverse-apply check for proving that an auto-merged file still contains each side's post-base delta before reporting integration success.
 * **Creation**: skills/crossed-mail-freeze-discipline — adds the HOLD/GO crossed-mail freeze protocol for exact state reports, unpushed freeze-time fixes, and stale-instruction checks.

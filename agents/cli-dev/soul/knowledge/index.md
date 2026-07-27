@@ -89,7 +89,7 @@ read what the current task needs, not everything.
 * [playbooks/test-conventions.md](playbooks/test-conventions.md) - Kernel and CLI tests run node:test against temp directories with fixture souls, fake/runtime tmux shims on PATH, spawnSync of bin/oas.mjs for CLI behavior, and regression coverage at the layer where bugs occurred.
 
 ## References
-* [references/strict-curriculum-scoping.md](references/strict-curriculum-scoping.md) - Launch-path facts and maintainer rulings for strict instance curriculum enforcement: Pi strict mode is viable, Claude requires a real-runtime spike, repo AGENTS files stay visible but not auto-loaded, and parity acceptance gates README claims.
+* [references/strict-curriculum-scoping.md](references/strict-curriculum-scoping.md) - Launch-path facts and maintainer rulings for strict instance curriculum enforcement, including the 0.19.0 release gate for complete active-capability resource materialization.
 
 * [references/oas-expert-decisions.md](references/oas-expert-decisions.md) - pointers to the canonical Decision records and docs governing this area.
 * [references/package-engine-corrected-head-remerge-map.md](references/package-engine-corrected-head-remerge-map.md) - Frozen-branch map for absorbing the corrected package-engine head after 054f7ba: fail-closed invalid-lock reads, materialized-dependency containment, depsIntegrity validation, canonical CLI env, residue and migration fixes, and JSON-envelope updates.

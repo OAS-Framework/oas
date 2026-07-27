@@ -1,12 +1,12 @@
 ---
 type: Reference
-title: Strict curriculum scoping and maintainer ruling
-description: Launch-path facts and maintainer rulings for strict instance curriculum enforcement: Pi strict mode is viable, Claude requires a real-runtime spike, repo AGENTS files stay visible but not auto-loaded, and parity acceptance gates README claims.
-tags: [skills, launch, pi, claude, curriculum, ruling]
-timestamp: 2026-07-26
+title: Strict curriculum scoping and release gate rulings
+description: Launch-path facts and maintainer rulings for strict instance curriculum enforcement, including the 0.19.0 release gate for complete active-capability resource materialization.
+tags: [skills, launch, pi, claude, curriculum, ruling, release-gate]
+timestamp: 2026-07-27
 ---
 
-# Strict curriculum scoping and maintainer ruling
+# Strict curriculum scoping and release gate rulings
 
 Launch-path facts and maintainer rulings gathered while scoping strict instance
 curriculum enforcement:
@@ -34,6 +34,22 @@ curriculum enforcement:
   from updated main, not from the package-engine feature branch, but remains in
   the same 0.19.0 release. Package-engine M2 must not claim strictness;
   `instance.json` surface evidence rides the curriculum PR, not M2.
+- After the fail-open defect in
+  [work-tree-relative-capability-skills-fail-open](/lessons/work-tree-relative-capability-skills-fail-open.md),
+  `oas-expert-oas-packages` relayed founder reinforcement that complete
+  active-capability curriculum is an explicit release gate for the overall
+  effort, not deferred past 0.19.0. The implementation must prove that every
+  skill, injection, and plugin declared by capabilities active for the soul is
+  resolved from locked/materialized sources rather than spawn-time disk state;
+  each such resource is copied into the instance and recorded in provenance;
+  the result is visible in fresh Pi and Claude real runtimes; missing required
+  resources fail spawn closed with rollback and no zombie instance; and
+  installed-but-inactive capabilities remain absent. The WS2 package-config
+  branch stays scoped as-is; this implementation belongs to the separate
+  strict-curriculum feature, with the package-config branch only owing the
+  evidence and lesson. Resolving from locked/materialized sources removes the
+  spawn-time race because materialization has a defined package-lifecycle
+  completion point, unlike a bare path probe.
 - `instance.json` already records skills and instructions with source
   provenance; the strict-curriculum Decision's surface-recording requirement is
   a small additive extension.
