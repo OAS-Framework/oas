@@ -41,6 +41,17 @@ function fakeRuntimes(base) {
   return `${bin}:${process.env.PATH}`;
 }
 
+/** A `pi` stub that answers `pi list` the way pi does: two-space spec line with
+ * an optional "(filtered)" marker, then the resolved install directory. */
+function fakePiWithPackages(base, rows) {
+  const bin = join(base, "bin"); mkdirSync(bin, { recursive: true });
+  const body = ["User packages:", ...rows.flatMap((r) => [`  ${r.source}${r.filtered ? " (filtered)" : ""}`, `    ${r.dir}`])].join("\n");
+  write(join(bin, "pi"), `#!/bin/sh\nif [ "$1" = "list" ]; then cat <<'EOF'\n${body}\nEOF\nfi\nexit 0\n`);
+  write(join(bin, "claude"), "#!/bin/sh\nexit 0\n");
+  execFileSync("chmod", ["-R", "+x", bin]);
+  return `${bin}:${process.env.PATH}`;
+}
+
 function fixtureSoul(base, runtime = "pi", type) {
   const repo = join(base, "repo"); gitRepo(repo);
   const root = join(base, "agents");
@@ -2420,7 +2431,10 @@ test("a required runtime package is verified and recorded, and pi loads it throu
   // A relocated pi config dir (PI_CODING_AGENT_DIR) holding the package entry.
   const piDir = join(base, "pi-agent");
   write(join(piDir, "settings.json"), JSON.stringify({ packages: ["npm:fake-channel@1.2.3"] }));
-  const oldPath = process.env.PATH; process.env.PATH = fakeRuntimes(base);
+  const pkgDir = join(piDir, "npm", "node_modules", "fake-channel");
+  write(join(pkgDir, "package.json"), JSON.stringify({ name: "fake-channel" }));
+  const oldPath = process.env.PATH;
+  process.env.PATH = fakePiWithPackages(base, [{ source: "npm:fake-channel@1.2.3", dir: pkgDir }]);
   const oldPi = process.env.PI_CODING_AGENT_DIR; process.env.PI_CODING_AGENT_DIR = piDir;
   try {
     const r = spawnInstance(root, findAgent(root, "dev"), { instance: "dev-ext", launch: false });
@@ -2453,7 +2467,10 @@ test("PI_PACKAGE_DIR pointing elsewhere does not break detection (reviewer-ad1b9
   write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.chan:\n      global: true\n");
   const piDir = join(base, "pi-agent");
   write(join(piDir, "settings.json"), JSON.stringify({ packages: ["npm:fake-channel"] }));
-  const oldPath = process.env.PATH; process.env.PATH = fakeRuntimes(base);
+  const pkgDir = join(piDir, "npm", "node_modules", "fake-channel");
+  write(join(pkgDir, "package.json"), JSON.stringify({ name: "fake-channel" }));
+  const oldPath = process.env.PATH;
+  process.env.PATH = fakePiWithPackages(base, [{ source: "npm:fake-channel", dir: pkgDir }]);
   const oldPi = process.env.PI_CODING_AGENT_DIR; process.env.PI_CODING_AGENT_DIR = piDir;
   const oldPkg = process.env.PI_PACKAGE_DIR; process.env.PI_PACKAGE_DIR = join(base, "nix-store-elsewhere");
   try {
@@ -2466,6 +2483,95 @@ test("PI_PACKAGE_DIR pointing elsewhere does not break detection (reviewer-ad1b9
     process.env.PATH = oldPath;
     if (oldPi === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = oldPi;
     if (oldPkg === undefined) delete process.env.PI_PACKAGE_DIR; else process.env.PI_PACKAGE_DIR = oldPkg;
+  }
+  rmSync(base, { recursive: true, force: true });
+});
+
+test('a settings entry with "extensions": [] fails the spawn — it loads none of them (reviewer-8518c49)', () => {
+  const base = temp();
+  const { repo, root } = fixtureSoul(base, "pi");
+  capability(repo, "chan", {
+    capability: "acme.chan",
+    requires: [{ runtime: "pi", package: "npm:fake-channel", why: "channel extension" }],
+  });
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.chan:\n      global: true\n");
+  const piDir = join(base, "pi-agent");
+  // Installed and listed, but the operator disabled every extension from it.
+  // A settings row is not proof the capability's extension will load.
+  write(join(piDir, "settings.json"), JSON.stringify({ packages: [{ source: "npm:fake-channel", extensions: [] }] }));
+  const pkgDir = join(piDir, "npm", "node_modules", "fake-channel");
+  write(join(pkgDir, "package.json"), JSON.stringify({ name: "fake-channel" }));
+  const oldPath = process.env.PATH;
+  process.env.PATH = fakePiWithPackages(base, [{ source: "npm:fake-channel", dir: pkgDir, filtered: true }]);
+  const oldPi = process.env.PI_CODING_AGENT_DIR; process.env.PI_CODING_AGENT_DIR = piDir;
+  try {
+    assert.throws(
+      () => spawnInstance(root, findAgent(root, "dev"), { instance: "dev-off", launch: false }),
+      (e) => e.code === "E_RUNTIME_RESOURCE_MISSING" && /"extensions": \[\], which loads none of them/.test(e.message),
+    );
+    assert.equal(existsSync(join(root, "dev", "instances", "dev-off")), false);
+  } finally {
+    process.env.PATH = oldPath;
+    if (oldPi === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = oldPi;
+  }
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("a stale settings row whose files were never installed fails the spawn (reviewer-8518c49)", () => {
+  const base = temp();
+  const { repo, root } = fixtureSoul(base, "pi");
+  capability(repo, "chan", {
+    capability: "acme.chan",
+    requires: [{ runtime: "pi", package: "npm:fake-channel", why: "channel extension" }],
+  });
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.chan:\n      global: true\n");
+  const piDir = join(base, "pi-agent");
+  write(join(piDir, "settings.json"), JSON.stringify({ packages: ["npm:fake-channel"] }));
+  // pi names a directory, but nothing was ever installed there (offline install,
+  // or the tree was removed). Presence in settings would have passed this gate.
+  const ghostDir = join(piDir, "npm", "node_modules", "fake-channel");
+  const oldPath = process.env.PATH;
+  process.env.PATH = fakePiWithPackages(base, [{ source: "npm:fake-channel", dir: ghostDir }]);
+  const oldPi = process.env.PI_CODING_AGENT_DIR; process.env.PI_CODING_AGENT_DIR = piDir;
+  try {
+    assert.throws(
+      () => spawnInstance(root, findAgent(root, "dev"), { instance: "dev-ghost", launch: false }),
+      (e) => e.code === "E_RUNTIME_RESOURCE_MISSING" && /nothing is installed there/.test(e.message),
+    );
+  } finally {
+    process.env.PATH = oldPath;
+    if (oldPi === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = oldPi;
+  }
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("a non-empty resource filter is recorded as auditable, not second-guessed", () => {
+  const base = temp();
+  const { repo, root } = fixtureSoul(base, "pi");
+  capability(repo, "chan", {
+    capability: "acme.chan",
+    requires: [{ runtime: "pi", package: "npm:fake-channel", why: "channel extension" }],
+  });
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.chan:\n      global: true\n");
+  const piDir = join(base, "pi-agent");
+  // A deliberate, non-empty choice: pi owns the glob semantics, so OAS records
+  // it in provenance rather than guessing whether it covers this extension.
+  write(join(piDir, "settings.json"), JSON.stringify({ packages: [{ source: "npm:fake-channel", extensions: ["./dist/*.js"] }] }));
+  const pkgDir = join(piDir, "npm", "node_modules", "fake-channel");
+  write(join(pkgDir, "package.json"), JSON.stringify({ name: "fake-channel" }));
+  const oldPath = process.env.PATH;
+  process.env.PATH = fakePiWithPackages(base, [{ source: "npm:fake-channel", dir: pkgDir, filtered: true }]);
+  const oldPi = process.env.PI_CODING_AGENT_DIR; process.env.PI_CODING_AGENT_DIR = piDir;
+  try {
+    const r = spawnInstance(root, findAgent(root, "dev"), { instance: "dev-filt", launch: false });
+    const meta = JSON.parse(readFileSync(join(r.home, "instance.json"), "utf8"));
+    const pkg = meta.composition.materialized.runtimePackages[0];
+    assert.equal(pkg.filtered, true, "the narrowing is visible for audit");
+    assert.equal(pkg.dir, pkgDir, "provenance records where the runtime says it lives");
+    retireInstance(root, "dev-filt", { tmuxSession: "oas-test-nosuch" });
+  } finally {
+    process.env.PATH = oldPath;
+    if (oldPi === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = oldPi;
   }
   rmSync(base, { recursive: true, force: true });
 });
