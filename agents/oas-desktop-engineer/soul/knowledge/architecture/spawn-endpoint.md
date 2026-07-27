@@ -3,7 +3,7 @@ type: Concept
 title: Spawn endpoint root allowlist, empty-task semantics, and CLI-unavailable degradation
 description: POST /api/spawn treats browser-supplied agentsRoot as a selector into the server's workspace roots, preserves task "" as the awaiting-instructions spawn shape, and returns a stable cli-unavailable 503 until the CLI mutation adapter lands.
 tags: [desktop-backend, spawn, endpoint, security, task]
-timestamp: 2026-07-24
+timestamp: 2026-07-27
 ---
 
 # Endpoint contract
@@ -19,6 +19,15 @@ Apply the same allowlist pattern to any future panel endpoint that accepts a
 path-shaped parameter from the browser. Keep this validation in process even
 when the mutation adapter is unavailable, so root and agent mistakes stay
 meaningful client errors instead of collapsing into generic service degradation.
+
+# Model field semantics
+
+The optional model value is still free-text spawn input, not an enum. The
+renderer may offer an advisory catalog from `GET /api/models?runtime=...`, but
+`POST /api/spawn` must pass the provided model preference through without checking
+catalog membership. Hard-selecting or server-validating the value would break
+comma-separated model preference lists and valid models absent from the probe; see
+[Model selection UI must stay advisory](/lessons/model-selection-advisory-datalist.md).
 
 # Empty task semantics
 
