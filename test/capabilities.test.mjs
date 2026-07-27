@@ -2765,3 +2765,66 @@ test("a clean rollback reports no verification problems (probe stderr regression
   } finally { process.env.PATH = oldPath; }
   rmSync(base, { recursive: true, force: true });
 });
+
+test("a failed required hook hands back its metadata so compensation can undo external state", () => {
+  const base = temp();
+  const { repo, root } = fixtureSoul(base, "pi");
+  // The hook creates external state, reports it, then fails. Its stdout is the
+  // ONLY channel for that state; discarding it strands whatever it created.
+  const marker = join(base, "external-identity");
+  capability(repo, "chan", {
+    capability: "acme.chan",
+    hooks: { spawn: { command: "hook.mjs spawn", required: true }, retire: "hook.mjs retire" },
+  }, {
+    "hook.mjs": `import {writeFileSync, rmSync, existsSync} from 'node:fs';
+const marker = ${JSON.stringify(marker)};
+if (process.env.OAS_EVENT === 'spawn') {
+  writeFileSync(marker, 'joined');                       // external state exists now
+  console.log(JSON.stringify({ meta: { alias: 'probe-alias' } }));
+  process.exit(1);                                        // …and then we fail
+}
+const meta = JSON.parse(process.env.OAS_META || '{}');
+if (meta.alias === 'probe-alias' && existsSync(marker)) rmSync(marker);   // compensate
+console.log('{}');`,
+  });
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.chan:\n      global: true\n");
+  const oldPath = process.env.PATH; process.env.PATH = fakeRuntimes(base);
+  try {
+    assert.throws(
+      () => spawnInstance(root, findAgent(root, "dev"), { instance: "dev-comp", launch: false }),
+      (e) => e.code === "E_REQUIRED_HOOK_FAILED",
+    );
+    assert.equal(existsSync(marker), false, "the retire hook received the failed hook's metadata and undid its external state");
+    assert.equal(existsSync(join(root, "dev", "instances", "dev-comp")), false);
+  } finally { process.env.PATH = oldPath; }
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("the SHIPPED aweb spawn hook exits nonzero when it cannot mint an identity", () => {
+  // The required-hook contract is worthless if the capability that declares it
+  // swallows its own failures. This executes the real hook, not a fixture.
+  const base = temp();
+  const hook = resolve(new URL("../capabilities/oas-aweb/bin/oas-aweb.mjs", import.meta.url).pathname);
+  const r = spawnSync(process.execPath, [hook, "spawn"], {
+    encoding: "utf8",
+    env: { ...process.env, OAS_EVENT: "spawn", OAS_INSTANCE: "probe", OAS_HOME: join(base, "no-such-home"), OAS_WORKSPACE: base, OAS_CONTEXT: base, OAS_TEAM_SCOPE: base },
+  });
+  assert.notEqual(r.status, 0, `no aweb root must be fatal, got exit ${r.status}: ${r.stdout}`);
+  assert.match(r.stdout, /no identity could be minted/);
+  const manifest = JSON.parse(readFileSync(resolve(new URL("../capabilities/oas-aweb/oas.json", import.meta.url).pathname), "utf8"));
+  assert.equal(manifest.hooks.spawn.required, true, "and the manifest declares it required, so the kernel acts on that exit code");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("the manifest schema rejects `required` on non-spawn hooks, matching runtime validation", async () => {
+  // A schema more permissive than the runtime lets authoring approve a manifest
+  // OAS then refuses to load.
+  const { default: Ajv2020 } = await import("ajv/dist/2020.js");   // the schema declares draft 2020-12, as validate-project.mjs does
+  const schema = JSON.parse(readFileSync(resolve(new URL("../docs/capability-manifest.schema.json", import.meta.url).pathname), "utf8"));
+  const validate = new Ajv2020({ strict: false, allowUnionTypes: true }).compile(schema);
+  const manifest = (hooks) => ({ capability: "acme.x", version: "1.0.0", compatibility: { oas: ">=0.6.2" }, description: "x", hooks });
+  assert.equal(validate(manifest({ spawn: { command: "h.mjs spawn", required: true } })), true, "spawn may be required");
+  assert.equal(validate(manifest({ retire: { command: "h.mjs retire", required: true } })), false, "retire may not");
+  assert.equal(validate(manifest({ "soul-scaffold": { command: "h.mjs s", required: true } })), false, "soul-scaffold may not");
+  assert.equal(validate(manifest({ retire: "h.mjs retire" })), true, "the plain string form still validates");
+});

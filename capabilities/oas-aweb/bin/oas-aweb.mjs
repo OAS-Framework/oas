@@ -23,7 +23,18 @@
  * Output (spawn, stdout JSON):
  *   { "meta": {...persisted to instance.json + OAS_META at retire},
  *     "brief": "one-line TASK.md briefing line", "warning": "non-fatal problem" }
- * Exit code is advisory: the kernel treats hook failure as a warning, never a block.
+ *
+ * EXIT CODE IS THE CONTRACT for the spawn hook. This capability declares
+ * `spawn` as required (oas.json), so a nonzero exit fails the spawn and rolls it
+ * back. Messaging is the whole point of the capability: an instance whose
+ * identity was never minted believes it can be woken by mail and cannot, which
+ * is worse than not starting. So identity failures exit nonzero, while genuinely
+ * advisory problems (the Claude channel plugin, a team-name mismatch) stay
+ * warnings on exit 0.
+ *
+ * On a fatal path, ALWAYS emit any metadata gathered so far before exiting: the
+ * kernel feeds it to the retire hook to compensate partial state, and an
+ * identity joined moments before the failure must still be deletable.
  */
 import { execSync } from "node:child_process";
 import { existsSync } from "node:fs";
@@ -32,8 +43,12 @@ import { join, dirname, resolve } from "node:path";
 const sh = (cmd, cwd, timeout = 45000) =>
   execSync(cmd, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout }).trim();
 const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
-const out = (o) => { process.stdout.write(JSON.stringify(o) + "\n"); process.exit(0); };
+const out = (o, code = 0) => { process.stdout.write(JSON.stringify(o) + "\n"); process.exit(code); };
 const warn = (m) => out({ warning: `oas-aweb: ${String(m).slice(0, 300)}` });
+/** Fatal for a REQUIRED spawn hook: emit metadata for compensation, then exit
+ * nonzero so the kernel rolls the spawn back. `meta` carries whatever external
+ * state already exists (e.g. a joined identity) so retire can undo it. */
+const fatal = (m, meta) => out({ ...(meta ? { meta } : {}), warning: `oas-aweb: ${String(m).slice(0, 300)}` }, 1);
 
 const event = process.env.OAS_EVENT || process.argv[2];
 const instance = process.env.OAS_INSTANCE;
@@ -77,12 +92,14 @@ const AW_INSTALL = "install the aw CLI first — see https://aweb.ai/docs (or `o
 const isCommand = ["roster", "setup"].includes(event);
 try { sh("command -v aw"); } catch {
   if (isCommand) { console.error(`oas aweb ${event}: aw CLI not on PATH — ${AW_INSTALL}`); process.exit(1); }
-  warn(`aw CLI not on PATH — no identity minted. Messaging is disabled for this instance; ${AW_INSTALL}`);
+  if (event === "spawn") fatal(`aw CLI not on PATH, so no identity could be minted and this instance would have no messaging — ${AW_INSTALL}`);
+  warn(`aw CLI not on PATH — no identity minted; ${AW_INSTALL}`);
 }
 
 if (event === "spawn") {
+  let minted;                 // external identity, once `aw team join` succeeds
   const root = awebRoot();
-  if (!root) warn(`no initialized aweb root (.aw) in the bounded candidates (home, its git repo, context repo, workspace ${process.env.OAS_WORKSPACE || "?"}) — no identity minted`);
+  if (!root) fatal(`no initialized aweb root (.aw) among the bounded candidates (home, its git repo, context repo, workspace ${process.env.OAS_WORKSPACE || "?"}), so no identity could be minted and this instance would have no messaging — run \`oas aweb setup\` for guided onboarding`);
   try {
     // Team correctness: the config's `team:` block wins (id, then name), else the
     // root's active team. ALWAYS pass --team-id explicitly — never inherit whatever
@@ -102,6 +119,9 @@ if (event === "spawn") {
     }
     const inv = JSON.parse(sh(`aw team invite --team-id ${shq(team)} --json`, root));
     const joined = JSON.parse(sh(`aw team join ${shq(inv.token)} --name ${shq(instance)} --json`, home));
+    // External state now exists. Record it immediately so any later failure can
+    // still report it for compensation.
+    minted = { team: joined.team_id, alias: joined.alias || instance };
     sh("aw init --do-not-touch-agents-md", home);
     const alias = joined.alias || instance;
     const mismatch = joined.team_id !== team
@@ -124,7 +144,12 @@ if (event === "spawn") {
       ...(launch ? { launch } : {}),
       ...(mismatch ? { warning: `oas-aweb: team mismatch — joined ${joined.team_id}, expected ${team}` } : channelWarning ? { warning: channelWarning } : {}),
     });
-  } catch (e) { warn(`identity minting failed (continuing without): ${e.message || e}`); }
+  } catch (e) {
+    // A join may already have created a REMOTE identity before the failure.
+    // Hand it back as meta so the kernel's compensation can delete it — losing
+    // it here would strand a roster entry no one owns.
+    fatal(`identity minting failed: ${e.message || e}`, minted);
+  }
 } else if (event === "retire") {
   const meta = JSON.parse(process.env.OAS_META || "{}");
   if (!meta.alias || !existsSync(join(home, ".aw"))) out({ meta: { retired: false } });

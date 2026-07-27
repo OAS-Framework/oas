@@ -128,8 +128,7 @@
         "soul-scaffold": {
           "oneOf": [
             {
-              "type": "string",
-              "description": "Command to run, relative to the capability."
+              "type": "string"
             },
             {
               "type": "object",
@@ -141,8 +140,8 @@
                   "type": "string"
                 },
                 "required": {
-                  "type": "boolean",
-                  "description": "Only valid on `spawn`. When true, a failure fails the spawn and rolls it back, instead of leaving an instance whose capability is not configured."
+                  "const": false,
+                  "description": "Only the spawn hook may be required \u2014 retire and soul-scaffold run outside a spawn transaction."
                 }
               },
               "additionalProperties": false
@@ -152,8 +151,7 @@
         "spawn": {
           "oneOf": [
             {
-              "type": "string",
-              "description": "Command to run, relative to the capability."
+              "type": "string"
             },
             {
               "type": "object",
@@ -166,7 +164,7 @@
                 },
                 "required": {
                   "type": "boolean",
-                  "description": "Only valid on `spawn`. When true, a failure fails the spawn and rolls it back, instead of leaving an instance whose capability is not configured."
+                  "description": "When true, a failure fails the spawn and rolls it back."
                 }
               },
               "additionalProperties": false
@@ -176,8 +174,7 @@
         "retire": {
           "oneOf": [
             {
-              "type": "string",
-              "description": "Command to run, relative to the capability."
+              "type": "string"
             },
             {
               "type": "object",
@@ -189,8 +186,8 @@
                   "type": "string"
                 },
                 "required": {
-                  "type": "boolean",
-                  "description": "Only valid on `spawn`. When true, a failure fails the spawn and rolls it back, instead of leaving an instance whose capability is not configured."
+                  "const": false,
+                  "description": "Only the spawn hook may be required \u2014 retire and soul-scaffold run outside a spawn transaction."
                 }
               },
               "additionalProperties": false
