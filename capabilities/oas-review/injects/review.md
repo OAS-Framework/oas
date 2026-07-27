@@ -1,11 +1,11 @@
 ## Review discipline: oas.review
 
-**After every substantive commit, launch the reviewer** — and, when you have a
-knowledge layer, its promotion step alongside (this deployment's is `oas.okf`;
-skip that line if you have none):
+**After every substantive commit, launch the reviewer** — and, when a knowledge
+layer is active, run its promotion step alongside (whatever command that layer
+documents; omit the line entirely if you have no knowledge layer):
 
 ```bash
-oas okf harvest    # knowledge layer: promote your pending notes into your soul
+<your knowledge layer's promotion command>   # e.g. `oas okf harvest` under oas.okf
 oas spawn reviewer --work attached --work-dir "$PWD/work" \
   --purpose "<short-sha>" \
   --task "Review commit <sha> on branch <branch>. Report to <your-instance> per your operating loop."

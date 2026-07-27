@@ -3579,7 +3579,7 @@ console.log(JSON.stringify({ meta: { retired: false, reason: 'self-delete-failed
 const BOUNDARY_MUST_SAY = [
   "$OAS_INSTANCE_HOME",                                   // the runtime-neutral name
   "It is not your user home (`~`), not the repository root, and not the work tree",
-  "Run `aw` and OAS operational/lifecycle commands from instance home",
+  "Run OAS operational/lifecycle commands, and commands from active capabilities, from instance home",
   "oas <cmd> --dir <path>",                               // the deliberate alternate scope
   "The home's `soul` link is not your edit surface",      // not "read-only": it is writable, and that is the point
 ];
@@ -3686,6 +3686,10 @@ test("kernel-composed blocks never prescribe a knowledge protocol they cannot gu
       }
       assert.doesNotMatch(text, KNOWLEDGE_PROTOCOL,
         `${mode}/${kind}: kernel blocks must not prescribe notes//harvest — no knowledge layer is composed here`);
+      // aweb is a capability too: the kernel may cite `aw` as an example of an
+      // active capability's command, never command it outright.
+      assert.doesNotMatch(text, /Run `aw`|run `aw mail`|every `aw mail`/,
+        `${mode}/${kind}: the kernel must not command an optional messaging layer`);
       assert.doesNotMatch(text, SETTLE_IN_WORK, `${mode}/${kind}`);
     }
   }

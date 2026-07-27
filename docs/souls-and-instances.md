@@ -169,9 +169,10 @@ instructions state first (`injects/instance-boundary.md`):
 - `<instance-home>` — the gitignored instance directory, `$OAS_INSTANCE_HOME` —
   holds the brain (`AGENTS.md`, `soul/`), the task, the provenance
   (`instance.json`) and the episodic state (`STATE.md`, `log.md`, `notes/`), and
-  is where `aw` and OAS operational/lifecycle commands are run, because they
-  resolve scope from the working directory (`--dir <path>` to target another
-  one deliberately).
+  is where OAS operational/lifecycle commands — and the commands of whatever
+  capabilities are active, `aw` among them when aweb messaging is — are run,
+  because they resolve scope from the working directory (`--dir <path>` to
+  target another one deliberately).
 - `<instance-home>/work` — the repository or workspace view — is where
   repository reading, editing, building, testing, git and commits happen, to the
   extent the mode below permits.

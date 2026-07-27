@@ -10,13 +10,13 @@ root, and not the work tree. Anything that says "your home" means this directory
   `instance.json` (what you were given and from where), and whatever working
   state your role keeps — your knowledge layer names those files, if you have
   one. They belong here, not in the work tree.
-- **Run `aw` and OAS operational/lifecycle commands from instance home** —
-  `oas status`, `oas doctor`, `oas spawn`, `oas retire`, and the commands your
-  own capabilities add — a messaging layer's, a knowledge layer's. They resolve
-  their scope from the directory you run
-  them in, so running them from the work tree points them at the wrong
-  deployment. To act on a different package or config scope deliberately, pass
-  an explicit resolved path: `oas <cmd> --dir <path>`.
+- **Run OAS operational/lifecycle commands, and commands from active
+  capabilities, from instance home** — `oas status`, `oas doctor`, `oas spawn`,
+  `oas retire`, and whatever your own capabilities add; for example, when the
+  aweb messaging capability is active, run `aw` there too. They resolve their
+  scope from the directory you run them in, so running them from the work tree
+  points them at the wrong deployment. To act on a different package or config
+  scope deliberately, pass an explicit resolved path: `oas <cmd> --dir <path>`.
 - **The home's `soul` link is not your edit surface.** It is there so you can
   READ your durable knowledge. Writing through it changes durable state outside
   your branch, where no review sees it and nothing records what changed or why.

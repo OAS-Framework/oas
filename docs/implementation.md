@@ -111,9 +111,10 @@ After the canonical soul and kernel text, every generated `AGENTS.md` states the
 runtime-neutral **home/work boundary** (`injects/instance-boundary.md`) — for
 every work mode and for capability service agents alike — immediately before the
 work-mode block it frames: `<instance-home>` (`$OAS_INSTANCE_HOME`) holds the
-brain, task, provenance and episodic state, and is where `aw` and OAS
-operational/lifecycle commands are run from, since they resolve scope from the
-working directory (`--dir <path>` reaches another deliberately); the home's
+brain, task, provenance and working state, and is where OAS operational/lifecycle
+commands are run from — together with the commands of whatever capabilities are
+active, `aw` among them when aweb messaging is — since they resolve scope from
+the working directory (`--dir <path>` reaches another deliberately); the home's
 `soul` link is to be treated as read-only because writes through it bypass the
 branch and review path; and `<instance-home>/work` is the repository or workspace
 view where repository reading, editing, building, testing, git and commits
