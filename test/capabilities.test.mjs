@@ -3572,6 +3572,87 @@ console.log(JSON.stringify({ meta: { retired: false, reason: 'self-delete-failed
   rmSync(base, { recursive: true, force: true });
 });
 
+// The founder-approved home/work boundary, as EXACT generated text. These
+// strings are the contract an agent reads at wake-up: an instance that learns
+// the wrong one runs `aw`/`oas` from the work tree and misresolves its
+// deployment — the root-placement bug, taught rather than coded.
+const BOUNDARY_MUST_SAY = [
+  "$OAS_INSTANCE_HOME",                                   // the runtime-neutral name
+  "It is not your user home (`~`), not the repository root, and not the work tree",
+  "Run `aw` and OAS operational/lifecycle commands from instance home",
+  "oas <cmd> --dir <path>",                               // the deliberate alternate scope
+  "Git, reading, editing, building, testing and committing all happen in `work/`",
+  "never the home's `soul` symlink",                      // durable edits go through tracked paths
+];
+/** Compare wording, not line wrapping: the contract is what the agent reads. */
+const flat = (t) => t.replace(/\s+/g, " ");
+// The instruction that taught the bug. It must not come back, in any mode.
+const BOUNDARY_MUST_NOT_SAY = /cd work\/? once|and stay there|where you live/i;
+
+test("every work mode's generated instructions carry the home/work boundary (maintainer contract)", () => {
+  const base = temp();
+  const { repo, root } = fixtureSoul(base, "pi");
+  const soulDir = join(root, "dev", "soul");
+  for (const mode of ["worktree", "checkout", "attached", "workspace"]) {
+    const { text } = composeInstanceAgentsMd(soulDir, repo, "dev", mode);
+    for (const must of BOUNDARY_MUST_SAY) {
+      assert.ok(flat(text).includes(flat(must)), `${mode}: generated instructions must say ${JSON.stringify(must)}`);
+    }
+    assert.doesNotMatch(text, BOUNDARY_MUST_NOT_SAY, `${mode}: must not teach "cd work and stay there"`);
+    assert.ok(text.includes(`Work mode: ${mode}`), `${mode}: and still carries its own mode block`);
+    // Order matters: the boundary is the frame the mode rules sit inside.
+    assert.ok(text.indexOf("## Your two directories") < text.indexOf(`Work mode: ${mode}`),
+      `${mode}: the boundary precedes the mode's ownership rules`);
+  }
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("capability service agents get the boundary too — reviewers run aw from home (maintainer contract)", () => {
+  const base = temp();
+  const { repo, root } = fixtureSoul(base, "pi");
+  const capDir = capability(repo, "rev", { capability: "acme.review", agents: ["agents/reviewer"] }, {
+    "agents/reviewer/soul.yaml": "name: reviewer\nkind: capability\nwork: attached\nruntime: pi\ndescription: Fresh reviewer.\n",
+    "agents/reviewer/AGENTS.md": "# Reviewer\n\nReview fresh.\n",
+  });
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.review:\n      global: true\n");
+  // kind "capability" suppresses the KNOWLEDGE layer (no episodic memory), and
+  // that exclusion must not take the boundary with it: a reviewer that mails its
+  // verdict from the work tree resolves the wrong deployment.
+  const { text } = composeInstanceAgentsMd(join(capDir, "agents", "reviewer"), repo, "reviewer", "attached", "capability");
+  for (const must of BOUNDARY_MUST_SAY) assert.ok(flat(text).includes(flat(must)), `capability reviewer: must say ${JSON.stringify(must)}`);
+  assert.doesNotMatch(text, BOUNDARY_MUST_NOT_SAY);
+  assert.ok(text.includes("Work mode: attached"));
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("no packaged work-mode injection teaches settling in the work tree (maintainer contract)", () => {
+  // The regression is one line in one file, so pin the property at the source:
+  // every packaged mode briefing, present and future.
+  const dir = resolve(new URL("../injects", import.meta.url).pathname);
+  const modes = readdirSync(dir).filter((f) => f.startsWith("work-") && f.endsWith(".md"));
+  assert.ok(modes.length >= 4, `expected every work mode to ship a briefing, saw ${modes.join(", ")}`);
+  for (const f of modes) {
+    assert.doesNotMatch(readFileSync(join(dir, f), "utf8"), BOUNDARY_MUST_NOT_SAY, `${f} teaches the root-placement bug`);
+  }
+});
+
+test("the accepted trust boundary is DOCUMENTED, not left as a code comment (maintainer contract)", () => {
+  // The maintainer accepted the narrow filesystem TOCTOU residual as a deployment
+  // trust boundary — which only holds if operators are TOLD. A prerequisite that
+  // lives in a source comment is one no deployment ever reads.
+  const doc = readFileSync(resolve(new URL("../docs/souls-and-instances.md", import.meta.url).pathname), "utf8");
+  const flatDoc = doc.replace(/\s+/g, " ");
+  for (const must of [
+    "must be owned by the operator and not writable by untrusted users or processes",
+    "openat",                                    // why the kernel cannot close it
+    "E_NO_CANONICAL_ROOT",                       // what failure looks like
+    "OAS_INSTANCE_HOME",                         // how an instance learns its home
+    "soul-owning repo's primary checkout",       // where homes actually land
+  ]) {
+    assert.ok(flatDoc.includes(must.replace(/\s+/g, " ")), `public docs must state ${JSON.stringify(must)}`);
+  }
+});
+
 test("instance homes stay inside the deployment: every layout, every symlink escape (reviewer-aggregate2, reviewer-1a6e82e)", () => {
   const base = temp();
   const { repo, root } = fixtureSoul(base, "pi");

@@ -241,6 +241,49 @@ not a git tree.
 The agents root is the nearest `agents/` directory walking upward from the
 current directory. `PI_AGENTS_ROOT` overrides the search.
 
+**Where instances are stored is a separate question from where you invoked
+OAS.** Discovery finds the root from your current directory, but instance homes
+always live in the **soul-owning repo's primary checkout**: when the root you
+discovered is inside a *linked git worktree*, storage maps to the equivalent
+path in that repository's primary checkout, so homes survive the worktree, stay
+visible to the whole deployment, and never depend on where a command happened to
+run. An agent that spawns after `cd work/` reaches the same home as one spawning
+from the deployment root.
+
+Three things stay independent, and are meant to:
+
+- **Invocation** — where you ran the command;
+- **Config/package scope** — resolved from the context directory, and steerable
+  with an explicit `--dir <path>`;
+- **`work/`** — the instance's repository view, which may well be a linked
+  worktree; only *storage* is redirected, never your work tree.
+
+Roots that Git does not own are unaffected: a non-Git agents root stores
+instances exactly where it sits.
+
+Every instance is told its own home as **`OAS_INSTANCE_HOME`** (absolute), in the
+runtime environment and in every lifecycle hook. Instructions refer to it as
+`<instance-home>`; `PI_AGENT_HOME` and `OAS_HOME` remain as compatibility
+aliases. It is not `OAS_HOME_DIR`, which is the package store root.
+
+When placement cannot be established — Git owns the location but the repository
+cannot be read, a linked worktree whose primary checkout is missing, or a
+resolved destination outside the agent's own directory — the spawn fails closed
+with **`E_NO_CANONICAL_ROOT`** and creates nothing.
+
+### Deployment prerequisite: the agents directory must be operator-owned
+
+The canonical deployment (the agents root, `local-agents/`, and the instance
+homes under them) **must be owned by the operator and not writable by untrusted
+users or processes.** OAS validates resolved destinations and re-checks the home
+immediately before creating anything in it, but it cannot defeat a concurrent
+local attacker who already has write access there: Node offers no
+`openat`/`O_NOFOLLOW`-relative directory creation, so a path can in principle be
+swapped between the check and the creation. Anyone with that access also
+controls souls, generated instructions, hook declarations and instance state, so
+this is a deployment prerequisite — filesystem ownership and permissions — not
+something the kernel can close from inside.
+
 Default layout:
 
 ```text

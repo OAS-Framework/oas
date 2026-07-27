@@ -81,6 +81,14 @@ an inherited slot and remains distinct from absence.
 
 `spawnInstance` resolves against the soul's repository and soul name. It:
 
+0. resolves and validates WHERE the home will be created, before any side
+   effect: the destination must be the agent directory's own `instances/`
+   child, that agent directory must lie inside this deployment, and a linked
+   worktree maps to the primary checkout — otherwise `E_NO_CANONICAL_ROOT` and
+   nothing is created. The check is repeated on the created directory before
+   anything is written into it. See
+   [souls-and-instances.md](souls-and-instances.md#deployment-prerequisite-the-agents-directory-must-be-operator-owned)
+   for the deployment prerequisite this rests on;
 1. calls `composeInstanceAgentsMd` without writing the soul;
 2. writes generated `AGENTS.md` and canonical compatibility symlinks;
 3. copies kernel + soul + active package skill trees into real directories in
@@ -98,6 +106,16 @@ Pi launches with `--no-skills --skill <instance-home>/.agents/skills
 one: no user, project, ancestor or package skill catalogs. It is not a claim
 that nothing else can reach the session — extensions stay ambient (below), and
 what they contribute stays with them.
+
+Every generated `AGENTS.md` opens the operational contract with the runtime-neutral
+**home/work boundary** (`injects/instance-boundary.md`), for every work mode and
+for capability service agents alike: `<instance-home>` (`$OAS_INSTANCE_HOME`) holds
+the brain, task, provenance and episodic state and is where `aw` and OAS
+lifecycle commands are run from — they resolve scope from the working directory,
+and `--dir <path>` is the deliberate way to reach another one — while
+`<instance-home>/work` is the only place git, edits, builds, tests and commits
+happen. Each work-mode block then adds only that mode's ownership and branch
+rules.
 
 `--no-context-files` also suppresses the instance's *own* composed `AGENTS.md`,
 so that is delivered explicitly; the work tree's `AGENTS.md` stays readable by
