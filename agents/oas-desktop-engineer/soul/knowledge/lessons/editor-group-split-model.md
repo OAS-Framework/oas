@@ -28,6 +28,14 @@ Key design decisions (branch agents/oas-desktop-engineer-editor-groups):
   and new terminal tabs through `openTabInFocusedGroup` — so EVERY open path
   (roster, palette, quick-open) lands in the focused group with identity
   resolution/dedup untouched.
+- Post-review blocker (ddbbe3b): after `requestSplit` focuses the new empty
+  group, `splitPane`'s re-render must call
+  `activateTab(activeTab, { keepGroupFocus: true })`. The default member path
+  calls `focusTab`, which would snap `focusedGroup` back to the source group;
+  then the next terminal opens in the original group and the empty group is
+  unreachable. Regression coverage must replay the real
+  `splitPane` -> `activateTab` -> open sequence, not only the split model in
+  isolation.
 - Split visibility = `!!split && activeTab.kind === "terminal"` — switching
   tabs never dismantles the split; non-terminal tabs merely cover it.
 - Per-group chrome: each `.group-cell` holds a `.group-tabbar` tablist with

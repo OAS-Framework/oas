@@ -1,6 +1,7 @@
 # Knowledge Log
 
 ## 2026-07-27
+* **Update**: merged the post-review split focus blocker into [Editor-group split model replaces the pending-slot arrangement](/lessons/editor-group-split-model.md): splitPane's re-render must use `activateTab(activeTab, { keepGroupFocus: true })` after requestSplit has already focused the new empty group, and regression coverage must replay splitPane -> activateTab -> open instead of only the split model.
 * **Creation**: promoted [Editor-group split model replaces the pending-slot arrangement](/lessons/editor-group-split-model.md) from the oas-desktop-engineer-editor-groups notes.
 * **Update**: linked [Split panes as flex-cell reprojection of existing tab panes](/lessons/split-panes-flex-reprojection.md) and [Split tab-strip alignment moves real tab elements into per-pane groups](/lessons/split-tab-strip-real-tab-groups.md) to the editor-group split model that supersedes their pending-slot/shared-strip approach for VS Code-style groups.
 
