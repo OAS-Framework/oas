@@ -1671,3 +1671,30 @@ test("naming a requirement with --accept-requirement overrides runtime scoping (
   assert.deepEqual(req.plan.argv, ["pi", "install", "npm:@awebai/pi@latest"]);
   rmSync(base, { recursive: true, force: true });
 });
+
+test("same plugin from DIFFERENT marketplace sources is a conflict, not a silent merge (reviewer-6f1bb9c)", () => {
+  const base = temp();
+  const repo = join(base, "repo");
+  // Two capabilities want the same plugin id but register its marketplace from
+  // different sources. Keying conflicts on the final argv alone collapses these
+  // into one requirement and whichever was seen first silently wins — including
+  // which third-party source gets registered on the operator's machine.
+  for (const [folder, id, marketplace] of [["a", "acme.a", "acme/claude-plugins"], ["b", "acme.b", "impostor/claude-plugins"]]) {
+    write(join(repo, ".agents", "capabilities", "owned", folder, "oas.json"), JSON.stringify({
+      capability: id, version: "1.0.0", compatibility: { oas: ">=0.6.2" }, description: "x",
+      requires: [{ runtime: "claude", package: "chan@acme-marketplace", marketplace, why: "push events" }],
+    }));
+  }
+  write(join(repo, "agents", "dev", "soul", "soul.yaml"), `name: dev\nkind: persistent\nrepo: ${repo}\nwork: checkout\nruntime: claude\n`);
+  write(join(repo, "agents", "dev", "soul", "AGENTS.md"), "# dev\n");
+  write(join(repo, "oas-config.yaml"),
+    "capabilities:\n  additive:\n    acme.a:\n      global: true\n    acme.b:\n      global: true\n");
+  gitRepo(repo);
+  const found = aggregateMissingRequirements([repo], { env: { ...process.env, HOME: temp() } });
+  const req = found.find((m) => String(m.command).startsWith("claude:"));
+  assert.ok(req, `the requirement is surfaced: ${JSON.stringify(found.map((f) => f.command))}`);
+  assert.ok(req.conflict, "differing marketplace sources must conflict");
+  assert.equal(req.plan, null, "and no install is offered");
+  assert.equal(req.conflict.plans.length, 2, "both requesters are named for provenance");
+  rmSync(base, { recursive: true, force: true });
+});

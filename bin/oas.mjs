@@ -959,7 +959,12 @@ function requirementsGate(scopes) {
       policyEntries.push(entryOf(req, "failed", { reason: req.invalid, code: "E_REQUIREMENT_POLICY" }));
     } else if (req.conflict) {
       note(`  CONFLICT for command "${req.command}": capabilities request non-identical install plans — no install is offered`);
-      for (const p of req.conflict.plans) note(`      ${p.capability} [${shortPath(p.scope)}]: ${p.argv ? p.argv.join(" ") : p.unavailable || "no plan"}`);
+      // Show the FULL sequence: two capabilities can agree on the final install
+      // command while registering different third-party sources before it.
+      for (const p of req.conflict.plans) {
+        const shown = p.steps?.length ? p.steps.map((a) => a.join(" ")).join("  &&  ") : (p.argv ? p.argv.join(" ") : p.unavailable || "no plan");
+        note(`      ${p.capability} [${shortPath(p.scope)}]: ${shown}`);
+      }
       policyEntries.push(entryOf(req, "failed", { reason: "conflicting install plans for the same command", code: "E_REQUIREMENT_POLICY", conflict: req.conflict }));
     }
   }

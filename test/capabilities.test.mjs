@@ -2965,17 +2965,30 @@ test("an alias minted with no local key is incomplete cleanup, not 'nothing to d
 
 // ---------- Claude runtime packages (consented, never installed at spawn) ----------
 
-/** A `claude` stub answering `plugin list` in Claude's real format. */
-function fakeClaudeWithPlugins(base, rows) {
+/** A `claude` stub answering `plugin list --json` in Claude's real shape, and
+ * REFUSING every other `plugin` subcommand so an imperative install during spawn
+ * fails loudly instead of passing silently. `name` lets a test install two
+ * differently-named wrappers (e.g. `claude` and `claude-personal`) reporting
+ * DIFFERENT plugin states. */
+function fakeClaudeWithPlugins(base, rows, { name = "claude", keepPath = false } = {}) {
   const bin = join(base, "bin"); mkdirSync(bin, { recursive: true });
-  const body = ["Installed plugins:", "", ...rows.flatMap((r) => [
-    `  ❯ ${r.name}`, `    Version: 1.0.0`, `    Scope: user`,
-    `    Status: ${r.disabled ? "✘ disabled" : "✔ enabled"}`, "",
-  ])].join("\n");
-  write(join(bin, "claude"), `#!/bin/sh\nif [ "$1" = "plugin" ] && [ "$2" = "list" ]; then cat <<'EOF'\n${body}\nEOF\nexit 0; fi\nif [ "$1" = "plugin" ]; then echo "REFUSED: spawn must not install plugins" >&2; exit 9; fi\nexit 0\n`);
-  write(join(bin, "pi"), "#!/bin/sh\nexit 0\n");
+  const json = JSON.stringify(rows.map((r) => ({
+    id: r.name, version: "1.0.0", scope: r.scope || "user", enabled: r.disabled !== true,
+    ...(r.projectPath ? { projectPath: r.projectPath } : {}),
+    installPath: join(base, "plugins", r.name),
+  })));
+  write(join(bin, name), `#!/bin/sh
+if [ "$1" = "plugin" ] && [ "$2" = "list" ]; then cat <<'EOF'
+${json}
+EOF
+exit 0; fi
+if [ "$1" = "plugin" ]; then echo "REFUSED: spawn must not install plugins" >&2; exit 9; fi
+exit 0
+`);
+  if (!existsSync(join(bin, "pi"))) write(join(bin, "pi"), "#!/bin/sh\nexit 0\n");
+  if (!existsSync(join(bin, "claude"))) write(join(bin, "claude"), "#!/bin/sh\nexit 0\n");
   execFileSync("chmod", ["-R", "+x", bin]);
-  return `${bin}:${process.env.PATH}`;
+  return keepPath ? `${bin}:${process.env.PATH}` : `${bin}:${process.env.PATH}`;
 }
 
 test("a Claude capability plugin is verified at spawn, never installed there", () => {
@@ -3064,5 +3077,68 @@ test("the aweb hook runs argv only, and detects `aw` without a shell builtin", (
   });
   assert.notEqual(r.status, 0, "a missing aw CLI is fatal for a required spawn hook");
   assert.match(r.stdout, /aw CLI not on PATH/);
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("the plugin probe uses the CONTEXT-SELECTED claude executable, not the literal one (reviewer-6f1bb9c)", () => {
+  const base = temp();
+  const { repo, root } = fixtureSoul(base, "claude");
+  capability(repo, "chan", {
+    capability: "acme.chan",
+    requires: [{ runtime: "claude", package: "chan@acme-marketplace", marketplace: "acme/claude-plugins", why: "push events" }],
+  });
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.chan:\n      global: true\n");
+  // oas-claude-config names a wrapper — a separate account with its own plugins.
+  write(join(repo, "oas-claude-config"), "claude-personal\n");
+  const oldPath = process.env.PATH;
+  try {
+    // Default `claude` HAS the plugin; the selected `claude-personal` does NOT.
+    // Probing the literal executable would pass preflight and launch an
+    // instance claiming a channel the real runtime lacks.
+    fakeClaudeWithPlugins(base, [{ name: "chan@acme-marketplace" }], { name: "claude" });
+    process.env.PATH = fakeClaudeWithPlugins(base, [], { name: "claude-personal" });
+    assert.throws(
+      () => spawnInstance(root, findAgent(root, "dev"), { instance: "dev-wrap", launch: false }),
+      (e) => e.code === "E_RUNTIME_RESOURCE_MISSING" && /chan@acme-marketplace/.test(e.message),
+      "the wrapper's missing plugin must fail, despite `claude` having it",
+    );
+    // And the reverse: the wrapper has it, the default does not → spawn succeeds.
+    const base2 = temp();
+    fakeClaudeWithPlugins(base2, [], { name: "claude" });
+    process.env.PATH = fakeClaudeWithPlugins(base2, [{ name: "chan@acme-marketplace" }], { name: "claude-personal" });
+    const r = spawnInstance(root, findAgent(root, "dev"), { instance: "dev-wrap2", launch: false });
+    assert.match(r.command, /claude-personal/, "and the session launches with that same executable");
+    retireInstance(root, "dev-wrap2", { tmuxSession: "oas-test-nosuch" });
+    rmSync(base2, { recursive: true, force: true });
+  } finally { process.env.PATH = oldPath; }
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("a plugin installed for an UNRELATED project does not satisfy the requirement", () => {
+  const base = temp();
+  const { repo, root } = fixtureSoul(base, "claude");
+  capability(repo, "chan", {
+    capability: "acme.chan",
+    requires: [{ runtime: "claude", package: "chan@acme-marketplace", marketplace: "acme/claude-plugins", why: "push events" }],
+  });
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.chan:\n      global: true\n");
+  const oldPath = process.env.PATH;
+  try {
+    // Enabled and matching, but scoped to someone else's project. Human `plugin
+    // list` output loses this distinction entirely.
+    process.env.PATH = fakeClaudeWithPlugins(base, [
+      { name: "chan@acme-marketplace", scope: "project", projectPath: join(base, "somebody-elses-repo") },
+    ]);
+    assert.throws(
+      () => spawnInstance(root, findAgent(root, "dev"), { instance: "dev-otherproj", launch: false }),
+      (e) => e.code === "E_RUNTIME_RESOURCE_MISSING",
+      "a project-scoped install elsewhere must not count",
+    );
+    // A user-scope install does apply everywhere.
+    process.env.PATH = fakeClaudeWithPlugins(base, [{ name: "chan@acme-marketplace", scope: "user" }]);
+    const r = spawnInstance(root, findAgent(root, "dev"), { instance: "dev-userscope", launch: false });
+    retireInstance(root, "dev-userscope", { tmuxSession: "oas-test-nosuch" });
+    assert.ok(r.home);
+  } finally { process.env.PATH = oldPath; }
   rmSync(base, { recursive: true, force: true });
 });
