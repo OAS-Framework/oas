@@ -71,6 +71,10 @@ A self-contained package has an `oas.json`:
   work never becomes a spawn blocker. `retire` and `soul-scaffold` cannot be
   required: they run outside a spawn transaction, so there is no moment to
   enforce them.
+- A capability declaring a **required** spawn hook should declare a `retire` hook
+  too. Without one, OAS has no way to undo what the spawn hook did and no way to
+  know whether it did anything, so a failure quarantines the home rather than
+  rolling it back — the operator cleans up by hand and removes it with `--force`.
 - A required hook must also be **able** to run: if its capability's executable
   surface is not trusted, the spawn fails with the `oas trust` remedy rather
   than starting without the setup. Advisory executable hooks stay

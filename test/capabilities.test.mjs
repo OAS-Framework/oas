@@ -3455,7 +3455,10 @@ console.log(JSON.stringify({ meta: { retired: false, reason: 'self-delete-failed
     writeFileSync(markerPath, JSON.stringify(marker, null, 2));
 
     const r = retireInstance(root, "dev-nohook", { tmuxSession: "oas-test-nosuch" });
-    assert.ok(r.rollbackIncomplete?.some((f) => /acme\.chan: did not run/.test(f)),
+    // Either way the retry resolved nothing to run for acme.chan — whether the
+    // entry names no retire hook or the capability is gone from config — and a
+    // hook that never ran cannot count as cleanup done.
+    assert.ok(r.rollbackIncomplete?.some((f) => /acme\.chan/.test(f) && /did not run|cannot verify or undo/.test(f)),
       `a hook that never ran cannot count as cleanup done, got ${JSON.stringify(r.rollbackIncomplete)}`);
     assert.equal(r.removedDir, false);
     assert.equal(existsSync(home), true, "the home survives");
@@ -3475,6 +3478,56 @@ console.log(JSON.stringify({ meta: { retired: false, reason: 'self-delete-failed
     assert.match(cli.stderr, /NOT cleaned up/, "and says so to the human, not only in the JSON");
     assert.match(cli.stderr, /acme\.chan/, "naming the state they now own");
     assert.equal(existsSync(home), false, "the home is gone because the operator said so");
+  } finally { process.env.PATH = oldPath; }
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("a required spawn hook with NO retire hook quarantines instead of deleting the credential (reviewer-446ebe1)", () => {
+  const base = temp();
+  const { repo, root } = fixtureSoul(base, "pi");
+  // The manifest permits this shape: a required spawn hook and no retire hook.
+  // The hook creates remote state and a local key, then fails. Compensation has
+  // nothing to run, so it reports nothing wrong — and the clean-rollback path
+  // deleted the home, taking the only key that could ever reach the remote state.
+  // Silence from a capability that declares no cleanup is not evidence of a clean
+  // rollback.
+  const remote = join(base, "remote-identity");
+  capability(repo, "chan", {
+    capability: "acme.chan",
+    hooks: { spawn: { command: "hook.mjs spawn", required: true } },
+  }, {
+    "hook.mjs": `import {writeFileSync} from 'node:fs';
+import {join} from 'node:path';
+writeFileSync(${JSON.stringify(remote)}, 'joined');
+writeFileSync(join(process.env.OAS_HOME, 'identity.key'), 'key');
+console.log(JSON.stringify({ meta: { alias: 'probe' } }));
+process.exit(1);`,
+  });
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.chan:\n      global: true\n");
+  const oldPath = process.env.PATH; process.env.PATH = fakeRuntimes(base);
+  const home = join(root, "dev", "instances", "dev-nocomp");
+  try {
+    assert.throws(
+      () => spawnInstance(root, findAgent(root, "dev"), { instance: "dev-nocomp", launch: false }),
+      (e) => e.code === "E_REQUIRED_HOOK_FAILED" && /RETAINED/.test(e.message),
+      "a rollback that could not compensate must not report a clean one",
+    );
+    assert.equal(existsSync(join(home, "identity.key")), true, "the key the hook wrote survives");
+    assert.equal(existsSync(remote), true, "and so does the remote state it created");
+    const marker = JSON.parse(readFileSync(join(home, ".oas-rollback-incomplete.json"), "utf8"));
+    assert.deepEqual(marker.cleanup.outstanding.hooks, ["acme.chan"], "which is recorded as outstanding");
+
+    // A retry cannot fix this — there is no hook to run — so it must keep saying
+    // so, and point at the only exit rather than quietly clearing.
+    const r = retireInstance(root, "dev-nocomp", { tmuxSession: "oas-test-nosuch" });
+    assert.ok(r.rollbackIncomplete?.some((f) => /declares no retire hook/.test(f)),
+      `the reason must name the real situation, got ${JSON.stringify(r.rollbackIncomplete)}`);
+    assert.equal(existsSync(join(home, "identity.key")), true, "nothing was destroyed on the retry either");
+
+    const f = retireInstance(root, "dev-nocomp", { tmuxSession: "oas-test-nosuch", force: true });
+    assert.ok(f.forcedIncomplete?.length, "and --force reports what the operator now owns");
+    assert.equal(existsSync(home), false);
+    assert.equal(existsSync(remote), true, "the remote state is still theirs to clean up");
   } finally { process.env.PATH = oldPath; }
   rmSync(base, { recursive: true, force: true });
 });
