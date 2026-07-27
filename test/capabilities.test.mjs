@@ -2836,7 +2836,9 @@ test("the SHIPPED aweb hook is fatal on every terminal pre-mint path (reviewer-5
   // past the root check and reaches team resolution — the paths that used to
   // warn-and-exit-0 while minting nothing.
   const bin = join(base, "bin"); mkdirSync(bin, { recursive: true });
-  write(join(bin, "aw"), `#!/bin/sh\nif [ "$1" = "team" ] && [ "$2" = "list" ]; then echo '{"teams":[],"active_team":null}'; exit 0; fi\nexit 0\n`);
+  // CURRENT aw shape: memberships, not teams. Using the stale key here is what
+  // let a real field drift pass review (reviewer-602627c).
+  write(join(bin, "aw"), `#!/bin/sh\nif [ "$1" = "team" ] && [ "$2" = "list" ]; then echo '{"memberships":[],"active_team":null}'; exit 0; fi\nexit 0\n`);
   execFileSync("chmod", ["+x", join(bin, "aw")]);
   const root = join(base, "awroot"); mkdirSync(join(root, ".aw"), { recursive: true });
   const run = (env) => spawnSync(process.execPath, [hook, "spawn"], {
@@ -2907,5 +2909,56 @@ console.log(JSON.stringify({ meta: { retired: false, reason: 'nothing-to-delete'
       "nothing to undo is completion, not failure",
     );
   } finally { process.env.PATH = oldPath; }
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("a name-only team config resolves against the CURRENT aw memberships shape (reviewer-602627c)", () => {
+  const base = temp();
+  const hook = resolve(new URL("../capabilities/oas-aweb/bin/oas-aweb.mjs", import.meta.url).pathname);
+  const bin = join(base, "bin"); mkdirSync(bin, { recursive: true });
+  // A real membership exists under `memberships`. Reading only `teams` here
+  // classified it as "no membership" — and since that path is now fatal, it
+  // would block every spawn on a perfectly valid deployment.
+  write(join(bin, "aw"), `#!/bin/sh
+if [ "$1" = "team" ] && [ "$2" = "list" ]; then echo '{"active_team":"default:acme.aweb.ai","memberships":[{"team_id":"default:acme.aweb.ai","alias":"x"}]}'; exit 0; fi
+if [ "$1" = "team" ] && [ "$2" = "invite" ]; then echo '{"token":"tok"}'; exit 0; fi
+if [ "$1" = "team" ] && [ "$2" = "join" ]; then echo '{"team_id":"default:acme.aweb.ai","alias":"probe"}'; exit 0; fi
+exit 0
+`);
+  execFileSync("chmod", ["+x", join(bin, "aw")]);
+  const root = join(base, "awroot"); mkdirSync(join(root, ".aw"), { recursive: true });
+  const r = spawnSync(process.execPath, [hook, "spawn"], {
+    encoding: "utf8",
+    env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, OAS_EVENT: "spawn", OAS_INSTANCE: "probe", OAS_HOME: root, OAS_WORKSPACE: root, OAS_CONTEXT: root, OAS_TEAM_SCOPE: root, OAS_TEAM_NAME: "default", OAS_TEAM_ID: "" },
+  });
+  assert.equal(r.status, 0, `a resolvable name-only team must succeed, got ${r.status}: ${r.stdout} ${r.stderr}`);
+  assert.match(r.stdout, /"alias":"probe"/);
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("an alias minted with no local key is incomplete cleanup, not 'nothing to delete'", () => {
+  const base = temp();
+  const hook = resolve(new URL("../capabilities/oas-aweb/bin/oas-aweb.mjs", import.meta.url).pathname);
+  const bin = join(base, "bin"); mkdirSync(bin, { recursive: true });
+  write(join(bin, "aw"), "#!/bin/sh\nexit 0\n");
+  execFileSync("chmod", ["+x", join(bin, "aw")]);
+  const homeDir = join(base, "home"); mkdirSync(homeDir, { recursive: true });   // no .aw
+  const r = spawnSync(process.execPath, [hook, "retire"], {
+    encoding: "utf8",
+    env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, OAS_EVENT: "retire", OAS_INSTANCE: "probe", OAS_HOME: homeDir, OAS_META: JSON.stringify({ alias: "probe", team: "default:acme.aweb.ai" }) },
+  });
+  // The remote record exists and its key is gone: the self-delete cannot be
+  // authenticated, so this must NOT read as a vacuous no-op.
+  assert.notEqual(r.status, 0, `missing key must be incomplete, got ${r.status}: ${r.stdout}`);
+  assert.match(r.stdout, /no-local-identity-key/);
+  assert.doesNotMatch(r.stdout, /nothing-to-delete/);
+
+  // …while a retire with no alias at all genuinely has nothing to undo.
+  const noAlias = spawnSync(process.execPath, [hook, "retire"], {
+    encoding: "utf8",
+    env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, OAS_EVENT: "retire", OAS_INSTANCE: "probe", OAS_HOME: homeDir, OAS_META: "{}" },
+  });
+  assert.equal(noAlias.status, 0);
+  assert.match(noAlias.stdout, /nothing-to-delete/);
   rmSync(base, { recursive: true, force: true });
 });

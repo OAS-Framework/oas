@@ -88,6 +88,14 @@ function awebRoot() {
   return undefined;
 }
 
+/** Team memberships from `aw team list --json`. The current CLI returns
+ * `memberships`; older output used `teams`. Spawn resolution and `oas aweb
+ * setup` MUST read this the same way — they drifted once, and because spawn
+ * treats "no matching membership" as fatal, the stale reader turned every
+ * name-only team config into a blocked spawn (reviewer-602627c). */
+const teamMemberships = (listed) => listed?.memberships || listed?.teams || [];
+const teamIdsOf = (listed) => teamMemberships(listed).map((m) => m.team_id || m.id || m);
+
 const AW_INSTALL = "install the aw CLI first — see https://aweb.ai/docs (or `oas aweb setup` for guided onboarding)";
 const isCommand = ["roster", "setup"].includes(event);
 try { sh("command -v aw"); } catch {
@@ -112,7 +120,7 @@ if (event === "spawn") {
     // A bare team name (no namespace) resolves against the root's memberships.
     if (!team.includes(":")) {
       const teams = JSON.parse(sh("aw team list --json", root));
-      const match = (teams.teams || []).map((t) => t.team_id || t.id || t).filter((tid) => String(tid).startsWith(`${team}:`));
+      const match = teamIdsOf(teams).filter((tid) => String(tid).startsWith(`${team}:`));
       if (match.length === 1) team = match[0];
       else if (match.length > 1) fatal(`team name "${team}" is ambiguous at ${root}: ${match.join(", ")}, so no identity could be minted — set team.id in oas-config.yaml`);
       else fatal(`no membership matching team "${team}" at ${root}, so no identity could be minted — join or create it first (aweb-team-membership skill), or set team.id`);
@@ -152,7 +160,14 @@ if (event === "spawn") {
   }
 } else if (event === "retire") {
   const meta = JSON.parse(process.env.OAS_META || "{}");
-  if (!meta.alias || !existsSync(join(home, ".aw"))) out({ meta: { retired: false, reason: "nothing-to-delete" } });
+  // No alias means the spawn hook never reported an identity: nothing exists to
+  // undo, which is completion. An alias WITH no local `.aw` is the opposite —
+  // the remote record exists and its key is gone, so the self-delete cannot be
+  // authenticated and the cleanup is incomplete, not vacuous (reviewer-602627c).
+  if (!meta.alias) out({ meta: { retired: false, reason: "nothing-to-delete" } });
+  if (!existsSync(join(home, ".aw"))) {
+    out({ meta: { retired: false, reason: "no-local-identity-key" }, warning: `oas-aweb: alias "${meta.alias}" was minted but ${join(home, ".aw")} is gone, so the remote record cannot be self-deleted and will linger until stale` }, 1);
+  }
   try {
     // Self-delete from inside the home, authenticated by its own key — a remote
     // delete would 409 until the server marks the workspace stale.
@@ -202,9 +217,8 @@ if (event === "spawn") {
   }
   let teams = { memberships: [] };
   try { teams = JSON.parse(sh("aw team list --json", scope)); } catch { /* fall through */ }
-  const memberships = teams.memberships || teams.teams || [];
   const want = teamId || teamName;
-  const match = memberships.map((m) => m.team_id || m.id || m).find((tid) => String(tid) === want || String(tid).startsWith(`${want}:`));
+  const match = teamIdsOf(teams).find((tid) => String(tid) === want || String(tid).startsWith(`${want}:`));
   if (match) {
     console.log(`✓ aweb workspace initialized and member of ${match}.`);
     if (teams.active_team && teams.active_team !== match) console.log(`  Note: active team is ${teams.active_team}; instances join ${match} explicitly, but consider \`aw team switch ${match}\`.`);
