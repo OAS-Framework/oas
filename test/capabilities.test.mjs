@@ -3666,7 +3666,10 @@ test("a REAL spawned packaged reviewer gets the boundary and keeps its own repor
 // stay knowledge-provider-neutral: prescribing that protocol unconditionally
 // tells those instances to use machinery they do not have, or that their own
 // instructions forbid (reviewer-focus-b512782).
-const KNOWLEDGE_PROTOCOL = /`notes\/`|okf harvest|the harvester promotes/i;
+// PRESCRIPTION, not mention: naming "harvesters" as a kind of service agent is
+// fine; telling an instance to write `notes/`, run a harvest, or promising how
+// its promotions are delivered is what only the knowledge layer may do.
+const KNOWLEDGE_PROTOCOL = /notes\/|okf harvest|memory promotion|harvester(,? which| that)? promot|promot\w* (it |them |your learnings )?(in)?to (its|your|the) soul|knowledge (promotion|updates) (arrive|are delivered)/i;
 
 test("kernel-composed blocks never prescribe a knowledge protocol they cannot guarantee (reviewer-focus-b512782)", () => {
   const base = temp();
@@ -3709,20 +3712,56 @@ test("with the knowledge layer active, ONE block owns the protocol (reviewer-foc
   // Persistent + worktree + OKF: the combination the earlier local-only test
   // could not reach. The knowledge block prescribes the protocol; the kernel
   // boundary defers to it and speaks only about ASSIGNED soul work.
+  // Count OWNING BLOCKS, not matches in flattened prose: "at least one match"
+  // passed while a second block carried its own competing rule (the workspace
+  // briefing's "Memory promotion writes there, on a branch, delivered as a PR")
+  // — which the old narrow regex could not even see (reviewer-focus-d357cee).
+  const owners = (mode, kind) => composeInstanceAgentsMd(soulDir, repo, "dev", mode, kind)
+    .blocks.filter((b) => KNOWLEDGE_PROTOCOL.test(b.content)).map((b) => b.source);
+  for (const mode of ["worktree", "checkout", "attached", "workspace"]) {
+    for (const kind of [undefined, "local"]) {
+      assert.deepEqual(owners(mode, kind), ["capability:oas.okf"],
+        `${mode}/${kind}: exactly one block may own the knowledge protocol`);
+    }
+    // Capability service agents suppress the knowledge layer by design, so NO
+    // block may carry it — the shipped reviewer is told not to write notes at all.
+    assert.deepEqual(owners(mode, "capability"), [],
+      `${mode}/capability: the suppressed layer must leave nothing behind`);
+  }
   const text = flat(composeInstanceAgentsMd(soulDir, repo, "dev", "worktree").text);
-  assert.match(text, KNOWLEDGE_PROTOCOL, "the knowledge layer supplies the protocol");
   assert.ok(text.includes(flat("How your own learnings reach your soul is your knowledge layer's business")),
     "and the boundary defers rather than competing with it");
   assert.ok(text.includes(flat("If your TASK is to change soul content that lives in this repository")),
     "assigned soul-maintenance work is distinguished from promotion of learnings");
-
-  // Capability service agent: the knowledge layer is suppressed by design, so
-  // the protocol must not reach it from ANY block.
-  const cap = flat(composeInstanceAgentsMd(soulDir, repo, "dev", "attached", "capability").text);
-  assert.doesNotMatch(cap, KNOWLEDGE_PROTOCOL,
-    "a capability agent's knowledge layer is suppressed — nothing may prescribe notes//harvest to it");
-  for (const must of BOUNDARY_MUST_SAY) assert.ok(cap.includes(flat(must)), `capability: must still say ${JSON.stringify(must)}`);
+  for (const must of BOUNDARY_MUST_SAY) {
+    assert.ok(flat(composeInstanceAgentsMd(soulDir, repo, "dev", "attached", "capability").text).includes(flat(must)),
+      `capability: must still say ${JSON.stringify(must)}`);
+  }
   rmSync(base, { recursive: true, force: true });
+});
+
+test("every harvest spawn path briefs its own custody-specific finish (reviewer-focus-d357cee)", () => {
+  // The harvester's soul and skill accompany ALL THREE spawn paths, so neither
+  // may mandate a finish: oas-okf.mjs briefs a shared-tree commit, a worktree
+  // plus PR, or a direct edit with nothing to commit. Two of three harvesters
+  // were reading instructions that did not describe their situation.
+  const okf = resolve(new URL("../capabilities/oas-okf", import.meta.url).pathname);
+  const soul = readFileSync(join(okf, "agents", "memory-harvest.md"), "utf8");
+  const skill = readFileSync(join(okf, "skills", "memory-harvest", "SKILL.md"), "utf8");
+  for (const [what, text] of [["soul", soul], ["skill", skill]]) {
+    assert.match(text, /briefing|TASK\.md/i, `the ${what} must defer to the briefing`);
+    assert.doesNotMatch(flat(text), /then commit on the shared work tree and retire|commit once with a `memory-harvest:` prefix, then/i,
+      `the ${what} must not mandate ONE finish for three custodies`);
+  }
+  // And the skill must actually describe all three deliveries.
+  for (const delivery of ["Attached to the source work tree", "Worktree of the soul's home repo", "Uncommitted local soul"]) {
+    assert.ok(skill.includes(delivery), `the skill must describe the "${delivery}" path`);
+  }
+  // Each briefing the spawner emits states its own finish.
+  const bin = readFileSync(join(okf, "bin", "oas-okf.mjs"), "utf8");
+  assert.match(bin, /Do NOT merge it/, "workspace path briefs PR delivery");
+  assert.match(bin, /commit your promotions there as a single commit/, "attached path briefs the shared-tree commit");
+  rmSync(join(okf, "..", "..", "nonexistent-cleanup-noop"), { recursive: true, force: true });
 });
 
 test("no shipped instructional surface teaches settling in the work tree (maintainer contract)", () => {

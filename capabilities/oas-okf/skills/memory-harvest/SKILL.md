@@ -3,11 +3,11 @@ name: memory-harvest
 description: >-
   Protocol for the memory-harvest agent: promote a live instance's pending
   notes into its soul — knowledge concepts into the right bundle sections,
-  procedure-shaped notes into soul skills (new or maintained) — then commit
-  on the shared work tree and retire. Use when you are a memory-harvest
-  instance, or when manually promoting notes/ into a soul. Covers the
-  promote/merge/drop decision, knowledge-vs-skill routing, index and log
-  discipline, and the harvest commit.
+  procedure-shaped notes into soul skills (new or maintained) — then deliver
+  the way the briefing's custody requires and retire. Use when you are a
+  memory-harvest instance, or when manually promoting notes/ into a soul.
+  Covers the promote/merge/drop decision, knowledge-vs-skill routing, index and
+  log discipline, and the three delivery paths.
 ---
 
 # Memory harvest — promoting notes into the soul

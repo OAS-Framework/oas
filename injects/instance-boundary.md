@@ -11,8 +11,8 @@ root, and not the work tree. Anything that says "your home" means this directory
   state your role keeps — your knowledge layer names those files, if you have
   one. They belong here, not in the work tree.
 - **Run `aw` and OAS operational/lifecycle commands from instance home** —
-  `oas status`, `oas doctor`, `oas spawn`, `oas retire`, every `aw mail`/`aw
-  chat`, and any other `oas` subcommand your capabilities add. They resolve
+  `oas status`, `oas doctor`, `oas spawn`, `oas retire`, and the commands your
+  own capabilities add — a messaging layer's, a knowledge layer's. They resolve
   their scope from the directory you run
   them in, so running them from the work tree points them at the wrong
   deployment. To act on a different package or config scope deliberately, pass

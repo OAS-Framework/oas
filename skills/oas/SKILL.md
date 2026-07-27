@@ -40,8 +40,8 @@ oas status --team [--json]   # whole-team roster when config declares team: (all
 # cross-machine view: aweb team members, where OAS aliases are instance names
 oas create <name> [--description ...] [--type <agent-type>] [--repo ...] [--work worktree|checkout|attached|workspace]
 # workspace mode = cross-repo coordinator: ./work is the whole team scope; read
-# all member repos, edit none; soul knowledge updates arrive as PRs to the
-# soul's home repo via `oas okf harvest`
+# all member repos, edit none; if a knowledge layer is active, IT defines how
+# soul updates are delivered (see that capability's own instructions)
 oas spawn <agent> [--task ...] [--purpose ...] [--relation child|sibling|parent|unrelated --relative-to <instance>] [--parent <instance>] [--no-launch] [--json]
 # lineage is explicit: agents spawning sub-agents declare their RELATION to the
 # new instance with --relation + --relative-to (--parent X is sugar for

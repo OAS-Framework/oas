@@ -1,10 +1,11 @@
 ## Review discipline: oas.review
 
-**After every substantive commit, launch BOTH service agents — always, as a
-pair:**
+**After every substantive commit, launch the reviewer** — and, when you have a
+knowledge layer, its promotion step alongside (this deployment's is `oas.okf`;
+skip that line if you have none):
 
 ```bash
-oas okf harvest    # promote your pending notes into your soul
+oas okf harvest    # knowledge layer: promote your pending notes into your soul
 oas spawn reviewer --work attached --work-dir "$PWD/work" \
   --purpose "<short-sha>" \
   --task "Review commit <sha> on branch <branch>. Report to <your-instance> per your operating loop."
@@ -14,8 +15,10 @@ oas spawn reviewer --work attached --work-dir "$PWD/work" \
   instance name (`reviewer-<short-sha>`); attached mode shares your work tree
   and automatically makes the reviewer your child (attached agents are always
   children of the work-tree owner — no relation flags needed or allowed).
-- The reviewer reviews **that commit's diff only** and reports back **by aweb
-  mail** to you (verdict `APPROVE` / `APPROVE WITH NITS` / `NEEDS CHANGES`).
+- The reviewer reviews **that commit's diff only** and reports its verdict back
+  to you over your deployment's messaging layer — aweb mail here (verdict
+  `APPROVE` / `APPROVE WITH NITS` / `NEEDS CHANGES`). With no messaging layer
+  active, a reviewer has no way to reach you: check its window yourself.
   Do not wait actively: finish your turn and go idle — the aweb channel
   awakens you when the mail arrives. `NEEDS CHANGES` means fix, commit, and
   re-review before the work is ready.
