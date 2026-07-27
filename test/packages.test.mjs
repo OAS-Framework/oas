@@ -1611,3 +1611,20 @@ test("an already-installed pi package is not raised, across a version selector",
     "PI_CODING_AGENT_DIR relocates the settings file");
   for (const d of [base, home, relocated]) rmSync(d, { recursive: true, force: true });
 });
+
+test("naming a requirement with --accept-requirement overrides runtime scoping (reviewer-ad1b9f0)", () => {
+  const base = temp();
+  // Claude-only souls: scoping correctly hides the pi requirement by default…
+  const repo = runtimeScopeFixture(base, { reviewer: "claude" });
+  const env = noPiPackages();
+  assert.equal(aggregateMissingRequirements([repo], { env }).some((m) => m.kind === "runtime-package"), false,
+    "not raised unprompted on a Claude-only host");
+  // …but `--runtime pi` at spawn emits `oas install --accept-requirement pi:…`,
+  // and that command must actually have something to install, or the remedy we
+  // printed is a no-op and the retry fails identically.
+  const named = aggregateMissingRequirements([repo], { env, accepted: new Set(["pi:npm:@awebai/pi"]) });
+  const req = named.find((m) => m.command === "pi:npm:@awebai/pi");
+  assert.ok(req, "explicitly naming the requirement surfaces it for install");
+  assert.deepEqual(req.plan.argv, ["pi", "install", "npm:@awebai/pi@latest"]);
+  rmSync(base, { recursive: true, force: true });
+});

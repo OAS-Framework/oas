@@ -90,21 +90,29 @@ an inherited slot and remains distinct from absence.
    files, hooks, capability metadata, and forward-only spawn lineage in
    `instance.json`.
 
-Pi launches in strict mode: `--no-skills --skill
-<instance-home>/.agents/skills --no-extensions --no-context-files
---no-prompt-templates --append-system-prompt <instance-home>/AGENTS.md`. The
-instance sees exactly the composed set and nothing ambient.
+Pi launches with `--no-skills --skill <instance-home>/.agents/skills
+--no-context-files --no-prompt-templates --append-system-prompt
+<instance-home>/AGENTS.md`. The instance's skill set is exactly the composed
+one: no user, project, ancestor or package skill catalogs.
 
-`--no-extensions` is required alongside `--no-skills`, because an extension's
-`resources_discover` hook contributes skill paths that survive skill-discovery
-suppression. Selected extensions return by explicit `-e <path>`, resolved from
-the runtime-package requirements that active capabilities declare (see
-[capabilities](capabilities.md)); a required package that is not installed
-fails the spawn with the consent command to fix it, rather than launching an
-instance whose capability silently vanished. `--no-context-files` also
-suppresses the instance's *own* composed `AGENTS.md`, so that is delivered
-explicitly; the work tree's `AGENTS.md` stays readable by the file tools —
-readable, not auto-injected.
+`--no-context-files` also suppresses the instance's *own* composed `AGENTS.md`,
+so that is delivered explicitly; the work tree's `AGENTS.md` stays readable by
+the file tools — readable, not auto-injected.
+
+Pi **extensions stay ambient**: operators run cross-agent extensions (web
+search, output formatting) that every instance should keep, so OAS does not
+pass `--no-extensions`. The accepted residue is narrow but real — an
+extension's `resources_discover` hook can contribute skill paths that survive
+`--no-skills`. Today only the OAS bridge does that, and inside an instance it
+contributes that instance's own `.agents/skills`, leaving the composed set
+unchanged.
+
+Runtime packages that active capabilities declare (see
+[capabilities](capabilities.md)) are verified at spawn and recorded in
+`instance.json`; a missing one fails the spawn with the consent command to fix
+it, rather than starting an agent whose instructions promise a capability it
+does not have. OAS does not resolve their extension entry points — pi owns that
+resolution, including globs and conventional directories.
 
 Claude discovers the same set natively through the instance's `.claude/skills`
 symlink. Claude Code resolves project skills from the working directory up to

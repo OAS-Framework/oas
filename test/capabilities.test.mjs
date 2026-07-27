@@ -158,8 +158,11 @@ test("pi and Claude instances receive the same exact local skills and generated 
         // ambient-coexistence decision.)
         assert.match(meta.command, /--skill /);
         assert.match(meta.command, /--no-skills/);
-        assert.match(meta.command, /--no-extensions/);
         assert.match(meta.command, /--no-context-files/);
+        // Extensions stay AMBIENT by founder ruling: operators run cross-agent
+        // pi extensions (web search, formatting) that every instance keeps.
+        assert.doesNotMatch(meta.command, /--no-extensions/);
+        assert.doesNotMatch(meta.command, / -e /);
         assert.match(meta.command, /--append-system-prompt/);
       }
       else assert.doesNotMatch(meta.command, /CLAUDE_CONFIG_DIR/);
@@ -2405,7 +2408,8 @@ test("spawn fails closed when a capability's runtime package is missing, even af
   rmSync(base, { recursive: true, force: true });
 });
 
-test("a resolved runtime extension is passed by path and recorded with provenance", () => {
+
+test("a required runtime package is verified and recorded, and pi loads it through its own discovery", () => {
   const base = temp();
   const { repo, root } = fixtureSoul(base, "pi");
   capability(repo, "chan", {
@@ -2413,26 +2417,24 @@ test("a resolved runtime extension is passed by path and recorded with provenanc
     requires: [{ runtime: "pi", package: "npm:fake-channel", why: "channel extension" }],
   });
   write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.chan:\n      global: true\n");
-  // A relocated pi install (PI_CODING_AGENT_DIR / PI_PACKAGE_DIR are supported)
-  // holding the package, its settings entry, and its declared extension file.
+  // A relocated pi config dir (PI_CODING_AGENT_DIR) holding the package entry.
   const piDir = join(base, "pi-agent");
-  write(join(piDir, "settings.json"), JSON.stringify({ packages: ["npm:fake-channel"] }));
-  const pkgDir = join(piDir, "npm", "node_modules", "fake-channel");
-  write(join(pkgDir, "package.json"), JSON.stringify({ name: "fake-channel", pi: { extensions: ["./dist/index.js"] } }));
-  write(join(pkgDir, "dist", "index.js"), "export default () => {};\n");
+  write(join(piDir, "settings.json"), JSON.stringify({ packages: ["npm:fake-channel@1.2.3"] }));
   const oldPath = process.env.PATH; process.env.PATH = fakeRuntimes(base);
   const oldPi = process.env.PI_CODING_AGENT_DIR; process.env.PI_CODING_AGENT_DIR = piDir;
   try {
     const r = spawnInstance(root, findAgent(root, "dev"), { instance: "dev-ext", launch: false });
-    // Ambient discovery off, the selected extension back by explicit path.
-    assert.match(r.command, /--no-extensions/);
-    assert.match(r.command, new RegExp(`-e '${join(pkgDir, "dist", "index.js")}'`));
+    // We do NOT name extensions on the command line: pi resolves them itself
+    // (its manifest supports globs and conventional directories), and passing
+    // them too would load the same extension twice.
+    assert.doesNotMatch(r.command, / -e /);
+    assert.doesNotMatch(r.command, /--no-extensions/);
     const meta = JSON.parse(readFileSync(join(r.home, "instance.json"), "utf8"));
-    const ext = meta.composition.materialized.runtimeExtensions;
-    assert.equal(ext.length, 1, "recorded once");
-    assert.equal(ext[0].capability, "acme.chan");
-    assert.equal(ext[0].package, "npm:fake-channel");
-    assert.equal(ext[0].path, join(pkgDir, "dist", "index.js"), "provenance records the exact file, not just a settings row");
+    const pkgs = meta.composition.materialized.runtimePackages;
+    assert.equal(pkgs.length, 1);
+    assert.equal(pkgs[0].capability, "acme.chan");
+    assert.equal(pkgs[0].package, "npm:fake-channel");
+    assert.equal(pkgs[0].loadedBy, "runtime-discovery", "provenance says how it reaches the session");
     retireInstance(root, "dev-ext", { tmuxSession: "oas-test-nosuch" });
   } finally {
     process.env.PATH = oldPath;
@@ -2441,7 +2443,7 @@ test("a resolved runtime extension is passed by path and recorded with provenanc
   rmSync(base, { recursive: true, force: true });
 });
 
-test("a declared extension that does not resolve refuses the launch rather than dropping it", () => {
+test("PI_PACKAGE_DIR pointing elsewhere does not break detection (reviewer-ad1b9f0)", () => {
   const base = temp();
   const { repo, root } = fixtureSoul(base, "pi");
   capability(repo, "chan", {
@@ -2451,19 +2453,19 @@ test("a declared extension that does not resolve refuses the launch rather than 
   write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.chan:\n      global: true\n");
   const piDir = join(base, "pi-agent");
   write(join(piDir, "settings.json"), JSON.stringify({ packages: ["npm:fake-channel"] }));
-  const pkgDir = join(piDir, "npm", "node_modules", "fake-channel");
-  // Declares an entry point it does not ship.
-  write(join(pkgDir, "package.json"), JSON.stringify({ name: "fake-channel", pi: { extensions: ["./dist/index.js"] } }));
   const oldPath = process.env.PATH; process.env.PATH = fakeRuntimes(base);
   const oldPi = process.env.PI_CODING_AGENT_DIR; process.env.PI_CODING_AGENT_DIR = piDir;
+  const oldPkg = process.env.PI_PACKAGE_DIR; process.env.PI_PACKAGE_DIR = join(base, "nix-store-elsewhere");
   try {
-    assert.throws(
-      () => spawnInstance(root, findAgent(root, "dev"), { instance: "dev-badext", launch: false }),
-      (e) => e.code === "E_RUNTIME_RESOURCE_MISSING" && /declares extension ".\/dist\/index\.js" which does not resolve/.test(e.message),
-    );
+    // PI_PACKAGE_DIR is pi's own asset dir, not `pi install` output. Detection
+    // must key off the agent dir alone, or a Nix/Guix-style host fails every spawn.
+    const r = spawnInstance(root, findAgent(root, "dev"), { instance: "dev-nix", launch: false });
+    assert.ok(existsSync(join(r.home, "instance.json")));
+    retireInstance(root, "dev-nix", { tmuxSession: "oas-test-nosuch" });
   } finally {
     process.env.PATH = oldPath;
     if (oldPi === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = oldPi;
+    if (oldPkg === undefined) delete process.env.PI_PACKAGE_DIR; else process.env.PI_PACKAGE_DIR = oldPkg;
   }
   rmSync(base, { recursive: true, force: true });
 });

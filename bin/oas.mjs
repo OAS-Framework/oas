@@ -935,7 +935,9 @@ function requirementsGate(scopes) {
   // Malformed repeatable flags are usage errors regardless of which branch
   // runs — validate up front so --no-requirements cannot mask them.
   const accepted = new Set(flagAll("accept-requirement"));
-  const missing = aggregateMissingRequirements(scopes);
+  // Explicitly named requirements bypass runtime scoping, so the remediation
+  // command a failed spawn prints actually installs something.
+  const missing = aggregateMissingRequirements(scopes, { accepted });
   if (!missing.length) return [];
   const note = (msg) => (JSON_MODE ? console.error(msg) : console.log(msg));
   const entryOf = (req, outcome, extra = {}) => ({
