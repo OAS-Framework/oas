@@ -1,9 +1,9 @@
 ---
 type: Lesson
-title: Recursive symlink containment walkers must not swallow security throws
-description: A symlink-containment walker that recurses through contained link targets must narrow lstat probe try/catch blocks so path-escape errors thrown by deeper recursion fail closed instead of being silently swallowed.
+title: Resource tree symlink containment must recurse and fail closed
+description: Resource containment must recurse through contained directory symlinks with a visited realpath set, validate every descendant link under both skill and capability-agent trees, and let deeper path-escape errors propagate.
 tags: [security, symlinks, containment, testing]
-timestamp: 2026-07-26
+timestamp: 2026-07-27
 ---
 
 # Swallowed security throws in recursive walkers
@@ -14,7 +14,10 @@ directory contained another symlink that escaped the containment boundary. The
 lexical walk visited `vendor/dep` with dependency context lost and skipped it.
 
 The first fix was to recurse through contained directory-link targets while
-preserving dependency context, with a realpath visited set for loops. The test
+preserving dependency context, with a realpath visited set for loops. Apply that
+same traversal to every package resource tree before trusting or exposing it:
+skill trees and capability-agent soul directories both need descendant target
+validation before the runtime reads `soul.yaml` or exposes `_soulDir`. The test
 still failed because the recursion sat inside a broad probe guard:
 
 ```js

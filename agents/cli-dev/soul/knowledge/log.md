@@ -1,6 +1,8 @@
 # Knowledge Log
 
 ## 2026-07-27
+* **Update**: [final-package-lifecycle-transaction-invariants](/lessons/final-package-lifecycle-transaction-invariants.md) records that post-commit convenience metadata such as package `.gitignore` maintenance must be best-effort because the lock and store are authoritative.
+* **Update**: [symlink-containment-walker-throws](/lessons/symlink-containment-walker-throws.md) merges reviewer-06f1160's resource-tree containment lesson: recurse through contained directory links with a visited realpath set and apply descendant-target validation to skill and capability-agent soul trees.
 * **Creation**: [final-package-lifecycle-transaction-invariants](/lessons/final-package-lifecycle-transaction-invariants.md) records final package lifecycle transaction invariants for no-op acquisition trust binding, target-scope removal rollback, and catalog selector preservation.
 
 ## 2026-07-26
