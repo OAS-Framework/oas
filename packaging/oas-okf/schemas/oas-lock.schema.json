@@ -36,7 +36,7 @@
             ],
             "properties": {
               "source": {
-                "description": "Normalized acquisition source: git:<url>@<ref>, path:<dir>, or catalog:<id>@<selector> (official catalog resolution is recorded but grants no executable trust).",
+                "description": "Normalized acquisition source: git:<url>@<ref>, path:<dir>, catalog:<id> for an originally bare catalog request, or catalog:<id>@<selector> for an originally explicit selector (the resolved commit is separate; official catalog identity grants no executable trust).",
                 "type": "string",
                 "pattern": "^(git:|path:|catalog:).+"
               },
