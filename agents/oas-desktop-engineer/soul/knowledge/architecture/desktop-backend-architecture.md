@@ -3,7 +3,7 @@ type: Concept
 title: Desktop backend architecture — zero-dependency localhost server bundled in the app
 description: The desktop backend is a zero-dependency node:http server on 127.0.0.1 bundled at packages/desktop/server/, spawned by the Electron main process, serving the /api surface to the desktop renderer (its only client) and reusing app-owned deployment reads plus tmux as its main seams to the agents.
 tags: [desktop, backend, architecture, http, tmux]
-timestamp: 2026-07-24
+timestamp: 2026-07-27
 ---
 
 # Shape
@@ -16,9 +16,9 @@ The backend lives in `packages/desktop/server/` (migrated from the retired
   repeatable `--dir <ws>` are still honored. Endpoints:
   - `GET /api/panel?ws=<id>` — roster JSON per workspace.
   - `POST /api/spawn` — validates the selected workspace root and agent before
-    crossing the OAS mutation boundary; until the compatible CLI adapter lands,
-    valid mutation requests degrade with a stable `cli-unavailable` 503 (see
-    [spawn endpoint](/architecture/spawn-endpoint.md)).
+    crossing the installed-CLI mutation boundary; when no compatible installed
+    `oas` binary is discovered, valid mutation requests degrade with a stable
+    `cli-unavailable` 503 (see [spawn endpoint](/architecture/spawn-endpoint.md)).
   - `GET /api/brain/<agent>?ws=<id>` — returns soul artifact paths, package-level
     capability-agent skills, and workspace-scoped running-state for the desktop
     brain view while resolving agent names through deployment-reader lookup seams
@@ -73,9 +73,10 @@ The backend lives in `packages/desktop/server/` (migrated from the retired
 
 - **OAS mutations**: operational mutations belong behind a compatible installed
   `oas ... --json` CLI. The deployment reader is read-only; `spawnInstance` did
-  not move into it. Until the CLI adapter lands, mutation-capable routes preserve
-  validation first and then degrade with stable `cli-unavailable` 503 responses
-  instead of reintroducing a direct-core bridge.
+  not move into it. Mutation-capable routes preserve validation first, then use
+  the shipped CLI adapter; when no compatible installed `oas` binary is
+  discovered, they degrade with stable `cli-unavailable` 503 responses instead
+  of reintroducing a direct-core bridge.
 - **Session view + input**: tmux only — `capture-pane` to read and raw
   `/api/keys` delivery through `send-keys` / `paste-buffer` to write. The
   terminal's own input line is the sole input surface; do not reintroduce a

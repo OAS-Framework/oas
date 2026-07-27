@@ -1,6 +1,7 @@
 # Knowledge Log
 
 ## 2026-07-27
+* **Update**: merged the stale pre-adapter phrasing follow-up from the oas-desktop-engineer-claude-code-spawn notes into [desktop deployment reader](/architecture/desktop-deployment-reader.md), [desktop backend architecture](/architecture/desktop-backend-architecture.md), and [desktop panel decisions](/references/desktop-panel-decisions.md): `cli-unavailable` now means no compatible installed `oas` CLI was discovered after the shipped CLI adapter boundary, not an interim pre-adapter state.
 * **Update**: merged the per-modal async fill race from the oas-desktop-engineer-claude-code-spawn notes into [Guard async render completions on both success and error paths](/lessons/guard-both-completion-paths.md): per-modal tokens are too coarse for repeated fills inside one modal; each fill request needs its own monotonic generation and out-of-order deferred-response regression.
 * **Creation**: promoted [Command-running routes must be POST + coalesced](/lessons/command-running-get-csrf-fanout.md) from the oas-desktop-engineer-claude-code-spawn notes.
 * **Creation**: promoted [Model selection UI must stay advisory](/lessons/model-selection-advisory-datalist.md) from the oas-desktop-engineer-claude-code-spawn notes.
