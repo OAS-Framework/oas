@@ -31,6 +31,15 @@ test("tag-derived version bumps root, pi, and desktop manifests", () => {
   }
 });
 
+test("release installs root and Desktop test dependencies before npm test", () => {
+  const testStep = yml.slice(yml.indexOf("Test capability resolution and package commands"), yml.indexOf("Sanity-check tarballs"));
+  assert.match(testStep, /npm ci --ignore-scripts/, "fresh release checkout installs root dev dependencies and the pi test binary");
+  assert.match(testStep, /packages\/desktop && ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm ci/, "Desktop test dependencies are installed separately");
+  const testRun = testStep.lastIndexOf("npm test"); // ignore explanatory comment text
+  assert.ok(testStep.indexOf("npm ci --ignore-scripts") < testRun, "root install precedes tests");
+  assert.ok(testStep.indexOf("packages/desktop") < testRun, "Desktop install precedes root discovery of Desktop suites");
+});
+
 test("all build/smoke steps precede npm publication", () => {
   const publishJob = yml.indexOf("publish:\n");
   assert.ok(publishJob > 0);

@@ -88,6 +88,9 @@ jobs:
 
       - name: Test capability resolution and package commands
         run: |
+          # Release checkout is fresh too: root tests need ajv and expose the
+          # dev-installed pi binary through npm's node_modules/.bin PATH.
+          npm ci --ignore-scripts
           npm run check
           # Root `npm test` discovers packages/desktop suites (jsdom/marked
           # imports) — install its dev deps like PR CI does; Electron binary
