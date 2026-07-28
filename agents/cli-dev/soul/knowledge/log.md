@@ -1,6 +1,8 @@
 # Knowledge Log
 
 ## 2026-07-28
+* **Creation**: [public-refs-are-option-injection-vectors](/lessons/public-refs-are-option-injection-vectors.md) records that caller-supplied git refs can be option-injection vectors even in argv-based execFileSync calls, so package acquisition must resolve behind --end-of-options and verify the checked-out hash.
+* **Creation**: [tighten-a-reader-against-its-writer](/lessons/tighten-a-reader-against-its-writer.md) records that strict lock-source readers must round-trip every source the writer can emit, including catalog selectors with additional @ characters.
 * **Creation**: [component-walk-classifies-broken-links](/lessons/component-walk-classifies-broken-links.md) records why full-path existence probes cannot distinguish absent paths from intermediate broken links when path-escape taxonomy depends on component depth.
 * **Creation**: [lock-source-strictness-prevents-reclassification](/lessons/lock-source-strictness-prevents-reclassification.md) records that lock source fields re-parsed into acquisition specs must validate against the writer's exact grammar to prevent kind reclassification.
 * **Creation**: [package-payload-root-contract](/decisions/package-payload-root-contract.md) records the configurable package payload root contract across Git fragments, catalog path fields, local roots, lock path storage, and integrity-drift advancement.
