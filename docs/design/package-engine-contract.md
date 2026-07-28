@@ -64,8 +64,12 @@ that resolves outside the checkout — through a symlink at any depth — and a
 broken link are `path-escape`, decided before any store or lock mutation.
 Installed bytes therefore equal the selected subtree: repository docs, CI
 configuration, owner souls and sibling packages are never installed and never
-reach `integrity`. Our own clone metadata (`.git`) is dropped, so a root
-selection and a subtree selection behave identically.
+reach `integrity`. Root source-control metadata (`.git`) is always stripped on
+acquisition, including direct local roots, so a root selection and a subtree
+selection behave identically. It is **not** an integrity exclusion inside a
+managed artifact: if `.git` bytes later appear in the installed root they are
+ordinary payload drift, invalidate trust, and bare restore removes them before
+any no-op fast path.
 
 One repository may contain several packages selected by different IDs. Because
 the closure dedupe key is *source **and** selected path*, two contained roots

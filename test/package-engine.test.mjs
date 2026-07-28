@@ -349,6 +349,54 @@ test("discovery: two same-scope packages exporting one capability id is an error
 
 // ---------- trust ----------
 
+test("managed artifacts strip root VCS metadata and any later .git bytes invalidate trust until restore repairs them", () => {
+  const base = temp();
+  try {
+    const level = scope(base);
+    const source = pkgSource(join(base, "source"), { package: "acme.vcs" }, {
+      "capabilities/run": { capability: "acme.run", commands: { go: "bin/run.mjs" } },
+    });
+    write(join(source, "capabilities/run/bin/run.mjs"), "export default 1;\n");
+    // Local exact-root acquisition must strip source-control metadata just like
+    // Git subtree acquisition; metadata is never managed package content.
+    write(join(source, ".git", "config"), "source metadata\n");
+    acquirePackage(level, source);
+    const installed = join(installedPackagesDir(level), "acme.vcs");
+    assert.equal(existsSync(join(installed, ".git")), false, "root .git is not installed");
+    approveCapability(level, "acme.run");
+    assert.equal(capabilityTrust(level, "acme.run").trusted, true);
+
+    // Re-introducing the excluded-looking name after approval is ordinary
+    // package tampering: its executable must never be approval-invisible.
+    write(join(installed, ".git", "cap", "payload.mjs"), "export default 'tampered';\n");
+    assert.equal(capabilityTrust(level, "acme.run").trusted, false, "inserted .git bytes invalidate package trust");
+    assert.equal(packageIntegrity(installed) === readPackageLocks(level).packages["acme.vcs"].integrity, false);
+
+    const report = restorePackages(level);
+    assert.equal(report.find((r) => r.package === "acme.vcs")?.status, "ok");
+    assert.equal(existsSync(join(installed, ".git")), false, "restore prunes root VCS metadata before the no-op fast path");
+    assert.equal(capabilityTrust(level, "acme.run").trusted, true, "the locked package is usable after repair");
+
+    // Standalone legacy capabilities obey the same invariant at their own v1
+    // scope (a v2 package lock correctly forbids adding new legacy entries).
+    const legacyLevel = scope(base, "legacy");
+    const capSrc = join(base, "cap-src");
+    write(join(capSrc, "oas.json"), JSON.stringify({ capability: "acme.legacy", version: "1.0.0", description: "legacy", commands: { go: "run.mjs" } }));
+    write(join(capSrc, "run.mjs"), "export default 1;\n");
+    write(join(capSrc, ".git", "config"), "source metadata\n");
+    const acquired = acquireCapability(legacyLevel, capSrc);
+    assert.equal(existsSync(join(acquired.dest, ".git")), false, "legacy acquisition also strips root .git");
+    writeCapabilityLock(legacyLevel, "acme.legacy", { source: `path:${capSrc}`, version: "1.0.0", integrity: acquired.integrity, trustedExecutables: true });
+    assert.equal(capabilityTrust(legacyLevel, "acme.legacy").trusted, true);
+    write(join(acquired.dest, ".git", "payload.mjs"), "tampered\n");
+    assert.equal(capabilityTrust(legacyLevel, "acme.legacy").trusted, false, "legacy .git insertion invalidates trust");
+    const restored = restoreCapabilities(legacyLevel);
+    assert.equal(restored.find((r) => r.id === "acme.legacy")?.status, "present");
+    assert.equal(existsSync(join(acquired.dest, ".git")), false, "legacy restore present path repairs root VCS metadata");
+    assert.equal(capabilityTrust(legacyLevel, "acme.legacy").trusted, true);
+  } finally { rmSync(base, { recursive: true, force: true }); }
+});
+
 test("trust: per-capability approval at exact package integrity; integrity change invalidates; non-executable needs none", () => {
   const base = temp();
   const s = scope(base);
