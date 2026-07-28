@@ -359,8 +359,13 @@ outside its installed copy — `oas.authoring` selects framework skills with
 capability's directory in the kernel marketplace
 (`<kernel>/capabilities/<slug>`), located by capability id rather than by the
 lock selector's spelling. The shipped source must still be the same capability
-at the same version as the installed and locked copy; drift fails closed and
-names `oas install <id> --dir <scope>` as the fix. Such a tree may leave the
+at the same version as the installed and locked copy — a kernel upgrade under
+an older install fails closed rather than lending the new content to the old
+lock. Recovery is to delete the installed copy the error names and then run
+`oas install <id> --dir <scope>`, which re-acquires and rewrites the lock
+entry; run with the copy still in place, that command reports `Already
+acquired` and changes nothing, and legacy v1 capability entries are not
+removable with `oas remove`, which services packages. Such a tree may leave the
 installed copy but never the kernel package: `..` segments and symlinks that
 resolve outside it are rejected exactly like any other escape. Capabilities
 exported by packages, authored at a scope, or referenced by path never receive

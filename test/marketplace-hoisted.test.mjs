@@ -63,8 +63,9 @@ function frameworkAuthor(base) {
   mkdirSync(join(root, "framework-author", "instances"), { recursive: true });
   return { repo, root };
 }
+const oasCli = (kernel, ...argv) => spawnSync(process.execPath, [join(kernel, "bin", "oas.mjs"), ...argv], { encoding: "utf8" });
 function install(kernel, id, dir) {
-  const r = spawnSync(process.execPath, [join(kernel, "bin", "oas.mjs"), "install", id, "--dir", dir], { encoding: "utf8" });
+  const r = oasCli(kernel, "install", id, "--dir", dir);
   assert.equal(r.status, 0, `${r.stdout}\n${r.stderr}`);
   return r;
 }
@@ -121,10 +122,27 @@ test("hoisted resources fail closed when the kernel marketplace source drifts fr
     const sourceManifest = join(kernel, "capabilities", "oas-authoring", "oas.json");
     const shipped = JSON.parse(readFileSync(sourceManifest, "utf8"));
     writeFileSync(sourceManifest, JSON.stringify({ ...shipped, version: "2.0.0" }, null, 2));
+    const installedCopy = join(repo, ".agents", "capabilities", "installed", "oas-authoring");
     assert.throws(() => core.capabilityDeclaredSkills("oas.authoring", repo), (e) => e.code === "E_MARKETPLACE_SOURCE_DRIFT"
-      && /kernel ships 2\.0\.0, installed copy is 1\.0\.0/.test(e.message) && /oas install oas\.authoring/.test(e.message),
-    "version drift names the drift and the refresh command");
-    writeFileSync(sourceManifest, JSON.stringify(shipped, null, 2));
+      && /kernel ships 2\.0\.0, installed copy is 1\.0\.0/.test(e.message)
+      && e.message.includes(installedCopy) && /oas install oas\.authoring --dir /.test(e.message),
+    "version drift names the drift, the copy to delete, and the reacquire command");
+
+    // The advertised recovery must actually recover, so run it. Its first half
+    // is load-bearing: `oas install <id>` alone finds the copy and stops.
+    const naive = oasCli(kernel, "install", "oas.authoring", "--dir", repo);
+    assert.match(naive.stdout, /Already acquired capability oas\.authoring \(1\.0\.0\); not activated or updated/,
+      "an install that keeps the copy is a no-op — which is why the message says to delete it first");
+    assert.throws(() => core.capabilityDeclaredSkills("oas.authoring", repo), (e) => e.code === "E_MARKETPLACE_SOURCE_DRIFT",
+      "and it leaves the scope exactly as drifted as before");
+    rmSync(installedCopy, { recursive: true, force: true });
+    install(kernel, "oas.authoring", repo);
+    assert.equal(JSON.parse(readFileSync(join(repo, "oas-lock.json"), "utf8")).capabilities["oas.authoring"].version, "2.0.0",
+      "the recovery relocks the scope onto the shipped version");
+    for (const s of core.capabilityDeclaredSkills("oas.authoring", repo)) {
+      assert.equal(realpathSync(s.path), realpathSync(join(kernel, "skills", s.declared.replace("../../skills/", ""))),
+        `${s.declared} resolves again after the documented recovery`);
+    }
 
     // Lock drift: the lock pins a version the installed copy is not.
     const lockFile = join(repo, "oas-lock.json");
