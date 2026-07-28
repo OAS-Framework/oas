@@ -107,7 +107,7 @@ test("oas.authoring: hoisted skills anchor at the capability's marketplace dir, 
   } finally { rmSync(base, { recursive: true, force: true }); }
 });
 
-test("hoisted resources fail closed when the kernel marketplace source drifts from the installed copy", async () => {
+test("kernel upgrades keep older locked marketplace installs working; installed/lock drift still fails closed", async () => {
   const base = temp();
   try {
     const kernel = installedKernel(base);
@@ -116,20 +116,34 @@ test("hoisted resources fail closed when the kernel marketplace source drifts fr
     install(kernel, "oas.authoring", repo);
     const core = await loadKernel(kernel);
 
-    // Kernel upgraded under a scope that still has the old install: the shipped
-    // capability is no longer the installed one, so its content must not be
-    // silently borrowed.
+    // A kernel upgrade intentionally advances framework-hoisted content while
+    // the user's valid v1 installed copy and lock remain on their old version.
+    // This is the real 0.18.6 → 0.19 state (not drift): the upgraded kernel is
+    // itself the trusted source of the hoisted skills.
     const sourceManifest = join(kernel, "capabilities", "oas-authoring", "oas.json");
     const shipped = JSON.parse(readFileSync(sourceManifest, "utf8"));
     writeFileSync(sourceManifest, JSON.stringify({ ...shipped, version: "2.0.0" }, null, 2));
     const installedCopy = join(repo, ".agents", "capabilities", "installed", "oas-authoring");
-    assert.throws(() => core.capabilityDeclaredSkills("oas.authoring", repo), (e) => e.code === "E_MARKETPLACE_SOURCE_DRIFT"
-      && /kernel ships 2\.0\.0, installed copy is 1\.0\.0/.test(e.message)
-      && e.message.includes(installedCopy) && /oas install oas\.authoring --dir /.test(e.message),
-    "version drift names the drift, the copy to delete, and the reacquire command");
+    const upgraded = core.capabilityDeclaredSkills("oas.authoring", repo);
+    assert.equal(upgraded.filter((s) => s.path).length, 3,
+      "a newer kernel keeps the older valid installed+locked marketplace capability usable");
+    for (const s of upgraded) {
+      assert.equal(realpathSync(s.path), realpathSync(join(kernel, "skills", s.declared.replace("../../skills/", ""))));
+    }
+    assert.equal(JSON.parse(readFileSync(join(repo, "oas-lock.json"), "utf8")).capabilities["oas.authoring"].version, "1.0.0",
+      "using upgraded kernel content does not silently rewrite the legacy lock");
 
-    // The advertised recovery must actually recover, so run it. Its first half
-    // is load-bearing: `oas install <id>` alone finds the copy and stops.
+    // Real drift is between the installed copy and its lock. The advertised
+    // recovery must actually recover, and its delete step is load-bearing:
+    // `oas install <id>` alone finds the copy and stops.
+    const lockFile = join(repo, "oas-lock.json");
+    const lock = JSON.parse(readFileSync(lockFile, "utf8"));
+    lock.capabilities["oas.authoring"].version = "0.9.0";
+    writeFileSync(lockFile, JSON.stringify(lock, null, 2));
+    assert.throws(() => core.capabilityDeclaredSkills("oas.authoring", repo), (e) => e.code === "E_MARKETPLACE_SOURCE_DRIFT"
+      && /lock pins 0\.9\.0, installed copy is 1\.0\.0/.test(e.message)
+      && e.message.includes(installedCopy) && /oas install oas\.authoring --dir /.test(e.message),
+    "lock/copy drift names the drift, copy to delete, and reacquire command");
     const naive = oasCli(kernel, "install", "oas.authoring", "--dir", repo);
     assert.match(naive.stdout, /Already acquired capability oas\.authoring \(1\.0\.0\); not activated or updated/,
       "an install that keeps the copy is a no-op — which is why the message says to delete it first");
@@ -137,22 +151,12 @@ test("hoisted resources fail closed when the kernel marketplace source drifts fr
       "and it leaves the scope exactly as drifted as before");
     rmSync(installedCopy, { recursive: true, force: true });
     install(kernel, "oas.authoring", repo);
-    assert.equal(JSON.parse(readFileSync(join(repo, "oas-lock.json"), "utf8")).capabilities["oas.authoring"].version, "2.0.0",
+    assert.equal(JSON.parse(readFileSync(lockFile, "utf8")).capabilities["oas.authoring"].version, "2.0.0",
       "the recovery relocks the scope onto the shipped version");
     for (const s of core.capabilityDeclaredSkills("oas.authoring", repo)) {
       assert.equal(realpathSync(s.path), realpathSync(join(kernel, "skills", s.declared.replace("../../skills/", ""))),
         `${s.declared} resolves again after the documented recovery`);
     }
-
-    // Lock drift: the lock pins a version the installed copy is not.
-    const lockFile = join(repo, "oas-lock.json");
-    const lock = JSON.parse(readFileSync(lockFile, "utf8"));
-    const good = JSON.stringify(lock, null, 2);
-    lock.capabilities["oas.authoring"].version = "0.9.0";
-    writeFileSync(lockFile, JSON.stringify(lock, null, 2));
-    assert.throws(() => core.capabilityDeclaredSkills("oas.authoring", repo), (e) => e.code === "E_MARKETPLACE_SOURCE_DRIFT"
-      && /lock pins 0\.9\.0/.test(e.message), "lock/copy drift fails closed too");
-    writeFileSync(lockFile, good);
 
     // And when this kernel does not ship the capability at all, the declared
     // resources simply do not resolve — spawn fails closed with no zombie home.
