@@ -368,6 +368,61 @@ test("a scope with only custom capabilities is left on v1, untouched, by the gui
   rmSync(base, { recursive: true, force: true });
 });
 
+test("several legacy capabilities aliased to ONE package migrate together, acquired once (reviewer-90dbb36)", () => {
+  const base = temp();
+  // One package exporting two capabilities, both reached through catalog aliases —
+  // the shape oas.dev already has, and the shape that must not collide with its
+  // own not-yet-converted residue during acquisition.
+  const bundle = pkgSource(join(base, "pkgs", "bundle"), "oas.bundle", {
+    a: { capability: "oas.a" },
+    b: { capability: "oas.b", commands: { go: { exec: "go.mjs" } }, _files: { "go.mjs": "// go\n" } },
+  });
+  const catalog = writeCatalog(join(base, "catalog.json"), { "oas.bundle": bundle }, ["oas.bundle"], { "oas.a": "oas.bundle", "oas.b": { package: "oas.bundle" } });
+  const scope = join(base, "scope");
+  write(join(scope, "oas-config.yaml"), "name: s\ncapabilities:\n  additive:\n    oas.a:\n      from: installed\n      global: true\n    oas.b:\n      from: installed\n      global: true\n");
+  legacyCap(scope, "oas.a", { dirName: "a" });
+  legacyCap(scope, "oas.b", { dirName: "b" });
+
+  const env = json(cli(scope, catalog, "migrate", "--official", "--dir", scope, "--json"));
+  assert.equal(env.ok, true, JSON.stringify(env));
+  const row = env.result.scopes[0];
+  assert.equal(row.status, "migrated");
+  assert.deepEqual(row.migrated, [
+    { capability: "oas.a", package: "oas.bundle", version: "2.0.0" },
+    { capability: "oas.b", package: "oas.bundle", version: "2.0.0" },
+  ]);
+  const lock = JSON.parse(readFileSync(join(scope, OAS_LOCK_FILE), "utf8"));
+  assert.deepEqual(Object.keys(lock.packages), ["oas.bundle"]);
+  assert.deepEqual(lock.packages["oas.bundle"].capabilities.sort(), ["oas.a", "oas.b"]);
+  assert.equal(lock.capabilities, undefined, "no residue is left behind by a multi-capability package");
+  assert.deepEqual(env.result.trust.map((t) => t.capability), ["oas.b"], "only the executable capability needs re-approval");
+  assert.deepEqual(resolveOasConfig(scope).capabilities.map((c) => c.id).sort(), ["oas.a", "oas.b"]);
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("a held dry run reports nonzero — automation can never read it as ready (reviewer-90dbb36)", () => {
+  const base = temp();
+  const { team } = deploy018(base);
+  // Catalog publishes oas.okf but not oas.dev: the team scope is held, the rest planned.
+  const catalog = writeCatalog(join(base, "catalog.json"), officialSources(base), ["oas.okf", "oas.aweb", "oas.authoring"]);
+
+  const r = cli(team, catalog, "migrate", "--official", "--recursive", "--dir", team, "--dry-run", "--json");
+  assert.notEqual(r.status, 0, "a plan containing held scopes is not a success");
+  const env = json(r);
+  assert.equal(env.ok, false);
+  assert.equal(env.error.code, "E_MIGRATE_FAILED");
+  assert.match(env.error.message, /1 scope held \(no official package mapping yet\).*2 ready/);
+  const byScope = Object.fromEntries(env.error.details.scopes.map((s) => [s.level, s]));
+  assert.equal(byScope[team].status, "held", "the complete plan still travels under error.details");
+  assert.ok(byScope[team].plan.some((p) => p.action === "hold" && p.capability === "oas.review" && /does not resolve "oas.dev"/.test(p.reason)));
+
+  const human = cli(team, catalog, "migrate", "--official", "--recursive", "--dir", team, "--dry-run");
+  assert.notEqual(human.status, 0);
+  assert.match(human.stdout, /2 scopes ready, 1 held/);
+  assert.match(human.stdout, /Held scopes stay on their v1 locks and their legacy capabilities keep working/);
+  rmSync(base, { recursive: true, force: true });
+});
+
 test("--recursive without --official keeps generic migrate semantics (unmappable entries become residue)", () => {
   const base = temp();
   const root = join(base, "generic");

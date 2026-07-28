@@ -211,12 +211,17 @@ oas migrate --official --recursive --dir <team-root>             # apply
 - **Held, not half-converted.** If this release's catalog cannot map every
   official capability at a scope, that scope is left completely untouched and
   the run reports it as held with a nonzero exit — legacy capabilities keep
-  working until the mapping publishes.
+  working until the mapping publishes. A `--dry-run` containing held scopes is
+  nonzero too (with the complete plan under `error.details`), so a readiness
+  check can never read "planned" as "can migrate now".
 - **Custom entries are untouched.** `git:`/`path:`/unknown v1 sources are never
   acquired by the guided mode: they are kept exactly as they are (as residue in
   a scope that converts for its official capabilities, and untouched in a scope
   with no official capabilities at all). Plain `oas migrate` still maps custom
   sources and creates residue when asked.
+- **One package, several capabilities.** When aliases map more than one legacy
+  capability onto the same package, all of them leave the residue map together
+  and the package is acquired once.
 - **Per scope transactional.** Each scope acquires its package closure, writes
   its v2 lock, and only then removes the superseded v1 artifacts. A failing
   scope is rolled back byte-identically; other scopes keep their (truthfully

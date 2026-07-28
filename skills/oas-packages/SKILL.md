@@ -147,8 +147,8 @@ path order, ancestors first), then applies each scope transactionally.
 - Config files are never rewritten — exported ids are unchanged, so activation,
   layers, targets, settings and exclusions stay valid.
 - No mapping yet at a scope → that scope is HELD and left untouched (nonzero
-  exit); legacy capabilities keep working. Nothing is converted to residue
-  prematurely.
+  exit, `--dry-run` included); legacy capabilities keep working. Nothing is
+  converted to residue prematurely.
 - `git:`/`path:`/unknown and owned capabilities are untouched; plain
   `oas migrate` is still the way to convert custom sources.
 - After it runs: `oas trust <capability> --dir <scope>` for each executable

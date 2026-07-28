@@ -1450,14 +1450,23 @@ function guidedMigrateCmd({ dir, dryRun, official, recursive }) {
     const failed = planned.filter((p) => p.status === "failed");
     const held = planned.filter((p) => p.status === "held");
     result.nextCommands = actionable.length ? [`oas migrate${official ? " --official" : ""}${recursive ? " --recursive" : ""} --dir ${shellQuote(dir)}`] : [];
+    // A held or unplannable scope is NOT a ready migration: the dry run says so
+    // with a nonzero result in both modes, so automation can never read
+    // "planned successfully" as "this deployment can migrate now"
+    // (reviewer-90dbb36). The complete plan travels under error.details.
+    const blocked = [
+      ...(held.length ? [`${held.length} scope${held.length > 1 ? "s" : ""} held (no official package mapping yet)`] : []),
+      ...(failed.length ? [`${failed.length} scope${failed.length > 1 ? "s" : ""} could not be planned`] : []),
+    ];
     if (JSON_MODE) {
-      if (failed.length) { console.log(JSON.stringify({ schemaVersion: 1, ok: false, error: { code: "E_MIGRATE_FAILED", message: `${failed.length} scope${failed.length > 1 ? "s" : ""} could not be planned`, details: result } })); process.exit(1); }
+      if (blocked.length) { console.log(JSON.stringify({ schemaVersion: 1, ok: false, error: { code: "E_MIGRATE_FAILED", message: `${blocked.join("; ")} (${actionable.length} ready)`, details: result } })); process.exit(1); }
       jsonOk(result);
       return;
     }
     out(`\nDry run — nothing was changed. ${actionable.length} scope${actionable.length === 1 ? "" : "s"} ready${held.length ? `, ${held.length} held` : ""}${failed.length ? `, ${failed.length} failed` : ""}.`);
     if (actionable.length) out(`Apply with: oas migrate${official ? " --official" : ""}${recursive ? " --recursive" : ""} --dir ${shellQuote(dir)}`);
-    if (failed.length) process.exit(1);
+    if (held.length) out("Held scopes stay on their v1 locks and their legacy capabilities keep working — re-run when the catalog publishes their packages.");
+    if (blocked.length) die(`${blocked.join("; ")} (${actionable.length} ready)`);
     return;
   }
 
