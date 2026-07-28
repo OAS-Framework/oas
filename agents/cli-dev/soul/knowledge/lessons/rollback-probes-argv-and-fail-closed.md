@@ -1,9 +1,9 @@
 ---
 type: Lesson
 title: Rollback verification probes must be argv-based and fail closed
-description: Public branch/ref values must never be interpolated into shell probes; cleanup verification needs three outcomes, and unverifiable checks belong in incomplete rollback diagnostics.
-tags: [security, shell-injection, rollback, probes, git, tmux]
-timestamp: 2026-07-25
+description: Public branch/ref values must never be interpolated into shell probes; cleanup verification needs three outcomes, including silent failures whose empty stderr is meaningful.
+tags: [security, shell-injection, rollback, probes, git, tmux, verification]
+timestamp: 2026-07-28
 ---
 
 # Lesson
@@ -25,7 +25,13 @@ succeeded.
   both present and unverifiable outcomes to `incomplete`.
 - For `git rev-parse --verify --quiet`, exit 0 means the ref is present; exit 1
   with empty stderr means confirmed absent; other failures mean unverifiable.
-  For tmux and worktree lists, command failure is unverifiable, never an empty
+  With `execFileSync(..., { encoding: "utf8" })`, a silent failure has
+  `e.stderr === ""`; use `e.stderr ?? e.message`, not `e.stderr || e.message`,
+  or the empty string falls through to Node's synthetic `Command failed: ...`
+  message and a clean deletion is misreported as unverifiable. A verifier that
+  cries wolf turns the one real incomplete-rollback warning into background
+  noise.
+- For tmux and worktree lists, command failure is unverifiable, never an empty
   list.
 - For `git worktree list --porcelain -z`, use the canonical worktree path
   retained immediately after `git worktree add` and parse exact NUL-delimited

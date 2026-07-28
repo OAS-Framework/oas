@@ -1,5 +1,22 @@
 # Knowledge Log
 
+## 2026-07-28
+* **Fix**: [runtime-package-requirements](/lessons/runtime-package-requirements.md), [generated-instructions-executable-surface](/lessons/generated-instructions-executable-surface.md), and [rollback-retain-retry-state](/lessons/rollback-retain-retry-state.md) now describe PR #55's terminal Pi/runtime and prose-test contracts and restore displaced rollback-validation paragraphs instead of presenting superseded review mechanisms as current.
+* **Creation**: [try-finally-promise-fixture-teardown](/lessons/try-finally-promise-fixture-teardown.md) records that returning an imported promise from a `try` with fixture cleanup in `finally` restores the fixture before the async test body runs.
+* **Creation**: [required-hook-guarantee-first-user](/lessons/required-hook-guarantee-first-user.md) records that required-hook enforcement only protects real capabilities if their shipped failure paths exit nonzero and preserve failure metadata for rollback.
+* **Creation**: [generous-stub-fail-closed-open-gate](/lessons/generous-stub-fail-closed-open-gate.md) records that fakes more generous than the real runtime can make fail-closed gates pass while the real absent-field path remains open.
+* **Creation**: [shared-skill-spawn-paths-briefing-authority](/lessons/shared-skill-spawn-paths-briefing-authority.md) records that skills shared by multiple spawn paths must either enumerate each delivery mode or defer environment facts to the briefing.
+* **Creation**: [aggregate-requirements-targeted-capabilities](/lessons/aggregate-requirements-targeted-capabilities.md) records that requirement aggregation must resolve targeted capabilities with soul context, not only scope-global bindings.
+* **Creation**: [execfile-error-secret-disclosure](/lessons/execfile-error-secret-disclosure.md) records that `execFileSync` error messages carry argv secrets and credential-minting commands need output suppression, not only redaction.
+* **Update**: [placement-guards-resolve-destination](/lessons/placement-guards-resolve-destination.md) merges the positive-containment lesson for resolved homes, trusted bases, and late post-creation revalidation.
+* **Creation**: [runtime-contract-not-resolution-internals](/lessons/runtime-contract-not-resolution-internals.md) records that OAS should verify runtime package contracts rather than reimplement pi extension resolution internals.
+* **Update**: [rollback-probes-argv-and-fail-closed](/lessons/rollback-probes-argv-and-fail-closed.md) merges the empty-stderr probe gotcha: `""` is meaningful evidence and must not fall through to Node's synthetic command message.
+* **Creation**: [generated-instructions-executable-surface](/lessons/generated-instructions-executable-surface.md) records that generated instructions are executable surface and fixes must update the composed prose contracts and their mode/capability combinations.
+* **Creation**: [rollback-retain-retry-state](/lessons/rollback-retain-retry-state.md) records that incomplete rollback must retain the state needed to retry cleanup, verify the retry's outcomes, and provide an explicit force override.
+* **Creation**: [single-implementation-guarantee](/lessons/single-implementation-guarantee.md) records that rollback retention guarantees need one implementation and consumers that recognize every retained-state case.
+* **Creation**: [session-runtime-executable-scope-probe](/lessons/session-runtime-executable-scope-probe.md) records that runtime preflight must probe through the exact executable, account, and scope the session will use.
+* **Update**: [runtime-package-requirements](/lessons/runtime-package-requirements.md) merges the Claude runtime-extension lesson: runtime identity, multi-step install plans, and enabled-vs-installed semantics are per-runtime.
+
 ## 2026-07-27
 * **Creation**: [runtime-package-requirements](/lessons/runtime-package-requirements.md) records that Pi runtime-package requirements need runtime settings detection, non-PATH post-install verification, selector-normalized identity, and fail-closed invalid-spec handling.
 * **Update**: [pi-strict-launch-blocked-on-runtime-extensions](/lessons/pi-strict-launch-blocked-on-runtime-extensions.md), [requirement-recipes-data-allowlist](/lessons/requirement-recipes-data-allowlist.md), and [strict-curriculum-scoping](/references/strict-curriculum-scoping.md) link the runtime-package requirement boundary to the Pi strict-launch blocker and host-command requirement lesson.
