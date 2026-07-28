@@ -1,6 +1,10 @@
 # Knowledge Log
 
 ## 2026-07-28
+* **Creation**: [package-payload-root-contract](/decisions/package-payload-root-contract.md) records the configurable package payload root contract across Git fragments, catalog path fields, local roots, lock path storage, and integrity-drift advancement.
+* **Creation**: [payload-root-subtree-extraction](/lessons/payload-root-subtree-extraction.md) records the clone-beside-destination extraction shape, realpath containment outcomes, `.git` exclusion, inspection dual layout, and standalone-capability fallback guard.
+* **Creation**: [fetch-seams-share-resolver](/lessons/fetch-seams-share-resolver.md) records that package-source consumers must share the engine parser and payload-root resolver instead of maintaining local source regexes or root-manifest reads.
+* **Update**: [test-conventions](/playbooks/test-conventions.md) merges the `packages/desktop` dependency-workspace gotcha: run its own `npm ci --ignore-scripts`, baseline jsdom-style failures before blaming a diff, and report pre-existing gate gaps honestly.
 * **Fix**: [runtime-package-requirements](/lessons/runtime-package-requirements.md), [generated-instructions-executable-surface](/lessons/generated-instructions-executable-surface.md), and [rollback-retain-retry-state](/lessons/rollback-retain-retry-state.md) now describe PR #55's terminal Pi/runtime and prose-test contracts and restore displaced rollback-validation paragraphs instead of presenting superseded review mechanisms as current.
 * **Creation**: [try-finally-promise-fixture-teardown](/lessons/try-finally-promise-fixture-teardown.md) records that returning an imported promise from a `try` with fixture cleanup in `finally` restores the fixture before the async test body runs.
 * **Creation**: [required-hook-guarantee-first-user](/lessons/required-hook-guarantee-first-user.md) records that required-hook enforcement only protects real capabilities if their shipped failure paths exit nonzero and preserve failure metadata for rollback.
