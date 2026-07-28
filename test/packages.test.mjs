@@ -9,7 +9,7 @@ import {
   aggregateMissingRequirements, capabilityRuntimeTargets, commandOnPath, diffConfigTexts, discoverWorkspaceScopes,
   lockedPackageCapabilities, normalizeRequirement, packageSpecIdentity, runtimePackageInstalled, runtimePackageStatus,
   parseProfileProvenance, profileProvenanceHeader, requirementInstallPlan,
-  resolveProfilePackage, runRequirementInstall, selectProfile, validateProfile,
+  readProfileText, resolveProfilePackage, runRequirementInstall, selectProfile, validateProfile,
 } from "../lib/packages.mjs";
 
 const CLI = resolve(new URL("../bin/oas.mjs", import.meta.url).pathname);
@@ -407,7 +407,7 @@ test("non-team bare install also verifies v2 package locks (chain path, no bound
   const ws = join(base, "ws");
   write(join(ws, "oas-config.yaml"), "name: ws\n"); // NO team:
   write(join(ws, "oas-lock.json"), JSON.stringify({ lockfileVersion: 2, packages: { "example.engineering": {
-    source: `path:${pkg}`, version: "1.0.0", commit: "local", integrity: `sha256-${"0".repeat(64)}`,
+    source: `path:${pkg}`, path: ".", version: "1.0.0", commit: "local", integrity: `sha256-${"0".repeat(64)}`,
     capabilities: ["example.review", "example.delivery"], dependencies: [], trustedCapabilities: [],
   } } }, null, 2));
   const r = cli(["install", "--no-requirements", "--dir", ws], { cwd: ws });
@@ -418,7 +418,7 @@ test("non-team bare install also verifies v2 package locks (chain path, no bound
   const outer = join(base, "outer");
   const inner = join(outer, "team");
   write(join(outer, "oas-lock.json"), JSON.stringify({ lockfileVersion: 2, packages: { "example.engineering": {
-    source: `path:${pkg}`, version: "1.0.0", commit: "local", integrity: `sha256-${"0".repeat(64)}`,
+    source: `path:${pkg}`, path: ".", version: "1.0.0", commit: "local", integrity: `sha256-${"0".repeat(64)}`,
     capabilities: ["example.review"], dependencies: [], trustedCapabilities: [],
   } } }, null, 2));
   write(join(inner, "oas-config.yaml"), "name: team\nteam:\n  name: t\n");
@@ -1795,5 +1795,69 @@ test("the JSON consent plan shows every step the installer will run (reviewer-fi
   const one = (single.result.requirements || []).find((e) => e.command === "wanted-cli");
   assert.ok(one, "single-step requirement reported");
   assert.deepEqual(one.plan.steps, [one.plan.argv], "a single-step plan still carries steps, holding exactly its argv");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("resolveProfilePackage selects the same contained package root acquisition would lock", () => {
+  const base = temp();
+  const repo = join(base, "repo");
+  fixturePackage(join(repo, "oas-package"));
+  fixturePackage(join(repo, "dist"), { id: "example.other" });
+  // A DIFFERENT package at the repository root must never be what a profile
+  // diff reads when the source selects a contained root.
+  fixturePackage(repo, { id: "example.rootdecoy" });
+  gitRepo(repo);
+
+  const clone = () => mkdtempSync(join(tmpdir(), "oas-clone-"));
+  const dflt = resolveProfilePackage(`file://${repo}`, base, { clone: clone() });
+  assert.equal(dflt.manifest.package, "example.engineering", "no fragment selects oas-package/");
+  assert.equal(dflt.source, `git:file://${repo}`, "the recorded source never carries the fragment");
+  assert.equal(resolveProfilePackage(`file://${repo}#dist`, base, { clone: clone() }).manifest.package, "example.other");
+  assert.equal(resolveProfilePackage(`file://${repo}#.`, base, { clone: clone() }).manifest.package, "example.rootdecoy");
+  assert.throws(() => resolveProfilePackage(`file://${repo}#nope`, base, { clone: clone() }), (e) => e.code === "invalid-source");
+  assert.throws(() => resolveProfilePackage(`file://${repo}#../escape`, base, { clone: clone() }), (e) => e.code === "path-escape");
+
+  // Local paths stay exact directories.
+  assert.equal(resolveProfilePackage(join(repo, "dist"), base).manifest.package, "example.other");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("resolveProfilePackage reads the profile at the PINNED ref, not HEAD (reviewer-da05e73)", () => {
+  const base = temp();
+  const repo = join(base, "repo");
+  fixturePackage(join(repo, "oas-package"));
+  gitRepo(repo);
+  execFileSync("git", ["-C", repo, "tag", "v1"]);
+  const pinned = execFileSync("git", ["-C", repo, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  // HEAD moves on: a diff that reads HEAD while claiming "@v1" compares the
+  // adopted snapshot against a profile the install never used.
+  write(join(repo, "oas-package", "configs/minimal/oas-config.yaml"), "name: workspace\n# CHANGED AFTER v1\n");
+  execFileSync("git", ["-C", repo, "add", "-A"]);
+  execFileSync("git", ["-C", repo, "commit", "-qm", "advance"]);
+  const head = execFileSync("git", ["-C", repo, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  assert.notEqual(head, pinned);
+
+  const clone = () => mkdtempSync(join(tmpdir(), "oas-clone-"));
+  for (const ref of ["v1", pinned]) {
+    const r = resolveProfilePackage(`file://${repo}@${ref}`, base, { clone: clone() });
+    assert.equal(r.commit, pinned, `${ref}: resolved commit is the pinned one`);
+    assert.doesNotMatch(readProfileText(r.manifest, selectProfile(r.manifest, "minimal")), /CHANGED AFTER v1/, `${ref}: profile text comes from the pinned ref`);
+    assert.equal(r.source, `git:file://${repo}@${ref}`);
+  }
+  const unpinned = resolveProfilePackage(`file://${repo}`, base, { clone: clone() });
+  assert.equal(unpinned.commit, head, "an unpinned source still resolves HEAD");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("resolveProfilePackage rejects an option-like ref instead of reading HEAD (reviewer-39c11e1)", () => {
+  const base = temp();
+  const repo = join(base, "repo");
+  fixturePackage(join(repo, "oas-package"));
+  gitRepo(repo);
+  const clone = () => mkdtempSync(join(tmpdir(), "oas-clone-"));
+  for (const ref of ["--detach", "--guess", "no-such-tag"]) {
+    assert.throws(() => resolveProfilePackage(`file://${repo}@${ref}`, base, { clone: clone() }),
+      (e) => e.code === "invalid-source" && /does not resolve to a commit/.test(e.message), ref);
+  }
   rmSync(base, { recursive: true, force: true });
 });

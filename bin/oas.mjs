@@ -175,13 +175,13 @@ function doctorPackagesData(ctx, chain) {
     }
     packages.push({
       id: p.package, version: p.version || null, level: p.level, source: lock?.source || null,
-      commit: lock?.commit || null, capabilities: p.capabilities.map((c) => c.id),
+      path: lock?.path || null, commit: lock?.commit || null, capabilities: p.capabilities.map((c) => c.id),
       status: problems.length ? "broken" : "ok", problems,
     });
   }
   for (const [id, lock] of Object.entries(pkgLocks.packages)) {
     if (!installedPkgs.some((p) => p.package === id)) {
-      packages.push({ id, version: lock.version || null, level: lock._level, source: lock.source || null, commit: lock.commit || null, capabilities: lock.capabilities || [], status: "broken", problems: [{ code: "missing-locked-package", detail: `locked in ${lock._file} but not installed — run oas install` }] });
+      packages.push({ id, version: lock.version || null, level: lock._level, source: lock.source || null, path: lock.path || null, commit: lock.commit || null, capabilities: lock.capabilities || [], status: "broken", problems: [{ code: "missing-locked-package", detail: `locked in ${lock._file} but not installed — run oas install` }] });
     }
   }
   // Legacy v1 files and v2 residue — the ENGINE's doctor shapes (its tests pin
@@ -605,16 +605,28 @@ function install() {
     if (parsedSrc.kind === "git") {
       try { gitInspection = inspectGitSourceRoot(src); }
       catch (e) { cmdFail(e.code || "invalid-source", e.message || e); return; }
-      if (gitInspection.package) {
+      if (gitInspection.payloadPackage) {
         try { installPackage(dir, src, { rootSnapshot: gitInspection }); }
         finally { gitInspection.cleanup(); }
         return;
       }
-      if (!gitInspection.capability) {
+      // Legacy standalone-capability repositories predate contained package
+      // roots, so the fallback only applies to a REPOSITORY-ROOT capability
+      // that was not asked for a specific path. A repo whose root carries
+      // oas-package.json must never silently downgrade to capability
+      // acquisition just because the selected path holds no package.
+      if (gitInspection.explicitPath || gitInspection.package || !gitInspection.capability) {
+        const where = `package path "${gitInspection.path}"`;
+        const reason = gitInspection.package
+          ? `Git source ${src} has an oas-package.json at the repository ROOT but no package at ${where}${gitInspection.explicitPath ? "" : " (the default)"} — select the root explicitly with \`${src}#.\``
+          : gitInspection.explicitPath
+            ? `Git source ${src} has no oas-package.json at ${where}`
+            : `Git source ${src} has no oas-package.json at ${where} (the default package path) and no oas.json at its root`;
         gitInspection.cleanup();
-        cmdFail("invalid-package-manifest", `Git source ${src} has neither oas-package.json nor oas.json at its root`); return;
+        cmdFail("invalid-package-manifest", reason); return;
       }
-      // Standalone capability: hand the SAME fetched snapshot to legacy acquisition.
+      // Standalone capability: hand the SAME fetched snapshot to legacy
+      // acquisition (which re-verifies that exact root layout before copying).
     } else { installPackage(dir, src); return; }
   }
   let known;
@@ -710,7 +722,7 @@ function installPackage(dir, src, opts = {}) {
   if (JSON_MODE) { jsonOk({ root: r.root, installed: r.installed, lockFile: r.lockFile, depWarnings: r.depWarnings || [] }); return true; }
   for (const p of r.installed) {
     console.log(`${p.kept ? "ok       " : "Acquired "}${p.package}@${p.version} → ${shortPath(p.dir)}`);
-    console.log(`  locked ${p.commit === "local" ? "local tree" : p.commit} (${p.integrity}); capabilities: ${p.capabilities.join(", ") || "(none)"}`);
+    console.log(`  locked ${p.commit === "local" ? "local tree" : p.commit} at path ${p.path} (${p.integrity}); capabilities: ${p.capabilities.join(", ") || "(none)"}`);
   }
   for (const w of r.depWarnings || []) console.log(`WARNING: ${w}`);
   console.log(`Locked in ${shortPath(r.lockFile)}; nothing activated.`);
@@ -1239,7 +1251,10 @@ function configDiffCmd() {
   const configFlag = flag("config");
   if (configFlag === true) bail("E_USAGE", "--config needs a profile name");
   const profileName = configFlag || provenance?.profile;
-  const tmp = /^(https?:\/\/|git@|ssh:\/\/)/.test(pkgId) ? mkdtempSync(join(tmpdir(), "oas-package-")) : undefined;
+  // Same engine classification resolveProfilePackage uses — the two must agree
+  // on which specs need a clone, or a git source arrives without one.
+  const pkgKind = (() => { try { return parsePackageSource(pkgId).kind; } catch { return undefined; } })();
+  const tmp = pkgKind === "git" ? mkdtempSync(join(tmpdir(), "oas-package-")) : undefined;
   try {
     let resolved;
     try { resolved = resolveProfilePackage(pkgId, dir, { clone: tmp }); }
@@ -1283,7 +1298,7 @@ function listCmd() {
   catch (e) { JSON_MODE ? jsonFail(e.code || "invalid-lock", e.message || e) : die(e.message); return; }
   if (JSON_MODE) {
     jsonOk({
-      packages: pkgs.map((p) => ({ package: p.package, version: p.version, level: p.level, source: p.source || null, commit: p.commit || null, integrity: p.integrity || null, locked: p.locked, dependencies: p.dependencies, trustedCapabilities: p.trustedCapabilities, capabilities: p.capabilities.map((c) => c.id) })),
+      packages: pkgs.map((p) => ({ package: p.package, version: p.version, level: p.level, source: p.source || null, path: p.path || null, commit: p.commit || null, integrity: p.integrity || null, locked: p.locked, dependencies: p.dependencies, trustedCapabilities: p.trustedCapabilities, capabilities: p.capabilities.map((c) => c.id) })),
       legacy: locks.legacy.map((l) => ({ file: l.file, level: l.level, lockfileVersion: l.lockfileVersion, capabilities: Object.keys(l.capabilities) })),
     });
     return;
@@ -1291,7 +1306,7 @@ function listCmd() {
   if (!pkgs.length) console.log("No installed packages in this config chain.");
   for (const p of pkgs) {
     console.log(`${p.package}@${p.version}  [${levelOf(p.level)} ${shortPath(p.level)}]${p.locked ? "" : "  UNLOCKED (no lock entry — reacquire)"}`);
-    if (p.source) console.log(`  source: ${p.source}  commit: ${p.commit || "?"}`);
+    if (p.source) console.log(`  source: ${p.source}  path: ${p.path || "?"}  commit: ${p.commit || "?"}`);
     for (const c of p.capabilities) {
       const executable = Object.keys(c.manifest.commands || {}).length || Object.keys(c.manifest.hooks || {}).length;
       const trusted = p.trustedCapabilities.includes(c.id);
@@ -1343,9 +1358,18 @@ function updatePackageCmd(id) {
   let r;
   try { r = updatePackage(dir, id); } catch (e) { cmdFail(e.code || "invalid-lock", e.message || e); return; }
   if (JSON_MODE) { jsonOk(r); return; }
-  if (!r.changed) { console.log(`${r.package} is already up to date (${r.after.version}, ${r.after.integrity}).`); return; }
+  // A moved package root is reported even when the bytes are identical: the
+  // lock now points somewhere else in the repository, and that is exactly the
+  // change an operator must see (contract §7).
+  const pathLine = () => console.log(`  package path ${r.before.path} → ${r.after.path} (the selected package root MOVED in the source)`);
+  if (!r.changed) {
+    console.log(`${r.package} is already up to date (${r.after.version}, ${r.after.integrity}).`);
+    if (r.pathChanged) pathLine();
+    return;
+  }
   console.log(`Updated ${r.package}: ${r.before.version} (${r.before.commit}) → ${r.after.version} (${r.after.commit})`);
   console.log(`  integrity ${r.before.integrity} → ${r.after.integrity}`);
+  if (r.pathChanged) pathLine();
   if (r.addedCapabilities.length) console.log(`  + capabilities: ${r.addedCapabilities.join(", ")}`);
   if (r.removedCapabilities.length) console.log(`  - capabilities: ${r.removedCapabilities.join(", ")}`);
   for (const w of r.depWarnings || []) console.log(`WARNING: ${w}`);
@@ -2052,9 +2076,12 @@ Usage:
   oas update [--check] [--yes]              check npm for a newer kernel+pi bridge and
                                             optionally run the update; then run oas doctor
   oas install [<source>] [--dir <d>]        acquire + exact-lock a package closure
-                                            (git:host/org/repo@ref, git URL, local
-                                            path, official catalog id) or a legacy
+                                            (git:host/org/repo@ref[#<path>], git URL,
+                                            local path, official catalog id) or a legacy
                                             marketplace capability; never activates
+                                            #<path> selects the contained package root
+                                            (default oas-package; #. = repository root;
+                                            local paths are always exact directories)
       [--recursive] [--no-requirements]     bare \`oas install\` exactly restores this
       [--accept-requirement <cmd> ...]      chain's locked packages + capabilities; at a
       [--json]                              team: scope (or with --recursive) it reconciles

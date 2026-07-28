@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://oas.dev/schemas/oas-package.schema.json",
   "title": "OAS distribution package manifest (oas-package.json)",
-  "description": "Manifest at a distribution-package root. A package is the source, acquisition, dependency, update, integrity, and review unit; it explicitly enumerates the capabilities and config profiles it ships. Install never ambiently loads undeclared files. Every declared path is package-relative and must remain inside the locked package after symlink resolution.",
+  "description": "Manifest at a distribution-package root. A package is the source, acquisition, dependency, update, integrity, and review unit; it explicitly enumerates the capabilities and config profiles it ships. The package root is the directory holding this file, which a Git/catalog source selects by path (default \"oas-package\"; \".\" selects the repository root) and a local source names exactly. Only that subtree is installed and hashed. Install never ambiently loads undeclared files. Every declared path is package-relative and must remain inside the locked package after symlink resolution.",
   "type": "object",
   "required": [
     "package",

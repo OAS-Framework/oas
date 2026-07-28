@@ -3,7 +3,7 @@ type: Playbook
 title: Test conventions in test/capabilities.test.mjs
 description: Kernel and CLI tests run node:test against temp directories with fixture souls, fake/runtime tmux shims on PATH, spawnSync of bin/oas.mjs for CLI behavior, and regression coverage at the layer where bugs occurred.
 tags: [testing, conventions, fixtures, cli, regression, tmux]
-timestamp: 2026-07-27
+timestamp: 2026-07-28
 ---
 
 # The house style
@@ -105,8 +105,15 @@ All kernel/CLI behavior tests live in `test/capabilities.test.mjs`
   that also contains uncommitted work, because it discards both. Apply and
   reverse the simulation with exact edits or stash the real changes first.
 - A clean checkout needs dependencies installed in both the repo root and
-  `packages/desktop`; otherwise desktop tests can fail with missing transitive
-  ESM packages such as `marked` before the kernel/CLI change under test runs.
+  `packages/desktop`; the desktop workspace has its own `package.json`,
+  `package-lock.json`, and `node_modules`, so root install does not populate
+  packages such as `jsdom` or `marked`. Run
+  `cd packages/desktop && npm ci --ignore-scripts` before desktop tests. If a
+  fresh worktree reports 17 `Cannot find package 'jsdom'` failures under
+  `packages/desktop/test/`, baseline with a stashed clean run before blaming a
+  kernel/CLI diff, and report the pre-existing gate gap honestly. In this
+  harness, `cd` does not persist between tool calls, so run the install and
+  verification in one command or set the working directory explicitly.
 - Package-lock fixtures that contain intentionally fake scanner inputs
   (unreachable tarball URLs, bogus integrity, omitted dev/peer entries, etc.)
   are scanner-only fixtures: assert them by calling the exported scanner

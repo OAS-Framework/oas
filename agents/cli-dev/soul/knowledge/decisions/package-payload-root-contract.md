@@ -1,0 +1,58 @@
+---
+type: Decision
+title: Configurable package payload roots are selected explicitly per source kind
+description: Git package roots are selected by a #<path> fragment, catalog roots by a catalog path field, local paths by their named directory, and locks keep the canonical path separate from source so updates and restores can preserve the right owner.
+tags: [packages, kernel, lock-v2, acquisition]
+timestamp: 2026-07-28
+---
+
+The package engine contract now treats a Git repository as a container that may
+hold the package payload somewhere below the repository root. The selected
+package root is explicit, not heuristic.
+
+# Where the path lives
+
+- **Git specs** carry the payload root as a `#<path>` fragment. Split the
+  fragment off before `@ref` parsing; otherwise `repo@v1#dist` treats
+  `v1#dist` as the ref. Only one fragment is valid.
+- **Catalog entries** carry the payload root as data (`{ url, ref?, path? }`),
+  not in the catalog id string. Allowing `#` on a catalog id would create two
+  spellings for one selection and fight the catalog's ownership of package
+  layout.
+- **Local paths** take no fragment and always resolve to `.`. The named
+  directory is the package root, whatever it is called; applying the Git default
+  to local sources would break direct package development.
+- The default is applied during resolution, not parse. Parsing records
+  `packagePath: undefined` so a catalog entry can still supply one.
+
+# Why `path` stays separate in the lock
+
+The lock keeps the canonical payload path in a field separate from `source`.
+`updatePackage` re-derives a spec from the locked `source`, and Git selections
+and catalog selections need opposite round-trip behavior: a Git path is the
+user's selection and must be re-appended as `#<path>` so it stays sticky, while a
+catalog path belongs to the catalog and must be re-read so an update can adopt a
+moved root.
+
+The dependency-closure dedupe key is therefore `source#path`. Comparing only
+`source` makes two contained roots in one repository look like the same package
+resolved twice, silently dropping one instead of raising
+`duplicate-package-identity`.
+
+# Canonical path and lock advancement
+
+Every spelling of the root (`""`, `"."`, `"./"`, `"./."`) normalizes to `"."`.
+`validateLockEntry` requires the stored value to equal its own canonicalization;
+a lock recording `"./sub"` is `invalid-lock`, not silently repaired on read.
+Normalizing on read would make lock round trips untestable and would let two
+byte-different locks claim the same pin.
+
+Path changes are lock advancement. A plain `oas install` that resolves a
+payload path different from the lock's `path` fails with `integrity-drift` before
+integrity comparison, because two different roots can contain byte-identical
+trees. Restore passes the locked path as an override that beats both the spec
+and the catalog entry, so neither an upstream `git mv` nor a repointed catalog
+can change what a bare restore installs.
+
+See [payload root subtree extraction](/lessons/payload-root-subtree-extraction.md)
+for how acquisition cuts the selected bytes out of the clone.

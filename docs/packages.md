@@ -1,12 +1,31 @@
 # Distribution packages — config profiles, workspace reconciliation, and host requirements
 
 An **OAS distribution package** is the install/update/review unit above
-capabilities: one Git repository (or local path) carrying one or more
-independently targetable capabilities plus one or more reference config
-**profiles**, described by a root `oas-package.json`. The package layer's
-engine (acquisition, store, lock v2, per-capability trust) is documented in
-its own workstream; this document covers the config side: adopting profiles,
-whole-workspace reconciliation, and consented host-requirement installs.
+capabilities: one or more independently targetable capabilities plus one or
+more reference config **profiles**, described by an `oas-package.json` at the
+package root. The package layer's engine (acquisition, store, lock v2,
+per-capability trust) is documented in its own workstream; this document
+covers the config side: adopting profiles, whole-workspace reconciliation,
+and consented host-requirement installs.
+
+A Git repository **contains** a package rather than being one. Which
+directory holds it is part of the source contract:
+
+```bash
+oas install git:github.com/org/repo@v1.0.0            # → repo's oas-package/  (the DEFAULT)
+oas install git:github.com/org/repo@v1.0.0#dist/oas   # → repo's dist/oas/
+oas install git:github.com/org/repo@v1.0.0#.          # → the repository ROOT
+oas install /repo/custom-root                         # local: that EXACT directory
+```
+
+Official examples, scaffolds and conventions use `oas-package/`; catalog
+entries carry their own `path`; local paths take no fragment and never apply
+the default. Only the selected subtree is installed and hashed, so repository
+docs, CI configuration, owner souls and sibling packages stay outside the
+package's installed bytes and integrity. One repository may ship several
+packages at different paths. The lock pins the selected root in its own
+`path` field, and only an explicit `oas update <package>` may move it — see
+[`design/package-engine-contract.md` §1.1](design/package-engine-contract.md).
 
 Ground truth for the contract: the accepted Decision "Distribution packages,
 config profiles, and consented host requirements".
