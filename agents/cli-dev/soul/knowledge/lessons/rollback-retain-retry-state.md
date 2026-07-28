@@ -114,7 +114,12 @@ instead, which `--force` cannot get past; an unrecognised `work` string skipped 
 cleanup and called it complete.
 
 The rule that would have caught all three: **validate to the depth the value is consumed,
-not to the depth it is stored.**
+not to the depth it is stored.** A field passed on as a domain object must be checked as one
+(every entry a capability with an id), an enum must be checked against its enum, and an
+empty collection must be judged against the situation — a quarantine exists because a
+capability's hook failed, so "no capabilities" cannot be true. Where the record names what
+went wrong, cross-check the two halves against each other: the descriptor must be able to
+rerun the capabilities the marker says failed.
 
 # Validation was the wrong instrument; verification was
 
@@ -158,11 +163,11 @@ The other half of the same lesson: know which empty case is legitimate. Here exa
 the Git verification is the proof. Rejecting empties wholesale would have broken a real
 producer output, so the rule is scoped to the mode that cannot have Git debt, and the
 legitimate shape has a positive test of its own.
- Validation asks "could this work?", which is a guess about the
-future; verification asks "did it work?", which is an observation. Only one of them can be
-wrong in the direction that destroys data. Keep the strict contract too — versioned, and
-required down to the fields the producer always writes — but as the cheap first gate, not as
-the guarantee.
+
+Validation asks "could this work?", which is a guess about the future; verification asks
+"did it work?", which is an observation. Only one of them can be wrong in the direction that
+destroys data. Keep the strict contract too — versioned, and required down to the fields the
+producer always writes — but as the cheap first gate, not as the guarantee.
 
 # Silence from a capability that declares no cleanup is not evidence
 
@@ -196,12 +201,6 @@ everything still outstanding is PRINTED as state the operator now owns.
 The pairing is the point: fail closed by default so nothing is destroyed by accident, and
 give one explicit, loud override so nothing is undeletable. Either half alone is a bug —
 without the default you lose credentials, without the override you strand homes.
- A field passed on as a domain object must be checked as one
-(every entry a capability with an id), an enum must be checked against its enum, and an
-empty collection must be judged against the situation — a quarantine exists because a
-capability's hook failed, so "no capabilities" cannot be true. Where the record names what
-went wrong, cross-check the two halves against each other: the descriptor must be able to
-rerun the capabilities the marker says failed.
 
 # A path in a message to a human must be the path, not a reconstruction
 

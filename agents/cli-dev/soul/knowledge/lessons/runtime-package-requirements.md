@@ -9,21 +9,24 @@ timestamp: 2026-07-28
 # Lesson
 
 Founder ruling: using the aweb capability from Pi must **require** the aweb Pi package,
-rather than silently depending on whatever the user has installed globally. That ambient
-dependency is what made the Pi strict launch unshippable — see the
-[Pi runtime-extension blocker](/lessons/pi-strict-launch-blocked-on-runtime-extensions.md).
+rather than silently depending on an undeclared host installation.
 
-The existing consent gate was reusable almost wholesale (per-requirement prompt with exact
-argv/source/scope, `--accept-requirement`, `--no-requirements`, fail-closed on invalid or
-conflicting plans, no shell/sudo/auth, doctor warning when declined). What did **not**
-transfer was every place the old design assumed "a command on PATH":
+The existing consent gate was reusable almost wholesale (per-requirement prompt with every
+ordered argv step and source, `--accept-requirement`, `--no-requirements`, fail-closed on
+invalid or conflicting plans, no shell/sudo/auth, doctor warning when declined). What did
+**not** transfer was every place the old design assumed "a command on PATH":
 
-1. **Detection** — `commandOnPath()` can never be true for a Pi package, so the
-   requirement would be raised forever. Detection must read the runtime's own package
-   list (`~/.pi/agent/settings.json` → `packages`, entries being a source string or
-   `{ source }`).
-2. **Post-install verification** — same function, same problem: every successful install
-   would be reported as a failure.
+1. **Detection and post-install verification** — `commandOnPath()` can never prove a Pi
+   package is installed. OAS asks the selected runtime through `pi list --no-approve`,
+   requires a matching package row with a real install location, and uses the same probe
+   after installation. A settings row records configuration intent only; when Pi cannot be
+   run it may support diagnostics, but remains unverified and never satisfies presence.
+2. **Resource filters** — settings still matter when they explicitly filter extensions.
+   An entry with no `extensions` key is accepted because runtime extension discovery remains
+   unfiltered. `extensions: []` disables the required surface, and any non-empty extension
+   filter is unverifiable without reimplementing Pi's resolver, so both explicit forms fail
+   closed. Filters on unrelated resources such as skills do not invalidate the extension
+   requirement.
 3. **Identity** — package specs carry version selectors. `npm:@awebai/pi@latest` and
    `npm:@awebai/pi@0.2.1` must be ONE requirement, or two capabilities requesting the same
    package at different selectors would collide as a fake conflict. The selector is the
@@ -53,8 +56,9 @@ that the selected runtime can actually use.
 - An unknown runtime or a non-plain package spec gets **no executable plan at all** and is
   reported as invalid with provenance — never consentable, mirroring the existing
   unsafe-command policy.
-- Unreadable runtime settings read as "not installed". A parse failure must never become a
-  false positive that skips a real requirement.
+- A failed runtime probe or unreadable fallback settings read as "not verified installed".
+  Configuration intent and parse failures must never become false positives that skip a
+  real requirement.
 
 # Contract impact
 
@@ -62,11 +66,15 @@ that the selected runtime can actually use.
 to a `oneOf` of the host-command and runtime-package forms, and every deployment that
 validates manifests is affected. Flagged to the maintainer rather than slipped in.
 
-Still outstanding for the Pi strict launch: requiring the package makes it present and
-consented, but `--no-extensions` also needs an explicit `-e <path>`, so spawn must resolve
-the installed extension's path. Two steps, not one.
+Pi's final launch posture deliberately keeps globally configured extensions enabled while
+curtailing ambient skills, context files, and prompt templates. OAS therefore does **not**
+add `--no-extensions`, explicit `-e` paths, or a private copy of Pi's extension-resolution
+algorithm. It verifies the required package through Pi and records runtime discovery
+honestly in provenance.
 
 # Related
 
 This extends the host-command [requirement recipe lesson](/lessons/requirement-recipes-data-allowlist.md)
-without reusing its PATH detection and verification assumptions.
+without reusing its PATH detection and verification assumptions. The
+[runtime contract lesson](/lessons/runtime-contract-not-resolution-internals.md) explains
+why package verification replaced extension-path reconstruction.

@@ -30,10 +30,12 @@ still teach it, you have shipped a contradiction that costs a full review cycle 
 The replacement is deliberately not "cd home and stay there" — that would be the same failure
 mirrored. The contract states the PURPOSE of each directory and lets the agent move:
 `<instance-home>` (`$OAS_INSTANCE_HOME`) holds the brain, task, provenance and episodic
-state, and is where `aw` and OAS lifecycle commands resolve their scope from — with
-`--dir <path>` as the deliberate way to reach a different one; `<instance-home>/work` is
-where git, edits, builds, tests and commits happen, and durable changes go through tracked
-paths there, never the home's read-only `soul` link.
+state, and is where OAS operational/lifecycle commands and commands from active
+capabilities resolve their scope — for example, `aw` when the aweb messaging capability is
+active — with `--dir <path>` as the deliberate way to reach a different one.
+`<instance-home>/work` is where permitted repository edits, builds, tests and commits happen,
+and durable repository changes go through tracked paths there, never by writing through the
+home's `soul` link.
 
 Two more things that made it correct rather than merely better:
 
@@ -152,10 +154,10 @@ sentence satisfied it; then a NEGATED clause satisfied it ("If no messaging capa
 active, run aw here" — conditional, and exactly backwards); then a sentence-wide exemption
 for "aware" swallowed "Please be aware and run aw here".
 
-An inline regex has no tests of its own. Pulling it out as a named function and giving it a
-table of sentences it must accept and must reject turned the rule into something I could
-check directly — and the table is where each of those bypasses now lives permanently.
-**When an assertion encodes a judgement, the judgement deserves its own test.**
+An inline regex had no tests of its own. Pulling it out as a named function and giving it a
+table of sentences it must accept and reject exposed those bypasses, but this was an
+**intermediate experiment**, not the final contract. It showed that when an assertion
+encodes a judgement, the judgement needs scrutiny of its own.
 
 But the table only exposed the real problem: the FOURTH version still admitted
 "For example, run `aw`." and rejected the valid "Run `aw` only with an active messaging
@@ -164,13 +166,11 @@ is no version of that which converges — "is this English sentence conditional,
 condition scope THIS clause?" is not decidable by regex, and each fix moved the hole rather
 than closing it.
 
-**When a property is undecidable in general, stop deciding and start enumerating.** The
-kernel ships exactly one sentence that may mention `aw`; the test is now an allowlist of that
-sentence, so every other phrasing fails regardless of how it is worded, and there is no
-grammar left to outsmart. The bypass table survives as the record of what the heuristics let
-through. The lesson generalises past prose: an approximate check on an unbounded input space
-is a leak with a schedule, and the exact check is usually available if you are willing to
-name the finite thing you actually allow.
+The next intermediate attempt stopped parsing English and enumerated the one sentence then
+allowed to mention `aw`. That allowlist and its bypass table were later removed too: they
+bounded bytes, not the semantic provider-neutrality property. The durable lesson is narrower:
+an approximate check on an unbounded input space is a leak with a schedule, but enumeration
+is useful only when the finite item being enumerated is itself the real contract.
 
 Even then, be exact about WHAT you allow. My first allowlist used `includes`, so a sentence
 holding the approved clause AND a second command passed — "run `aw` even when no messaging
@@ -187,23 +187,16 @@ absolute PATHS, so composing from a directory whose name contained "aw" made unc
 fail. Strip the machine-generated markers before reading text as prose — provenance is not
 instruction.
 
-And the same failure at the file level: a DENYLIST of provider names could never establish
-neutrality — SMTP, Slack, email and "the direct message" all sailed past one built from this
-deployment's brands, because the space of transports is open and my imagination is not the
-limit of it. The delivery instructions are now pinned as exact SNAPSHOTS: editing them
-requires updating the test, which is precisely the review gate that prose contract deserves.
+The same failure appeared at the file level: a denylist of provider names could never
+establish neutrality — SMTP, Slack, email and "the direct message" all sailed past one built
+from this deployment's brands. Intermediate revisions tried exact passage snapshots and then
+a content hash of every shipped surface. Both were rejected: snapshots can select decoy
+markers, and a hash proves only that bytes have not changed, not that a human approved their
+meaning.
 
-Snapshotting two PASSAGES was still not enough, twice over. A passage snapshot is anchored by
-markers, and markers are not unique — prepending a commented decoy made `indexOf` select the
-copy while the live text said "send the report over Matrix". And everything outside the two
-passages was still guarded by the denylist, so "Send review questions over Matrix." in a
-declared SKILL passed all 118 tests. The terminal form is a content hash of EVERY shipped
-surface, with the file list itself asserted so an added or removed file fails too. Any change
-to any shipped instruction now fails until a human re-reads it and re-approves the hash.
-
-The progression is worth remembering as a ladder, because I climbed every rung: substring
-denylist → broader denylist → passage snapshot → whole-surface hash. Each rung was defeated
-by an input I had not imagined, and only the last one does not depend on imagining anything.
+The progression is worth remembering as a failed ladder: substring denylist → broader
+denylist → passage snapshot → whole-surface hash. Each step was an experiment superseded by
+the terminal maintainer ruling below; none is the current test contract.
 
 **And the maintainer then removed the last rung, correctly.** A byte hash does not prove
 provider neutrality; it proves nobody refreshed a checksum. Any contributor can update the
@@ -223,22 +216,18 @@ I spent five review rounds climbing that ladder. The signal I missed: when each 
 strictly more clever than the last and the finding rate does not fall, the target is probably
 not machine-checkable at all.
 
-The same move fixed the neutrality check: instead of four branded spellings on a hand-listed
-set of files, walk every shipped surface and reject the PROTOCOL as well as the brand —
-"say so in the mail" assumes a messaging layer as surely as naming aweb does, and a skill
-added tomorrow is held to the rule without anyone remembering to add it to a list.
+A broad walk of shipped surfaces that rejected branded words and protocol phrases was also
+an intermediate attempt. Its own file classifier skipped unknown extensions even though a
+manifest can declare any injection path. That exposed a useful general scanning rule —
+manifest-declared text must be classified by its runtime role, not its suffix — but the
+provider-neutrality grammar itself was still unbounded and was removed.
 
-And the walk itself had the same shape of hole: filtering to known extensions SKIPS what it
-does not recognise, and a manifest may point `inject` at any path. Enumerate every shipped
-file and FAIL on an unclassified one — an unknown surface should force a decision, never a
-silent pass. Skipping is the default that hides things; erroring is the default that finds
-them.
-
-That hole had a second mouth: a manifest may declare `inject` at ANY path, and the runtime
-reads it as UTF-8 whatever the suffix — so a rogue `.png` was scanned by the runtime and
-skipped by my "known binary" classifier. **Whatever a manifest declares is text by
-definition**, because something will read it; classify by ROLE first and by extension only
-for the rest.
+The **final** tests keep only bounded observable properties: no independently shipped review
+surface issues an unconditional layer-specific command; active-layer wording and the
+transcript fallback exist; exactly one composed block owns the knowledge protocol, and none
+does when that layer is suppressed; every instructional surface is checked for the concrete
+retired "settle in work" rule. Semantic provider neutrality remains a maintainer review
+obligation whenever the prose changes.
 
 # A test that restates the text proves nothing
 

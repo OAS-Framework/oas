@@ -1,6 +1,7 @@
 # Knowledge Log
 
 ## 2026-07-28
+* **Fix**: [runtime-package-requirements](/lessons/runtime-package-requirements.md), [generated-instructions-executable-surface](/lessons/generated-instructions-executable-surface.md), and [rollback-retain-retry-state](/lessons/rollback-retain-retry-state.md) now describe PR #55's terminal Pi/runtime and prose-test contracts and restore displaced rollback-validation paragraphs instead of presenting superseded review mechanisms as current.
 * **Creation**: [try-finally-promise-fixture-teardown](/lessons/try-finally-promise-fixture-teardown.md) records that returning an imported promise from a `try` with fixture cleanup in `finally` restores the fixture before the async test body runs.
 * **Creation**: [required-hook-guarantee-first-user](/lessons/required-hook-guarantee-first-user.md) records that required-hook enforcement only protects real capabilities if their shipped failure paths exit nonzero and preserve failure metadata for rollback.
 * **Creation**: [generous-stub-fail-closed-open-gate](/lessons/generous-stub-fail-closed-open-gate.md) records that fakes more generous than the real runtime can make fail-closed gates pass while the real absent-field path remains open.
