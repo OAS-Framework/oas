@@ -1,48 +1,9 @@
-# OAS config for the oas framework repo — the first full OAS deployment.
-# Messaging resolves at the laptop level (aweb); the team is declared here.
-name: oas-framework
+# Repository-specific OAS policy for the framework checkout.
+# Team-wide layers, families, authoring, and review come from the adopted
+# oas.dev profile at the non-Git workspace root.
+name: oas-framework-repo
 
-# ── Team — the deployment boundary; instances join this aweb team at spawn.
-team:
-  name: oas-framework
-  id: default:oas-framework.aweb.ai
-
-agent-types:
-  framework-authors:
-    description: Agents that author and steward the OAS framework itself
-  developers:
-    description: OAS developers — worktree-mode, PR-only to main, post-commit review discipline
-
-capabilities:
-  # Fundamental layers — exclusive slots; a capability entry or an explicit none.
-  layers:
-    knowledge:
-      capability: oas.okf
-      from: installed
-      # injection-override: .agents/injections/capabilities/oas.okf.md
-    tasks: none
-  additive:
-    oas.authoring:
-      from: installed
-      agent-types:
-        framework-authors: true
-      # injection-override: .agents/injections/capabilities/oas.authoring.md
-    oas.review:
-      from: installed
-      agent-types:
-        developers: true
-      # injection-override: .agents/injections/capabilities/oas.review.md
-
-# ── Work modes — optional per-mode env bootstrap.
-# `setup:` runs inside each NEW worktree right after `git worktree add`.
-work-modes:
-  worktree:
-    # setup: scripts/setup-worktree.sh
-
-# ── OAS defaults — the framework's baseline instruction block.
-oas:
-  # injection-override: .agents/injections/oas-defaults/oas.md
-
-# Extra unconditional instruction blocks for every instance in this workspace.
+# This instruction is specific to the framework repository and must not apply
+# to sibling package maintainers.
 agents-md-injection:
   framework: injects/framework-workspace.md
