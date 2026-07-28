@@ -243,15 +243,18 @@ The official catalog is data (`package-catalog.json`, or the file named by
 ```json
 {
   "packages": {
-    "oas.okf": { "url": "https://github.com/org/oas-okf", "ref": "v2.0.0", "path": "oas-package" },
-    "oas.dev": { "url": "https://github.com/org/oas-dev", "path": "oas-package" }
+    "oas.okf": { "url": "https://github.com/OAS-Framework/oas-okf.git", "ref": "v1.4.1", "path": "oas-package" },
+    "oas.dev": { "url": "https://github.com/OAS-Framework/oas-dev.git", "ref": "v1.0.0", "path": "oas-package" }
   },
   "capabilities": { "oas.review": "oas.dev" }
 }
 ```
 
 `packages` is identity + discovery only — resolving through it never advances a
-lock and never grants executable trust. `capabilities` is the legacy-capability
+lock and never grants executable trust. The released kernel bundles the official
+OAS-Framework entries. Once a short id appears there, `oas install <id>` prefers
+the distribution package over the legacy bundled capability marketplace; existing
+v1 locks and artifacts remain supported until the user runs guided migration. `capabilities` is the legacy-capability
 → package alias map the guided migration reads; identity mappings need no
 entry. An alias value may also be spelled `{ "package": "<id>" }`.
 

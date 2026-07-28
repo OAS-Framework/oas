@@ -25,7 +25,7 @@ import {
   capabilityManifests, capabilityManifest, capabilityMissingRequires, capabilityIntegrity, capabilityTrust, capabilityExecutablePath,
   readCapabilityLocks, writeCapabilityLock,
   parsePackageSource, inspectGitSourceRoot, acquirePackage, restorePackages, listInstalledPackages, readPackageLocks, residueEntryViolation,
-  officialCapabilityPackage,
+  officialCapabilityPackage, officialPackageCatalog,
   approveCapability, updatePackage, removePackage, migrateLegacyLock, applyLegacyLockMigration,
   packageIntegrity, packageDepsIntegrity, installedPackagesDir, loadPackageManifestAt,
   resolveOasConfig, resolveWorkMode, composeInstanceAgentsMd, parseYamlNested, packagedInject, teamAgentRoots,
@@ -629,7 +629,13 @@ function install() {
   // Package source? (git/path with an oas-package.json, or a catalog id) — otherwise legacy capability acquisition.
   let parsedSrc;
   try { parsedSrc = parsePackageSource(src); } catch { parsedSrc = undefined; }
-  const isMarketplaceCap = parsedSrc?.kind === "catalog" && !!marketplaceCapabilities()[src.replace(/@.*$/, "")];
+  const catalogId = parsedSrc?.kind === "catalog" ? parsedSrc.id : undefined;
+  const hasOfficialPackage = !!catalogId && Object.hasOwn(officialPackageCatalog(), catalogId);
+  // Once an official package catalog entry exists it becomes the default
+  // acquisition route for that short id. Existing v1 installs keep working,
+  // but a deliberate `oas install oas.okf` now acquires the package rather than
+  // creating another legacy capability lock.
+  const isMarketplaceCap = parsedSrc?.kind === "catalog" && !!marketplaceCapabilities()[catalogId] && !hasOfficialPackage;
   const isLocalPackage = parsedSrc?.kind === "path" && existsSync(join(parsedSrc.path, "oas-package.json"));
   const isCatalogPackage = parsedSrc?.kind === "catalog" && !isMarketplaceCap;
   let gitInspection;

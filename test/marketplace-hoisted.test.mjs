@@ -50,6 +50,9 @@ function installedKernel(base) {
     const rel = entry.replace(/\/$/, "");
     if (existsSync(join(REPO, rel))) cpSync(join(REPO, rel), join(kernel, rel), { recursive: true });
   }
+  // These fixtures exercise the legacy bundled marketplace compatibility seam,
+  // not the now-preferred official package catalog route.
+  rmSync(join(kernel, "package-catalog.json"), { force: true });
   return kernel;
 }
 const loadKernel = (kernel) => import(pathToFileURL(join(kernel, "lib", "core.mjs")).href);

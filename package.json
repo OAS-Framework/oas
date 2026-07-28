@@ -34,7 +34,8 @@
     "injects/",
     "capabilities/",
     "docs/",
-    "README.md"
+    "README.md",
+    "package-catalog.json"
   ],
   "dependencies": {
     "@awebai/pi": "^0.2.1"

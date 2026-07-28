@@ -243,6 +243,34 @@ test("acquirePackage: catalog resolver boundary — identity/discovery only, inj
   rmSync(base, { recursive: true, force: true });
 });
 
+test("CLI short ids prefer a published official package catalog entry over the legacy bundled marketplace capability", () => {
+  const base = temp();
+  try {
+    const level = scope(base);
+    const repo = join(base, "official-okf");
+    const payload = pkgSource(join(repo, "oas-package"), { package: "oas.okf" }, {
+      "capabilities/oas-okf": { capability: "oas.okf", layer: "knowledge" },
+    });
+    assert.ok(payload);
+    const commit = gitify(repo);
+    const catalog = join(base, "catalog.json");
+    write(catalog, JSON.stringify({ packages: { "oas.okf": { url: `file://${repo}`, ref: commit, path: "oas-package" } } }));
+
+    const r = spawnSync(process.execPath, [CLI, "install", "oas.okf", "--dir", level, "--json"], {
+      encoding: "utf8", env: { ...process.env, OAS_PACKAGE_CATALOG: catalog },
+    });
+    assert.equal(r.status, 0, `${r.stdout}\n${r.stderr}`);
+    const body = JSON.parse(r.stdout);
+    assert.equal(body.ok, true);
+    const lock = JSON.parse(readFileSync(join(level, OAS_LOCK_FILE), "utf8"));
+    assert.equal(lock.lockfileVersion, 2);
+    assert.deepEqual(Object.keys(lock.packages), ["oas.okf"]);
+    assert.equal(lock.packages["oas.okf"].path, "oas-package");
+    assert.equal(lock.packages["oas.okf"].commit, commit);
+    assert.equal(lock.capabilities, undefined, "no new legacy marketplace capability lock is created");
+  } finally { rmSync(base, { recursive: true, force: true }); }
+});
+
 test("acquirePackage: legacy v1 lock at the scope blocks package install with legacy-lock", () => {
   const base = temp();
   const s = scope(base);

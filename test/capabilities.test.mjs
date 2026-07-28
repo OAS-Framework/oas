@@ -478,9 +478,12 @@ test("CLI activation writes stable global/type/soul bindings without activating 
   const base = temp(); const repo = join(base, "repo"); mkdirSync(repo);
   let r = spawnSync(process.execPath, [CLI, "init", "--raw", "--dir", repo], { encoding: "utf8" });
   assert.equal(r.status, 0, r.stderr);
-  r = spawnSync(process.execPath, [CLI, "install", "oas.okf", "--dir", repo], { encoding: "utf8" });
+  const emptyCatalog = join(base, "empty-catalog.json");
+  write(emptyCatalog, JSON.stringify({ packages: {} }));
+  r = spawnSync(process.execPath, [CLI, "install", "oas.okf", "--dir", repo], { encoding: "utf8", env: { ...process.env, OAS_PACKAGE_CATALOG: emptyCatalog } });
   assert.equal(r.status, 0, r.stderr); assert.match(r.stdout, /not activated/);
-  // Marketplace install: copied into installed/, locked with marketplace source, trusted at acquisition.
+  // With no official catalog entry this deliberately exercises the legacy
+  // marketplace install: copied into installed/, locked, trusted at acquisition.
   const okfLock = JSON.parse(readFileSync(join(repo, "oas-lock.json"), "utf8")).capabilities["oas.okf"];
   assert.match(okfLock.source, /^marketplace:oas\.okf@/);
   assert.equal(okfLock.trustedExecutables, true);

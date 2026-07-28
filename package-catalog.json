@@ -1,0 +1,37 @@
+{
+  "packages": {
+    "oas.okf": {
+      "url": "https://github.com/OAS-Framework/oas-okf.git",
+      "ref": "v1.4.1",
+      "path": "oas-package"
+    },
+    "oas.aweb": {
+      "url": "https://github.com/OAS-Framework/oas-aweb.git",
+      "ref": "v1.8.0",
+      "path": "oas-package"
+    },
+    "oas.jira": {
+      "url": "https://github.com/OAS-Framework/oas-jira.git",
+      "ref": "v1.0.0",
+      "path": "oas-package"
+    },
+    "oas.linear": {
+      "url": "https://github.com/OAS-Framework/oas-linear.git",
+      "ref": "v1.0.0",
+      "path": "oas-package"
+    },
+    "oas.authoring": {
+      "url": "https://github.com/OAS-Framework/oas-authoring.git",
+      "ref": "v1.0.0",
+      "path": "oas-package"
+    },
+    "oas.dev": {
+      "url": "https://github.com/OAS-Framework/oas-dev.git",
+      "ref": "v1.0.0",
+      "path": "oas-package"
+    }
+  },
+  "capabilities": {
+    "oas.review": "oas.dev"
+  }
+}
