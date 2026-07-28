@@ -13,8 +13,9 @@ function dom() {
 }
 const payload = (ok, extra = {}) => ({
   ok, bin: ok ? "/usr/local/bin/oas" : null, version: ok ? "0.18.0" : null,
-  source: ok ? "path" : null, required: { desktopApi: 1, range: ">=0.18.0 <0.19.0" },
-  probedAt: 1, tried: ok ? [] : [{ path: "/old/oas", source: "path", reason: "version 0.17.6 outside >=0.18.0 <0.19.0", version: "0.17.6" }],
+  source: ok ? "path" : null, required: { desktopApi: 1, range: ">=0.18.0 <0.20.0" },
+  install: "npm install -g @oas-framework/oas@0.19.0",
+  probedAt: 1, tried: ok ? [] : [{ path: "/old/oas", source: "path", reason: "version 0.17.6 outside >=0.18.0 <0.20.0", version: "0.17.6" }],
   ...extra,
 });
 const jsonCtx = (state) => ({
@@ -89,9 +90,9 @@ test("cliCard renders the full contract surface: detected, required, Choose, Ret
   assert.ok(el.textContent.includes("/old/oas"), "detected path shown");
   assert.ok(el.textContent.includes("0.17.6"), "detected version shown");
   // required range + api
-  assert.ok(el.textContent.includes(">=0.18.0 <0.19.0"), "required range shown");
-  // copyable install command
-  assert.ok(el.querySelector(".cli-cmd").textContent.includes("npm install -g @oas-framework/oas@0.18.2"));
+  assert.ok(el.textContent.includes(">=0.18.0 <0.20.0"), "required range shown");
+  // copyable install command — the BACKEND's derived, version-pinned one
+  assert.ok(el.querySelector(".cli-cmd").textContent.includes("npm install -g @oas-framework/oas@0.19.0"));
   assert.ok(el.querySelector(".cli-copy"), "copy affordance present");
   // actions
   const choose = el.querySelector(".cli-choose");
@@ -117,6 +118,32 @@ test("cliCard without a picker hook disables Choose but keeps Retry/docs usable"
   assert.equal(el.querySelector(".cli-choose").disabled, true);
   assert.ok(!el.querySelector(".cli-retry").disabled);
   dispose();
+});
+
+// The card must never RESTATE an enforced value. A renderer-side copy of the
+// band or of a pinned version drifts silently — that is how the card came to
+// advertise @0.18.2 while requiring 0.18.6 for relations (review bbfec1a).
+test("cliCard states the requirement from the payload and never invents one when the payload is absent", async () => {
+  const doc = dom();
+  // SETTLED-UNKNOWN: a legacy/garbage payload arrived — nothing to read.
+  await cs.refreshCli({ api: async () => ({ ok: true, status: 200, json: async () => ({ some: "legacy-shape" }) }) });
+  assert.equal(cs.cliStatus(), null, "precondition: settled unknown");
+  const { el, dispose } = cs.cliCard(doc, { api: async () => ({ ok: true, status: 200, json: async () => ({ some: "legacy-shape" }) }) });
+  assert.match(el.textContent, /unknown/, "an unreadable requirement says so");
+  assert.ok(!/>=\d+\.\d+\.\d+/.test(el.textContent), "no band is fabricated for a state that never received one");
+  assert.equal(el.querySelector(".cli-cmd").textContent.trim(), cs.GENERIC_INSTALL_COMMAND);
+  assert.ok(!/@\d+\.\d+\.\d+/.test(el.querySelector(".cli-cmd").textContent), "no version is fabricated either");
+  dispose();
+});
+
+test("cli-status: install/requirement helpers prefer the backend payload, fall back version-lessly", () => {
+  const withPayload = { required: { desktopApi: 1, range: ">=0.18.0 <0.20.0" }, install: "npm install -g @oas-framework/oas@0.19.0" };
+  assert.equal(cs.cliInstallCommand(withPayload), "npm install -g @oas-framework/oas@0.19.0");
+  assert.equal(cs.cliRequirementText(withPayload), ">=0.18.0 <0.20.0 with desktop API 1");
+  for (const absent of [null, undefined, {}, { install: "" }, { required: {} }]) {
+    assert.equal(cs.cliInstallCommand(absent), cs.GENERIC_INSTALL_COMMAND);
+    assert.match(cs.cliRequirementText(absent), /unknown/);
+  }
 });
 
 test("cli-status: a cached unavailable state transitions to UNKNOWN on an invalid/legacy payload (review d7becaf)", async () => {

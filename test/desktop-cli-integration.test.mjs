@@ -95,7 +95,15 @@ test("desktop server: /api/cli reports discovery status; compatible fake CLI acc
     assert.equal(s.ok, true, JSON.stringify(s));
     assert.equal(s.version, "0.18.0");
     assert.equal(s.source, "env");
-    assert.deepEqual(s.required, { desktopApi: 1, range: ">=0.18.0 <0.19.0" });
+    assert.deepEqual(s.required, { desktopApi: 1, range: ">=0.18.0 <0.20.0" });
+    // The recovery command is DERIVED from this app's own version, so it names
+    // the lockstep-published kernel and always lands inside the band above —
+    // never a hand-pinned version that rots below a feature floor.
+    const desktopVersion = JSON.parse(readFileSync(new URL("../packages/desktop/package.json", import.meta.url), "utf8")).version;
+    assert.equal(s.install, `npm install -g @oas-framework/oas@${desktopVersion}`);
+    const { acceptProbe } = await import("../packages/desktop/cli-locator.mjs");
+    assert.equal(acceptProbe({ schemaVersion: 1, name: "@oas-framework/oas", version: desktopVersion, desktopApi: 1 }).ok, true,
+      `the served install command pins ${desktopVersion}, which this Desktop would reject`);
     const g = await (await fetch(`http://127.0.0.1:${port}/api/cli`)).json();
     assert.equal(g.ok, true);
     assert.equal(g.bin, real);

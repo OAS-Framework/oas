@@ -8,7 +8,7 @@ import { JSDOM } from "jsdom";
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
 const cliStatusMod = await import("../renderer/views/cli-status.mjs");
-const CLI_OK = { ok: true, bin: "/seed/oas", version: "0.18.0", source: "path", required: { desktopApi: 1, range: ">=0.18.0 <0.19.0" }, probedAt: 1, tried: [] };
+const CLI_OK = { ok: true, bin: "/seed/oas", version: "0.18.0", source: "path", required: { desktopApi: 1, range: ">=0.18.0 <0.20.0" }, probedAt: 1, tried: [] };
 async function seedCliAvailable() {
   await cliStatusMod.refreshCli({
     api: async () => ({ ok: true, status: 200, json: async () => CLI_OK }),

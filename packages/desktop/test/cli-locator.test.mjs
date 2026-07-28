@@ -3,8 +3,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { delimiter } from "node:path";
+import { readFileSync } from "node:fs";
 import {
   acceptProbe, parseSemver, parseProbeStdout, candidates, discover, DESKTOP_API,
+  ACCEPT_RANGE, ACCEPT_RANGE_TEXT,
 } from "../cli-locator.mjs";
 
 const PROBE = (v = "0.18.0") => ({ schemaVersion: 1, name: "@oas-framework/oas", version: v, desktopApi: 1 });
@@ -12,6 +14,8 @@ const PROBE = (v = "0.18.0") => ({ schemaVersion: 1, name: "@oas-framework/oas",
 test("acceptProbe: exact v1 payload accepted; every deviation rejected with a reason", () => {
   assert.equal(acceptProbe(PROBE()).ok, true);
   assert.equal(acceptProbe(PROBE("0.18.9")).ok, true);
+  assert.equal(acceptProbe(PROBE("0.19.0")).ok, true, "the 0.19 kernel line is inside the band");
+  assert.equal(acceptProbe(PROBE("0.19.7")).ok, true);
   const cases = [
     [null, /no probe/],
     [{ ...PROBE(), schemaVersion: 2 }, /schemaVersion/],
@@ -19,7 +23,7 @@ test("acceptProbe: exact v1 payload accepted; every deviation rejected with a re
     [{ ...PROBE(), desktopApi: 2 }, /desktopApi 2/],
     [{ ...PROBE(), desktopApi: undefined }, /desktopApi missing/],
     [PROBE("0.17.9"), /outside/],
-    [PROBE("0.19.0"), /outside/],
+    [PROBE("0.20.0"), /outside/],
     [PROBE("1.0.0"), /outside/],
     [PROBE("not-a-version"), /unparsable/],
   ];
@@ -52,6 +56,22 @@ test("acceptProbe: prereleases are rejected — 0.18.0-rc.1 precedes 0.18.0 (rev
     assert.match(r.reason, /prerelease/, v);
   }
   assert.equal(acceptProbe(PROBE("0.18.0+build.7")).ok, true, "build metadata does not affect precedence");
+});
+
+// Release-gate invariant. Desktop and the kernel ship from ONE tag, and the
+// release workflow bumps packages/desktop to that tag version BEFORE running
+// this suite — so an app whose band excludes its own version would be caught
+// here instead of shipping an observation-only Desktop (the 0.19.0 blocker:
+// the band still ended at 0.19.0 while the release published kernel 0.19.0).
+test("the accepted band admits the kernel version this Desktop ships with", () => {
+  const version = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
+  const r = acceptProbe(PROBE(version));
+  assert.equal(r.ok, true, `Desktop ${version} rejects the same-version oas CLI: ${r.reason} — widen ACCEPT_RANGE for this kernel minor`);
+});
+
+test("the human-readable band is derived from the enforced numbers", () => {
+  assert.equal(ACCEPT_RANGE_TEXT, `>=${ACCEPT_RANGE.min.join(".")} <${ACCEPT_RANGE.maxExclusive.join(".")}`);
+  assert.match(acceptProbe(PROBE("0.20.0")).reason, new RegExp(ACCEPT_RANGE_TEXT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 });
 
 test("parseProbeStdout: only a single JSON object passes", () => {

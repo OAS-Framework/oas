@@ -16,7 +16,7 @@ Download the installer for your platform from the
 | macOS x64 (Intel) | DMG + ZIP | ad-hoc signed — see below |
 | Linux x64 | AppImage + DEB | requires `tmux` |
 
-**Windows and Linux arm64 are not supported in 0.18.x.**
+**Windows and Linux arm64 are not supported in 0.19.x.**
 
 Verify downloads against the release's `SHA256SUMS.txt`. GitHub
 build-provenance attestations are published for every asset
@@ -51,11 +51,24 @@ all. Spawning agents runs through an installed `oas` CLI with Desktop API
 v1:
 
 ```bash
-npm install -g @oas-framework/oas@0.18.2
+npm install -g @oas-framework/oas
 ```
 
-Desktop 0.18 accepts CLI versions `>=0.18.0 <0.19.0` (released versions
-only; prereleases are rejected). The app discovers the CLI automatically
+Desktop and the CLI publish in lockstep from one tag, so the matching CLI is
+the one with **this Desktop's own version** — the app's degradation card
+shows that exact `npm install -g @oas-framework/oas@<version>` command, and
+copying it from the card is the reliable route.
+
+Each Desktop accepts a band of released CLI versions around its own —
+prereleases are never accepted — and individual features may sit behind a
+higher floor (spawn-time agent relations do; the relation controls fail closed
+naming the version they need). **The app states both**: the degradation card
+shows the accepted range and the exact install command, and the relation note
+names its floor. This guide deliberately does not repeat those numbers — it is
+rolling documentation and would go stale against the app; the versioned
+[release notes](release-notes/) record the band for each release, and
+[docs/desktop-cli-api.md](desktop-cli-api.md) is the contract of record beside
+the code that enforces it. The app discovers the CLI automatically
 (your PATH, the npm global prefix, a login shell) and re-probes on launch,
 app focus, and Retry. Until a compatible CLI is verified, the Soul roster's
 **Spawn** buttons are disabled behind one card showing what was detected,
@@ -88,7 +101,7 @@ scripted use: `--dir <workspace>` and `OAS_DESKTOP_PORT`.
 `@oas-framework/oas/control-pane` export. The Desktop app replaces all
 three. Migration:
 
-1. Update the CLI everywhere: `npm install -g @oas-framework/oas@0.18.2`.
+1. Update the CLI everywhere: `npm install -g @oas-framework/oas`.
 2. Run `oas doctor` at each workspace scope and follow its guidance to
    remove stale `oas.web` config entries, locks, and installed artifacts.
 3. Install the Desktop app (above) and open your workspace.
@@ -115,7 +128,7 @@ The full breaking-change list is in the
 
 | Symptom | Cause / fix |
 | --- | --- |
-| "Compatible oas CLI required" card | No CLI, or version outside `>=0.18.0 <0.19.0`. Install/update, or **Choose oas…** to point at the right binary; **Retry** re-probes. Spawn is disabled until a compatible CLI is verified. |
+| "Compatible oas CLI required" card | No CLI, or a version outside the range the card itself states. Copy the card's install command, or **Choose oas…** to point at the right binary; **Retry** re-probes. Spawn is disabled until a compatible CLI is verified. |
 | Spawn disabled, no card | The probe hasn't settled yet (transient, resolves in ms). If it persists, the backend is unreachable — restart the app. |
 | Terminals fail to open ("could not attach") | tmux missing, or no live session for that instance. Install tmux (`tmux -V`); check `tmux ls`. |
 | Can't select/copy text in a terminal tab | The terminal runs with tmux mouse handling, so a plain drag scrolls/passes through. Hold **Option** (macOS) or **Shift** while dragging to make a local selection, then copy (Cmd+C / right-click → Copy). |
