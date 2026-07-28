@@ -1,23 +1,61 @@
 {
-  "lockfileVersion": 1,
-  "capabilities": {
+  "lockfileVersion": 2,
+  "packages": {
     "oas.authoring": {
-      "source": "marketplace:oas.authoring@1.0.0",
+      "source": "catalog:oas.authoring@v1.0.0",
+      "path": "oas-package",
       "version": "1.0.0",
-      "integrity": "sha256-ca809bee6fbec832f8e3137ca87549d6f642b9c03ab073184865bb4da54e2252",
-      "trustedExecutables": true
-    },
-    "oas.review": {
-      "source": "marketplace:oas.review@1.2.0",
-      "version": "1.2.0",
-      "integrity": "sha256-b58741a6d31c06923108882bab58da7a8a7dda3036c68aa084bd5e31d904dfb9",
-      "trustedExecutables": true
+      "commit": "9f98e3fdb8b4720e8622b8189d9f36cd1e42f44a",
+      "integrity": "sha256-204d2903fcc184209ff35c37b2c51782125dbf67ae66f822a96854bd965d2375",
+      "capabilities": [
+        "oas.authoring"
+      ],
+      "dependencies": [],
+      "trustedCapabilities": []
     },
     "oas.okf": {
-      "source": "marketplace:oas.okf@1.4.1",
+      "source": "catalog:oas.okf",
+      "path": "oas-package",
       "version": "1.4.1",
-      "integrity": "sha256-75a6c0f47bfdc168110ceec0e16e81ec903b1f7dc864071d411a5d56a2dbb630",
-      "trustedExecutables": true
+      "commit": "d2bee613d67cd2da920e5561ed1947e1b1e53187",
+      "integrity": "sha256-79245f2b2f9b2875caad059475c08bedb9cc70b85531ed4ff1c5557e4e1fc364",
+      "capabilities": [
+        "oas.okf"
+      ],
+      "dependencies": [],
+      "trustedCapabilities": [
+        "oas.okf"
+      ]
+    },
+    "oas.aweb": {
+      "source": "catalog:oas.aweb@v1.8.0",
+      "path": "oas-package",
+      "version": "1.8.0",
+      "commit": "9a7b25c16e88be9587f1d9e919423f1dde298dff",
+      "integrity": "sha256-2ada69adac11d9a84b95023bd09112450ca5b28da03fed1a478fc2fedb4c8b5e",
+      "capabilities": [
+        "oas.aweb"
+      ],
+      "dependencies": [],
+      "trustedCapabilities": [
+        "oas.aweb"
+      ]
+    },
+    "oas.dev": {
+      "source": "catalog:oas.dev",
+      "path": "oas-package",
+      "version": "1.0.0",
+      "commit": "f77dbdf95bedeac9abf28221e23d31a872d6fd41",
+      "integrity": "sha256-0c1196035322349abc23dbfa69507fdfb44e9327082ec489bad5abe78530cf62",
+      "capabilities": [
+        "oas.review"
+      ],
+      "dependencies": [
+        "oas.okf",
+        "oas.aweb",
+        "oas.authoring"
+      ],
+      "trustedCapabilities": []
     }
   }
 }
