@@ -1848,3 +1848,16 @@ test("resolveProfilePackage reads the profile at the PINNED ref, not HEAD (revie
   assert.equal(unpinned.commit, head, "an unpinned source still resolves HEAD");
   rmSync(base, { recursive: true, force: true });
 });
+
+test("resolveProfilePackage rejects an option-like ref instead of reading HEAD (reviewer-39c11e1)", () => {
+  const base = temp();
+  const repo = join(base, "repo");
+  fixturePackage(join(repo, "oas-package"));
+  gitRepo(repo);
+  const clone = () => mkdtempSync(join(tmpdir(), "oas-clone-"));
+  for (const ref of ["--detach", "--guess", "no-such-tag"]) {
+    assert.throws(() => resolveProfilePackage(`file://${repo}@${ref}`, base, { clone: clone() }),
+      (e) => e.code === "invalid-source" && /does not resolve to a commit/.test(e.message), ref);
+  }
+  rmSync(base, { recursive: true, force: true });
+});

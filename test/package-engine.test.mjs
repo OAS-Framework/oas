@@ -3297,3 +3297,48 @@ test("a broken symlink at ANY depth of the package path is path-escape, not 'no 
   assert.throws(() => acquirePackage(sAbsent, `file://${repo}#mid/absent/deeper`), (e) => e.code === "invalid-source");
   rmSync(base, { recursive: true, force: true });
 });
+
+test("an @-bearing catalog selector round-trips through acquire, lock read and update (reviewer-39c11e1)", () => {
+  const base = temp();
+  const repo = repoWithPackages(join(base, "repo"), { "oas-package": { manifest: { package: "sel.pkg" } } });
+  execFileSync("git", ["-C", repo, "tag", "release@candidate"]);
+  const s = scope(base);
+  // The catalog id charset excludes "@", so everything after the FIRST one is
+  // the selector — a legitimate git ref spelling the writer does produce.
+  const catalog = (id, selector) => (id === "sel.pkg" ? { url: repo, ref: selector, path: "oas-package" } : undefined);
+  acquirePackage(s, "sel.pkg@release@candidate", { catalog });
+  const locked = readPackageLocks(s).packages["sel.pkg"];
+  assert.equal(locked.source, "catalog:sel.pkg@release@candidate", "the writer preserves the full selector");
+  // …and every reader accepts what the writer produced.
+  const { _file, _level, ...clean } = locked;
+  assert.equal(validateLockEntry("sel.pkg", clean, { "sel.pkg": clean }, {}), true);
+  assert.equal(restorePackages(s, { catalog }).find((r) => r.package === "sel.pkg").status, "ok");
+  assert.equal(updatePackage(s, "sel.pkg", { catalog }).after.version, "1.0.0");
+  assert.equal(readPackageLocks(s).packages["sel.pkg"].source, "catalog:sel.pkg@release@candidate", "update preserves the selector verbatim");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("an option-like git ref is rejected, never silently resolved to HEAD (reviewer-39c11e1)", () => {
+  const base = temp();
+  const repo = repoWithPackages(join(base, "repo"), { "oas-package": { manifest: { package: "opt.pkg" } } });
+  const head = execFileSync("git", ["-C", repo, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+
+  // `git checkout -q --detach` exits 0 WITHOUT selecting a revision, so a ref
+  // reaching git as an option-capable argument would make acquisition report
+  // whatever HEAD already was as the pinned commit.
+  for (const ref of ["--detach", "--guess", "-q", "--orphan", "no-such-tag"]) {
+    const s = scope(base, `s-${ref.replace(/[^a-z]/gi, "x")}`);
+    assert.throws(() => acquirePackage(s, `file://${repo}@${ref}`), (e) => e.code === "invalid-source" && /does not resolve to a commit/.test(e.message), ref);
+    assert.ok(!existsSync(join(s, OAS_LOCK_FILE)), `${ref}: no lock written`);
+    assert.throws(() => inspectGitSourceRoot(`file://${repo}@${ref}`), (e) => e.code === "invalid-source", `inspect ${ref}`);
+  }
+  // A REMOTE manifest's dependency ref is the same untrusted input.
+  const parent = pkgSource(join(base, "parent"), { package: "opt.parent", dependencies: [`file://${repo}@--detach#oas-package`] });
+  const sDep = scope(base, "s-dep");
+  assert.throws(() => acquirePackage(sDep, parent), (e) => e.code === "invalid-source" && /does not resolve to a commit/.test(e.message));
+
+  // Real refs still work and land on the exact commit.
+  const sOk = scope(base, "s-ok");
+  assert.equal(acquirePackage(sOk, `file://${repo}@${head}`).installed[0].commit, head);
+  rmSync(base, { recursive: true, force: true });
+});

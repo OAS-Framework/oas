@@ -39,7 +39,7 @@
               "source": {
                 "description": "Normalized acquisition source, in EXACTLY the writer's grammar: git:<url>@<ref>, path:<absolute-dir>, catalog:<id> for an originally bare catalog request, or catalog:<id>@<selector> for an originally explicit selector (the resolved commit is separate; official catalog identity grants no executable trust). It never carries a \"#<path>\" fragment — the selected package root is the entry's own \"path\" field. Parsed strictly: a payload that merely starts with a known scheme but is not valid for that kind (catalog:../evil, path:relative/dir) is an invalid lock, because update re-derives a source spec from this string and would reclassify it.",
                 "type": "string",
-                "pattern": "^(catalog:[a-z0-9][a-z0-9._-]*(@[^@#]+)?|path:/[^#]*|git:(https?://|file://|git@|ssh://|git://)[^#]+)$"
+                "pattern": "^(catalog:[a-z0-9][a-z0-9._-]*(@[^#]+)?|path:/[^#]*|git:(https?://|file://|git@|ssh://|git://)[^#]+)$"
               },
               "path": {
                 "description": "Canonical, repository-relative path of the SELECTED package root inside the source (the directory carrying oas-package.json). \".\" is the canonical spelling of the source root; git/catalog sources default to \"oas-package\" when the source contract selects nothing; path: sources are exact directories and always record \".\". Never normalized or repaired on read — a non-canonical spelling is an invalid lock. Only `oas update` may change it.",
