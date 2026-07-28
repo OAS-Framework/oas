@@ -1,5 +1,8 @@
 # Knowledge Log
 
+## 2026-07-28
+* **Delivery**: PR #57 merged as `d9e176f` at exact head `842f043`; [repo state](/stewardship/repo-state.md) and the [delivery log](/stewardship/delivery-log.md) record configurable contained package payload roots, strict lock path provenance, explicit-update-only advancement, local-capability preservation, closed security findings, green 853-test/exact-head CI gates, and the two fresh parallel follow-ups for existing-user migration and six-package payload restructuring.
+
 ## 2026-07-27
 * **Update**: [OAS development team — PR-only flow, review capability, capability-defined agents, model preference lists](/decisions/dev-team-and-review-flow.md) now assigns cli-dev, oas-desktop-engineer, and the promoted persistent ux-designer to Claude Code's `opus` alias; coordinator/maintainer/reviewer use GPT-5.6 Sol; superseded webpanel-dev and tui-dev souls are removed after knowledge succession.
 

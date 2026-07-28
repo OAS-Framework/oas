@@ -3,7 +3,7 @@ type: Reference
 title: Delivery log — every PR that reached (or was returned from) the main gate
 description: Append-only record kept by per-PR maintainer instances — PR number, scope, verdict per gate, merge or return, and anything the review taught about the codebase. The stewardship counterpart of git history — the WHY next to the what.
 tags: [stewardship, deliveries, append-only]
-timestamp: 2026-07-26
+timestamp: 2026-07-28
 ---
 
 # Delivery log
@@ -23,6 +23,11 @@ Entries whose lessons grow beyond a line get promoted to lessons/ or
 decisions/ and referenced from here.
 
 ---
+
+## PR #57 — configurable contained OAS package payload roots (2026-07-28)
+- verdict: MERGED as merge commit `d9e176f4b57a9c9e25f69d35b98046cc19267d6e` at exact PR head `842f0433311c766097c4eb3b1d4514b2ee0efd90`. All four gates PASS. Git/catalog sources select an authoritative configurable package `path`; omitted Git/catalog path defaults to the official `oas-package/` convention, custom paths and explicit root work, while local paths remain exact package roots. Lock v2 records strict canonical path provenance; one exact checkout is fetched and only the selected subtree is installed/hashed; bare restore uses locked source+commit+path and only explicit update advances it. Existing `from: owned`, `from: path`, and legacy capability semantics remain separate. Four review rounds closed real catalog/path/ref/source parsing and containment findings, including source-kind reclassification, Git option injection, pinned-ref mismatch, broken intermediate links, and remote-branch DWIM restoration. Terminal product head `bc11a02` received APPROVE/no findings; the only later delta was semantically reviewed cli-dev knowledge. Local full gate passed 853 tests/0 failures plus check/check:pi/validate/warning-free strict OKF/pack/smoke/diff; required exact-head CI passed. Same-account approval is comment `5106896683`; expected-head merge succeeded and remote branch was deleted.
+- owner: cli-dev-package-payload-root · coordinator: oas-expert-oas-packages (direct)
+- taught us: a repository source and its installed package are separate boundaries; explicit payload selection prevents owner souls and development files from entering integrity. Argv execution alone does not prevent option injection, persisted source strings must be validated against the writer grammar before re-parsing, and replacing Git porcelain with plumbing requires intentionally restoring wanted DWIM behavior.
 
 ## PR #47 — oas-desktop-engineer split-ui maintainer hold-discipline harvest (2026-07-26)
 - verdict: MERGED as merge commit `6f8dbf1` at exact head `42c35ec`. All four gates PASS. The knowledge-only delta preserves retiring `oas-desktop-engineer-split-ui`'s post-merge harvest commit (`44b019f`, cherry-picked as `42c35ec`) in the canonical Desktop soul: the maintainer mergeability-loop lesson now emphasizes live PR head verification, one evidence-backed reply to stale verdicts, rebasing only onto the explicitly mailed successor SHA, holding instead of speculatively rebasing while a wait instruction stands, self-contained handbacks, newest-first `log.md` conflict union, fresh fetch before PR opening, and gating mechanical rebase/stewardship commits. Source-state review showed `origin/main..44b019f -- agents/oas-desktop-engineer/soul/knowledge` contains only that harvest and the touched Desktop-soul files are byte-identical between source `44b019f` and PR head. Fresh scratch gates passed after root + Desktop dependency install and copied installed capabilities: targeted oas-desktop-engineer strict OKF `110 concept(s), 0 error(s), 0 warning(s)`, aggregate `validate:okf` all 8 bundles with zero warnings, `npm test` `568/569` with the expected node-pty ABI skip, `check`, `validate`, `pack:check`, and diff-check. Exact-head PR CI was green; same-account approval is PR comment `5085072697`; expected-head merge succeeded, and the remote harvest branch was deleted manually after the detached scratch worktree blocked automatic branch deletion.
