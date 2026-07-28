@@ -351,6 +351,21 @@ a matching lock entry, so an installed artifact cannot masquerade as scope-owned
 by dropping its lock. A committed lock's approval survives restore when the
 restored artifact hashes to the locked integrity.
 
+One narrow exception exists for the kernel's own marketplace, kept only until
+official packages replace legacy `marketplace:` installs. A capability whose
+lock source is `marketplace:<id>@<version>` may declare resources that live
+outside its installed copy — `oas.authoring` selects framework skills with
+`../../skills/<name>` — and those declarations are resolved against the
+capability's directory in the kernel marketplace
+(`<kernel>/capabilities/<slug>`), located by capability id rather than by the
+lock selector's spelling. The shipped source must still be the same capability
+at the same version as the installed and locked copy; drift fails closed and
+names `oas install <id> --dir <scope>` as the fix. Such a tree may leave the
+installed copy but never the kernel package: `..` segments and symlinks that
+resolve outside it are rejected exactly like any other escape. Capabilities
+exported by packages, authored at a scope, or referenced by path never receive
+this resolution — they stay inside their own artifact.
+
 Bundled framework packages are trusted. Packages you author at a scope live in
 `.agents/capabilities/owned/` and are config-owned trusted — trusting the
 scope trusts them; review them like other repository instructions and code.

@@ -511,6 +511,30 @@ test("containment: package capability hook/exec paths resolve inside the locked 
   rmSync(base, { recursive: true, force: true });
 });
 
+test("containment: legacy marketplace residue never grants a PACKAGE-EXPORTED capability the framework-hoisted exemption", () => {
+  // Framework-hoisted resolution exists only for kernel marketplace installs. A
+  // package that exports a capability under an official id, in a scope whose
+  // lock still carries that id's migration residue, must stay contained by its
+  // own package root — otherwise a third-party package could borrow kernel
+  // content (here: the real oas.authoring declaration) on the strength of a
+  // legacy lock entry it does not own.
+  const base = temp();
+  const s = scope(base, "scope", "name: t\ncapabilities:\n  additive:\n    oas.authoring:\n      from: installed\n      global: true\n");
+  const src = pkgSource(join(base, "src"), { package: "impostor.pkg" }, {
+    "cap": { capability: "oas.authoring", version: "1.0.0", skills: ["../../skills/skill-craft"] },
+  });
+  acquirePackage(s, src);
+  const lockFile = join(s, OAS_LOCK_FILE);
+  const lock = JSON.parse(readFileSync(lockFile, "utf8"));
+  lock.capabilities = { "oas.authoring": { source: "marketplace:oas.authoring@1.0.0", version: "1.0.0", integrity: `sha256-${"a".repeat(64)}` } };
+  writeFileSync(lockFile, JSON.stringify(lock, null, 2));
+  const manifest = capabilityManifest("oas.authoring", s);
+  assert.equal(manifest._package, "impostor.pkg", "the package-exported manifest is the one under test");
+  assert.equal(manifest._marketplace, undefined, "residue does not flag a package-exported capability as marketplace-sourced");
+  assert.deepEqual(capabilitySkillDirs("oas.authoring", s), [], "the kernel's skills/ never resolves for it");
+  rmSync(base, { recursive: true, force: true });
+});
+
 // ---------- runtime deps ----------
 
 test("materializePackageDeps: npm ci --ignore-scripts only; lifecycle scripts never run; integrity ignores node_modules", () => {

@@ -240,6 +240,14 @@ the checkout, verifies the adapter resolves that installed kernel, runs
 exact skills, generated instructions, canonical soul immutability, and
 metadata.
 
+One manual probe is required after every release and before 0.19.0 ships: from
+the **published** kernel (not a checkout), install `oas.authoring` into a fresh
+scope, activate it for a framework-author soul, and spawn that soul. The spawn
+must succeed with `integration-authoring`, `skill-craft`, and `soul-craft`
+materialized in the instance's `.agents/skills/`. Framework-hoisted resources
+are resolved by path arithmetic against the installed kernel's own layout, so a
+source-tree run can pass while every installed deployment fails.
+
 These deterministic checks deliberately do **not** contact real aweb, Jira, or
 Linear services, validate remote git hosting/auth flows, or publish npm
 artifacts. Adapter/discovery changes additionally require a disposable real pi
