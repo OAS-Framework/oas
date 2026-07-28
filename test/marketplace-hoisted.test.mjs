@@ -107,6 +107,26 @@ test("oas.authoring: hoisted skills anchor at the capability's marketplace dir, 
   } finally { rmSync(base, { recursive: true, force: true }); }
 });
 
+test("marketplace dependencies may be npm-hoisted to the kernel root (published oas.aweb layout)", async () => {
+  const base = temp();
+  try {
+    const kernel = installedKernel(base);
+    const { repo } = frameworkAuthor(base);
+    write(join(repo, "oas-config.yaml"), "name: test\n");
+    for (const name of ["aweb-messaging", "aweb-team-membership", "aweb-identity"]) {
+      write(join(kernel, "node_modules", "@awebai", "pi", "skills", name, "SKILL.md"), `---\nname: ${name}\ndescription: test\n---\n`);
+    }
+    install(kernel, "oas.aweb", repo);
+    const core = await loadKernel(kernel);
+    const declared = core.capabilityDeclaredSkills("oas.aweb", repo);
+    assert.equal(declared.length, 3);
+    for (const s of declared) {
+      assert.ok(s.path, `${s.declared} resolves from npm's kernel-root hoist`);
+      assert.ok(realpathSync(s.path).startsWith(realpathSync(join(kernel, "node_modules", "@awebai", "pi", "skills"))));
+    }
+  } finally { rmSync(base, { recursive: true, force: true }); }
+});
+
 test("kernel upgrades keep older locked marketplace installs working; installed/lock drift still fails closed", async () => {
   const base = temp();
   try {

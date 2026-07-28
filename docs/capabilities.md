@@ -358,7 +358,9 @@ outside its installed copy — `oas.authoring` selects framework skills with
 `../../skills/<name>` — and those declarations are resolved against the
 capability's directory in the kernel marketplace
 (`<kernel>/capabilities/<slug>`), located by capability id rather than by the
-lock selector's spelling. The shipped source must still have the same
+lock selector's spelling. If that declared path names an npm dependency hoisted
+by npm, OAS also checks the equivalent path from the kernel root; this is the
+published `oas.aweb` layout (`node_modules/@awebai/pi/skills/...`). The shipped source must still have the same
 capability identity, while its version may advance with an explicitly installed
 kernel upgrade: framework-hoisted resources belong to that trusted kernel, and
 this preserves valid older v1 installs until official-package migration. The
