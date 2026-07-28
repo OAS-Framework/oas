@@ -137,9 +137,11 @@ from `test/packages.test.mjs`. (The oas.okf tree changes themselves —
   Consumer/package CI must include a fixture asserting omitted peer
   dependencies are ABSENT from the materialized tree.
 - **Integrity coverage**: the lock `integrity` covers the package SOURCE tree
-  only — every `node_modules` (at any depth) is excluded from the hash (as
-  are `.git` and `oas-lock.json`). The MATERIALIZED closure is bound
-  separately: the lock records `depsIntegrity`, a deterministic digest of
+  only — every `node_modules` (at any depth) is excluded from the hash and
+  bound separately. Root source-control metadata (`.git`) is stripped before
+  installation; if it later appears in a managed artifact it is ordinary source
+  drift, not an integrity exclusion. The generated root `oas-lock.json` is
+  excluded. The MATERIALIZED closure is bound separately: the lock records `depsIntegrity`, a deterministic digest of
   every materialized `node_modules` tree under the package root (absent for
   an empty closure). Trust verifies BOTH digests — tampering a materialized
   dependency invalidates capability approvals exactly like source drift.
