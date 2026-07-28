@@ -1,6 +1,8 @@
 # Knowledge Log
 
 ## 2026-07-28
+* **Creation**: [hoisted-resource-fallbacks-anchor-at-declaring-dir](/lessons/hoisted-resource-fallbacks-anchor-at-declaring-dir.md) records that marketplace hoisted-resource fallbacks must anchor manifest-relative paths at the declaring capability's canonical marketplace directory, verify marketplace source/version identity, and still walk hoisted trees for containment.
+* **Update**: [marketplace-trust-and-hoisted-paths](/lessons/marketplace-trust-and-hoisted-paths.md) supersedes the older PKG_ROOT-anchored fallback wording with the lock-provenance and declaring-directory anchor rule.
 * **Creation**: [dry-run-exit-status-contract](/lessons/dry-run-exit-status-contract.md) records that dry-run modes must use the same nonzero exit contract as apply modes for states that block application, keeping plans under `error.details` instead of returning readiness.
 * **Creation**: [residue-collision-during-batched-migration](/lessons/residue-collision-during-batched-migration.md) records that migration transactions must remove all residue entries they will convert before acquisition when the callee validates against the full residue map.
 * **Creation**: [guided-official-migration-shape](/decisions/guided-official-migration-shape.md) records that guided official lock migration maps legacy marketplace capabilities through catalog aliases, holds a scope unchanged when any official mapping is missing, retains non-official entries, and reports recursive partial failures honestly.
