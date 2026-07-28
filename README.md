@@ -218,8 +218,8 @@ See [Configuration](docs/configuration.md), [Layers](docs/layers.md), and
 ## Install
 
 ```bash
-npm install -g @oas-framework/oas@0.19.2
-pi install npm:@oas-framework/pi@0.19.2
+npm install -g @oas-framework/oas@latest
+pi install npm:@oas-framework/pi@latest
 ```
 
 Install matching kernel/Pi adapter versions. Claude Code uses the same generated
