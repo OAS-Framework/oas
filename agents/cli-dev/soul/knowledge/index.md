@@ -32,6 +32,8 @@ read what the current task needs, not everything.
 * [architecture/spawn-relations-lineage-fields.md](architecture/spawn-relations-lineage-fields.md) - final child/sibling/parent/unrelated semantics, sparse lineage fields, attached-owner binding, ambiguity validation, and retirement splice behavior.
 
 ## Lessons
+* [lessons/dry-run-exit-status-contract.md](lessons/dry-run-exit-status-contract.md) - A dry run that reports a held or otherwise blocked state must exit nonzero when apply would exit nonzero, or automation can read "planned" as "ready".
+* [lessons/residue-collision-during-batched-migration.md](lessons/residue-collision-during-batched-migration.md) - When multiple legacy capabilities convert to one package, deleting only the current residue before acquiring collides with sibling entries the package also exports.
 * [lessons/never-run-migrate-in-the-work-tree.md](lessons/never-run-migrate-in-the-work-tree.md) - `node bin/oas.mjs migrate --help` executed a real migration because command-specific help flags are ignored, so mutating oas commands must be checked only inside temp deployments with explicit --dir.
 * [lessons/try-finally-promise-fixture-teardown.md](lessons/try-finally-promise-fixture-teardown.md) - A test that set PATH to a fake runtime and returned an imported promise from the try block had PATH restored before the body executed, so it silently exercised the machine's real toolchain.
 * [lessons/required-hook-guarantee-first-user.md](lessons/required-hook-guarantee-first-user.md) - The kernel enforced required spawn hooks correctly, but oas-aweb converted every fatal path into a warning on exit 0, so the mechanism never fired for the capability it was built for.
