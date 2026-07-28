@@ -1,6 +1,8 @@
 # Knowledge Log
 
 ## 2026-07-28
+* **Creation**: [component-walk-classifies-broken-links](/lessons/component-walk-classifies-broken-links.md) records why full-path existence probes cannot distinguish absent paths from intermediate broken links when path-escape taxonomy depends on component depth.
+* **Creation**: [lock-source-strictness-prevents-reclassification](/lessons/lock-source-strictness-prevents-reclassification.md) records that lock source fields re-parsed into acquisition specs must validate against the writer's exact grammar to prevent kind reclassification.
 * **Creation**: [package-payload-root-contract](/decisions/package-payload-root-contract.md) records the configurable package payload root contract across Git fragments, catalog path fields, local roots, lock path storage, and integrity-drift advancement.
 * **Creation**: [payload-root-subtree-extraction](/lessons/payload-root-subtree-extraction.md) records the clone-beside-destination extraction shape, realpath containment outcomes, `.git` exclusion, inspection dual layout, and standalone-capability fallback guard.
 * **Creation**: [fetch-seams-share-resolver](/lessons/fetch-seams-share-resolver.md) records that package-source consumers must share the engine parser and payload-root resolver instead of maintaining local source regexes or root-manifest reads.
