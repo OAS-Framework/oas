@@ -130,6 +130,38 @@ Residue entries keep legacy restore/trust semantics and show in doctor as
 pending migration; re-run `oas migrate` when the official package publishes.
 Approvals never carry over — re-trust after migrating.
 
+### Upgrading a 0.18 deployment (bundled official capabilities → packages)
+
+```
+oas migrate --official --recursive --dry-run --dir <team-root>   # plan every scope
+oas migrate --official --recursive --dir <team-root>             # apply, scope by scope
+```
+
+Guided mode for existing users. It plans every visible lock-owning scope first
+(ancestor chain incl. outer/laptop locks, team boundary, pruned descendants;
+path order, ancestors first), then applies each scope transactionally.
+
+- Which package supplies a legacy capability is CATALOG data: identity by
+  default, plus aliases (`oas.review` → package `oas.dev`). Never a hardcoded
+  URL or tag, and no ref is guessed from the v1 capability version.
+- Config files are never rewritten — exported ids are unchanged, so activation,
+  layers, targets, settings and exclusions stay valid.
+- No mapping yet at a scope → that scope is HELD and left untouched (nonzero
+  exit, `--dry-run` included); legacy capabilities keep working. Nothing is
+  converted to residue prematurely.
+- `git:`/`path:`/unknown and owned capabilities are untouched; plain
+  `oas migrate` is still the way to convert custom sources.
+- After it runs: `oas trust <capability> --dir <scope>` for each executable
+  surface it names (approvals never transfer), then `oas install --dir <scope>`
+  — already-installed host requirements verify, nothing is reinstalled.
+- `--json` emits one envelope; an aggregate failure is `ok:false` with
+  `error.code = E_MIGRATE_FAILED` and the complete per-scope report (including
+  the scopes that DID migrate) under `error.details`.
+
+`oas doctor` detects the upgradeable state and prints the exact command
+(`officialMigration` in `--json`), or says migration is not available yet while
+confirming the legacy capabilities remain supported.
+
 ## Troubleshooting
 
 `oas doctor [dir] [--json]` distinguishes: missing locked package (run

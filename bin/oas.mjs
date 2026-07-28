@@ -25,6 +25,7 @@ import {
   capabilityManifests, capabilityManifest, capabilityMissingRequires, capabilityIntegrity, capabilityTrust, capabilityExecutablePath,
   readCapabilityLocks, writeCapabilityLock,
   parsePackageSource, inspectGitSourceRoot, acquirePackage, restorePackages, listInstalledPackages, readPackageLocks, residueEntryViolation,
+  officialCapabilityPackage,
   approveCapability, updatePackage, removePackage, migrateLegacyLock, applyLegacyLockMigration,
   packageIntegrity, packageDepsIntegrity, installedPackagesDir, loadPackageManifestAt,
   resolveOasConfig, resolveWorkMode, composeInstanceAgentsMd, parseYamlNested, packagedInject, teamAgentRoots,
@@ -33,7 +34,7 @@ import {
   spawnInstance, retireInstance, upsertLocalAgent, defaultRepo, RELATIONS,
 } from "../lib/core.mjs";
 import {
-  aggregateMissingRequirements, diffConfigTexts, discoverWorkspaceScopes,
+  aggregateMissingRequirements, diffConfigTexts, discoverMigrationScopes, discoverWorkspaceScopes,
   lockedPackageCapabilities, parseProfileProvenance, profileProvenanceHeader,
   readProfileText, requirementInstallPlan, resolveProfilePackage,
   runRequirementInstall, selectProfile, validateProfile,
@@ -141,7 +142,31 @@ function doctorComposition(ctx, soulName) {
 /** WS2 package-layer doctor data — the ONE source for both human and --json
  * doctor output: lock v2 packages, adopted-profile provenance, available-but-
  * unapplied profiles, and missing host requirements with structured plans. */
-function doctorPackagesData(ctx, chain) {
+/** Guided-upgrade readiness for the legacy official capabilities visible from a
+ * scope (release contract §4): which legacy `marketplace:` locks exist, which
+ * official package supplies each one, and whether this release's catalog can
+ * map them all yet. `null` when there is no legacy official state at all. */
+function officialMigrationState(legacyLocks, { teamScope, ctx }) {
+  const capabilities = [];
+  for (const l of legacyLocks) {
+    for (const [id, entry] of Object.entries(l.capabilities || {})) {
+      if (typeof entry?.source !== "string" || !entry.source.startsWith("marketplace:")) continue;
+      let m;
+      try { m = officialCapabilityPackage(id); }
+      catch (e) { return { status: "unavailable", capabilities: [], command: null, reason: `the official package catalog is unreadable: ${e.message}` }; }
+      capabilities.push({ capability: id, package: m.package, via: m.via, available: m.available, file: l.file, level: l.level });
+    }
+  }
+  if (!capabilities.length) return null;
+  const boundary = teamScope || ctx;
+  const command = `oas migrate --official --recursive --dir ${shellQuote(boundary)}`;
+  const missing = capabilities.filter((c) => !c.available);
+  return missing.length
+    ? { status: "unavailable", capabilities, command: null, reason: `no official package mapping yet for ${missing.map((c) => c.capability).join(", ")} — this release keeps the legacy capabilities working; migration becomes available when the catalog publishes them` }
+    : { status: "ready", capabilities, command, reason: null };
+}
+
+function doctorPackagesData(ctx, chain, { teamScope } = {}) {
   // reviewer-455ba15 fix 4: the ENGINE diagnostics the human doctor renders
   // (invalid locks, missing artifacts, integrity/runtime-closure drift,
   // capability-list mismatches, untrusted surfaces, legacy/residue states)
@@ -229,7 +254,7 @@ function doctorPackagesData(ctx, chain) {
       ? `oas install --accept-requirement ${req.command} --dir ${shellQuote(ctx)}`
       : null,
   }));
-  return { lockError: lockBroken, packages, legacyLockFiles, migrationResidue, profileProvenance, unappliedProfiles, missingHostRequirements };
+  return { lockError: lockBroken, packages, legacyLockFiles, migrationResidue, profileProvenance, unappliedProfiles, missingHostRequirements, officialMigration: officialMigrationState(pkgLocks.legacy, { teamScope, ctx }) };
 }
 
 function doctorJson(dir) {
@@ -239,7 +264,7 @@ function doctorJson(dir) {
   const mans = capabilityManifests(ctx);
   const composition = doctorComposition(ctx, soulName);
   const chain = configChain(ctx);
-  const pkg = doctorPackagesData(ctx, chain);
+  const pkg = doctorPackagesData(ctx, chain, { teamScope: r.team?.scope });
   console.log(JSON.stringify({
     schemaVersion: 1,
     context: ctx,
@@ -268,6 +293,7 @@ retiredLocks: (() => { try { return Object.entries(readCapabilityLocks(ctx)); } 
     lockError: pkg.lockError,
     legacyLockFiles: pkg.legacyLockFiles,
     migrationResidue: pkg.migrationResidue,
+    officialMigration: pkg.officialMigration,
     profileProvenance: pkg.profileProvenance,
     unappliedProfiles: pkg.unappliedProfiles,
     missingHostRequirements: pkg.missingHostRequirements,
@@ -371,7 +397,7 @@ function doctor(dir) {
   // doctorPackagesData computation (reviewer-455ba15 fix 4); fail-closed
   // invalid-lock raises are diagnosed here, never consumed as data.
   console.log("\nInstalled packages:");
-  const pkg = doctorPackagesData(ctx, chain);
+  const pkg = doctorPackagesData(ctx, chain, { teamScope: r.team?.scope });
   if (pkg.lockError) {
     console.log(`  ERROR: ${pkg.lockError.message} [${pkg.lockError.code}]`);
     if (pkg.lockError.file) console.log(`         fix or remove the offending entry in ${shortPath(pkg.lockError.file)} — the lock is never auto-repaired; package operations fail closed until it is valid`);
@@ -391,6 +417,15 @@ function doctor(dir) {
   for (const res of pkg.migrationResidue) {
     if (res.status === "invalid-lock") console.log(`  ERROR: residue entry ${res.id} in ${shortPath(res.file)} is malformed (${res.violation}) — never auto-repaired; fix or remove the entry [invalid-lock]`);
     else console.log(`  NOTE: ${res.id} in ${shortPath(res.file)} is legacy migration residue (${res.source}) — pending migration: re-run \`oas migrate --dir ${shortPath(res.level)}\` when its official package publishes, or remove the entry if the capability is abandoned`);
+  }
+  if (pkg.officialMigration) {
+    const om = pkg.officialMigration;
+    console.log(`\nOfficial capability migration (0.18 bundled capabilities → official packages):`);
+    for (const c of om.capabilities) {
+      console.log(`  ${c.capability} → package ${c.package}${c.via === "alias" ? " (catalog alias)" : ""}  ${c.available ? "[mapped]" : "[no catalog mapping yet]"}  [${shortPath(c.level)}]`);
+    }
+    if (om.status === "ready") console.log(`  READY: migrate with \`${om.command}\` (plan it first with --dry-run; approvals are re-earned afterwards)`);
+    else console.log(`  NOT YET AVAILABLE: ${om.reason}`);
   }
   for (const prov of pkg.profileProvenance) {
     console.log(`\nConfig profile provenance: ${shortPath(prov.file)} adopted ${prov.package}${prov.ref ? `@${prov.ref}` : ""} profile "${prov.profile}" (snapshot — compare with \`oas config diff\`)`);
@@ -1328,10 +1363,193 @@ function removeCmd() {
   console.log(`Removed package ${r.package} (${shortPath(r.dir)}) and its entry in ${shortPath(r.lockFile)}.`);
 }
 
+/** The team boundary a guided migration walks, when the scope declares one.
+ * A config the kernel refuses to resolve is not a reason to abort a migration
+ * that only reads locks — discovery falls back to the explicit scope and says so. */
+function migrationTeamScope(dir, warnings) {
+  try { return resolveOasConfig(dir)?.team?.scope || undefined; }
+  catch (e) { warnings.push(`team boundary not resolved from ${shortPath(dir)} (${e.message}) — discovery covers this scope and its lock-owning ancestors only`); return undefined; }
+}
+
+const migratePlanRow = (s) => ({
+  capability: s.capabilityId, action: s.action,
+  package: s.package?.id || null, spec: s.package?.spec || null, via: s.package?.via || null,
+  source: s.v1?.source || null, reason: s.reason || null, note: s.note || null,
+});
+
+/** `oas migrate --official` / `--recursive` — the guided existing-user upgrade.
+ *
+ * Plans EVERY visible lock-owning scope first (deterministic, side-effect
+ * free), prints the complete per-scope plan, then applies scope by scope. Each
+ * scope keeps the engine's transactional guarantee on its own: one scope's
+ * failure leaves that scope byte-identical, never stops the others from being
+ * reported truthfully, and makes the aggregate result nonzero. */
+function guidedMigrateCmd({ dir, dryRun, official, recursive }) {
+  const out = (msg) => (JSON_MODE ? console.error(msg) : console.log(msg));
+  const opts = official ? { official: true } : {};
+  const warnings = [];
+  let scopes;
+  try {
+    scopes = recursive
+      ? discoverMigrationScopes(dir, { teamScope: migrationTeamScope(dir, warnings) })
+      : (existsSync(join(dir, OAS_LOCK_FILE)) ? [resolve(dir)] : []);
+  } catch (e) { cmdFail(e.code || "invalid-lock", e.message || e); return; }
+
+  // ---- plan every scope BEFORE touching any of them ----
+  const planned = [];
+  for (const scope of scopes) {
+    const file = join(scope, OAS_LOCK_FILE);
+    try {
+      const { plan, warnings: w } = migrateLegacyLock(scope, opts);
+      const held = plan.filter((s) => s.action === "hold");
+      const acquire = plan.filter((s) => s.action === "acquire");
+      const formatOnly = plan.some((s) => s.action === "convert-format");
+      const keep = plan.filter((s) => s.action === "retain" || s.action === "manual");
+      // Generic (non-official) mode keeps `oas migrate`'s semantics even when
+      // nothing maps: converting a v1 file to v2 with residue IS the operation.
+      // Official mode never rewrites a scope it has no official work in.
+      const status = held.length ? "held"
+        : (acquire.length || formatOnly || (!official && plan.length)) ? "ready"
+        : "nothing";
+      planned.push({ scope, file, status, plan, acquire, keep, held, warnings: w });
+    } catch (e) {
+      planned.push({ scope, file, status: "failed", plan: [], acquire: [], keep: [], held: [], warnings: [], error: { code: e.code || "invalid-lock", message: String(e.message || e) } });
+    }
+  }
+  const planRows = planned.map((p) => ({
+    level: p.scope, levelKind: levelOf(p.scope), file: p.file, status: p.status,
+    plan: p.plan.map(migratePlanRow), warnings: p.warnings, error: p.error || null,
+  }));
+
+  const actionable = planned.filter((p) => p.status === "ready" || p.status === "format-only");
+  out(`oas migrate${official ? " --official" : ""}${recursive ? " --recursive" : ""} — ${scopes.length} lock-owning scope${scopes.length === 1 ? "" : "s"} from ${shortPath(dir)}`);
+  for (const w of warnings) out(`WARNING: ${w}`);
+  if (!scopes.length) out("  (no oas-lock.json found — nothing to migrate)");
+  for (const p of planned) {
+    out(`\n  ${shortPath(p.scope)}  [${levelOf(p.scope)}]  ${shortPath(p.file)}`);
+    if (p.status === "failed") { out(`    ERROR      ${p.error.message} [${p.error.code}]`); continue; }
+    for (const s of p.plan) {
+      if (s.action === "convert-format") out(`    format     ${s.note}`);
+      else if (s.action === "acquire") out(`    migrate    ${s.capabilityId} → package ${s.package.id || s.package.spec}${s.package.via === "alias" ? `  (catalog alias: package ${s.package.id} exports ${s.capabilityId})` : s.package.via === "identity" ? "  (official catalog)" : ""}`);
+      else if (s.action === "hold") out(`    HELD       ${s.capabilityId} — ${s.reason}`);
+      else out(`    keep       ${s.capabilityId}${s.v1?.source ? `  (${s.v1.source})` : ""} — not converted, entry kept unchanged`);
+    }
+    if (p.status === "nothing") out("    (nothing to migrate at this scope)");
+    if (p.status === "ready") {
+      out(`    config     ${shortPath(join(p.scope, "oas-config.yaml"))} is NOT rewritten — capability ids, layers, targets, settings, exclusions and overrides stay valid (packages export the same ids)`);
+      out("    trust      executable approvals are NOT carried over — they are re-earned after migrating (exact commands below)");
+    }
+    for (const w of p.warnings) out(`    WARNING: ${w}`);
+  }
+
+  const result = {
+    mode: official ? "official" : "generic", recursive, dryRun,
+    boundary: resolve(dir), scopes: planRows, trust: [], requirements: [], nextCommands: [], warnings,
+  };
+  if (dryRun) {
+    const failed = planned.filter((p) => p.status === "failed");
+    const held = planned.filter((p) => p.status === "held");
+    result.nextCommands = actionable.length ? [`oas migrate${official ? " --official" : ""}${recursive ? " --recursive" : ""} --dir ${shellQuote(dir)}`] : [];
+    // A held or unplannable scope is NOT a ready migration: the dry run says so
+    // with a nonzero result in both modes, so automation can never read
+    // "planned successfully" as "this deployment can migrate now"
+    // (reviewer-90dbb36). The complete plan travels under error.details.
+    const blocked = [
+      ...(held.length ? [`${held.length} scope${held.length > 1 ? "s" : ""} held (no official package mapping yet)`] : []),
+      ...(failed.length ? [`${failed.length} scope${failed.length > 1 ? "s" : ""} could not be planned`] : []),
+    ];
+    if (JSON_MODE) {
+      if (blocked.length) { console.log(JSON.stringify({ schemaVersion: 1, ok: false, error: { code: "E_MIGRATE_FAILED", message: `${blocked.join("; ")} (${actionable.length} ready)`, details: result } })); process.exit(1); }
+      jsonOk(result);
+      return;
+    }
+    out(`\nDry run — nothing was changed. ${actionable.length} scope${actionable.length === 1 ? "" : "s"} ready${held.length ? `, ${held.length} held` : ""}${failed.length ? `, ${failed.length} failed` : ""}.`);
+    if (actionable.length) out(`Apply with: oas migrate${official ? " --official" : ""}${recursive ? " --recursive" : ""} --dir ${shellQuote(dir)}`);
+    if (held.length) out("Held scopes stay on their v1 locks and their legacy capabilities keep working — re-run when the catalog publishes their packages.");
+    if (blocked.length) die(`${blocked.join("; ")} (${actionable.length} ready)`);
+    return;
+  }
+
+  // ---- apply, scope by scope (each independently transactional) ----
+  const failures = [];
+  for (const [i, p] of planned.entries()) {
+    const row = planRows[i]; // planRows is built from planned, in order
+    if (p.status === "failed") { row.status = "failed"; failures.push({ scope: p.scope, code: p.error.code, message: p.error.message }); continue; }
+    if (p.status === "held") {
+      row.status = "held";
+      failures.push({ scope: p.scope, code: "official-mapping-unavailable", message: `held: ${p.held.map((s) => `${s.capabilityId} (${s.reason})`).join("; ")}` });
+      out(`\nHELD      ${shortPath(p.scope)} — left unchanged; its legacy capabilities keep working`);
+      continue;
+    }
+    if (p.status === "nothing") { row.status = "skipped"; continue; }
+    let r;
+    try { r = applyLegacyLockMigration(p.scope, opts); }
+    catch (e) {
+      row.status = "failed";
+      row.error = { code: e.code || "legacy-lock", message: String(e.message || e) };
+      failures.push({ scope: p.scope, code: row.error.code, message: row.error.message });
+      out(`\nFAILED    ${shortPath(p.scope)} — ${row.error.message}`);
+      continue;
+    }
+    row.status = r.skipped ? "skipped" : r.formatConverted ? "format-converted" : "migrated";
+    row.migrated = r.migrated;
+    row.residue = r.residue;
+    row.warnings = r.warnings;
+    for (const t of r.trust || []) result.trust.push({ ...t, command: `oas trust ${t.capability} --dir ${shellQuote(p.scope)}` });
+    out(`\n  ${shortPath(p.scope)}:`);
+    for (const m of r.migrated) out(`    migrated   ${m.capability} → package ${m.package}@${m.version}`);
+    for (const c of r.residue) out(`    kept       ${c}  (unchanged legacy entry)`);
+    for (const w of r.warnings) out(`    WARNING: ${w}`);
+    if (r.formatConverted) out(`    format     empty lockfileVersion 1 file → canonical v2 (no residue)`);
+    else if (!r.skipped) out(`    ${shortPath(r.file)} is now lockfileVersion 2 — config activation (from: installed) is unchanged`);
+  }
+
+  // ---- exact next commands: trust first, then the requirement/install pass ----
+  const migratedScopes = planRows.filter((r) => r.status === "migrated").map((r) => r.level);
+  let requirements = [];
+  try { requirements = migratedScopes.length ? aggregateMissingRequirements(migratedScopes) : []; }
+  catch (e) { result.warnings.push(`host requirements not aggregated: ${e.message}`); }
+  result.requirements = requirements.map((req) => ({
+    command: req.command, requestedBy: req.requestedBy,
+    consentCommand: req.plan && !req.plan.unavailable && !req.invalid && !req.conflict
+      ? `oas install --accept-requirement ${req.command} --dir ${shellQuote(dir)}` : null,
+  }));
+  result.nextCommands = [
+    ...result.trust.map((t) => t.command),
+    ...result.requirements.filter((q) => q.consentCommand).map((q) => q.consentCommand),
+    `oas install --dir ${shellQuote(dir)}`,
+  ];
+
+  if (JSON_MODE) {
+    if (failures.length) { console.log(JSON.stringify({ schemaVersion: 1, ok: false, error: { code: "E_MIGRATE_FAILED", message: `${failures.length} scope${failures.length > 1 ? "s" : ""} not migrated (${planRows.filter((r) => r.status === "migrated").length} migrated)`, details: result } })); process.exit(1); }
+    jsonOk(result);
+    return;
+  }
+  out("\nNext steps:");
+  if (result.trust.length) {
+    out("  1. Review and approve the executable surfaces (approvals are never carried over):");
+    for (const t of result.trust) out(`       ${t.command}`);
+  } else out("  1. No executable surfaces to approve.");
+  for (const q of result.requirements) {
+    if (q.consentCommand) out(`  *  Missing host command ${q.command}: ${q.consentCommand}`);
+  }
+  out(`  2. Verify the runtime closure and host requirements (already-installed requirements are not reinstalled):`);
+  out(`       oas install --dir ${shellQuote(dir)}`);
+  if (failures.length) {
+    out("\nFailures by scope:");
+    for (const f of failures) out(`  ${shortPath(f.scope)}: ${f.message} [${f.code}]`);
+    die(`${failures.length} scope${failures.length > 1 ? "s" : ""} not migrated (${planRows.filter((r) => r.status === "migrated").length} migrated)`);
+  }
+}
+
 /** oas migrate — map this scope's v1 marketplace capability locks to package locks. */
 function migrateCmd() {
   const dir = dirFlag();
   const dryRun = args.includes("--dry-run");
+  if (args.includes("--official") || args.includes("--recursive")) {
+    guidedMigrateCmd({ dir, dryRun, official: args.includes("--official"), recursive: args.includes("--recursive") });
+    return;
+  }
   if (dryRun) {
     let plan, warnings;
     try { ({ plan, warnings } = migrateLegacyLock(dir)); }
@@ -2102,6 +2320,12 @@ Usage:
                                             dependent packages reference it)
   oas migrate [--dry-run] [--dir <d>]       map this scope's v1 capability locks to
                                             package locks (preserves config activation)
+  oas migrate --official [--recursive]      guided upgrade of 0.18 bundled official
+      [--dry-run] [--dir <d>] [--json]      capabilities to official packages: plans every
+                                            visible lock-owning scope first, applies each
+                                            transactionally, keeps custom/owned entries
+                                            untouched, and prints the exact trust/install
+                                            follow-up (held when the catalog cannot map yet)
   oas config diff [--package <id|url|path>] report how the local snapshot differs from the
       [--config <name>] [--dir <d>] [--json] package's current profile — never merges/overwrites;
                                             an adopted snapshot's provenance header supplies
