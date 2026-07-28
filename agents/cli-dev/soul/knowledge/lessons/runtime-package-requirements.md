@@ -1,9 +1,9 @@
 ---
 type: Lesson
 title: A runtime-package requirement is not a PATH requirement
-description: Extending capability `requires` to cover runtime packages needed three separate changes — detection, post-install verification, and identity — because a pi package never appears on PATH and carries a version selector.
-tags: [capabilities, requirements, pi, consent, contract]
-timestamp: 2026-07-27
+description: Runtime package and plugin requirements need per-runtime detection, identity, plan shape, and post-install verification rather than PATH-style assumptions.
+tags: [capabilities, requirements, pi, claude-code, consent, contract]
+timestamp: 2026-07-28
 ---
 
 # Lesson
@@ -29,8 +29,24 @@ transfer was every place the old design assumed "a command on PATH":
    package at different selectors would collide as a fake conflict. The selector is the
    **last** `@`, not the first — scoped names start with one.
 
-Requirements are **runtime-scoped**, so a Claude-only deployment is never prompted to
-install a Pi package.
+# Extending the kind to a second runtime
+
+Adding Claude beside pi was not a copy-paste of the Pi package shape:
+
+- **Identity is per-runtime.** A Claude plugin id is `name@marketplace`, where `@` separates
+  the source. Reusing npm's version-selector stripping would collapse plugins from different
+  marketplaces into one identity. Spec validation is per-runtime for the same reason.
+- **Install plans can be a sequence.** A Claude marketplace must be registered before the
+  plugin installs, so a single `argv` is not enough. Both steps belong in the consent prompt:
+  agreeing to a plugin also means agreeing to the third-party source it comes from.
+- **Installed is not enabled.** `claude plugin list` reports a Status line; a disabled plugin
+  is installed but inert, so it must not satisfy a requirement.
+
+The founder's ruling that OAS must not exclude the operator's Claude configuration is not
+permission to silently add to it. Verified-not-installed at spawn is the boundary.
+
+Requirements are **runtime-scoped**, so a deployment is only prompted for packages or plugins
+that the selected runtime can actually use.
 
 # Fail-closed details worth keeping
 
