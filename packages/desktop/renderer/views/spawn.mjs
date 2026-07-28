@@ -15,9 +15,15 @@ import { resolveViewKey } from "../view-keys.mjs";
 import { cliAvailable, cliKnownUnavailable, cliStatus, refreshCli, onCliChange, cliCard, cliRelationsAvailable } from "./cli-status.mjs";
 import { distinguishingRootTags } from "../instance-tree.mjs";
 
-/** Required-version label for the disabled relation note — from the probe
- * payload when the backend provides it, else the pinned desktop default. */
-function relationsMinLabel() { return cliStatus()?.relationsMin || "0.18.6"; }
+/** Required-version label for the disabled relation note. The floor is the
+ * LOCATOR's (RELATIONS_MIN, served as `relationsMin`); restating a number here
+ * is the drift class that once had the CLI card advertising a version below
+ * the floor it required. A backend that did not send one leaves us genuinely
+ * not knowing it, and the note says so rather than naming a guess. */
+function relationsMinLabel() {
+  const min = cliStatus()?.relationsMin;
+  return typeof min === "string" && min ? min : null;
+}
 
 /** True while the CLI probe has never SETTLED (no response classified yet).
  * Pending is card-less by design, so disabled buttons must explain
@@ -638,7 +644,8 @@ function openSpawnModal(s, a) {
       : ref.value ? `This instance will spawn as a ${phrase[rel.value]} ${ref.value}.`
       : `Pick the instance this one is a ${phrase[rel.value]}.`;
     note.hidden = relations;
-    note.textContent = relations ? "" : `Relations require oas >= ${relationsMinLabel()} — the installed CLI spawns unrelated instances only. Set the relation to "Unrelated" to spawn now.`;
+    const min = relationsMinLabel();
+    note.textContent = relations ? "" : `${min ? `Relations require oas >= ${min}` : "Relations require a newer oas than the one installed"} — the installed CLI spawns unrelated instances only. Set the relation to "Unrelated" to spawn now.`;
   };
   s.syncModalRelations = syncRelationControls;
   syncRelationControls();
