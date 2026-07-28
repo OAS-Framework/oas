@@ -178,6 +178,78 @@ Rules (all enforced):
 
 When no safe recipe matches the host, OAS prints the documented install URL.
 
+## Upgrading a 0.18 deployment to the official packages
+
+Deployments created before official packages existed hold ordinary
+`oas-config.yaml` files, **v1** `oas-lock.json` files and acquired capability
+artifacts under `.agents/capabilities/installed/`. Those keep working: a valid
+v1 lock still restores, activates, trusts and spawns, and nothing about
+installing this release migrates anything.
+
+The upgrade is one explicit, guided command:
+
+```bash
+oas migrate --official --recursive --dry-run --dir <team-root>   # plan first
+oas migrate --official --recursive --dir <team-root>             # apply
+```
+
+- **Scope discovery** is deterministic and covers every *visible* lock-owning
+  scope: the explicit scope's ancestor chain (so an outer repo/laptop lock the
+  deployment actually reads is migrated too), the team boundary, and descendant
+  config/lock scopes found with reconciliation's pruning (nested team
+  boundaries stay self-owned). Scopes are planned and applied in path order,
+  ancestors first. Without `--recursive` only the named scope is migrated.
+- **Plan first, always.** The complete per-scope plan is printed (and available
+  as stable JSON) before anything is applied; `--dry-run` stops after it.
+- **Which package supplies which capability is catalog data**, never code. The
+  catalog maps identity by default (capability `oas.okf` → package `oas.okf`)
+  and carries explicit aliases for capabilities a package exports under another
+  identity (`oas.review` → package `oas.dev`). See the catalog shape below.
+- **Config files are not rewritten.** Packages export the same capability ids,
+  so activation, layer bindings, targets, settings, exclusions and injection
+  overrides remain valid byte-for-byte.
+- **Held, not half-converted.** If this release's catalog cannot map every
+  official capability at a scope, that scope is left completely untouched and
+  the run reports it as held with a nonzero exit — legacy capabilities keep
+  working until the mapping publishes.
+- **Custom entries are untouched.** `git:`/`path:`/unknown v1 sources are never
+  acquired by the guided mode: they are kept exactly as they are (as residue in
+  a scope that converts for its official capabilities, and untouched in a scope
+  with no official capabilities at all). Plain `oas migrate` still maps custom
+  sources and creates residue when asked.
+- **Per scope transactional.** Each scope acquires its package closure, writes
+  its v2 lock, and only then removes the superseded v1 artifacts. A failing
+  scope is rolled back byte-identically; other scopes keep their (truthfully
+  reported) result and the aggregate exit is nonzero.
+- **Trust is re-earned, never transferred.** Package integrity is not the v1
+  artifact's integrity, so approvals do not carry over: the run prints the exact
+  `oas trust <capability> --dir <scope>` commands, then the bare
+  `oas install --dir <scope>` pass (already-installed host requirements verify
+  and are not reinstalled; anything missing gets its
+  `oas install --accept-requirement <cmd>` consent command).
+
+Rerunning the command after a successful migration changes nothing.
+
+### Catalog shape
+
+The official catalog is data (`package-catalog.json`, or the file named by
+`OAS_PACKAGE_CATALOG`):
+
+```json
+{
+  "packages": {
+    "oas.okf": { "url": "https://github.com/org/oas-okf", "ref": "v2.0.0", "path": "oas-package" },
+    "oas.dev": { "url": "https://github.com/org/oas-dev", "path": "oas-package" }
+  },
+  "capabilities": { "oas.review": "oas.dev" }
+}
+```
+
+`packages` is identity + discovery only — resolving through it never advances a
+lock and never grants executable trust. `capabilities` is the legacy-capability
+→ package alias map the guided migration reads; identity mappings need no
+entry. An alias value may also be spelled `{ "package": "<id>" }`.
+
 ## Doctor
 
 `oas doctor` reports, in addition to its capability diagnostics:
@@ -188,7 +260,13 @@ When no safe recipe matches the host, OAS prints the documented install URL.
 - **available-but-unapplied profiles** — a locked, installed package exporting
   config profiles that no scope has adopted;
 - **missing host commands** for active capabilities, with the exact consent
-  command when a safe installer exists.
+  command when a safe installer exists;
+- **official capability migration** (`officialMigration` in `--json`) when the
+  chain still holds legacy `marketplace:` locks: each capability with the
+  package that supplies it, and either `ready` with the exact
+  `oas migrate --official --recursive --dir <boundary>` command, or
+  `unavailable` with the reason — the catalog has no mapping yet and the legacy
+  capabilities remain supported.
 
 ## Engine integration
 
