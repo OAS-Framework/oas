@@ -1,14 +1,46 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync, mkdtempSync, mkdirSync, writeFileSync, cpSync, rmSync } from "node:fs";
 import { spawn, execFileSync } from "node:child_process";
 import { request as httpRequest } from "node:http";
+import { createServer } from "node:net";
+import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const CLI = join(ROOT, "bin", "oas.mjs");
 const SRV = join(ROOT, "packages", "desktop", "server", "oas-web.mjs");
+
+async function freePort() {
+  const server = createServer();
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const { port } = server.address();
+  await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  return port;
+}
+
+function desktopCapabilityFixture() {
+  const scope = mkdtempSync(join(tmpdir(), "oasweb-capability-"));
+  const soul = join(scope, "agents", "dev", "soul");
+  mkdirSync(soul, { recursive: true });
+  writeFileSync(join(soul, "soul.yaml"), "name: dev\ndescription: Test developer.\nruntime: pi\nwork: checkout\n");
+  writeFileSync(join(soul, "AGENTS.md"), "# Test developer\n");
+  const capability = join(scope, ".agents", "capabilities", "owned", "oas-review");
+  cpSync(join(ROOT, "capabilities", "oas-review"), capability, { recursive: true });
+  writeFileSync(join(scope, "oas-config.yaml"), [
+    "name: desktop-test",
+    "capabilities:",
+    "  additive:",
+    "    oas.review:",
+    "      from: owned",
+    "      global: true",
+    "",
+  ].join("\n"));
+  return scope;
+}
 
 // ---- registry cache + attach sequencing (extracted marked blocks) ----
 function extractBlock(file, marker) {
@@ -64,7 +96,7 @@ test("desktop server: key-send failures never leak the payload or its hex encodi
 // ---- HTTP origin guard regression (server must not crash on Origin: null) ----
 
 test("desktop server: POST origin guard rejects hostile/null origins without crashing", async () => {
-  const port = 4000 + Math.floor(Math.random() * 2000);
+  const port = await freePort();
   const proc = spawn(process.execPath, [SRV, "start", "--port", String(port), "--dir", ROOT], { stdio: "ignore" });
   try {
     let up = false;
@@ -153,10 +185,9 @@ test("desktop harness: every shipped view has a tab in the shared harness", () =
 
 
 test("desktop server: /api/brain returns the contract shape with absolute paths", async () => {
-  // capability agents (reviewer) need installed capabilities — restore first (no-op when present)
-  execFileSync(process.execPath, [CLI, "install", "--dir", ROOT], { stdio: "ignore" });
-  const port = 4000 + Math.floor(Math.random() * 2000);
-  const proc = spawn(process.execPath, [SRV, "start", "--port", String(port), "--dir", ROOT], { stdio: "ignore" });
+  const scope = desktopCapabilityFixture();
+  const port = await freePort();
+  const proc = spawn(process.execPath, [SRV, "start", "--port", String(port), "--dir", scope], { stdio: "ignore" });
   try {
     let up = false;
     for (let i = 0; i < 40 && !up; i++) {
@@ -204,7 +235,7 @@ test("desktop server: /api/brain returns the contract shape with absolute paths"
     assert.ok(skillNames.includes("code-review") && skillNames.includes("security-review"),
       `capability agent carries its package skills (got: ${skillNames.join(", ")})`);
     for (const s of rev.soul.skills) assert.ok(s.path.startsWith("/") && s.path.endsWith("SKILL.md"));
-  } finally { proc.kill(); }
+  } finally { proc.kill(); rmSync(scope, { recursive: true, force: true }); }
 });
 
 test("desktop server: harvestHome rejects out-of-layout homes independently of roster derivation (review 0b83988)", async () => {
@@ -264,7 +295,7 @@ test("desktop server: /api/brain never returns skills from symlinks escaping a c
   writeFileSync(join(capDir, "agents", "helper", "skills", "good", "SKILL.md"), "---\nname: good-skill\ndescription: ok\n---\n# g\n");
   symlinkSync(join(scope, "outside-skill.md"), join(capDir, "agents", "helper", "skills", "sneaky", "SKILL.md"));
   mkdirSync(join(scope, "agents"), { recursive: true });
-  const port = 4000 + Math.floor(Math.random() * 2000);
+  const port = await freePort();
   const proc = spawn(process.execPath, [SRV, "start", "--port", String(port), "--dir", scope], { stdio: "ignore" });
   try {
     let up = false;
@@ -284,18 +315,15 @@ test("desktop server: /api/brain never returns skills from symlinks escaping a c
 
 
 test("desktop server: /api/agents lists persistent AND capability-defined agents; /api/spawn validates", async () => {
-  // CI runs from a bare checkout where .agents/capabilities/installed/ is
-  // gitignored — restore locked capabilities first (no-op when present) so
-  // capability-defined agents (oas.review's reviewer) can resolve.
-  execFileSync(process.execPath, [CLI, "install", "--dir", ROOT], { stdio: "ignore" });
-  const port = 4000 + Math.floor(Math.random() * 2000);
+  const scope = desktopCapabilityFixture();
+  const port = await freePort();
   // The 503 assertion below requires the server to find NO compatible CLI.
   // On dev machines a real `oas` is often on PATH (the probe settles ok and
   // the spawn attempt answers 409 instead) — strip every locator source so
   // the test is deterministic in CI and locally alike. PATH must be empty of
   // ANY toolchain: even /usr/bin/npm lets the npm-global source rediscover a
   // real oas (review b2a1564).
-  const proc = spawn(process.execPath, [SRV, "start", "--port", String(port), "--dir", ROOT], {
+  const proc = spawn(process.execPath, [SRV, "start", "--port", String(port), "--dir", scope], {
     stdio: "ignore",
     env: { ...process.env, PATH: "/nonexistent", OAS_DESKTOP_OAS_BIN: "", SHELL: "/bin/false" },
   });
@@ -334,7 +362,7 @@ test("desktop server: /api/agents lists persistent AND capability-defined agents
     const body = await r.json();
     assert.ok(!/unknown agent/.test(body.error), `reviewer resolves via findCapabilityAgent (got: ${body.error})`);
     assert.equal(body.code, "cli-unavailable", "stable degradation code for the UI");
-  } finally { proc.kill(); }
+  } finally { proc.kill(); rmSync(scope, { recursive: true, force: true }); }
 });
 
 // ---- /api/models: advisory model catalog for the spawn modal ----
@@ -364,7 +392,7 @@ test("desktop server: POST /api/models serves runtime-scoped catalogs, coalesces
   const countFile = join(bindir, "runs");
   writeFileSync(fakePi, `#!/bin/sh\necho x >> ${countFile}\nsleep 0.3\ncat <<'EOF'\nprovider        model                       context\nanthropic       claude-opus-4-5             200K\nanthropic       claude-sonnet-4-5           200K\nopenai          gpt-5.2                     400K\nEOF\n`);
   chmodSync(fakePi, 0o755);
-  const port = 4000 + Math.floor(Math.random() * 2000);
+  const port = await freePort();
   const proc = spawn(process.execPath, [SRV, "start", "--port", String(port), "--dir", ROOT], {
     stdio: "ignore",
     env: { ...process.env, PATH: `${bindir}:${process.env.PATH}` },
@@ -406,7 +434,7 @@ test("desktop server: POST /api/models serves runtime-scoped catalogs, coalesces
 });
 
 test("desktop server: /api/models degrades to an empty list when pi is not installed", async () => {
-  const port = 4000 + Math.floor(Math.random() * 2000);
+  const port = await freePort();
   const proc = spawn(process.execPath, [SRV, "start", "--port", String(port), "--dir", ROOT], {
     stdio: "ignore",
     env: { ...process.env, PATH: "/nonexistent", SHELL: "/bin/false" },
@@ -487,7 +515,7 @@ test("desktop server: file guard never re-resolves roots — a dir→symlink swa
 });
 
 test("desktop server: /api/file serves guarded text files with markdown flag", async () => {
-  const port = 4000 + Math.floor(Math.random() * 2000);
+  const port = await freePort();
   const proc = spawn(process.execPath, [SRV, "start", "--port", String(port), "--dir", ROOT], { stdio: "ignore" });
   try {
     let up = false;
@@ -526,7 +554,7 @@ test("desktop server: /api/file serves guarded text files with markdown flag", a
 });
 
 test("desktop server: hostile Host header is rejected on GET file APIs (DNS rebinding)", async () => {
-  const port = 4000 + Math.floor(Math.random() * 2000);
+  const port = await freePort();
   const proc = spawn(process.execPath, [SRV, "start", "--port", String(port), "--dir", ROOT], { stdio: "ignore" });
   try {
     let up = false;
@@ -561,7 +589,7 @@ test("desktop server: a symlinked local-agents sibling never becomes an /api/fil
   writeFileSync(join(scope, "agents", "dev", "soul", "soul.yaml"), "name: dev\ndescription: d\n");
   writeFileSync(join(scope, "agents", "dev", "soul", "AGENTS.md"), "# dev\n");
   symlinkSync(secret, join(scope, "local-agents"));
-  const port = 4000 + Math.floor(Math.random() * 2000);
+  const port = await freePort();
   const proc = spawn(process.execPath, [SRV, "start", "--port", String(port), "--dir", scope], { stdio: "ignore" });
   try {
     let up = false;
@@ -586,7 +614,7 @@ test("desktop server: a symlinked local-agents sibling never becomes an /api/fil
     mkdirSync(join(scope2, "local-agents", "loc", "soul"), { recursive: true });
     writeFileSync(join(scope2, "local-agents", "loc", "soul", "soul.yaml"), "name: loc\n");
     writeFileSync(join(scope2, "local-agents", "loc", "soul", "AGENTS.md"), "# loc\n");
-    const port2 = 4000 + Math.floor(Math.random() * 2000);
+    const port2 = await freePort();
     const proc2 = spawn(process.execPath, [SRV, "start", "--port", String(port2), "--dir", scope2], { stdio: "ignore" });
     try {
       let up2 = false;
@@ -615,7 +643,7 @@ test("desktop server: dir→symlink swap after admission cannot re-resolve the l
   writeFileSync(join(scope, "agents", "dev", "soul", "soul.yaml"), "name: dev\ndescription: d\n");
   mkdirSync(join(scope, "local-agents", "loc", "soul"), { recursive: true });
   writeFileSync(join(scope, "local-agents", "loc", "soul", "AGENTS.md"), "# loc\n");
-  const port = 4000 + Math.floor(Math.random() * 2000);
+  const port = await freePort();
   const proc = spawn(process.execPath, [SRV, "start", "--port", String(port), "--dir", scope], { stdio: "ignore" });
   try {
     let up = false;
