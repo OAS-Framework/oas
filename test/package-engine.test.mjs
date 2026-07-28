@@ -3342,3 +3342,34 @@ test("an option-like git ref is rejected, never silently resolved to HEAD (revie
   assert.equal(acquirePackage(sOk, `file://${repo}@${head}`).installed[0].commit, head);
   rmSync(base, { recursive: true, force: true });
 });
+
+test("a short non-default remote branch name still resolves after a clone (reviewer-374647d)", () => {
+  const base = temp();
+  const repo = repoWithPackages(join(base, "repo"), { "oas-package": { manifest: { package: "br.pkg" } } });
+  const defaultBranch = execFileSync("git", ["-C", repo, "rev-parse", "--abbrev-ref", "HEAD"], { encoding: "utf8" }).trim();
+  // A plain clone materializes ONLY the default branch locally; every other
+  // branch exists solely as refs/remotes/origin/<name>, so `<name>` has to be
+  // resolved through the remote-tracking ref.
+  execFileSync("git", ["-C", repo, "checkout", "-qb", "feature"]);
+  write(join(repo, "oas-package", "feature-only.md"), "on the feature branch\n");
+  const featureCommit = gitCommit(repo, "feature work");
+  execFileSync("git", ["-C", repo, "checkout", "-q", defaultBranch]);
+  assert.notEqual(featureCommit, execFileSync("git", ["-C", repo, "rev-parse", "HEAD"], { encoding: "utf8" }).trim());
+
+  const s = scope(base);
+  const r = acquirePackage(s, `file://${repo}@feature`);
+  assert.equal(r.installed[0].commit, featureCommit, "short remote branch resolves to its own commit, not the default branch");
+  assert.ok(existsSync(join(r.installed[0].dir, "feature-only.md")), "the feature branch's payload is what got installed");
+  assert.equal(readPackageLocks(s).packages["br.pkg"].source, `git:file://${repo}@feature`);
+
+  // The fallback is a resolution path, not a relaxation: unknown and
+  // option-like refs still fail closed.
+  for (const ref of ["no-such-branch", "--detach"]) {
+    const bs = scope(base, `s-${ref.replace(/[^a-z]/gi, "x")}`);
+    assert.throws(() => acquirePackage(bs, `file://${repo}@${ref}`), (e) => e.code === "invalid-source" && /does not resolve to a commit/.test(e.message), ref);
+  }
+  // Inspection and the WS2 profile diff share the helper, so they agree.
+  const snap = inspectGitSourceRoot(`file://${repo}@feature`);
+  try { assert.equal(snap.commit, featureCommit); } finally { snap.cleanup(); }
+  rmSync(base, { recursive: true, force: true });
+});
