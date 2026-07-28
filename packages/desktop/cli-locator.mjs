@@ -12,8 +12,8 @@
 //
 // Every candidate is canonicalized to an absolute executable and accepted
 // ONLY if executable and `<bin> version --json` returns the v1 probe:
-//   {"schemaVersion":1,"name":"@oas-framework/oas","version":"0.18.x","desktopApi":1}
-// Desktop 0.18 accepts desktopApi === 1 and semver >=0.18.0 <0.19.0.
+//   {"schemaVersion":1,"name":"@oas-framework/oas","version":"0.19.x","desktopApi":1}
+// Desktop 0.19 accepts desktopApi === 1 and semver >=0.18.0 <0.20.0.
 // API version — not source adjacency — is authoritative.
 //
 // Pure/injected: all process, fs and exec effects come through `io` so the
@@ -22,7 +22,18 @@
 import { delimiter, isAbsolute, join } from "node:path";
 
 export const DESKTOP_API = 1;
-export const ACCEPT_RANGE = { min: [0, 18, 0], maxExclusive: [0, 19, 0] };
+// The accepted band is per-minor and widened DELIBERATELY, once per kernel
+// minor, after confirming the Desktop v1 surface (`version --json` probe,
+// `spawn --json`, `okf harvest --json` — test/cli-json-contract.test.mjs) is
+// unchanged. It must always admit the kernel version shipped by the SAME
+// release: Desktop and the kernel are built from one tag, so a band that
+// excluded its own kernel would ship an app that degrades to observation-only
+// against the CLI it was released with (the 0.19.0 readiness blocker).
+export const ACCEPT_RANGE = { min: [0, 18, 0], maxExclusive: [0, 20, 0] };
+/** The band as humans read it — derived, never hand-spelled, so the probe
+ * rejection reason, the backend's /api status and the degradation card can
+ * never disagree with the numbers actually enforced above. */
+export const ACCEPT_RANGE_TEXT = `>=${ACCEPT_RANGE.min.join(".")} <${ACCEPT_RANGE.maxExclusive.join(".")}`;
 export const PROBE_NAME = "@oas-framework/oas";
 // Spawn-time agent relations (--relation/--relative-to) AND the anchor
 // qualifier (--relative-root, a later contract addition in the same
@@ -83,11 +94,11 @@ export function acceptProbe(payload) {
   if (!v) return { ok: false, reason: `unparsable version "${payload.version}"` };
   // Prerelease policy: prereleases are NOT accepted. Precedence-wise
   // 0.18.0-rc.1 < 0.18.0 (below the minimum), and a prerelease of any
-  // in-range version is not a released CLI — desktop 0.18 pairs with
-  // released 0.18.x only.
-  if (v.prerelease) return { ok: false, reason: `prerelease version ${payload.version} not accepted (need a released >=0.18.0 <0.19.0)` };
+  // in-range version is not a released CLI — Desktop pairs with released
+  // kernels only.
+  if (v.prerelease) return { ok: false, reason: `prerelease version ${payload.version} not accepted (need a released ${ACCEPT_RANGE_TEXT})` };
   if (cmp(v.nums, ACCEPT_RANGE.min) < 0 || cmp(v.nums, ACCEPT_RANGE.maxExclusive) >= 0) {
-    return { ok: false, reason: `version ${payload.version} outside >=0.18.0 <0.19.0` };
+    return { ok: false, reason: `version ${payload.version} outside ${ACCEPT_RANGE_TEXT}` };
   }
   return { ok: true };
 }

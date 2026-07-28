@@ -372,7 +372,7 @@ function cliStatus() {
     bin: cliState.bin || null,
     version: cliState.version || null,
     source: cliState.source || null,
-    required: { desktopApi: locator.DESKTOP_API, range: ">=0.18.0 <0.19.0" },
+    required: { desktopApi: locator.DESKTOP_API, range: locator.ACCEPT_RANGE_TEXT },
     // Capability flag for the spawn form: relation UI renders DISABLED
     // (never hidden) with the required version when the accepted CLI
     // predates spawn-time relations.

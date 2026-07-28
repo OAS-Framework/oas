@@ -17,8 +17,14 @@ prints exactly one JSON object on stdout:
 {"schemaVersion":1,"name":"@oas-framework/oas","version":"<installed version>","desktopApi":1}
 ```
 
-`version` is the installed package's exact semver (e.g. `0.18.2`).
-Desktop 0.18 accepts `desktopApi === 1` and semver `>=0.18.0 <0.19.0`.
+`version` is the installed package's exact semver (e.g. `0.19.0`).
+Desktop 0.19 accepts `desktopApi === 1` and semver `>=0.18.0 <0.20.0`.
+
+The band is widened one kernel minor at a time, after confirming this v1
+surface is unchanged, and always admits the kernel published by the same
+release — Desktop and the CLI are built from one tag, so a band excluding its
+own kernel would degrade the shipped app to observation-only. Prereleases are
+never accepted.
 
 ## Envelope
 

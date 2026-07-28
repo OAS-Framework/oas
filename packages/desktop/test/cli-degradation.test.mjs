@@ -13,8 +13,8 @@ function dom() {
 }
 const payload = (ok, extra = {}) => ({
   ok, bin: ok ? "/usr/local/bin/oas" : null, version: ok ? "0.18.0" : null,
-  source: ok ? "path" : null, required: { desktopApi: 1, range: ">=0.18.0 <0.19.0" },
-  probedAt: 1, tried: ok ? [] : [{ path: "/old/oas", source: "path", reason: "version 0.17.6 outside >=0.18.0 <0.19.0", version: "0.17.6" }],
+  source: ok ? "path" : null, required: { desktopApi: 1, range: ">=0.18.0 <0.20.0" },
+  probedAt: 1, tried: ok ? [] : [{ path: "/old/oas", source: "path", reason: "version 0.17.6 outside >=0.18.0 <0.20.0", version: "0.17.6" }],
   ...extra,
 });
 const jsonCtx = (state) => ({
@@ -89,7 +89,7 @@ test("cliCard renders the full contract surface: detected, required, Choose, Ret
   assert.ok(el.textContent.includes("/old/oas"), "detected path shown");
   assert.ok(el.textContent.includes("0.17.6"), "detected version shown");
   // required range + api
-  assert.ok(el.textContent.includes(">=0.18.0 <0.19.0"), "required range shown");
+  assert.ok(el.textContent.includes(">=0.18.0 <0.20.0"), "required range shown");
   // copyable install command
   assert.ok(el.querySelector(".cli-cmd").textContent.includes("npm install -g @oas-framework/oas@0.18.2"));
   assert.ok(el.querySelector(".cli-copy"), "copy affordance present");

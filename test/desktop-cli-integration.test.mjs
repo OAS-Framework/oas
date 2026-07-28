@@ -95,7 +95,7 @@ test("desktop server: /api/cli reports discovery status; compatible fake CLI acc
     assert.equal(s.ok, true, JSON.stringify(s));
     assert.equal(s.version, "0.18.0");
     assert.equal(s.source, "env");
-    assert.deepEqual(s.required, { desktopApi: 1, range: ">=0.18.0 <0.19.0" });
+    assert.deepEqual(s.required, { desktopApi: 1, range: ">=0.18.0 <0.20.0" });
     const g = await (await fetch(`http://127.0.0.1:${port}/api/cli`)).json();
     assert.equal(g.ok, true);
     assert.equal(g.bin, real);

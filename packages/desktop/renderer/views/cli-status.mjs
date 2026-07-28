@@ -119,7 +119,7 @@ export function cliCard(doc, ctx) {
             ? `${escapeHtml(detected.path)} <span class="cli-ver">(${escapeHtml(detected.version || "unknown")})</span>`
             : "no oas binary found"}</span>
           <span class="k">Required</span>
-          <span class="v">${escapeHtml(s?.required?.range || ">=0.18.0 <0.19.0")} with desktop API ${escapeHtml(String(s?.required?.desktopApi ?? 1))}</span>
+          <span class="v">${escapeHtml(s?.required?.range || ">=0.18.0 <0.20.0")} with desktop API ${escapeHtml(String(s?.required?.desktopApi ?? 1))}</span>
         </div>
         <div class="cli-install">
           <code class="cli-cmd">${escapeHtml(INSTALL_COMMAND)}</code>
