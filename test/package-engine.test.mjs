@@ -9,6 +9,7 @@ import {
   acquireCapability, acquirePackage, applyLegacyLockMigration, approveCapability, capabilityIntegrity, capabilityManifests, capabilityManifest, capabilityTrust,
   capabilitySkillDirs, capabilityExecutablePath, listInstalledPackages, loadPackageManifestAt, migrateLegacyLock,
   inspectGitSourceRoot, materializePackageDeps, packageDepsIntegrity, platformVariantLockPackages, packageIntegrity, parsePackageSource, readPackageLocks, removePackage, resolveOasConfig, restoreCapabilities, restorePackages,
+  DEFAULT_PACKAGE_PATH, normalizePackagePath,
   findAgent, findCapabilityAgent, spawnInstance, updatePackage, validateLockEntry, writeCapabilityLock, writePackageLock, installedPackagesDir, OAS_LOCK_FILE,
 } from "../lib/core.mjs";
 
@@ -130,15 +131,15 @@ test("writePackageLock/readPackageLocks: v2 round-trip, closest scope wins, refu
   const base = temp();
   const outer = scope(base, "outer");
   const inner = scope(join(base, "outer"), "inner");
-  writePackageLock(outer, "a.pkg", { source: "path:/x", version: "1.0.0", commit: "local", integrity: `sha256-${"0".repeat(64)}`, capabilities: ["a.cap"] });
-  writePackageLock(inner, "a.pkg", { source: "path:/y", version: "2.0.0", commit: "local", integrity: `sha256-${"1".repeat(64)}`, capabilities: ["a.cap"] });
+  writePackageLock(outer, "a.pkg", { source: "path:/x", path: ".", version: "1.0.0", commit: "local", integrity: `sha256-${"0".repeat(64)}`, capabilities: ["a.cap"] });
+  writePackageLock(inner, "a.pkg", { source: "path:/y", path: ".", version: "2.0.0", commit: "local", integrity: `sha256-${"1".repeat(64)}`, capabilities: ["a.cap"] });
   const locks = readPackageLocks(inner);
   assert.equal(locks.packages["a.pkg"].version, "2.0.0"); // closer wins
   assert.equal(readPackageLocks(outer).packages["a.pkg"].version, "1.0.0");
   // v1 file refuses package writes with legacy-lock
   const v1 = scope(base, "v1scope");
   writeCapabilityLock(v1, "old.cap", { source: "marketplace:old.cap@1.0.0", version: "1.0.0", integrity: `sha256-${"c".repeat(64)}` });
-  assert.throws(() => writePackageLock(v1, "a.pkg", { source: "path:/z", version: "1", commit: "local", integrity: `sha256-${"2".repeat(64)}`, capabilities: [] }), (e) => e.code === "legacy-lock");
+  assert.throws(() => writePackageLock(v1, "a.pkg", { source: "path:/z", path: ".", version: "1", commit: "local", integrity: `sha256-${"2".repeat(64)}`, capabilities: [] }), (e) => e.code === "legacy-lock");
   // legacy locks surface separately
   assert.equal(readPackageLocks(v1).legacy.length, 1);
   // deleting an entry
@@ -150,7 +151,7 @@ test("writePackageLock/readPackageLocks: v2 round-trip, closest scope wins, refu
 test("writeCapabilityLock never downgrades a v2 lock and refuses NEW legacy entries there", () => {
   const base = temp();
   const s = scope(base);
-  writePackageLock(s, "a.pkg", { source: "path:/x", version: "1", commit: "local", integrity: `sha256-${"0".repeat(64)}`, capabilities: [] });
+  writePackageLock(s, "a.pkg", { source: "path:/x", path: ".", version: "1", commit: "local", integrity: `sha256-${"0".repeat(64)}`, capabilities: [] });
   // Only `oas migrate` creates residue: adding a fresh legacy entry to a v2 lock is refused.
   assert.throws(() => writeCapabilityLock(s, "legacy.cap", { source: "path:/y", version: "1", integrity: `sha256-${"1".repeat(64)}` }), (e) => e.code === "legacy-lock");
   const parsed = JSON.parse(readFileSync(join(s, OAS_LOCK_FILE), "utf8"));
@@ -169,7 +170,7 @@ test("acquirePackage: local package with git dependency closure, exact lock, not
   const depSrc = pkgSource(join(base, "dep-src"), { package: "dep.pkg" }, { "cap": { capability: "dep.cap" } });
   const depCommit = gitify(depSrc);
   // root package (local path) depending on the pinned git dep
-  const rootSrc = pkgSource(join(base, "root-src"), { package: "root.pkg", dependencies: [`file://${depSrc}@${depCommit}`] }, { "cap": { capability: "root.cap", commands: { run: { exec: "x.mjs" } } } });
+  const rootSrc = pkgSource(join(base, "root-src"), { package: "root.pkg", dependencies: [`file://${depSrc}@${depCommit}#.`] }, { "cap": { capability: "root.cap", commands: { run: { exec: "x.mjs" } } } });
   write(join(rootSrc, "cap", "x.mjs"), "// exec\n");
   const r = acquirePackage(s, rootSrc);
   assert.equal(r.root, "root.pkg");
@@ -194,7 +195,7 @@ test("acquirePackage: unpinned git dependency is rejected; cycles and identity c
   const s = scope(base);
   const dep = pkgSource(join(base, "dep"), { package: "d.p" });
   gitify(dep);
-  const unpinned = pkgSource(join(base, "u"), { package: "u.p", dependencies: [`file://${dep}`] });
+  const unpinned = pkgSource(join(base, "u"), { package: "u.p", dependencies: [`file://${dep}#.`] });
   assert.throws(() => acquirePackage(s, unpinned), (e) => e.code === "invalid-source" && /pinned/.test(e.message));
   // cycle: a → b → a  (local path deps)
   const a = join(base, "a"); const b = join(base, "b");
@@ -232,7 +233,7 @@ test("acquirePackage: catalog resolver boundary — identity/discovery only, inj
   const src = pkgSource(join(base, "official"), { package: "oas.thing" }, { "cap": { capability: "oas.thing", commands: { go: { exec: "go.mjs" } } } });
   write(join(src, "cap", "go.mjs"), "// x\n");
   gitify(src);
-  const catalog = (id) => (id === "oas.thing" ? { url: src } : undefined);
+  const catalog = (id) => (id === "oas.thing" ? { url: src, path: "." } : undefined);
   const r = acquirePackage(s, "oas.thing", { catalog });
   assert.equal(r.root, "oas.thing");
   const lock = readPackageLocks(s).packages["oas.thing"];
@@ -265,7 +266,7 @@ test("restorePackages: exact restore from lock (commit + integrity), transaction
   const s = scope(base);
   const src = pkgSource(join(base, "src"), { package: "g.p" }, { "cap": { capability: "g.cap" } });
   gitify(src);
-  acquirePackage(s, `file://${src}`);
+  acquirePackage(s, `file://${src}#.`);
   const store = join(installedPackagesDir(s), "g.p");
   const lockedIntegrity = readPackageLocks(s).packages["g.p"].integrity;
   // wipe the store; restore refetches at the exact commit
@@ -428,7 +429,7 @@ test("removePackage: refuses while a dependent package or a config reference exi
   const s = scope(base, "scope", "name: t\ncapabilities:\n  additive:\n    rm.cap:\n      from: installed\n      global: true\n");
   const dep = pkgSource(join(base, "dep"), { package: "rm.dep" }, { "cap": { capability: "rm.cap" } });
   const depCommit = gitify(dep);
-  const root = pkgSource(join(base, "root"), { package: "rm.root", dependencies: [`file://${dep}@${depCommit}`] });
+  const root = pkgSource(join(base, "root"), { package: "rm.root", dependencies: [`file://${dep}@${depCommit}#.`] });
   acquirePackage(s, root);
   // blocked: rm.root depends on rm.dep AND config references rm.cap
   assert.throws(() => removePackage(s, "rm.dep"), (e) => e.code === "remove-blocked" && /depends on it/.test(e.message) && /references capability/.test(e.message));
@@ -453,7 +454,7 @@ test("migrateLegacyLock + applyLegacyLockMigration: marketplace→catalog mappin
   // official package for mig.cap available through a fixture catalog
   const official = pkgSource(join(base, "official"), { package: "mig.cap" }, { "cap": { capability: "mig.cap" } });
   gitify(official);
-  const catalog = (id) => (id === "mig.cap" ? { url: official } : undefined);
+  const catalog = (id) => (id === "mig.cap" ? { url: official, path: "." } : undefined);
   // v1 lock: one mappable marketplace entry, one unmappable
   writeCapabilityLock(s, "mig.cap", { source: "marketplace:mig.cap@1.0.0", version: "1.0.0", integrity: `sha256-${"a".repeat(64)}`, trustedExecutables: true });
   writeCapabilityLock(s, "gone.cap", { source: "marketplace:gone.cap@1.0.0", version: "1.0.0", integrity: `sha256-${"b".repeat(64)}` });
@@ -482,7 +483,10 @@ test("migrateLegacyLock: git and path v1 sources map to acquirable package specs
   writeCapabilityLock(s, "g.cap", { source: "git:https://host/x.git", version: "1", commit: "abc", integrity: `sha256-${"c".repeat(64)}` });
   writeCapabilityLock(s, "p.cap", { source: "path:/some/dir", version: "1", integrity: `sha256-${"d".repeat(64)}` });
   const { plan } = migrateLegacyLock(s);
-  assert.equal(plan.find((p) => p.capabilityId === "g.cap").package.spec, "https://host/x.git@abc");
+  // A v1 lock had no package-path concept: its artifact WAS the repository
+  // root, so migration selects the root explicitly instead of inheriting the
+  // new default contained path.
+  assert.equal(plan.find((p) => p.capabilityId === "g.cap").package.spec, "https://host/x.git@abc#.");
   assert.equal(plan.find((p) => p.capabilityId === "p.cap").package.spec, "/some/dir");
   rmSync(base, { recursive: true, force: true });
 });
@@ -681,7 +685,7 @@ test("clean fixture: acquire → lock → trust → activate → spawn probe wit
 // ---------- lock semantic validation (invalid-lock) ----------
 
 test("validateLockEntry: trust subset, dependency refs, source/commit pairing", () => {
-  const ok = { source: "git:https://h/x.git@v1", version: "1", commit: "a".repeat(40), integrity: `sha256-${"0".repeat(64)}`, capabilities: ["a.c"], dependencies: [], trustedCapabilities: ["a.c"] };
+  const ok = { source: "git:https://h/x.git@v1", path: ".", version: "1", commit: "a".repeat(40), integrity: `sha256-${"0".repeat(64)}`, capabilities: ["a.c"], dependencies: [], trustedCapabilities: ["a.c"] };
   assert.equal(validateLockEntry("p", ok, { p: ok }), true);
   assert.throws(() => validateLockEntry("p", { ...ok, trustedCapabilities: ["ghost"] }, {}), (e) => e.code === "invalid-lock");
   assert.throws(() => validateLockEntry("p", { ...ok, dependencies: ["missing.dep"] }, {}), (e) => e.code === "invalid-lock");
@@ -853,7 +857,7 @@ test("flat single-capability package: capabilities: [\".\"] — acquire/discover
   write(join(src, "go.mjs"), "//\n");
   write(join(src, "oas-package.json"), JSON.stringify({ package: "flat.p", version: "1.0.0", description: "p", compatibility: { oas: ">=0.1.0" }, capabilities: ["."] }));
   gitify(src);
-  acquirePackage(s, `file://${src}`);
+  acquirePackage(s, `file://${src}#.`);
   const m = capabilityManifests(s)["flat.cap"];
   assert.ok(m, "flat capability discovered");
   assert.equal(m._dir, m._packageDir, "capability dir IS the package root");
@@ -885,7 +889,7 @@ test("residue: later successful conversion — re-running migrate converts once 
   // official package publishes
   const official = pkgSource(join(base, "official"), { package: "late.cap" }, { "cap": { capability: "late.cap" } });
   gitify(official);
-  const catalog = (id) => (id === "late.cap" ? { url: official } : undefined);
+  const catalog = (id) => (id === "late.cap" ? { url: official, path: "." } : undefined);
   // second migrate on the (now v2) lock: converts the residue
   const r2 = applyLegacyLockMigration(s, { catalog });
   assert.deepEqual(r2.migrated.map((m) => m.capability), ["late.cap"]);
@@ -930,7 +934,7 @@ test("residue: migration failure is atomic — original v1 lock restored, migrat
   writeCapabilityLock(s, "ok.cap", { source: "marketplace:ok.cap@1.0.0", version: "1.0.0", integrity: `sha256-${"a".repeat(64)}` });
   writeCapabilityLock(s, "bad.cap", { source: "marketplace:bad.cap@1.0.0", version: "1.0.0", integrity: `sha256-${"b".repeat(64)}` });
   const original = readFileSync(join(s, OAS_LOCK_FILE), "utf8");
-  const catalog = (id) => (id === "ok.cap" ? { url: good } : id === "bad.cap" ? { url: wrong } : undefined);
+  const catalog = (id) => (id === "ok.cap" ? { url: good, path: "." } : id === "bad.cap" ? { url: wrong, path: "." } : undefined);
   assert.throws(() => applyLegacyLockMigration(s, { catalog }), (e) => /rolled back/.test(e.message));
   assert.equal(readFileSync(join(s, OAS_LOCK_FILE), "utf8"), original, "original v1 lock byte-identical");
   assert.ok(!existsSync(join(installedPackagesDir(s), "ok.cap")), "migration-installed package removed on rollback");
@@ -1007,7 +1011,7 @@ test("agent-callable JSON completeness: install/restore/trust/update/remove/migr
   write(join(src, "cap", "r.mjs"), "//\n");
   gitify(src);
   // install --json
-  let env = JSON.parse(cli(s, "install", `file://${src}`, "--dir", s, "--json").stdout);
+  let env = JSON.parse(cli(s, "install", `file://${src}#.`, "--dir", s, "--json").stdout);
   assert.equal(env.ok, true);
   assert.equal(env.result.root, "js.p");
   assert.equal(env.result.installed[0].package, "js.p");
@@ -1044,7 +1048,7 @@ test("agent-callable JSON completeness: install/restore/trust/update/remove/migr
   assert.equal(env.ok, true);
   assert.equal(env.result.package, "js.p");
   // trust --json failure: integrity drift carries the frozen code
-  cli(s, "install", `file://${src}`, "--dir", s);
+  cli(s, "install", `file://${src}#.`, "--dir", s);
   write(join(installedPackagesDir(s), "js.p", "cap", "r.mjs"), "// tampered\n");
   env = JSON.parse(cli(s, "trust", "js.cap", "--dir", s, "--json").stdout);
   assert.equal(env.ok, false);
@@ -1078,7 +1082,7 @@ test("compatibility: required, exact v1 grammar; malformed/missing → invalid-p
 test("invalid-lock hardening: self-dependency, locked-graph cycle, duplicates, provenance fields", () => {
   const sha = "a".repeat(40);
   const integ = `sha256-${"0".repeat(64)}`;
-  const mkEntry = (over = {}) => ({ source: "git:https://h/x.git@v1", version: "1", commit: sha, integrity: integ, capabilities: ["x.c"], dependencies: [], trustedCapabilities: [], ...over });
+  const mkEntry = (over = {}) => ({ source: "git:https://h/x.git@v1", path: ".", version: "1", commit: sha, integrity: integ, capabilities: ["x.c"], dependencies: [], trustedCapabilities: [], ...over });
   // self-dependency
   assert.throws(() => validateLockEntry("p", mkEntry({ dependencies: ["p"] }), { p: mkEntry() }, { file: "/f" }),
     (e) => e.code === "invalid-lock" && /self-dependency/.test(e.message) && e.provenance?.[0]?.package === "p" && e.provenance?.[0]?.file === "/f");
@@ -1098,7 +1102,7 @@ test("invalid-lock: update/remove planning fail closed; doctor and list diagnose
   const s = scope(base);
   const src = pkgSource(join(base, "src"), { package: "hd.p" }, { "cap": { capability: "hd.cap" } });
   gitify(src);
-  cli(s, "install", `file://${src}`, "--dir", s);
+  cli(s, "install", `file://${src}#.`, "--dir", s);
   // corrupt the lock: trust outside capabilities
   const lockFile = join(s, OAS_LOCK_FILE);
   const parsed = JSON.parse(readFileSync(lockFile, "utf8"));
@@ -1213,12 +1217,12 @@ test("update transaction: identity change fails PRE-COMMIT — nothing installed
   const s = scope(base);
   const src = pkgSource(join(base, "src"), { package: "old.id" }, { "cap": { capability: "oi.cap" } });
   gitify(src);
-  acquirePackage(s, `file://${src}`);
+  acquirePackage(s, `file://${src}#.`);
   // Source renames its ROOT identity while a dependency claims the expected
   // old id. Closure-membership is insufficient: update must require rootId.
   const impostorDep = pkgSource(join(base, "impostor-dep"), { package: "old.id" });
   const depCommit = gitify(impostorDep);
-  write(join(src, "oas-package.json"), JSON.stringify({ package: "new.id", version: "2.0.0", description: "p", compatibility: { oas: ">=0.1.0" }, capabilities: ["cap"], dependencies: [`file://${impostorDep}@${depCommit}`] }));
+  write(join(src, "oas-package.json"), JSON.stringify({ package: "new.id", version: "2.0.0", description: "p", compatibility: { oas: ">=0.1.0" }, capabilities: ["cap"], dependencies: [`file://${impostorDep}@${depCommit}#.`] }));
   gitCommit(src);
   assert.throws(() => updatePackage(s, "old.id"), (e) => e.code === "duplicate-package-identity" && /root resolved/.test(e.message));
   assert.ok(!existsSync(join(installedPackagesDir(s), "new.id")), "new identity NOT installed");
@@ -1262,7 +1266,7 @@ test("trust QUERY path validates the lock: malformed trustedCapabilities reads a
 test("validateLockEntry: prototype-named dependency, non-array fields, unknown source scheme all fail invalid-lock", () => {
   const sha = "a".repeat(40);
   const integ = `sha256-${"0".repeat(64)}`;
-  const mk = (over = {}) => ({ source: "git:https://h/x.git@v1", version: "1", commit: sha, integrity: integ, capabilities: ["x.c"], ...over });
+  const mk = (over = {}) => ({ source: "git:https://h/x.git@v1", path: ".", version: "1", commit: sha, integrity: integ, capabilities: ["x.c"], ...over });
   assert.throws(() => validateLockEntry("p", mk({ dependencies: ["constructor"] }), {}, {}), (e) => e.code === "invalid-lock" && /constructor/.test(e.message));
   assert.throws(() => validateLockEntry("p", mk({ dependencies: "notarray" }), {}, {}), (e) => e.code === "invalid-lock" && /must be an array/.test(e.message));
   assert.throws(() => validateLockEntry("p", mk({ trustedCapabilities: { evil: 1 } }), {}, {}), (e) => e.code === "invalid-lock" && /must be an array/.test(e.message));
@@ -1277,7 +1281,7 @@ test("restore repairs a deleted node_modules closure; doctor probes closure stal
   write(join(src, "package.json"), JSON.stringify({ name: "rc-p", version: "1.0.0", dependencies: { dep: "file:vendor/dep" } }));
   write(join(src, "package-lock.json"), JSON.stringify({ name: "rc-p", version: "1.0.0", lockfileVersion: 3, requires: true, packages: { "": { name: "rc-p", version: "1.0.0", dependencies: { dep: "file:vendor/dep" } }, "node_modules/dep": { resolved: "vendor/dep", link: true }, "vendor/dep": { version: "1.0.0" } } }));
   gitify(src);
-  acquirePackage(s, `file://${src}`);
+  acquirePackage(s, `file://${src}#.`);
   const dest = join(installedPackagesDir(s), "rc.p");
   assert.ok(existsSync(join(dest, "node_modules", "dep")));
   // delete the derived closure: doctor flags it; bare restore repairs it
@@ -1316,7 +1320,7 @@ test("__proto__ raw-JSON lock keys cannot forge trusted entries (reviewer-4d1b82
 test("validateLockEntry: falsey non-array optional fields are invalid (null/false/0/'')", () => {
   const sha = "a".repeat(40);
   const integ = `sha256-${"0".repeat(64)}`;
-  const mk = (over) => ({ source: "git:https://h/x.git@v1", version: "1", commit: sha, integrity: integ, capabilities: ["x.c"], ...over });
+  const mk = (over) => ({ source: "git:https://h/x.git@v1", path: ".", version: "1", commit: sha, integrity: integ, capabilities: ["x.c"], ...over });
   for (const v of [null, false, 0, ""]) {
     assert.throws(() => validateLockEntry("p", mk({ dependencies: v }), {}, {}), (e) => e.code === "invalid-lock", `dependencies=${JSON.stringify(v)}`);
     assert.throws(() => validateLockEntry("p", mk({ trustedCapabilities: v }), {}, {}), (e) => e.code === "invalid-lock", `trustedCapabilities=${JSON.stringify(v)}`);
@@ -1378,7 +1382,7 @@ test("writePackageLock validates the FULL prospective map (finding 3)", () => {
   const s = scope(base);
   const sha = "a".repeat(40);
   const integ = `sha256-${"3".repeat(64)}`;
-  const good = { source: `git:https://h/x.git@v1`, version: "1", commit: sha, integrity: integ, capabilities: ["g.c"], dependencies: [], trustedCapabilities: [] };
+  const good = { source: `git:https://h/x.git@v1`, path: ".", version: "1", commit: sha, integrity: integ, capabilities: ["g.c"], dependencies: [], trustedCapabilities: [] };
   writePackageLock(s, "good.p", good);
   // writing an entry that references a missing dependency is rejected...
   assert.throws(() => writePackageLock(s, "bad.p", { ...good, capabilities: ["b.c"], dependencies: ["ghost.p"] }), (e) => e.code === "invalid-lock");
@@ -1400,12 +1404,12 @@ test("migration rollback removes the FAILING conversion's packages too (reviewer
   // the FAILING conversion carries a DEPENDENCY — rollback must remove BOTH
   const wrongDep = pkgSource(join(base, "wrong-dep"), { package: "bad.dep" });
   const wrongDepCommit = gitify(wrongDep);
-  const wrong = pkgSource(join(base, "wrong"), { package: "bad.cap", dependencies: [`file://${wrongDep}@${wrongDepCommit}`] }, { "cap": { capability: "something.else" } });
+  const wrong = pkgSource(join(base, "wrong"), { package: "bad.cap", dependencies: [`file://${wrongDep}@${wrongDepCommit}#.`] }, { "cap": { capability: "something.else" } });
   gitify(wrong);
   writeCapabilityLock(s, "ok.cap", { source: "marketplace:ok.cap@1.0.0", version: "1.0.0", integrity: `sha256-${"a".repeat(64)}` });
   writeCapabilityLock(s, "bad.cap", { source: "marketplace:bad.cap@1.0.0", version: "1.0.0", integrity: `sha256-${"b".repeat(64)}` });
   const original = readFileSync(join(s, OAS_LOCK_FILE), "utf8");
-  const catalog = (id) => (id === "ok.cap" ? { url: good } : id === "bad.cap" ? { url: wrong } : undefined);
+  const catalog = (id) => (id === "ok.cap" ? { url: good, path: "." } : id === "bad.cap" ? { url: wrong, path: "." } : undefined);
   assert.throws(() => applyLegacyLockMigration(s, { catalog }), /rolled back/);
   assert.equal(readFileSync(join(s, OAS_LOCK_FILE), "utf8"), original);
   assert.ok(!existsSync(join(installedPackagesDir(s), "ok.cap")), "earlier conversion removed");
@@ -1572,9 +1576,9 @@ test("updatePackage fails closed when ANY consumable lock entry is invalid (revi
   const s = scope(base);
   const dep = pkgSource(join(base, "dep"), { package: "b.p" }, { "cap": { capability: "b.cap" } });
   const depCommit = gitify(dep);
-  const root = pkgSource(join(base, "root"), { package: "a2.p", dependencies: [`file://${dep}@${depCommit}`] });
+  const root = pkgSource(join(base, "root"), { package: "a2.p", dependencies: [`file://${dep}@${depCommit}#.`] });
   gitify(root);
-  acquirePackage(s, `file://${root}`);
+  acquirePackage(s, `file://${root}#.`);
   // corrupt the DEPENDENCY entry, then update the ROOT
   const lockFile = join(s, OAS_LOCK_FILE);
   const parsed = JSON.parse(readFileSync(lockFile, "utf8"));
@@ -1591,8 +1595,8 @@ test("schema/runtime parity: array/null compatibility, empty source (reviewer-fe
   assert.throws(() => loadPackageManifestAt(mk(null)), (e) => e.code === "invalid-package-manifest", "null compatibility is invalid-package-manifest, not TypeError");
   const sha = "a".repeat(40);
   const integ = `sha256-${"0".repeat(64)}`;
-  assert.throws(() => validateLockEntry("p", { source: "path:", version: "1", commit: "local", integrity: integ, capabilities: [] }, {}, {}), (e) => e.code === "invalid-lock", "empty path source rejected");
-  assert.throws(() => validateLockEntry("p", { source: "git:", version: "1", commit: sha, integrity: integ, capabilities: [] }, {}, {}), (e) => e.code === "invalid-lock", "empty git url rejected");
+  assert.throws(() => validateLockEntry("p", { source: "path:", path: ".", version: "1", commit: "local", integrity: integ, capabilities: [] }, {}, {}), (e) => e.code === "invalid-lock", "empty path source rejected");
+  assert.throws(() => validateLockEntry("p", { source: "git:", path: ".", version: "1", commit: sha, integrity: integ, capabilities: [] }, {}, {}), (e) => e.code === "invalid-lock", "empty git url rejected");
   rmSync(base, { recursive: true, force: true });
 });
 
@@ -1680,7 +1684,7 @@ test("locks with only missing artifacts still fail closed on list; restore raise
   const base = temp();
   const s = scope(base);
   // v2 lock whose ONLY entry has no installed artifact and a bad integrity
-  writeFileSync(join(s, OAS_LOCK_FILE), JSON.stringify({ lockfileVersion: 2, packages: { "ghost.p": { source: "path:/x", version: "1", commit: "local", integrity: "sha256-bad", capabilities: [] } } }, null, 2));
+  writeFileSync(join(s, OAS_LOCK_FILE), JSON.stringify({ lockfileVersion: 2, packages: { "ghost.p": { source: "path:/x", path: ".", version: "1", commit: "local", integrity: "sha256-bad", capabilities: [] } } }, null, 2));
   // even without a store dir, list must RAISE — not return ok:true
   const r = cli(s, "list", "--dir", s, "--json");
   const env = JSON.parse(r.stdout);
@@ -1747,7 +1751,7 @@ test("relative dependency paths resolve against the DEPENDING package's root, no
   // a relative dependency declared by a NON-path (git) parent is a coded error, not CWD guessing
   const g = pkgSource(join(base, "g"), { package: "g.rel", dependencies: ["./sub"] });
   gitify(g);
-  assert.throws(() => acquirePackage(scope(base, "s2"), `file://${g}`), (e) => e.code === "invalid-source" && /relative path/.test(e.message));
+  assert.throws(() => acquirePackage(scope(base, "s2"), `file://${g}#.`), (e) => e.code === "invalid-source" && /relative path/.test(e.message));
   rmSync(base, { recursive: true, force: true });
 });
 
@@ -1908,7 +1912,7 @@ test("re-acquisition cannot re-legitimize same-bytes drift against an existing l
 test("no coercion anywhere: non-string array items, array depsIntegrity, numeric package id all rejected (reviewer-176d339)", () => {
   const sha = "a".repeat(40);
   const integ = `sha256-${"0".repeat(64)}`;
-  const mk = (over) => ({ source: "git:https://h/x.git@v1", version: "1", commit: sha, integrity: integ, capabilities: ["x.c"], ...over });
+  const mk = (over) => ({ source: "git:https://h/x.git@v1", path: ".", version: "1", commit: sha, integrity: integ, capabilities: ["x.c"], ...over });
   // array depsIntegrity coerced through String() previously
   assert.throws(() => validateLockEntry("p", mk({ depsIntegrity: [integ] }), {}, {}), (e) => e.code === "invalid-lock" && /depsIntegrity/.test(e.message));
   // schema-invalid array MEMBERS
@@ -2099,7 +2103,7 @@ test("lock entries enforce additionalProperties: false (reviewer-5f1188d)", () =
   const integ = `sha256-${"0".repeat(64)}`;
   writeFileSync(join(s, OAS_LOCK_FILE), JSON.stringify({
     lockfileVersion: 2,
-    packages: { "x.p": { source: "git:https://h/x.git@v1", version: "1", commit: sha, integrity: integ, capabilities: [], wat: true } },
+    packages: { "x.p": { source: "git:https://h/x.git@v1", path: ".", version: "1", commit: sha, integrity: integ, capabilities: [], wat: true } },
   }));
   assert.throws(() => readPackageLocks(s), (e) => e.code === "invalid-lock" && /unknown keys: wat/.test(e.message));
   assert.throws(() => restorePackages(s), (e) => e.code === "invalid-lock");
@@ -2124,7 +2128,7 @@ test("relative-dep rejection classifies from the parsed payload — path:sub and
       const g = pkgSource(join(base, `g-${spelling.replace(/[^a-z]/g, "")}`), { package: "gp.rel", dependencies: [spelling] });
       gitify(g);
       const lockBefore = existsSync(join(s, OAS_LOCK_FILE)) ? readFileSync(join(s, OAS_LOCK_FILE), "utf8") : null;
-      assert.throws(() => acquirePackage(s, `file://${g}`), (e) => e.code === "invalid-source" && /relative path/.test(e.message), spelling);
+      assert.throws(() => acquirePackage(s, `file://${g}#.`), (e) => e.code === "invalid-source" && /relative path/.test(e.message), spelling);
       assert.ok(!existsSync(join(installedPackagesDir(s), "bait.p")), `${spelling}: CWD bait not installed`);
       assert.ok(!existsSync(join(installedPackagesDir(s), "gp.rel")), `${spelling}: remote package not installed either (transaction failed whole)`);
       const lockAfter = existsSync(join(s, OAS_LOCK_FILE)) ? readFileSync(join(s, OAS_LOCK_FILE), "utf8") : null;
@@ -2284,7 +2288,7 @@ test("writePackageLock routes through the central parser — all malformed roots
   const base = temp();
   const sha = "a".repeat(40);
   const integ = `sha256-${"0".repeat(64)}`;
-  const entry = { source: "git:https://h/x.git@v1", version: "1", commit: sha, integrity: integ, capabilities: [] };
+  const entry = { source: "git:https://h/x.git@v1", path: ".", version: "1", commit: sha, integrity: integ, capabilities: [] };
   const shapes = [["malformed", "{ nope"], ["null-root", "null"], ["scalar-root", "42"], ["array-root", "[]"],
     ["bad-packages", JSON.stringify({ lockfileVersion: 2, packages: "x" })],
     ["bad-residue", JSON.stringify({ lockfileVersion: 1, capabilities: [] })]];
@@ -2320,7 +2324,7 @@ test("configs: null is invalid-package-manifest; non-string packageId rejected b
   const s = scope(base);
   const sha = "a".repeat(40);
   const integ = `sha256-${"0".repeat(64)}`;
-  const entry = { source: "git:https://h/x.git@v1", version: "1", commit: sha, integrity: integ, capabilities: [] };
+  const entry = { source: "git:https://h/x.git@v1", path: ".", version: "1", commit: sha, integrity: integ, capabilities: [] };
   for (const badId of [123, true, ["a"], null]) {
     assert.throws(() => writePackageLock(s, badId, entry), (e) => e.code === "invalid-lock" && /must be a string/.test(e.message), JSON.stringify(badId));
   }
@@ -2343,7 +2347,7 @@ test("non-reader paths validate residue containers and packages shapes (reviewer
   const base = temp();
   const sha = "a".repeat(40);
   const integ = `sha256-${"0".repeat(64)}`;
-  const entry = { source: "git:https://h/x.git@v1", version: "1", commit: sha, integrity: integ, capabilities: [] };
+  const entry = { source: "git:https://h/x.git@v1", path: ".", version: "1", commit: sha, integrity: integ, capabilities: [] };
   // v2 with capabilities: null — restore and write both raise
   const s = scope(base, "s1");
   writeFileSync(join(s, OAS_LOCK_FILE), JSON.stringify({ lockfileVersion: 2, packages: {}, capabilities: null }));
@@ -2414,7 +2418,7 @@ test("tilde dependency spellings from git parents are rejected — no ambient $H
       const g = pkgSource(join(base, `g-${spelling.replace(/[^a-z0-9]/gi, "")}`), { package: "gt.rel", dependencies: [spelling] });
       gitify(g);
       const lockBefore = existsSync(join(s, OAS_LOCK_FILE)) ? readFileSync(join(s, OAS_LOCK_FILE), "utf8") : null;
-      assert.throws(() => acquirePackage(s, `file://${g}`), (e) => e.code === "invalid-source" && /relative path/.test(e.message), spelling);
+      assert.throws(() => acquirePackage(s, `file://${g}#.`), (e) => e.code === "invalid-source" && /relative path/.test(e.message), spelling);
       assert.ok(!existsSync(join(installedPackagesDir(s), "hbait.p")), `${spelling}: $HOME bait not installed`);
       assert.ok(!existsSync(join(installedPackagesDir(s), "gt.rel")), `${spelling}: whole-transaction failure`);
       const lockAfter = existsSync(join(s, OAS_LOCK_FILE)) ? readFileSync(join(s, OAS_LOCK_FILE), "utf8") : null;
@@ -2507,7 +2511,7 @@ test("capability and package restore preflight the COMPLETE visible lock chain b
   const innerPkg = join(outerPkg, "inner"); mkdirSync(innerPkg);
   const psrc = pkgSource(join(base, "pkg-src"), { package: "good.pkg" });
   writeFileSync(join(outerPkg, OAS_LOCK_FILE), JSON.stringify({ lockfileVersion: 2, packages: {
-    "good.pkg": { source: `path:${psrc}`, version: "1.0.0", commit: "local", integrity: packageIntegrity(psrc), capabilities: [] },
+    "good.pkg": { source: `path:${psrc}`, path: ".", version: "1.0.0", commit: "local", integrity: packageIntegrity(psrc), capabilities: [] },
   } }));
   writeFileSync(join(innerPkg, OAS_LOCK_FILE), JSON.stringify({ lockfileVersion: 2, packages: null }));
   assert.throws(() => restorePackages(innerPkg), (e) => e.code === "invalid-lock" && /packages/.test(e.message));
@@ -2598,7 +2602,7 @@ test("remove checks target own-scope dependents despite inner same-id shadow and
   const outer = scope(base, "outer"); const inner = join(outer, "inner"); mkdirSync(inner);
   const dep = pkgSource(join(base, "dep"), { package: "shadow.dep" });
   const depCommit = gitify(dep);
-  const root = pkgSource(join(base, "outer-root"), { package: "shadow.root", dependencies: [`file://${dep}@${depCommit}`] });
+  const root = pkgSource(join(base, "outer-root"), { package: "shadow.root", dependencies: [`file://${dep}@${depCommit}#.`] });
   acquirePackage(outer, root);
   // Inner same-id root has no dependency and hides outer shadow.root in the
   // closest-wins merged map used by the vulnerable implementation.
@@ -2634,7 +2638,7 @@ test("update preserves explicit catalog selector and lock metadata distinguishes
   const seen = [];
   const catalog = (id, selector) => {
     assert.equal(id, "select.p"); seen.push(selector);
-    return { url: selector === "v1" ? pinned : latest };
+    return { url: selector === "v1" ? pinned : latest, path: "." };
   };
 
   const explicitScope = scope(base, "explicit");
@@ -2682,7 +2686,7 @@ test("contained directory symlinks cannot hide second-hop skill or capability-ag
   // Git clone preserves the authored relative directory links verbatim; local
   // cp may canonicalize them to source-tree absolute targets.
   gitify(src);
-  acquirePackage(s, `file://${src}`);
+  acquirePackage(s, `file://${src}#.`);
   assert.throws(() => capabilitySkillDirs("tree.cap", s), /skill path escapes its integrity boundary/, "nested skill symlink escape rejected");
   assert.throws(() => findCapabilityAgent(s, join(base, "agents-root"), "reviewer"), /agent path escapes its integrity boundary/, "nested capability-agent symlink escape rejected");
   rmSync(base, { recursive: true, force: true });
@@ -2759,11 +2763,11 @@ test("Git root probe precedes v1 lock preflight and never falls back for depende
   // validation, never reinterpret the root's oas.json as legacy fallback.
   const dep = standalone("not-a-package-dep", "dep.legacy");
   const depCommit = execFileSync("git", ["-C", dep, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
-  const dual = pkgSource(join(base, "dual"), { package: "dual.pkg", dependencies: [`file://${dep}@${depCommit}`] });
+  const dual = pkgSource(join(base, "dual"), { package: "dual.pkg", dependencies: [`file://${dep}@${depCommit}#.`] });
   write(join(dual, "oas.json"), JSON.stringify({ capability: "dual.legacy", version: "1.0.0", description: "must not fallback" }));
   gitify(dual);
   const dualScope = scope(base, "dual-scope");
-  const bad = cli(dualScope, "install", `file://${dual}`, "--dir", dualScope, "--json");
+  const bad = cli(dualScope, "install", `file://${dual}#.`, "--dir", dualScope, "--json");
   assert.notEqual(bad.status, 0);
   assert.match(bad.stdout, /invalid-package-manifest/);
   const dualLock = join(dualScope, OAS_LOCK_FILE);
@@ -2791,15 +2795,399 @@ test("Git root selection hands one immutable inspected snapshot across standalon
 
   // package at inspection, mutated remote becomes standalone afterwards
   const pkg = pkgSource(join(base, "pkg"), { package: "snap.pkg" }); gitify(pkg);
-  const pkgSnap = inspectGitSourceRoot(`file://${pkg}`);
+  const pkgSnap = inspectGitSourceRoot(`file://${pkg}#.`);
   try {
     rmSync(join(pkg, "oas-package.json"));
     write(join(pkg, "oas.json"), JSON.stringify({ capability: "wrong.cap", version: "1.0.0", description: "d" }));
     gitCommit(pkg);
     const s = scope(base, "pkg-scope");
-    const r = acquirePackage(s, `file://${pkg}`, { rootSnapshot: pkgSnap });
+    const r = acquirePackage(s, `file://${pkg}#.`, { rootSnapshot: pkgSnap });
     assert.equal(r.root, "snap.pkg");
     assert.equal(r.installed[0].commit, pkgSnap.commit, "package acquisition uses inspected commit, not mutated remote head");
   } finally { pkgSnap.cleanup(); }
+  rmSync(base, { recursive: true, force: true });
+});
+
+// ---------- configurable package payload root (contract §§1-9) ----------
+
+/** A repository containing one or more packages at contained roots.
+ * `layout` maps package path → { manifest, capabilities }. Returns the repo dir. */
+function repoWithPackages(dir, layout, extras = {}) {
+  for (const [rel, spec] of Object.entries(layout)) {
+    pkgSource(rel === "." ? dir : join(dir, rel), spec.manifest, spec.capabilities || {});
+  }
+  for (const [rel, content] of Object.entries(extras)) write(join(dir, rel), content);
+  gitify(dir);
+  return dir;
+}
+
+test("package path parsing: git fragments normalize; catalog ids and local paths take none", () => {
+  assert.equal(DEFAULT_PACKAGE_PATH, "oas-package");
+  // Unselected: the parse records nothing and resolution applies the default.
+  assert.equal(parsePackageSource("git:github.com/org/repo@v1").packagePath, undefined);
+  // Every git spelling accepts the fragment, and the fragment is split BEFORE
+  // the @ref so a path can never be swallowed by ref parsing.
+  const sh = parsePackageSource("git:github.com/org/repo@v1.2.0#packages/core");
+  assert.deepEqual({ ref: sh.ref, packagePath: sh.packagePath, normalized: sh.normalized },
+    { ref: "v1.2.0", packagePath: "packages/core", normalized: "git:https://github.com/org/repo.git@v1.2.0" });
+  assert.equal(parsePackageSource("https://host/org/repo.git@abc#sub").packagePath, "sub");
+  assert.equal(parsePackageSource("git@host:org/repo.git@v2#a/b").packagePath, "a/b");
+  // Every spelling of the repository root canonicalizes to exactly ".".
+  for (const spelling of [".", "./", "./.", "", "  "]) {
+    assert.equal(parsePackageSource(`https://h/x.git#${spelling}`).packagePath, ".", spelling);
+  }
+  assert.equal(parsePackageSource("https://h/x.git#./a//b/").packagePath, "a/b");
+  // Local paths are exact directories; catalog paths come from the catalog.
+  assert.equal(parsePackageSource("/abs/dir").packagePath, ".");
+  for (const bad of ["/abs/dir#sub", "path:/abs/dir#sub", "./rel#sub", "oas.okf#sub", "oas.okf@v1#sub"]) {
+    assert.throws(() => parsePackageSource(bad), (e) => e.code === "invalid-source" && /#<path>/.test(e.message), bad);
+  }
+  assert.throws(() => parsePackageSource("https://h/x.git#a#b"), (e) => e.code === "invalid-source" && /more than one/.test(e.message));
+  assert.throws(() => parsePackageSource("#oas-package"), (e) => e.code === "invalid-source" && /names no source/.test(e.message));
+});
+
+test("normalizePackagePath: canonical relative forms only; traversal is path-escape", () => {
+  assert.equal(normalizePackagePath(undefined), undefined, "absent lets the caller apply its own default");
+  assert.equal(normalizePackagePath("."), ".");
+  assert.equal(normalizePackagePath("a/./b/"), "a/b");
+  for (const bad of ["/abs", "~/home", "~", "a\\b", "C:/x", "a\0b"]) {
+    assert.throws(() => normalizePackagePath(bad), (e) => e.code === "invalid-source", bad);
+  }
+  for (const bad of ["..", "../x", "a/../../b", "a/.."]) {
+    assert.throws(() => normalizePackagePath(bad), (e) => e.code === "path-escape", bad);
+  }
+  for (const bad of [42, [], {}, true]) {
+    assert.throws(() => normalizePackagePath(bad), (e) => e.code === "invalid-source" && /must be a string/.test(e.message), JSON.stringify(bad));
+  }
+  assert.throws(() => normalizePackagePath("/abs", { code: "invalid-lock" }), (e) => e.code === "invalid-lock");
+});
+
+test("git acquisition: default oas-package root, custom path, and explicit repository root", () => {
+  const base = temp();
+  // DEFAULT: no fragment selects oas-package/, never the repository root.
+  const dflt = repoWithPackages(join(base, "default-repo"),
+    { "oas-package": { manifest: { package: "d.pkg" }, capabilities: { cap: { capability: "d.cap" } } } },
+    { "README.md": "repo docs\n", ".github/workflows/ci.yml": "ci\n" });
+  const s1 = scope(base, "s1");
+  const r1 = acquirePackage(s1, `file://${dflt}`);
+  assert.equal(r1.root, "d.pkg");
+  assert.equal(readPackageLocks(s1).packages["d.pkg"].path, "oas-package");
+
+  // CUSTOM path.
+  const custom = repoWithPackages(join(base, "custom-repo"),
+    { "dist/oas": { manifest: { package: "c.pkg" }, capabilities: { cap: { capability: "c.cap" } } } });
+  const s2 = scope(base, "s2");
+  assert.equal(acquirePackage(s2, `file://${custom}#dist/oas`).root, "c.pkg");
+  assert.equal(readPackageLocks(s2).packages["c.pkg"].path, "dist/oas");
+
+  // EXPLICIT ROOT.
+  const rootRepo = repoWithPackages(join(base, "root-repo"), { ".": { manifest: { package: "r.pkg" }, capabilities: { cap: { capability: "r.cap" } } } });
+  const s3 = scope(base, "s3");
+  assert.equal(acquirePackage(s3, `file://${rootRepo}#.`).root, "r.pkg");
+  assert.equal(readPackageLocks(s3).packages["r.pkg"].path, ".", "root representation is canonical in the lock");
+
+  // A repository whose package is ONLY at the root is not found by the default.
+  const s4 = scope(base, "s4");
+  assert.throws(() => acquirePackage(s4, `file://${rootRepo}`),
+    (e) => e.code === "invalid-source" && /oas-package/.test(e.message) && /#\./.test(e.message));
+  assert.ok(!existsSync(join(s4, OAS_LOCK_FILE)), "a failed selection writes no lock");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("installed bytes equal the SELECTED subtree — repo docs, CI, souls and sibling packages stay outside", () => {
+  const base = temp();
+  const repo = repoWithPackages(join(base, "repo"),
+    { "oas-package": { manifest: { package: "sel.pkg" }, capabilities: { cap: { capability: "sel.cap" } } } },
+    {
+      "README.md": "repo docs\n", ".github/workflows/ci.yml": "ci\n",
+      "agents/owner/soul/soul.yaml": "name: owner\n", "other-package/oas-package.json": "{}\n",
+    });
+  const s = scope(base);
+  const r = acquirePackage(s, `file://${repo}`);
+  const dir = r.installed[0].dir;
+  assert.deepEqual(readdirSync(dir).sort(), ["cap", "oas-package.json"], "only the selected subtree is materialized");
+  for (const outside of ["README.md", ".github", "agents", "other-package", ".git"]) {
+    assert.ok(!existsSync(join(dir, outside)), `${outside} must not be installed`);
+  }
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("integrity covers the selected payload only: outside-root edits are invisible, payload and capability-agent edits are not", () => {
+  const base = temp();
+  const repo = repoWithPackages(join(base, "repo"),
+    { "oas-package": { manifest: { package: "int.pkg" }, capabilities: { cap: { capability: "int.cap", agents: ["agents/reviewer"] } } } },
+    { "README.md": "v1\n" });
+  write(join(repo, "oas-package", "cap", "agents", "reviewer", "soul.yaml"), "name: reviewer\ndescription: d\n");
+  write(join(repo, "oas-package", "cap", "agents", "reviewer", "AGENTS.md"), "reviewer v1\n");
+  gitCommit(repo, "agents");
+  const s = scope(base);
+  const baseline = acquirePackage(s, `file://${repo}`).installed[0].integrity;
+
+  // OUTSIDE the selected root: neither installed bytes nor integrity move, so a
+  // bare re-acquire is a clean no-op against the existing lock.
+  write(join(repo, "README.md"), "v2 — totally different repository docs\n");
+  write(join(repo, "unrelated", "notes.md"), "new sibling tree\n");
+  gitCommit(repo, "outside");
+  const s2 = scope(base, "s2");
+  assert.equal(acquirePackage(s2, `file://${repo}`).installed[0].integrity, baseline, "changes outside the selected root do not move integrity");
+
+  // INSIDE the payload — and inside a nested capability-agent soul — they do.
+  const s3 = scope(base, "s3");
+  write(join(repo, "oas-package", "cap", "agents", "reviewer", "AGENTS.md"), "reviewer v2 — TAMPERED\n");
+  gitCommit(repo, "payload");
+  assert.notEqual(acquirePackage(s3, `file://${repo}`).installed[0].integrity, baseline, "nested capability-agent changes move integrity");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("two packages in one repository install side by side; one identity from two roots collides", () => {
+  const base = temp();
+  const repo = repoWithPackages(join(base, "mono"), {
+    "packages/alpha": { manifest: { package: "mono.alpha" }, capabilities: { cap: { capability: "mono.a" } } },
+    "packages/beta": { manifest: { package: "mono.beta" }, capabilities: { cap: { capability: "mono.b" } } },
+  });
+  const s = scope(base);
+  acquirePackage(s, `file://${repo}#packages/alpha`);
+  acquirePackage(s, `file://${repo}#packages/beta`);
+  const locks = readPackageLocks(s).packages;
+  assert.deepEqual([locks["mono.alpha"].path, locks["mono.beta"].path], ["packages/alpha", "packages/beta"]);
+  assert.deepEqual(listInstalledPackages(s).map((p) => p.package).sort(), ["mono.alpha", "mono.beta"]);
+
+  // Same OAS package identity from a second contained root is still a collision:
+  // the dedup key is source AND selected path, so it cannot silently merge.
+  const clash = repoWithPackages(join(base, "clash"), {
+    "a": { manifest: { package: "clash.pkg" } },
+    "b": { manifest: { package: "clash.pkg", dependencies: [] } },
+    "root": { manifest: { package: "clash.root", dependencies: [] } },
+  });
+  const clashCommit = execFileSync("git", ["-C", clash, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  write(join(clash, "root", "oas-package.json"), JSON.stringify({
+    package: "clash.root", version: "1.0.0", description: "p", compatibility: { oas: ">=0.1.0" },
+    capabilities: [], dependencies: [`file://${clash}@${clashCommit}#a`, `file://${clash}@${clashCommit}#b`],
+  }));
+  gitCommit(clash, "deps");
+  const s2 = scope(base, "s2");
+  assert.throws(() => acquirePackage(s2, `file://${clash}#root`),
+    (e) => e.code === "duplicate-package-identity" && e.provenance.every((p) => /#[ab]$/.test(p)));
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("payload-root selection fails atomically: traversal, missing manifest, non-directory, symlink escape, broken link", () => {
+  const base = temp();
+  const outside = join(base, "secret");
+  write(join(outside, "oas-package.json"), JSON.stringify({ package: "evil.pkg", version: "1", description: "d", compatibility: { oas: ">=0.1.0" }, capabilities: [] }));
+  const repo = repoWithPackages(join(base, "repo"), { "oas-package": { manifest: { package: "ok.pkg" }, capabilities: { cap: { capability: "ok.cap" } } } }, { "notes.md": "plain file\n" });
+  symlinkSync(outside, join(repo, "escape"));
+  symlinkSync(join(base, "nowhere"), join(repo, "dangling"));
+  symlinkSync("oas-package", join(repo, "inside-link"));
+  gitCommit(repo, "links");
+
+  const cases = [
+    ["../secret", "path-escape"],          // traversal never reaches the filesystem
+    ["/etc", "invalid-source"],            // absolute paths are rejected at parse
+    ["escape", "path-escape"],             // symlink out of the checkout
+    ["dangling", "path-escape"],           // broken link fails closed, never "absent"
+    ["notes.md", "invalid-source"],        // not a directory
+    ["missing", "invalid-source"],         // absent
+    ["oas-package/cap", "invalid-package-manifest"], // real dir, no manifest
+  ];
+  for (const [path, code] of cases) {
+    const s = scope(base, `s-${path.replace(/[^a-z]/gi, "")}`);
+    assert.throws(() => acquirePackage(s, `file://${repo}#${path}`), (e) => e.code === code, `${path} → ${code}`);
+    assert.ok(!existsSync(join(s, OAS_LOCK_FILE)), `${path}: no lock written`);
+    assert.ok(!existsSync(installedPackagesDir(s)), `${path}: no store mutation`);
+  }
+  // A CONTAINED symlink is followed like any other directory.
+  const sOk = scope(base, "s-ok");
+  assert.equal(acquirePackage(sOk, `file://${repo}#inside-link`).root, "ok.pkg");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("source-layout mutation between inspection and acquisition fails before any store or lock write", () => {
+  const base = temp();
+  const repo = repoWithPackages(join(base, "repo"), { "oas-package": { manifest: { package: "mut.pkg" } } });
+  const snap = inspectGitSourceRoot(`file://${repo}`);
+  assert.deepEqual({ path: snap.path, payloadPackage: snap.payloadPackage, package: snap.package },
+    { path: "oas-package", payloadPackage: true, package: false }, "inspection reports payload and root layout separately");
+  try {
+    // The remote moves its package root out from under the inspected snapshot.
+    rmSync(join(repo, "oas-package", "oas-package.json"));
+    write(join(repo, "oas-package", "oas.json"), JSON.stringify({ capability: "mut.cap", version: "1", description: "d" }));
+    gitCommit(repo, "moved");
+    const s = scope(base);
+    // The snapshot is immutable: acquisition still installs the INSPECTED bytes.
+    assert.equal(acquirePackage(s, `file://${repo}`, { rootSnapshot: snap }).installed[0].commit, snap.commit);
+    // …and a snapshot whose payload layout no longer matches is rejected outright.
+    const s2 = scope(base, "s2");
+    assert.throws(() => acquirePackage(s2, `file://${repo}`, { rootSnapshot: { ...snap, payloadCapability: true } }),
+      (e) => e.code === "invalid-source" && /layout changed/.test(e.message));
+    assert.ok(!existsSync(join(s2, OAS_LOCK_FILE)));
+  } finally { snap.cleanup(); }
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("lock path is strict: required, canonical, and '.' for local sources", () => {
+  const sha = "a".repeat(40), integ = `sha256-${"0".repeat(64)}`;
+  const git = (over) => ({ source: "git:https://h/x.git@v1", path: "oas-package", version: "1", commit: sha, integrity: integ, capabilities: [], ...over });
+  assert.equal(validateLockEntry("p", git(), {}, {}), true);
+  assert.equal(validateLockEntry("p", git({ path: "." }), {}, {}), true);
+  const { path: _drop, ...noPath } = git();
+  assert.throws(() => validateLockEntry("p", noPath, {}, {}), (e) => e.code === "invalid-lock" && /missing path/.test(e.message));
+  // Never normalized or repaired on read — a non-canonical spelling is invalid.
+  for (const bad of ["./sub", "sub/", "a//b", "a/./b"]) {
+    assert.throws(() => validateLockEntry("p", git({ path: bad }), {}, {}), (e) => e.code === "invalid-lock" && /canonical/.test(e.message), bad);
+  }
+  for (const bad of ["/abs", "../x", "~/h", 7, null, ""]) {
+    assert.throws(() => validateLockEntry("p", git({ path: bad }), {}, {}), (e) => e.code === "invalid-lock", JSON.stringify(bad));
+  }
+  // Local acquisition is exact-directory: only "." can be locked for it.
+  assert.equal(validateLockEntry("p", git({ source: "path:/d", commit: "local", path: "." }), {}, {}), true);
+  assert.throws(() => validateLockEntry("p", git({ source: "path:/d", commit: "local", path: "sub" }), {}, {}),
+    (e) => e.code === "invalid-lock" && /exact directories/.test(e.message));
+});
+
+test("local package acquisition keeps exact-directory semantics for any root name", () => {
+  const base = temp();
+  // A directory that is NOT named oas-package is still the package root when
+  // named directly — no default-path heuristic for local sources.
+  const custom = pkgSource(join(base, "my-custom-root"), { package: "loc.pkg" }, { cap: { capability: "loc.cap" } });
+  const s = scope(base);
+  const r = acquirePackage(s, custom);
+  assert.equal(r.root, "loc.pkg");
+  const lock = readPackageLocks(s).packages["loc.pkg"];
+  assert.deepEqual({ path: lock.path, commit: lock.commit, source: lock.source }, { path: ".", commit: "local", source: `path:${custom}` });
+  // …and a local source that HAPPENS to contain oas-package/ still installs itself.
+  const trap = pkgSource(join(base, "trap"), { package: "trap.pkg" });
+  pkgSource(join(base, "trap", "oas-package"), { package: "trap.inner" });
+  const s2 = scope(base, "s2");
+  assert.equal(acquirePackage(s2, trap).root, "trap.pkg");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("bare restore stays exact after the upstream package root moves; explicit update adopts and reports it", () => {
+  const base = temp();
+  const repo = repoWithPackages(join(base, "repo"), { "oas-package": { manifest: { package: "mv.pkg" }, capabilities: { cap: { capability: "mv.cap" } } } });
+  const s = scope(base);
+  const first = acquirePackage(s, `file://${repo}#oas-package`).installed[0];
+
+  // Upstream moves the package to a different contained root and advances.
+  execFileSync("git", ["-C", repo, "mv", "oas-package", "dist"]);
+  write(join(repo, "dist", "extra.md"), "new payload file\n");
+  gitCommit(repo, "moved root");
+
+  // BARE RESTORE: the locked source+commit+path+integrity is what comes back,
+  // even though the ref and the path both moved upstream.
+  rmSync(join(installedPackagesDir(s), "mv.pkg"), { recursive: true, force: true });
+  const restored = restorePackages(s).find((r) => r.package === "mv.pkg");
+  assert.deepEqual({ status: restored.status, path: restored.path }, { status: "restored", path: "oas-package" });
+  assert.equal(packageIntegrity(restored.dir), first.integrity, "restore reproduces the locked bytes exactly");
+  assert.equal(readPackageLocks(s).packages["mv.pkg"].commit, first.commit, "restore never advances the ref");
+
+  // Plain acquire may not move the locked root either.
+  assert.throws(() => acquirePackage(s, `file://${repo}#dist`),
+    (e) => e.code === "integrity-drift" && /package path "dist"/.test(e.message) && /oas update/.test(e.message));
+  assert.equal(readPackageLocks(s).packages["mv.pkg"].path, "oas-package", "the refused acquire left the lock untouched");
+
+  // Only an EXPLICIT update adopts the new root, and it reports the move.
+  const upd = updatePackage(s, "mv.pkg", { spec: `file://${repo}#dist` });
+  assert.deepEqual({ pathChanged: upd.pathChanged, before: upd.before.path, after: upd.after.path }, { pathChanged: true, before: "oas-package", after: "dist" });
+  assert.equal(readPackageLocks(s).packages["mv.pkg"].path, "dist");
+  const out = cli(s, "update", "mv.pkg", "--dir", s);
+  assert.equal(out.status, 0, out.stderr);
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("update round-trips the selected root: git selection is sticky, a catalog may move its own", () => {
+  const base = temp();
+  // GIT: the user's selection survives an update that is not respelled.
+  const repo = repoWithPackages(join(base, "repo"), { "sub/pkg": { manifest: { package: "st.pkg" } } });
+  const s = scope(base);
+  acquirePackage(s, `file://${repo}#sub/pkg`);
+  write(join(repo, "sub", "pkg", "new.md"), "payload change\n");
+  gitCommit(repo, "advance");
+  const upd = updatePackage(s, "st.pkg");
+  assert.deepEqual({ changed: upd.changed, pathChanged: upd.pathChanged, path: upd.after.path }, { changed: true, pathChanged: false, path: "sub/pkg" });
+
+  // CATALOG: the catalog entry owns the path, so an update re-reads it.
+  const cat = repoWithPackages(join(base, "cat"), { "v1": { manifest: { package: "cat.pkg" } }, "v2": { manifest: { package: "cat.pkg", version: "2.0.0" } } });
+  const s2 = scope(base, "s2");
+  let path = "v1";
+  const catalog = (id) => (id === "cat.pkg" ? { url: cat, path } : undefined);
+  acquirePackage(s2, "cat.pkg", { catalog });
+  assert.equal(readPackageLocks(s2).packages["cat.pkg"].path, "v1");
+  path = "v2";
+  const cupd = updatePackage(s2, "cat.pkg", { catalog });
+  assert.deepEqual({ pathChanged: cupd.pathChanged, before: cupd.before.path, after: cupd.after.path }, { pathChanged: true, before: "v1", after: "v2" });
+  // …but a bare restore of that lock still installs the LOCKED path, not the catalog's.
+  rmSync(join(installedPackagesDir(s2), "cat.pkg"), { recursive: true, force: true });
+  path = "v1";
+  const row = restorePackages(s2, { catalog }).find((r) => r.package === "cat.pkg");
+  assert.deepEqual({ status: row.status, path: row.path }, { status: "restored", path: "v2" }, "a moved catalog path never changes a bare restore");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("catalog entry paths are validated, and an invalid one fails before any mutation", () => {
+  const base = temp();
+  const repo = repoWithPackages(join(base, "repo"), { "oas-package": { manifest: { package: "cp.pkg" } } });
+  // Absent catalog path falls back to the default contained root.
+  const s = scope(base);
+  acquirePackage(s, "cp.pkg", { catalog: () => ({ url: repo }) });
+  assert.equal(readPackageLocks(s).packages["cp.pkg"].path, DEFAULT_PACKAGE_PATH);
+  for (const [bad, code] of [["../out", "path-escape"], ["/abs", "invalid-source"], [42, "invalid-source"]]) {
+    const bs = scope(base, `bad-${String(bad).replace(/[^a-z0-9]/gi, "")}`);
+    assert.throws(() => acquirePackage(bs, "cp.pkg", { catalog: () => ({ url: repo, path: bad }) }),
+      (e) => e.code === code && /catalog entry/.test(e.message), String(bad));
+    assert.ok(!existsSync(join(bs, OAS_LOCK_FILE)));
+  }
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("payload-root parity: trust, depsIntegrity, restore, JSON doctor and list all carry the selected path", () => {
+  const base = temp();
+  const repo = join(base, "repo");
+  pkgSource(join(repo, "dist/pkg"), { package: "par.pkg" }, { cap: { capability: "par.cap", commands: { go: { exec: "go.mjs" } } } });
+  write(join(repo, "dist/pkg", "cap", "go.mjs"), "// x\n");
+  write(join(repo, "dist/pkg", "package.json"), JSON.stringify({ name: "par", version: "1.0.0", dependencies: {} }));
+  write(join(repo, "dist/pkg", "package-lock.json"), JSON.stringify({ name: "par", lockfileVersion: 3, requires: true, packages: { "": { name: "par", version: "1.0.0" } } }));
+  write(join(repo, "README.md"), "outside\n");
+  gitify(repo);
+  const s = scope(base);
+
+  const inst = JSON.parse(cli(s, "install", `file://${repo}#dist/pkg`, "--dir", s, "--json").stdout);
+  assert.equal(inst.ok, true, JSON.stringify(inst));
+  assert.equal(inst.result.installed[0].path, "dist/pkg");
+
+  const list = JSON.parse(cli(s, "list", "--dir", s, "--json").stdout);
+  assert.equal(list.result.packages.find((p) => p.package === "par.pkg").path, "dist/pkg");
+  const doc = JSON.parse(cli(s, "doctor", s, "--json").stdout);
+  assert.equal(doc.packages.find((p) => p.id === "par.pkg").path, "dist/pkg");
+
+  // Trust binds to the same package whether or not it sits at the repo root.
+  const tr = JSON.parse(cli(s, "trust", "par.cap", "--dir", s, "--json").stdout);
+  assert.equal(tr.ok, true, JSON.stringify(tr));
+  const lock = readPackageLocks(s).packages["par.pkg"];
+  assert.deepEqual({ path: lock.path, trusted: lock.trustedCapabilities }, { path: "dist/pkg", trusted: ["par.cap"] });
+  assert.ok(Object.hasOwn(lock, "depsIntegrity") === (packageDepsIntegrity(join(installedPackagesDir(s), "par.pkg")) !== undefined));
+
+  // Restore of the untouched artifact is an exact-path no-op.
+  const rows = restorePackages(s).filter((r) => r.package === "par.pkg");
+  assert.deepEqual(rows.map((r) => [r.status, r.path]), [["ok", "dist/pkg"]]);
+  assert.deepEqual(readPackageLocks(s).packages["par.pkg"].trustedCapabilities, ["par.cap"], "restore preserves approvals");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("payload roots never touch local capability development: owned/ and from: path: are unchanged", () => {
+  const base = temp();
+  const s = scope(base, "scope", "name: t\ncapabilities:\n  additive:\n    own.cap:\n      from: owned\n      global: true\n    dev.cap:\n      from: path:../devcap\n      global: true\n");
+  write(join(s, ".agents/capabilities/owned/own.cap/oas.json"), JSON.stringify({ capability: "own.cap", version: "1.0.0", description: "owned" }));
+  write(join(base, "devcap", "oas.json"), JSON.stringify({ capability: "dev.cap", version: "1.0.0", description: "dev" }));
+  // External path capabilities stay lock-gated exactly as before — payload
+  // roots never route them through package acquisition.
+  writeCapabilityLock(s, "dev.cap", { source: `path:${join(base, "devcap")}`, version: "1.0.0", integrity: capabilityIntegrity(join(base, "devcap")) });
+  const resolved = resolveOasConfig(s);
+  assert.deepEqual(resolved.capabilities.map((c) => c.id).sort(), ["dev.cap", "own.cap"]);
+  // Neither is a package source, so no package path or lock is involved at all.
+  const lockText = JSON.parse(readFileSync(join(s, OAS_LOCK_FILE), "utf8"));
+  assert.equal(lockText.lockfileVersion, 1, "local capability development stays on the legacy capability lock — no package path involved");
+  assert.equal(lockText.packages, undefined);
   rmSync(base, { recursive: true, force: true });
 });

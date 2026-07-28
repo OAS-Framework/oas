@@ -25,14 +25,51 @@ A **package source spec** (CLI argument, or an entry in a manifest's
 
 | Form | Examples | Notes |
 |---|---|---|
-| Shorthand git | `git:github.com/org/repo@v1.2.0`, `git:host/org/repo@<ref>` | `@ref` optional at the CLI; resolved once and exact-locked, never advanced on restore |
-| Raw git URL | `https://host/org/repo.git@v1.2.0`, `git@host:org/repo.git@ref` | HTTPS or SSH; same `@ref` rule |
-| Local path | `./pkgs/mypkg`, `/abs/path`, `path:./pkgs/mypkg` | development escape hatch; locked with `commit: "local"` and tree integrity |
-| Official catalog short ID | `oas.okf`, `oas.okf@v1.4.0` | pattern `^[a-z0-9][a-z0-9._-]*$` with optional `@selector`; resolved through the catalog to a git repo |
+| Shorthand git | `git:github.com/org/repo@v1.2.0#<path>`, `git:host/org/repo@<ref>` | `@ref` and `#<path>` both optional at the CLI; resolved once and exact-locked, never advanced on restore |
+| Raw git URL | `https://host/org/repo.git@v1.2.0#dist/oas`, `git@host:org/repo.git@ref#.` | HTTPS or SSH; same `@ref` and `#<path>` rules |
+| Local path | `./pkgs/mypkg`, `/abs/path`, `path:./pkgs/mypkg` | development escape hatch; locked with `commit: "local"` and tree integrity; **exact directory** — no `#<path>` and no default-path heuristic |
+| Official catalog short ID | `oas.okf`, `oas.okf@v1.4.0` | pattern `^[a-z0-9][a-z0-9._-]*$` with optional `@selector`; resolved through the catalog to a git repo **and its `path`**; takes no `#<path>` |
 
 Manifest `dependencies[]` entries must be pinnable: an official selector, a
 pinned git tag/commit (`@ref` required), or a local path. There is **no
 general semver solver**.
+
+### 1.1 Contained package root (`path`)
+
+A Git repository is not a package: it *contains* one. The **package root** is
+the directory inside the fetched source that carries `oas-package.json`, and it
+is selected by the source contract — never hardcoded at a use site:
+
+- **Git specs** select it with a single `#<path>` fragment, split off *before*
+  `@ref` parsing so a path can never be mistaken for part of a ref. One
+  fragment maximum; a second `#` is `invalid-source`.
+- **Catalog entries** carry it as data: `{ url, ref?, path? }`. The catalog
+  owns its packages' roots, so an entry may move one (see §3 `updatePackage`).
+- **Omitted** on either: the default is **`oas-package`**. Official examples,
+  scaffolds and conventions use `oas-package/` — never a generic `package/`.
+- **Local paths** never take one. `oas install /repo/custom-root` treats that
+  exact directory as the package root whatever it is named, and locks `.`.
+
+**Canonical form.** A path is POSIX-relative with no redundant or trailing
+separators. Every spelling of the source root (`.`, `./`, `./.`, empty)
+normalizes to the single canonical `"."`, so a root selection round-trips
+identically through spec → lock → JSON → doctor/list/update. Absolute paths,
+Windows drive paths, `~` spellings, backslash separators and NUL are
+`invalid-source`; `..` traversal is `path-escape`.
+
+**Resolution and containment.** One exact commit is cloned once; the configured
+path is resolved *inside that checkout by realpath*; `oas-package.json` must be
+there; and **only that subtree** is copied, hashed and materialized. A path
+that resolves outside the checkout — through a symlink at any depth — and a
+broken link are `path-escape`, decided before any store or lock mutation.
+Installed bytes therefore equal the selected subtree: repository docs, CI
+configuration, owner souls and sibling packages are never installed and never
+reach `integrity`. Our own clone metadata (`.git`) is dropped, so a root
+selection and a subtree selection behave identically.
+
+One repository may contain several packages selected by different IDs. Because
+the closure dedupe key is *source **and** selected path*, two contained roots
+claiming the same OAS package identity still fail `duplicate-package-identity`.
 
 **Normalized identity** (what dedupe and lock keys use):
 
@@ -44,6 +81,10 @@ general semver solver**.
   selector. The resolved catalog commit is recorded separately in `commit`.
   Two source strings that normalize to the same canonical git URL are the
   same source.
+- The **selected package root** is recorded in the lock as its own strict
+  `path` field — never folded into the source string. It is stored in canonical
+  form only and is never normalized or repaired on read: a non-canonical
+  spelling is `invalid-lock`. `path:` sources always record `"."`.
 
 **Catalog resolver boundary** (all workstream 3 gets to plug into): the
 catalog is a pure mapping *official short ID → git repository (+ optional
@@ -82,11 +123,33 @@ relevant, `provenance` (array of `{ package, source, file }`).
 /** Parse + normalize a package source spec.
  * @param {string} spec  CLI/dependency source string
  * @returns {{ kind: "git"|"path"|"catalog", url?: string, ref?: string,
- *             path?: string, id?: string, selector?: string,
- *             normalized: string }}   // normalized = lock "source" form (ref may be unresolved for bare git specs)
- * @throws  code: "invalid-source"
+ *             path?: string, packagePath?: string, id?: string,
+ *             selector?: string, normalized: string }}
+ *   // normalized = lock "source" form (ref may be unresolved for bare git
+ *   //   specs) and NEVER carries the `#<path>` fragment
+ *   // path        = the local directory of a path: source
+ *   // packagePath = the CONTAINED package root selected by `#<path>`,
+ *   //   canonical; undefined when the spec selects none (resolution then
+ *   //   applies the catalog entry's path or DEFAULT_PACKAGE_PATH). Always
+ *   //   "." for path: sources.
+ * @throws  code: "invalid-source", "path-escape"
  */
 export function parsePackageSource(spec)
+
+/** The default contained package root — "oas-package" — applied whenever a
+ * Git/catalog source contract selects none. Read it; never hardcode it. */
+export const DEFAULT_PACKAGE_PATH
+
+/** Normalize a configured package path to canonical form (§1.1), or throw.
+ * Returns undefined ONLY for an absent value, so the caller applies the
+ * source-appropriate default.
+ * @param {string|undefined} raw
+ * @param {{ where?: string, code?: string }} [opts]  message context / code
+ *        for non-traversal violations (default "invalid-source")
+ * @returns {string|undefined}
+ * @throws  code: opts.code, or "path-escape" for ".." traversal
+ */
+export function normalizePackagePath(raw, opts)
 
 /** Read the merged package locks visible from a directory's config chain
  * (closest scope wins per package identity). Legacy v1 files are surfaced
@@ -111,9 +174,9 @@ export function writePackageLock(levelDir, packageId, entry)
  * dir; the store and lock are replaced together or not at all.
  * @param {string} levelDir  scope directory owning the store + lock
  * @param {string} spec      package source spec
- * @param {{ catalog?: (id, selector) => { url, ref } }} [opts]  catalog resolver injection (fixture in tests)
+ * @param {{ catalog?: (id, selector) => { url, ref, path? } }} [opts]  catalog resolver injection (fixture in tests)
  * @returns {{ root: id, installed: Array<{ package, version, commit,
- *             integrity, source, capabilities: string[] }>, lockFile }}
+ *             integrity, source, path, capabilities: string[] }>, lockFile }}
  * @throws codes: "invalid-source", "invalid-package-manifest", "path-escape",
  *         "dependency-cycle", "duplicate-package-identity",
  *         "duplicate-capability-id", "incompatible-oas"
@@ -126,7 +189,7 @@ export function acquirePackage(levelDir, spec, opts)
  * Transactional per scope. Never advances a ref. NO team-boundary recursion
  * (that is workstream 2, layered on top of this).
  * @returns {Array<{ package, level, status: "restored"|"ok"|"failed",
- *                   reason? }>}
+ *                   path?, reason? }>}
  * @throws codes: "integrity-drift", "capability-list-mismatch", "legacy-lock"
  */
 export function restorePackages(startDir, opts)
@@ -135,7 +198,7 @@ export function restorePackages(startDir, opts)
  * capabilities each exports, with provenance. Closer scope wins for the
  * same package identity; two same-scope packages exporting one capability
  * ID throw code "duplicate-capability-id".
- * @returns {Array<{ package, version, level, source, commit, integrity,
+ * @returns {Array<{ package, version, level, source, path, commit, integrity,
  *             dir, capabilities: Array<{ id, dir, manifest }> }>}
  */
 export function listInstalledPackages(startDir)
@@ -224,3 +287,13 @@ lifecycle commands):
   executable-trust broadening; official identity ≠ executable trust.
 - Any package integrity change invalidates all of its capability approvals.
 - Existing config targeting/layer/injection/override semantics unchanged.
+- The selected package root is part of what a lock pins. A bare `oas install`
+  restores the exact locked source + commit + **path** + integrity even if the
+  catalog, the ref or the upstream directory layout moved; a plain acquire that
+  resolves a different path is refused (`integrity-drift`). Only an explicit
+  `oas update <package-id>` may adopt a newer commit or path, and it reports a
+  path move in both human and `--json` output.
+- `.agents/capabilities/owned/<id>` and `from: path:<dir>` capability
+  development are untouched by package paths: they are not package sources, are
+  never routed through the default contained root, and keep their existing
+  structural/executable trust, targeting, override and composition semantics.

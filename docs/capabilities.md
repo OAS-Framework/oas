@@ -252,18 +252,23 @@ semantic contradictions between two prose injections; review the output.
 ## Distribution packages
 
 A **distribution package** is the install/update/review unit above
-capabilities: one Git repository (or local directory) with an
-`oas-package.json` root manifest that explicitly enumerates one or more
-capabilities and reference config profiles (schema:
+capabilities: a directory with an `oas-package.json` manifest that explicitly
+enumerates one or more capabilities and reference config profiles (schema:
 `docs/oas-package.schema.json`; contract:
 `docs/design/package-engine-contract.md`). A capability remains the
 targeting/activation unit — every capability a package exports stays
 independently addressable by ID with `from: installed`.
 
+A Git repository *contains* that directory; `#<path>` selects which one, and
+only the selected subtree is installed and hashed. Omitting it selects
+`oas-package/` (the convention for every official example and scaffold); `#.`
+selects the repository root. Local paths are always exact directories.
+
 ```bash
-oas install git:github.com/org/repo@v1.0.0 --dir /path/to/scope   # git shorthand
-oas install https://host/org/repo.git@v1.0.0                       # raw git URL
-oas install ../my-package                                          # local path
+oas install git:github.com/org/repo@v1.0.0 --dir /path/to/scope   # git shorthand → oas-package/
+oas install git:github.com/org/repo@v1.0.0#dist/oas                # a custom contained root
+oas install https://host/org/repo.git@v1.0.0#.                     # raw git URL, repository root
+oas install ../my-package                                          # local path (exact directory)
 oas install oas.okf                                                # official catalog id
 oas install                     # bare: exact restore of this chain's locks
 oas list                        # installed packages, exported capabilities, scopes

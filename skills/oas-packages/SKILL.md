@@ -29,6 +29,44 @@ oas install ../my-package                     # local path (dev escape hatch)
 oas install <catalog-id>                      # official catalog short id (identity only — no auto-trust)
 ```
 
+### Which directory in the repo is the package?
+
+A git repository CONTAINS a package; it is not one. The package root is the
+directory carrying `oas-package.json`, and a git source selects it with a
+`#<path>` fragment after any `@ref`:
+
+```
+oas install git:github.com/org/repo@v1.0.0            # → repo's oas-package/   (the DEFAULT)
+oas install git:github.com/org/repo@v1.0.0#dist/oas   # → repo's dist/oas/
+oas install git:github.com/org/repo@v1.0.0#.          # → the repository ROOT
+```
+
+- **Omit it and you get `oas-package/`.** Every official example, scaffold and
+  convention uses `oas-package/` — never a generic `package/`. A repo whose
+  manifest sits at the root needs `#.`; the error message says so.
+- **Only the selected subtree is installed and hashed.** Repository docs, CI
+  config, owner souls and sibling packages never become installed bytes and
+  never affect `integrity` — so editing them cannot invalidate approvals, and
+  editing the payload (including a nested capability-agent soul) always does.
+- **One repo can ship several packages** at different paths; install each by
+  its own source. Two contained roots claiming the SAME package identity still
+  fail with `duplicate-package-identity`.
+- **Catalog ids take no fragment** — the catalog entry carries `path` itself.
+- **Local paths take no fragment either**: `oas install /repo/custom-root`
+  treats that exact directory as the package root whatever it is named. There
+  is no `oas-package` default for local sources.
+
+The lock records the selected root in its own `path` field, in canonical form
+(`.` for a root selection). A bare `oas install` restores the locked
+source + commit + **path** + integrity even if upstream moved the directory or
+the catalog repointed; only `oas update <package>` may adopt a new path, and it
+reports the move. Attempting to move it with a plain `oas install` is refused
+with `integrity-drift`.
+
+Local capability development is untouched by all of this:
+`.agents/capabilities/owned/<id>` (`from: owned`) and `from: path:<dir>` are
+not package sources and are never routed through package paths.
+
 Interim cutover note: official ids that are still KERNEL-MARKETPLACE
 capabilities (e.g. `oas.okf` today) route through the legacy capability path
 and are trusted at acquisition because they ship with the kernel you already
