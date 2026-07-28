@@ -4,16 +4,42 @@
    reads and existing terminal access keep working, while Spawn and Harvest
    are disabled behind ONE consistent card showing the detected path/version,
    the required range, **Choose oas…**, **Retry**, a docs link, and a
-   copyable `npm install -g @oas-framework/oas@0.18.2`. Never silently
-   install. Missing tmux is a SEPARATE diagnosis — never conflated with CLI
-   compatibility.
+   copyable install command. Never silently install. Missing tmux is a
+   SEPARATE diagnosis — never conflated with CLI compatibility.
+
+   The requirement and the install command are the BACKEND's to state, not
+   this module's: /api/cli carries `required.range`, `required.desktopApi`
+   and `install`, all derived from the locator's enforced band and this
+   app's own version. Nothing here restates a version or a range — a
+   renderer-side copy of an enforced value drifts silently, which is how the
+   card once advertised a CLI below the relations floor it required. The
+   settled-unknown and absent-endpoint states have no payload to read, so
+   they say "unknown" and offer the VERSION-LESS install command rather than
+   inventing a band.
 
    This module owns the fetch/refresh/subscribe state and the card DOM so
    every mutation surface renders the SAME card; views only mount it. */
 import { escapeHtml } from "./common.mjs";
 
-export const INSTALL_COMMAND = "npm install -g @oas-framework/oas@0.18.2";
+/** Recovery command when the backend could not tell us which version to
+ * pin — version-LESS on purpose: it names the package without restating any
+ * band, so it cannot fall out of agreement with what the locator enforces. */
+export const GENERIC_INSTALL_COMMAND = "npm install -g @oas-framework/oas";
 export const DOCS_URL = "https://github.com/OAS-Framework/oas/blob/main/docs/desktop-cli-api.md";
+
+/** The install command to show/copy: the backend's derived, version-pinned
+ * one when a payload settled, else the version-less fallback. */
+export function cliInstallCommand(s = cli) {
+  return typeof s?.install === "string" && s.install ? s.install : GENERIC_INSTALL_COMMAND;
+}
+/** The requirement line. Never fabricated: an unreadable/absent payload says
+ * so instead of printing a band this build did not obtain. */
+export function cliRequirementText(s = cli) {
+  const range = s?.required?.range;
+  const api = s?.required?.desktopApi;
+  if (!range) return "unknown — this build could not read its CLI requirement";
+  return `${range} with desktop API ${api ?? 1}`;
+}
 
 let cli = null;              // last GET /api/cli payload (null = probe not yet settled)
 let settledUnknown = false;  // a response ARRIVED but was unclassifiable (older backend, garbage)
@@ -119,10 +145,10 @@ export function cliCard(doc, ctx) {
             ? `${escapeHtml(detected.path)} <span class="cli-ver">(${escapeHtml(detected.version || "unknown")})</span>`
             : "no oas binary found"}</span>
           <span class="k">Required</span>
-          <span class="v">${escapeHtml(s?.required?.range || ">=0.18.0 <0.20.0")} with desktop API ${escapeHtml(String(s?.required?.desktopApi ?? 1))}</span>
+          <span class="v">${escapeHtml(cliRequirementText(s))}</span>
         </div>
         <div class="cli-install">
-          <code class="cli-cmd">${escapeHtml(INSTALL_COMMAND)}</code>
+          <code class="cli-cmd">${escapeHtml(cliInstallCommand(s))}</code>
           <button class="act cli-copy" title="Copy install command">Copy</button>
         </div>
       </div>
@@ -133,7 +159,7 @@ export function cliCard(doc, ctx) {
         <span class="cli-status" role="status"></span>
       </div>`;
     el.querySelector(".cli-copy").addEventListener("click", async () => {
-      try { await doc.defaultView.navigator.clipboard.writeText(INSTALL_COMMAND); } catch { /* clipboard denied */ }
+      try { await doc.defaultView.navigator.clipboard.writeText(cliInstallCommand()); } catch { /* clipboard denied */ }
       const st = el.querySelector(".cli-status");
       if (st) st.textContent = "Install command copied.";
     });

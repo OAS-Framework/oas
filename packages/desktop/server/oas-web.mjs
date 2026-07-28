@@ -373,6 +373,13 @@ function cliStatus() {
     version: cliState.version || null,
     source: cliState.source || null,
     required: { desktopApi: locator.DESKTOP_API, range: locator.ACCEPT_RANGE_TEXT },
+    // The recovery command the degradation card offers, DERIVED rather than
+    // spelled: Desktop and the kernel publish in lockstep from one tag, so
+    // this app's own version names the exactly-matching CLI — always inside
+    // the accepted band and never below a feature floor. A hand-pinned
+    // command rots (it sat at 0.18.2 through four releases, i.e. below the
+    // 0.18.6 spawn-relations floor it was telling users to install).
+    install: `npm install -g @oas-framework/oas@${MANIFEST.version}`,
     // Capability flag for the spawn form: relation UI renders DISABLED
     // (never hidden) with the required version when the accepted CLI
     // predates spawn-time relations.
