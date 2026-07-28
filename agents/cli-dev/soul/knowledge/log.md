@@ -1,6 +1,8 @@
 # Knowledge Log
 
 ## 2026-07-28
+* **Creation**: [guided-official-migration-shape](/decisions/guided-official-migration-shape.md) records that guided official lock migration maps legacy marketplace capabilities through catalog aliases, holds a scope unchanged when any official mapping is missing, retains non-official entries, and reports recursive partial failures honestly.
+* **Creation**: [never-run-migrate-in-the-work-tree](/lessons/never-run-migrate-in-the-work-tree.md) records that `oas <cmd> --help` can fall through to a mutating command because unknown flags are ignored, so manual smoke checks for mutating CLI paths need temp deployments and explicit --dir.
 * **Creation**: [hardening-a-git-invocation-drops-its-dwim](/lessons/hardening-a-git-invocation-drops-its-dwim.md) records that replacing git checkout porcelain with verified hash checkout closed option injection but also removed checkout's remote-branch DWIM, so plumbing hardening must enumerate and restore wanted porcelain conveniences explicitly.
 * **Update**: [public-refs-are-option-injection-vectors](/lessons/public-refs-are-option-injection-vectors.md) links the safe checkout shape to the remote-branch regression it introduced.
 * **Creation**: [public-refs-are-option-injection-vectors](/lessons/public-refs-are-option-injection-vectors.md) records that caller-supplied git refs can be option-injection vectors even in argv-based execFileSync calls, so package acquisition must resolve behind --end-of-options and verify the checked-out hash.
