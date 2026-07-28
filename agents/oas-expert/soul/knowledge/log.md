@@ -1,6 +1,8 @@
 # Knowledge Log
 
 ## 2026-07-28
+* **Creation**: [Official OAS development uses a multi-repository workspace with one expert soul per package](/decisions/official-multi-repo-workspace-and-package-experts.md) records the accepted non-Git `oas.dev` team scope, preserved `oas-framework` identity, independent framework/package repositories, and one durable package-maintainer soul per official package.
+* **Release**: v0.19.4 publishes the package/catalog/migration/curriculum generation with the rewritten specialist-agent README and hermetic Desktop release fixtures; the six official package repositories are independently tagged/released and the complete `oas.dev` profile is available for editable workspace adoption.
 * **Delivery**: PR #58 merged as `ab51acc` at exact head `24e6f00`; [repo state](/stewardship/repo-state.md) and the [delivery log](/stewardship/delivery-log.md) record guided recursive official migration, config/trust/custom-source preservation, fixed multi-capability/held-dry-run findings, independent 865-test clean room, exact-head CI, and deleted branch. A separate authoring-hoisted-resource release fix is now in flight.
 * **Delivery**: PR #57 merged as `d9e176f` at exact head `842f043`; [repo state](/stewardship/repo-state.md) and the [delivery log](/stewardship/delivery-log.md) record configurable contained package payload roots, strict lock path provenance, explicit-update-only advancement, local-capability preservation, closed security findings, green 853-test/exact-head CI gates, and the two fresh parallel follow-ups for existing-user migration and six-package payload restructuring.
 

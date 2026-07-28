@@ -24,6 +24,11 @@ decisions/ and referenced from here.
 
 ---
 
+## PR #65 — v0.19.4 manifest bump after complete publication (2026-07-28)
+- verdict: MERGED as `9131b83c368296458ae50efac1d8af531fd1521b` from exact release-bump head `06f2256674694dc93453011a0ff54a2013bc1414`. The v0.19.4 release had already published `@oas-framework/oas`, `@oas-framework/pi`, checksums/provenance, and the complete Desktop installer matrix after all build/test/smoke gates passed in run `30396340346`; only the known organization policy prevented Actions from creating the version-bump PR, so the maintainer created and squash-merged it manually.
+- owner: oas-expert-oas-packages · coordinator: none
+- taught us: repository deployment config must not be an implicit test fixture. Moving the official package closure to a non-Git workspace exposed two Desktop tests that relied on the former repository lock; explicit isolated fixtures and ephemeral loopback ports now keep the release gate independent of operator deployment state.
+
 ## PR #58 — guided official-capability migration for existing 0.18 deployments (2026-07-28)
 - verdict: MERGED as merge commit `ab51acc8ec4381fac1b75d569b1225a8e6482f56` at exact head `24e6f00a7fe35a0cd88e32646ab251bdc83433be`. All four gates PASS. The new `oas migrate --official --recursive` is a guided policy layer over the existing transactional migration engine: deterministic outer/team/nested scope planning, catalog-driven capability→package aliases, config-byte preservation, held/unmapped official scopes left unchanged, custom/owned/path entries retained, per-scope truthful aggregate failure, no trust transfer, and exact trust/install next commands. Reviewer returned two important findings—multiple legacy capabilities exported by one package collided during conversion, and a held dry-run exited success—and approved the exact fixes; the final delta was knowledge only. Fresh detached clean room with root/Desktop/Pi dependencies passed 865 tests (864 pass, 0 fail, 1 environment skip), check/check:pi/validate, strict seven-bundle OKF zero warnings, pack, tarball smoke and diff-check; required exact-head CI passed. Same-account approval is comment `5107558430`; expected-head merge succeeded and remote branch was deleted.
 - owner: cli-dev-official-capability-migration · coordinator: oas-expert-oas-packages (direct)
