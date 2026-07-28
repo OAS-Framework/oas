@@ -35,9 +35,14 @@ harness recursive discovery may not descend through them. Packages retain
 skills in their own artifact; activation selects them for materialization. Config-level `.agents/skills` is not an OAS capability source
 or an ambient runtime discovery root.
 
-Pi starts spawned sessions with ambient discovery disabled and the one
-instance path explicit. Claude uses the instance-local project/config-home views and only
-the redirected `user` setting source. `oas-getting-started` is the sole pre-workspace ambient bootstrap.
+Pi starts spawned sessions with ambient skill and context discovery disabled
+and the one instance path explicit; its globally configured extensions remain
+enabled. Claude runs provider-native: it reads the instance's `.claude/skills`
+and `CLAUDE.md` symlinks, and the operator's own user and project
+configuration — skills, plugins, settings — stays in effect. Neither runtime
+gets a redirected config home. `composition.materialized.runtimePosture` in
+`instance.json` records what each instance actually exposes.
+`oas-getting-started` is the sole pre-workspace ambient bootstrap.
 
 Duplicate skill directory names are errors unless config's `skill-overrides`
 selects a source.

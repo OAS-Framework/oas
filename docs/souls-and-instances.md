@@ -163,7 +163,25 @@ final status.
 ## Work modes
 
 A work mode decides what `./work` points at and what discipline the agent must
-follow.
+follow. Every mode sits inside the same home/work boundary, which the generated
+instructions state first (`injects/instance-boundary.md`):
+
+- `<instance-home>` — the gitignored instance directory, `$OAS_INSTANCE_HOME` —
+  holds the brain (`AGENTS.md`, `soul/`), the task, the provenance
+  (`instance.json`) and the episodic state (`STATE.md`, `log.md`, `notes/`), and
+  is where OAS operational/lifecycle commands — and the commands of whatever
+  capabilities are active, `aw` among them when aweb messaging is — are run,
+  because they resolve scope from the working directory (`--dir <path>` to
+  target another one deliberately).
+- `<instance-home>/work` — the repository or workspace view — is where
+  repository reading, editing, building, testing, git and commits happen, to the
+  extent the mode below permits.
+- The home's `soul` link is to be treated as read-only: writes through it bypass
+  the branch and review path. Durable soul edits go through tracked paths under
+  `work/`, or through the harvester when the soul lives outside the repo.
+
+Agents move between the two as the task needs; the boundary is what each
+directory is for, not a place to settle in.
 
 ### `worktree` — isolated branch
 
@@ -174,9 +192,9 @@ Use this for agents that will edit code or docs independently.
 
 Rules:
 
-- Start in `work/` and stay there.
-- Build, test, and commit from `work/`.
-- Never edit from the main checkout or the home root.
+- Build, test, and commit from `work/`, on your own branch.
+- Never run git from the repo's main checkout — it resolves to the wrong branch
+  and skips review.
 - Do not create extra worktrees. Ask for another instance if parallel work is
   needed.
 
@@ -240,6 +258,58 @@ not a git tree.
 
 The agents root is the nearest `agents/` directory walking upward from the
 current directory. `PI_AGENTS_ROOT` overrides the search.
+
+**Where instances are stored is a separate question from where you invoked
+OAS.** Discovery finds the root from your current directory, but instance homes
+always live in the **soul-owning repo's primary checkout**: when the root you
+discovered is inside a *linked git worktree*, storage maps to the equivalent
+path in that repository's primary checkout, so homes survive the worktree, stay
+visible to the whole deployment, and never depend on where a command happened to
+run. An agent that spawns after `cd work/` reaches the same home as one spawning
+from the deployment root.
+
+Three things stay independent, and are meant to:
+
+- **Invocation** — where you ran the command;
+- **Config/package scope** — resolved from the context directory, and steerable
+  with an explicit `--dir <path>`;
+- **`work/`** — the instance's repository view, which may well be a linked
+  worktree; only *storage* is redirected, never your work tree.
+
+Roots that Git does not own are unaffected: a non-Git agents root stores
+instances exactly where it sits.
+
+Every instance is told its own home as **`OAS_INSTANCE_HOME`** (absolute), and
+instructions refer to it as `<instance-home>`. The two environments differ, so
+they are stated separately:
+
+- **Runtime session**: `OAS_INSTANCE_HOME` and `PI_AGENT_HOME` (plus
+  `OAS_INSTANCE`/`PI_AGENT_INSTANCE`). The `PI_`-prefixed names are
+  compatibility aliases for the separately published pi extension.
+- **Lifecycle hooks**: `OAS_INSTANCE_HOME` and `OAS_HOME`, alongside the rest of
+  the hook contract. `OAS_HOME` predates `OAS_INSTANCE_HOME` and is kept because
+  shipped capability hooks read it; it is **not** exported to runtime sessions.
+
+Neither is `OAS_HOME_DIR`, which is the package store root — do not conflate
+them.
+
+When placement cannot be established — Git owns the location but the repository
+cannot be read, a linked worktree whose primary checkout is missing, or a
+resolved destination outside the agent's own directory — the spawn fails closed
+with **`E_NO_CANONICAL_ROOT`** and creates nothing.
+
+### Deployment prerequisite: the agents directory must be operator-owned
+
+The canonical deployment (the agents root, `local-agents/`, and the instance
+homes under them) **must be owned by the operator and not writable by untrusted
+users or processes.** OAS validates resolved destinations and re-checks the home
+immediately before creating anything in it, but it cannot defeat a concurrent
+local attacker who already has write access there: Node offers no
+`openat`/`O_NOFOLLOW`-relative directory creation, so a path can in principle be
+swapped between the check and the creation. Anyone with that access also
+controls souls, generated instructions, hook declarations and instance state, so
+this is a deployment prerequisite — filesystem ownership and permissions — not
+something the kernel can close from inside.
 
 Default layout:
 

@@ -38,7 +38,12 @@ A self-contained package has an `oas.json`:
   "description": "Messaging through Team Chat.",
   "layer": "messaging",
   "requires": [
-    { "command": "team-chat", "why": "send and receive messages" }
+    { "command": "team-chat", "why": "send and receive messages" },
+    {
+      "runtime": "pi",
+      "package": "npm:team-chat-pi",
+      "why": "real-time push events in pi sessions"
+    }
   ],
   "skills": ["skills"],
   "inject": "injects/team-chat.md",
@@ -57,8 +62,78 @@ A self-contained package has an `oas.json`:
   packages cannot implement the same layer for one soul.
 - `skills` entries can be skill directories or roots containing skills.
 - `inject` is optional instance instruction Markdown.
-- Only `soul-scaffold`, `spawn`, and `retire` hooks are accepted.
-- `requires` reports external tools; OAS does not install them silently.
+- Only `soul-scaffold`, `spawn`, and `retire` hooks are accepted. A hook is a
+  command string, or `{ command, required }`. `required: true` is valid **only
+  on `spawn`**: the hook's failure then fails the spawn and rolls it back,
+  instead of producing an instance whose capability never configured itself —
+  an aweb identity that could not be minted leaves an agent believing it can be
+  woken by mail. Every other hook stays best-effort and only warns, so advisory
+  work never becomes a spawn blocker. `retire` and `soul-scaffold` cannot be
+  required: they run outside a spawn transaction, so there is no moment to
+  enforce them.
+- A capability declaring a **required** spawn hook should declare a `retire` hook
+  too. Without one, OAS has no way to undo what the spawn hook did and no way to
+  know whether it did anything, so a failure quarantines the home rather than
+  rolling it back — the operator cleans up by hand and removes it with `--force`.
+- A required hook must also be **able** to run: if its capability's executable
+  surface is not trusted, the spawn fails with the `oas trust` remedy rather
+  than starting without the setup. Advisory executable hooks stay
+  disabled-with-warning.
+- When a required hook fails and its compensation cannot finish, the instance
+  home is **retained**, not deleted — it holds the credentials and metadata a
+  retry needs, and removing it would turn a transient cleanup failure into
+  permanent external residue. It is marked `.oas-rollback-incomplete.json`, so
+  `oas status` reports it as retained state rather than a live instance, and
+  `oas retire <instance>` retries the cleanup — re-running the retire hooks and
+  the rollback-owned Git steps, and verifying both. A retry that still cannot
+  finish keeps the home again, names what is outstanding, and exits nonzero.
+- The **escape hatch is `oas retire <instance> --force`**, for a home OAS cannot
+  identify at all: no `instance.json` and no **usable** cleanup descriptor. Usable
+  means it satisfies the versioned cleanup contract the rollback writes, checked
+  to the depth the retry consumes it: `version`, a context `repo`, a recognised
+  `work` mode (plus a `branch` for `worktree` — an unknown mode would skip the
+  rollback-owned Git cleanup and call it done), a real non-empty capability set,
+  and the record of what still owes cleanup — retire hooks by capability id, plus
+  the rollback-owned Git steps (`worktree`, `branch`) where the mode has them. That
+  record can never be empty: a quarantine exists because something is outstanding,
+  and one claiming otherwise would give the retry nothing to prove. A marker failing any of
+  that is no more retryable than a missing one, and is treated as missing so the
+  escape hatch works.
+- A retry clears the quarantine only by **proving the outstanding work happened**:
+  every retire hook the marker records as owing cleanup must have run and reported
+  success, and every Git step it records must be re-run and verified. A retry that resolves no
+  capabilities — a hand-edited descriptor, or config drift since the spawn — is an
+  incomplete cleanup, not a clean one, and the home stays.
+- Because some cleanups can never succeed (a capability offering no way to undo its
+  own setup, a permanently unreachable remote), **`--force` also overrides
+  retention**: the home is removed, and everything still outstanding is printed as
+  state the operator now owns. Nothing is ever permanently unremovable through OAS,
+  and nothing is silently dropped. Without `--force` that state fails closed with
+  `E_UNIDENTIFIED_INSTANCE_HOME` rather than deleting whatever credentials the
+  directory still holds; `--force` removes it and leaves any external state for
+  the operator to clean up by hand.
+- `requires` declares what must exist before the capability works. Two kinds:
+  - a **host command** (`command`), satisfied by a binary on `PATH`;
+  - a **runtime package** (`runtime` + `package`, optionally `marketplace`),
+    satisfied by that runtime's own package manager — `npm:@scope/name` for pi,
+    `plugin@marketplace` for Claude Code. It is raised only for deployments that use the named
+    runtime — a Claude-only deployment is never asked to install a pi package —
+    and is verified in the runtime's package list, never on `PATH`. A version
+    selector is allowed and ignored for identity, so `@latest` and a pinned
+    version are one requirement.
+  A runtime package is **verified at spawn, never installed there**: installing
+  would mutate the operator's runtime configuration without asking, in the
+  middle of a spawn. A missing, uninstalled or disabled package fails the spawn
+  with the consent command that fixes it.
+- OAS never installs a requirement silently. `oas install` prompts per
+  requirement with the exact argv, source and scope; automation passes
+  `--accept-requirement <name>` (the name is the command, or
+  `<runtime>:<package>`), and `--no-requirements` skips the gate. When a plan
+  has several steps — registering a Claude marketplace before installing from
+  it — every step is shown, because agreeing to a plugin also means agreeing to
+  the source it comes from. Declining
+  leaves an actionable `oas doctor` warning. Consent to install is separate
+  from capability trust.
 - Target names never appear in a package manifest.
 
 `capability` is the only manifest identity field. The machine-readable

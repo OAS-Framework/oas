@@ -6,8 +6,8 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { resolveOasConfig, capabilityIntegrity, acquirePackage, loadPackageManifestAt, parsePackageSource, readPackageLocks } from "../lib/core.mjs";
 import {
-  aggregateMissingRequirements, commandOnPath, diffConfigTexts, discoverWorkspaceScopes,
-  lockedPackageCapabilities, normalizeRequirement,
+  aggregateMissingRequirements, capabilityRuntimeTargets, commandOnPath, diffConfigTexts, discoverWorkspaceScopes,
+  lockedPackageCapabilities, normalizeRequirement, packageSpecIdentity, runtimePackageInstalled, runtimePackageStatus,
   parseProfileProvenance, profileProvenanceHeader, requirementInstallPlan,
   resolveProfilePackage, runRequirementInstall, selectProfile, validateProfile,
 } from "../lib/packages.mjs";
@@ -980,12 +980,18 @@ test("install --json requirements: all four consent outcomes with structured pla
   assert.equal(e1.result.requirements.length, 1);
   const q1 = e1.result.requirements[0];
   assert.equal(q1.outcome, "consent-required");
-  assert.deepEqual(q1.plan, { manager: "npm-global", argv: ["npm", "install", "-g", "wanted-cli@1.0.0"], source: "npm registry (wanted-cli@1.0.0)", version: "1.0.0", scope: "user-level (npm global prefix)" });
+  // ONE shape for every plan: `steps` is the ordered sequence that will run and
+  // is always present; `argv` is its final command. A single-step plan carries a
+  // one-element `steps` rather than omitting it, so JSON clients never branch
+  // (reviewer-final0130bc8).
+  assert.deepEqual(q1.plan, { manager: "npm-global", argv: ["npm", "install", "-g", "wanted-cli@1.0.0"], steps: [["npm", "install", "-g", "wanted-cli@1.0.0"]], source: "npm registry (wanted-cli@1.0.0)", version: "1.0.0", scope: "user-level (npm global prefix)" });
   assert.deepEqual(q1.requestedBy.map((x) => x.capability), ["needy.cap"]);
   // skipped: --no-requirements
   const r2 = cli(["install", "--json", "--no-requirements", "--dir", w1], { cwd: w1, env });
   const e2 = JSON.parse(r2.stdout);
   assert.equal(e2.result.requirements[0].outcome, "skipped");
+  assert.deepEqual(e2.result.requirements[0].plan.steps, [["npm", "install", "-g", "wanted-cli@1.0.0"]],
+    "a skipped requirement still shows what WOULD run, in full");
   // installed: accepted, lands on PATH, onPath true
   const r3 = cli(["install", "--json", "--accept-requirement", "wanted-cli", "--dir", w1], { cwd: w1, env });
   assert.equal(r3.status, 0, r3.stdout);
@@ -1438,4 +1444,356 @@ test("commandOnPath finds executables only via PATH lookup", () => {
   assert.equal(commandOnPath("sh"), true);
   assert.equal(commandOnPath("definitely-not-a-real-cmd-xyz"), false);
   assert.equal(commandOnPath("/bin/sh"), false, "path-shaped commands are not PATH lookups");
+});
+
+// ---------- runtime-package requirements (satisfied by a runtime, not by PATH) ----------
+
+test("packageSpecIdentity collapses version selectors, keeping scoped names intact", () => {
+  assert.equal(packageSpecIdentity("npm:@awebai/pi@latest"), "npm:@awebai/pi");
+  assert.equal(packageSpecIdentity("npm:@awebai/pi@0.2.1"), "npm:@awebai/pi");
+  assert.equal(packageSpecIdentity("npm:@awebai/pi"), "npm:@awebai/pi");
+  assert.equal(packageSpecIdentity("npm:pi-web-search@^1.2.0"), "npm:pi-web-search");
+});
+
+test("a runtime package counts as installed only when the runtime resolves an install location", () => {
+  const base = temp();
+  const pkgDir = join(base, "store", "@awebai", "pi");
+  write(join(pkgDir, "package.json"), JSON.stringify({ name: "@awebai/pi" }));
+  const oldPath = process.env.PATH;
+  try {
+    // Verified: pi lists it AND names a directory that exists.
+    process.env.PATH = fakePi(base, [{ source: "npm:@awebai/pi@latest", dir: pkgDir }]);
+    const env = { ...process.env, HOME: base };
+    assert.equal(runtimePackageInstalled("pi", "npm:@awebai/pi", env), true, "matches across a version selector");
+    assert.equal(runtimePackageInstalled("pi", "npm:@awebai/pi@0.2.1", env), true);
+    assert.equal(runtimePackageInstalled("pi", "npm:not-installed", env), false);
+    assert.equal(runtimePackageInstalled("nosuchruntime", "npm:@awebai/pi", env), false, "unknown runtime is never satisfied");
+
+    // Configured but never installed: pi prints no path line. Presence in the
+    // list is not installation.
+    process.env.PATH = fakePi(base, [{ source: "npm:@awebai/pi" }]);
+    const st = runtimePackageStatus("pi", "npm:@awebai/pi", { ...process.env, HOME: base });
+    assert.equal(st.installed, true, "the row exists…");
+    assert.equal(st.missingFiles, true, "…but nothing is installed for it");
+    assert.equal(runtimePackageInstalled("pi", "npm:@awebai/pi", { ...process.env, HOME: base }), false);
+
+    // pi unrunnable: settings record intent, never installation.
+    process.env.PATH = fakePi(base, [], { fails: true });
+    write(join(base, ".pi", "agent", "settings.json"), JSON.stringify({ packages: ["npm:@awebai/pi"] }));
+    const fallback = runtimePackageStatus("pi", "npm:@awebai/pi", { ...process.env, HOME: base });
+    assert.match(fallback.unverified || "", /could not run/);
+    assert.equal(runtimePackageInstalled("pi", "npm:@awebai/pi", { ...process.env, HOME: base }), false,
+      "a config entry is never accepted as an installation");
+  } finally { process.env.PATH = oldPath; }
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("a runtime-package requirement plans an argv install scoped to its runtime", () => {
+  const plan = requirementInstallPlan({
+    runtime: "pi", package: "npm:@awebai/pi", why: "aweb channel extension for pi sessions",
+  });
+  assert.deepEqual(plan.argv, ["pi", "install", "npm:@awebai/pi"], "argv only — no shell, no sudo");
+  assert.equal(plan.runtime, "pi");
+  assert.equal(plan.command, "pi:npm:@awebai/pi", "identity is runtime-scoped");
+  assert.match(plan.scope, /pi packages/);
+  // Unknown runtimes and unsafe specs are never given an executable plan.
+  assert.match(requirementInstallPlan({ runtime: "nope", package: "npm:x" }).unavailable, /unknown runtime/);
+  assert.match(requirementInstallPlan({ runtime: "pi", package: "npm:x; rm -rf /" }).unavailable, /not a plain source token/);
+  assert.match(requirementInstallPlan({ runtime: "pi", package: "../../etc/passwd" }).unavailable, /not a plain source token/);
+});
+
+test("an unknown runtime in a requirement is fail-closed, never consentable", () => {
+  const base = temp();
+  const repo = join(base, "repo");
+  const capDir = join(repo, ".agents", "capabilities", "owned", "bad");
+  write(join(capDir, "oas.json"), JSON.stringify({
+    capability: "acme.bad", version: "1.0.0", compatibility: { oas: ">=0.6.2" }, description: "Bad.",
+    requires: [{ runtime: "deno-but-not-real", package: "npm:whatever", why: "nope" }],
+  }));
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.bad:\n      global: true\n");
+  gitRepo(repo);
+  const found = aggregateMissingRequirements([repo], { env: { ...process.env, HOME: temp() } });
+  const bad = found.find((m) => m.invalid);
+  assert.ok(bad, "invalid requirement is surfaced");
+  assert.equal(bad.plan, null, "no executable plan is offered");
+  assert.match(bad.invalid, /unknown runtime/);
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("the aweb capability declares its pi channel package as a requirement", () => {
+  // The behavior this whole mechanism exists for: using aweb from pi must
+  // require the aweb pi package, instead of silently depending on whatever the
+  // user happens to have installed globally.
+  const manifest = JSON.parse(readFileSync(resolve(new URL("../capabilities/oas-aweb/oas.json", import.meta.url).pathname), "utf8"));
+  const req = (manifest.requires || []).find((r) => r.runtime === "pi");
+  assert.ok(req, "oas-aweb declares a pi runtime requirement");
+  assert.equal(packageSpecIdentity(req.package), "npm:@awebai/pi");
+  assert.ok(req.why && req.why.length > 20, "the prompt tells the user why it is needed");
+  const plan = requirementInstallPlan(req);
+  assert.deepEqual(plan.argv, ["pi", "install", "npm:@awebai/pi"]);
+});
+
+/** A deployment whose souls have the given runtimes, with a pi-requiring capability. */
+function runtimeScopeFixture(base, souls, { target = "global" } = {}) {
+  const repo = join(base, "repo");
+  const capDir = join(repo, ".agents", "capabilities", "owned", "chan");
+  write(join(capDir, "oas.json"), JSON.stringify({
+    capability: "acme.chan", version: "1.0.0", compatibility: { oas: ">=0.6.2" }, description: "Channel.",
+    requires: [{ runtime: "pi", package: "npm:@awebai/pi@latest", why: "channel extension" }],
+  }));
+  for (const [name, spec] of Object.entries(souls)) {
+    const { runtime, type } = typeof spec === "string" ? { runtime: spec } : spec;
+    write(join(repo, "agents", name, "soul", "soul.yaml"),
+      `name: ${name}\nkind: persistent\nrepo: ${repo}\nwork: checkout\nruntime: ${runtime}\n${type ? `type: ${type}\n` : ""}`);
+    write(join(repo, "agents", name, "soul", "AGENTS.md"), `# ${name}\n`);
+  }
+  const binding = target === "global" ? "      global: true\n"
+    : target.startsWith("type:") ? `      agent-types:\n        ${target.slice(5)}:\n          enabled: true\n`
+    : `      souls:\n        ${target.slice(5)}:\n          enabled: true\n`;
+  const types = target.startsWith("type:") ? `agent-types:\n  ${target.slice(5)}: {}\n` : "";
+  write(join(repo, "oas-config.yaml"), `${types}capabilities:\n  additive:\n    acme.chan:\n${binding}`);
+  gitRepo(repo);
+  return repo;
+}
+/** A `pi` stub answering `pi list` in pi's real format: the install path line
+ * appears ONLY for a genuinely installed package. Returns a PATH prefix. */
+function fakePi(base, rows, { fails = false } = {}) {
+  const bin = join(base, "bin"); mkdirSync(bin, { recursive: true });
+  const body = ["User packages:", ...rows.flatMap((r) => [
+    `  ${r.source}${r.filtered ? " (filtered)" : ""}`,
+    ...(r.dir ? [`    ${r.dir}`] : []),
+  ])].join("\n");
+  write(join(bin, "pi"), fails ? "#!/bin/sh\nexit 3\n" : `#!/bin/sh\nif [ "$1" = "list" ]; then cat <<'EOF'\n${body}\nEOF\nfi\nexit 0\n`);
+  chmodSync(join(bin, "pi"), 0o755);
+  return `${bin}:${process.env.PATH}`;
+}
+
+const noPiPackages = () => ({ ...process.env, HOME: mkdtempSync(join(tmpdir(), "oas-nopi-")) });
+
+test("a Claude-only deployment is never prompted for a pi package", () => {
+  const base = temp();
+  const repo = runtimeScopeFixture(base, { writer: "claude", editor: "claude" });
+  const missing = aggregateMissingRequirements([repo], { env: noPiPackages() });
+  assert.equal(missing.some((m) => m.kind === "runtime-package"), false,
+    `no pi requirement for a Claude-only host: ${JSON.stringify(missing.map((m) => m.command))}`);
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("a pi deployment is prompted, with soul-level provenance", () => {
+  const base = temp();
+  const repo = runtimeScopeFixture(base, { coder: "pi" });
+  const missing = aggregateMissingRequirements([repo], { env: noPiPackages() });
+  const req = missing.find((m) => m.command === "pi:npm:@awebai/pi");
+  assert.ok(req, "the pi requirement is raised");
+  assert.deepEqual(req.plan.argv, ["pi", "install", "npm:@awebai/pi@latest"]);
+  assert.deepEqual(req.requestedBy[0].souls, ["coder"], "provenance names the soul that pulled it in");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("a mixed pi+claude deployment reports ONE deduped requirement naming only the pi souls", () => {
+  const base = temp();
+  const repo = runtimeScopeFixture(base, { coder: "pi", helper: "pi", reviewer: "claude" });
+  const missing = aggregateMissingRequirements([repo], { env: noPiPackages() });
+  const reqs = missing.filter((m) => m.kind === "runtime-package");
+  assert.equal(reqs.length, 1, "deduped to one requirement");
+  assert.deepEqual(reqs[0].requestedBy[0].souls.sort(), ["coder", "helper"], "claude souls are not listed as requesters");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("type and soul targeting scope the requirement to the souls actually targeted", () => {
+  const base = temp();
+  // Only the pi soul carries the targeted type.
+  const byType = runtimeScopeFixture(join(base, "a"),
+    { coder: { runtime: "pi", type: "developers" }, reviewer: "claude" }, { target: "type:developers" });
+  assert.ok(aggregateMissingRequirements([byType], { env: noPiPackages() }).some((m) => m.kind === "runtime-package"),
+    "raised when the targeted type is a pi soul");
+
+  // The targeted type belongs only to a claude soul → never raised.
+  const claudeType = runtimeScopeFixture(join(base, "b"),
+    { coder: "pi", reviewer: { runtime: "claude", type: "reviewers" } }, { target: "type:reviewers" });
+  assert.equal(aggregateMissingRequirements([claudeType], { env: noPiPackages() }).some((m) => m.kind === "runtime-package"), false,
+    "not raised when the targeted type is claude-only");
+
+  // Explicit soul targeting, claude soul only.
+  const bySoul = runtimeScopeFixture(join(base, "c"), { coder: "pi", reviewer: "claude" }, { target: "soul:reviewer" });
+  assert.equal(aggregateMissingRequirements([bySoul], { env: noPiPackages() }).some((m) => m.kind === "runtime-package"), false,
+    "not raised when only a claude soul is targeted");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("no souls yet: the requirement is not raised, and the policy is spawn's to enforce", () => {
+  const base = temp();
+  const repo = runtimeScopeFixture(base, {});   // capability active, zero souls
+  const targets = capabilityRuntimeTargets(repo, "acme.chan");
+  assert.equal(targets.souls, 0);
+  assert.equal(targets.runtimes.size, 0);
+  assert.equal(aggregateMissingRequirements([repo], { env: noPiPackages() }).some((m) => m.kind === "runtime-package"), false,
+    "a fresh deployment is not prompted for runtimes its future souls may never use");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("a genuinely installed pi package is not raised; an unverifiable one still is (reviewer-14c38e8)", () => {
+  const base = temp();
+  const repo = runtimeScopeFixture(base, { coder: "pi" });
+  const pkgDir = join(base, "store", "@awebai", "pi");
+  write(join(pkgDir, "package.json"), JSON.stringify({ name: "@awebai/pi" }));
+  const oldPath = process.env.PATH;
+  try {
+    // Verified install → nothing to prompt for.
+    process.env.PATH = fakePi(base, [{ source: "npm:@awebai/pi@0.2.1", dir: pkgDir }]);
+    assert.equal(aggregateMissingRequirements([repo], { env: { ...process.env, HOME: temp() } }).some((m) => m.kind === "runtime-package"), false);
+
+    // Listed with NO install location: aggregation must still offer to install
+    // it, or the `oas install --accept-requirement …` remedy spawn prints is a
+    // no-op and the retry fails identically.
+    process.env.PATH = fakePi(base, [{ source: "npm:@awebai/pi" }]);
+    assert.ok(aggregateMissingRequirements([repo], { env: { ...process.env, HOME: temp() } }).some((m) => m.command === "pi:npm:@awebai/pi"),
+      "a configured-but-uninstalled package is still raised");
+
+    // `pi list` fails and only settings exist: same conclusion.
+    const home = temp();
+    write(join(home, ".pi", "agent", "settings.json"), JSON.stringify({ packages: ["npm:@awebai/pi"] }));
+    process.env.PATH = fakePi(base, [], { fails: true });
+    assert.ok(aggregateMissingRequirements([repo], { env: { ...process.env, HOME: home } }).some((m) => m.command === "pi:npm:@awebai/pi"),
+      "an unverifiable settings row is still raised");
+    rmSync(home, { recursive: true, force: true });
+  } finally { process.env.PATH = oldPath; }
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("naming a requirement with --accept-requirement overrides runtime scoping (reviewer-ad1b9f0)", () => {
+  const base = temp();
+  // Claude-only souls: scoping correctly hides the pi requirement by default…
+  const repo = runtimeScopeFixture(base, { reviewer: "claude" });
+  const env = noPiPackages();
+  assert.equal(aggregateMissingRequirements([repo], { env }).some((m) => m.kind === "runtime-package"), false,
+    "not raised unprompted on a Claude-only host");
+  // …but `--runtime pi` at spawn emits `oas install --accept-requirement pi:…`,
+  // and that command must actually have something to install, or the remedy we
+  // printed is a no-op and the retry fails identically.
+  const named = aggregateMissingRequirements([repo], { env, accepted: new Set(["pi:npm:@awebai/pi"]) });
+  const req = named.find((m) => m.command === "pi:npm:@awebai/pi");
+  assert.ok(req, "explicitly naming the requirement surfaces it for install");
+  assert.deepEqual(req.plan.argv, ["pi", "install", "npm:@awebai/pi@latest"]);
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("same plugin from DIFFERENT marketplace sources is a conflict, not a silent merge (reviewer-6f1bb9c)", () => {
+  const base = temp();
+  const repo = join(base, "repo");
+  // Two capabilities want the same plugin id but register its marketplace from
+  // different sources. Keying conflicts on the final argv alone collapses these
+  // into one requirement and whichever was seen first silently wins — including
+  // which third-party source gets registered on the operator's machine.
+  for (const [folder, id, marketplace] of [["a", "acme.a", "acme/claude-plugins"], ["b", "acme.b", "impostor/claude-plugins"]]) {
+    write(join(repo, ".agents", "capabilities", "owned", folder, "oas.json"), JSON.stringify({
+      capability: id, version: "1.0.0", compatibility: { oas: ">=0.6.2" }, description: "x",
+      requires: [{ runtime: "claude", package: "chan@acme-marketplace", marketplace, why: "push events" }],
+    }));
+  }
+  write(join(repo, "agents", "dev", "soul", "soul.yaml"), `name: dev\nkind: persistent\nrepo: ${repo}\nwork: checkout\nruntime: claude\n`);
+  write(join(repo, "agents", "dev", "soul", "AGENTS.md"), "# dev\n");
+  write(join(repo, "oas-config.yaml"),
+    "capabilities:\n  additive:\n    acme.a:\n      global: true\n    acme.b:\n      global: true\n");
+  gitRepo(repo);
+  const found = aggregateMissingRequirements([repo], { env: { ...process.env, HOME: temp() } });
+  const req = found.find((m) => String(m.command).startsWith("claude:"));
+  assert.ok(req, `the requirement is surfaced: ${JSON.stringify(found.map((f) => f.command))}`);
+  assert.ok(req.conflict, "differing marketplace sources must conflict");
+  assert.equal(req.plan, null, "and no install is offered");
+  assert.equal(req.conflict.plans.length, 2, "both requesters are named for provenance");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("post-install verification probes the same executable the install ran through (reviewer-165d668)", () => {
+  const base = temp();
+  // Two wrappers reporting OPPOSITE states: `claude-personal` (the configured
+  // one) has the plugin, the literal `claude` does not.
+  const bin = join(base, "bin"); mkdirSync(bin, { recursive: true });
+  // The advertised installPath must EXIST — Claude names one, and a row pointing
+  // at a directory that was never created is a registration without an install,
+  // which the preflight is supposed to reject (reviewer-aggregate2).
+  const listing = (rows) => JSON.stringify(rows.map((id) => {
+    mkdirSync(join(base, id), { recursive: true });
+    return { id, version: "1.0.0", scope: "user", enabled: true, installPath: join(base, id) };
+  }));
+  for (const [name, rows] of [["claude", []], ["claude-personal", ["chan@acme-marketplace"]]]) {
+    write(join(bin, name), `#!/bin/sh
+if [ "$1" = "plugin" ] && [ "$2" = "list" ]; then echo '${listing(rows)}'; exit 0; fi
+exit 0
+`);
+  }
+  execFileSync("chmod", ["-R", "+x", bin]);
+  const oldPath = process.env.PATH; process.env.PATH = `${bin}:${process.env.PATH}`;
+  try {
+    const repo = join(base, "repo");
+    write(join(repo, "oas-claude-config"), "claude-personal\n");
+    const plan = requirementInstallPlan(
+      { runtime: "claude", package: "chan@acme-marketplace", marketplace: "acme/claude-plugins", why: "push events" },
+      { context: repo },
+    );
+    // The plan targets the configured wrapper…
+    assert.equal(plan.steps[0][0], "claude-personal");
+    assert.equal(plan.probe?.bin, "claude-personal", "…and carries it for verification");
+    // …so the install verifies against that wrapper, which HAS the plugin.
+    // Probing the literal `claude` here would report a successful install failed.
+    const r = runRequirementInstall(plan, { stdio: "ignore" });
+    assert.equal(r.onPath, true, "verified through the executable the install used");
+  } finally { process.env.PATH = oldPath; }
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("the JSON consent plan shows every step the installer will run (reviewer-final0130bc8)", () => {
+  const base = temp();
+  const ws = join(base, "ws");
+  const bin = join(base, "bin"); mkdirSync(bin, { recursive: true });
+  // A Claude runtime package needs its MARKETPLACE registered before install —
+  // two commands, the first of which registers a lower-trust source. Serializing
+  // only the final argv meant a client consenting through the JSON API never saw
+  // that step, while runRequirementInstall ran it.
+  write(join(bin, "claude"), "#!/bin/sh\nif [ \"$1\" = \"plugin\" ] && [ \"$2\" = \"list\" ]; then echo '[]'; exit 0; fi\nexit 0\n");
+  chmodSync(join(bin, "claude"), 0o755);
+  write(join(bin, "pi"), "#!/bin/sh\nexit 0\n"); chmodSync(join(bin, "pi"), 0o755);
+  write(join(ws, "agents", "dev", "soul", "soul.yaml"), "name: dev\nkind: persistent\nruntime: claude\n");
+  write(join(ws, "agents", "dev", "soul", "AGENTS.md"), "# dev\n");
+  write(join(ws, ".agents", "capabilities", "owned", "chan", "oas.json"), JSON.stringify({
+    capability: "acme.chan", version: "1.0.0", description: "x",
+    requires: [{ runtime: "claude", package: "chan@acme-marketplace", marketplace: "acme/claude-plugins", why: "push events" }],
+  }));
+  write(join(ws, "oas-config.yaml"), "name: ws\nteam:\n  name: t\ncapabilities:\n  additive:\n    acme.chan:\n      from: owned\n      global: true\n");
+  const env = { ...process.env, PATH: `${bin}:${process.env.PATH}` };
+
+  const human = cli(["install", "--dir", ws], { cwd: ws, env });
+  assert.equal(human.status, 0, human.stderr);
+  assert.match(human.stdout, /claude plugin marketplace add acme\/claude-plugins/,
+    "the human plan names the source registration");
+
+  const r = cli(["install", "--json", "--dir", ws], { cwd: ws, env });
+  const env1 = JSON.parse(r.stdout);
+  assert.equal(env1.schemaVersion, 1);
+  const entry = (env1.result.requirements || []).find((e) => e.package === "chan@acme-marketplace");
+  assert.ok(entry, `the requirement is reported in JSON: ${r.stdout}`);
+  // PARITY: the ordered sequence the installer executes, not just its last command.
+  assert.deepEqual(entry.plan.steps, [
+    ["claude", "plugin", "marketplace", "add", "acme/claude-plugins"],
+    ["claude", "plugin", "install", "chan@acme-marketplace"],
+  ], "the JSON plan carries every step, in order");
+  assert.deepEqual(entry.plan.argv, entry.plan.steps.at(-1), "argv stays the final command");
+  // What the installer would actually run must equal what was shown.
+  const plan = requirementInstallPlan(
+    { runtime: "claude", package: "chan@acme-marketplace", marketplace: "acme/claude-plugins", why: "push events" },
+    { context: ws },
+  );
+  assert.deepEqual(entry.plan.steps, plan.steps, "the consented sequence IS the executed sequence");
+
+  // Single-step plans keep one shape: `steps` present, holding just that argv.
+  write(join(ws, ".agents", "capabilities", "owned", "chan", "oas.json"), JSON.stringify({
+    capability: "acme.chan", version: "1.0.0", description: "x",
+    requires: [{ command: "wanted-cli", why: "testing", install: { docs: "https://example.invalid", methods: [{ platform: process.platform, manager: "npm-global", package: "wanted-cli@1.0.0" }] } }],
+  }));
+  const single = JSON.parse(cli(["install", "--json", "--dir", ws], { cwd: ws, env }).stdout);
+  const one = (single.result.requirements || []).find((e) => e.command === "wanted-cli");
+  assert.ok(one, "single-step requirement reported");
+  assert.deepEqual(one.plan.steps, [one.plan.argv], "a single-step plan still carries steps, holding exactly its argv");
+  rmSync(base, { recursive: true, force: true });
 });

@@ -217,7 +217,7 @@ function doctorPackagesData(ctx, chain) {
     command: req.command, why: req.why || null, docs: req.docs || null,
     requestedBy: req.requestedBy,
     plan: req.plan && !req.plan.unavailable
-      ? { manager: req.plan.manager, argv: req.plan.argv, source: req.plan.source, version: req.plan.version || null, scope: req.plan.scope }
+      ? { manager: req.plan.manager, argv: req.plan.argv, steps: req.plan.steps || [req.plan.argv], source: req.plan.source, version: req.plan.version || null, scope: req.plan.scope }
       : null,
     invalid: req.invalid || null,
     conflict: req.conflict || null,
@@ -935,13 +935,22 @@ function requirementsGate(scopes) {
   // Malformed repeatable flags are usage errors regardless of which branch
   // runs — validate up front so --no-requirements cannot mask them.
   const accepted = new Set(flagAll("accept-requirement"));
-  const missing = aggregateMissingRequirements(scopes);
+  // Explicitly named requirements bypass runtime scoping, so the remediation
+  // command a failed spawn prints actually installs something.
+  const missing = aggregateMissingRequirements(scopes, { accepted });
   if (!missing.length) return [];
   const note = (msg) => (JSON_MODE ? console.error(msg) : console.log(msg));
   const entryOf = (req, outcome, extra = {}) => ({
-    command: req.command, why: req.why || null,
+    command: req.command, kind: req.kind || "host-command",
+    runtime: req.runtime || null, package: req.package || null, why: req.why || null,
+    // `steps` is the ORDERED sequence runRequirementInstall actually executes;
+    // `argv` is only its last command. Serializing argv alone hid a
+    // `claude plugin marketplace add <source>` — a lower-trust source
+    // registration — from every client consenting through the JSON API
+    // (reviewer-final0130bc8). Always present, exactly as doctor renders it, so
+    // single- and multi-step plans have one shape.
     plan: req.plan && !req.plan.unavailable
-      ? { manager: req.plan.manager, argv: req.plan.argv, source: req.plan.source, version: req.plan.version || null, scope: req.plan.scope }
+      ? { manager: req.plan.manager, argv: req.plan.argv, steps: req.plan.steps || [req.plan.argv], source: req.plan.source, version: req.plan.version || null, scope: req.plan.scope }
       : null,
     requestedBy: req.requestedBy, docs: req.docs || null, outcome, ...extra,
   });
@@ -956,7 +965,12 @@ function requirementsGate(scopes) {
       policyEntries.push(entryOf(req, "failed", { reason: req.invalid, code: "E_REQUIREMENT_POLICY" }));
     } else if (req.conflict) {
       note(`  CONFLICT for command "${req.command}": capabilities request non-identical install plans — no install is offered`);
-      for (const p of req.conflict.plans) note(`      ${p.capability} [${shortPath(p.scope)}]: ${p.argv ? p.argv.join(" ") : p.unavailable || "no plan"}`);
+      // Show the FULL sequence: two capabilities can agree on the final install
+      // command while registering different third-party sources before it.
+      for (const p of req.conflict.plans) {
+        const shown = p.steps?.length ? p.steps.map((a) => a.join(" ")).join("  &&  ") : (p.argv ? p.argv.join(" ") : p.unavailable || "no plan");
+        note(`      ${p.capability} [${shortPath(p.scope)}]: ${shown}`);
+      }
       policyEntries.push(entryOf(req, "failed", { reason: "conflicting install plans for the same command", code: "E_REQUIREMENT_POLICY", conflict: req.conflict }));
     }
   }
@@ -964,7 +978,7 @@ function requirementsGate(scopes) {
   if (args.includes("--no-requirements")) return [...policyEntries, ...consentable.map((req) => entryOf(req, "skipped", { reason: "--no-requirements" }))];
   const interactive = !JSON_MODE && process.stdin.isTTY && process.stdout.isTTY;
   const out = [...policyEntries];
-  if (consentable.length) note(`\nMissing host commands for active capabilities (${consentable.length}):`);
+  if (consentable.length) note(`\nMissing requirements for active capabilities (${consentable.length}):`);
   for (const req of consentable) {
     const requesters = req.requestedBy.map((r) => `${r.capability} [${shortPath(r.scope)}]`).join(", ");
     note(`  ${req.command} — ${req.why || "required"} (requested by: ${requesters})`);
@@ -974,7 +988,10 @@ function requirementsGate(scopes) {
       out.push(entryOf(req, "skipped", { reason: plan?.unavailable || "no safe installer" }));
       continue;
     }
-    note(`    installer: ${plan.argv.join(" ")}  (source: ${plan.source}${plan.version ? `, version ${plan.version}` : ""}; ${plan.scope})`);
+    // Show EVERY step: installing a Claude plugin also registers a third-party
+    // marketplace, and consent to that must be visible, not implied.
+    const shown = (plan.steps?.length ? plan.steps : [plan.argv]).map((a) => a.join(" ")).join("  &&  ");
+    note(`    installer: ${shown}  (source: ${plan.source}${plan.version ? `, version ${plan.version}` : ""}; ${plan.scope})`);
     let consent = accepted.has(req.command);
     if (!consent && interactive) {
       process.stdout.write(`    Run this install now? [y/N] `);
@@ -984,14 +1001,17 @@ function requirementsGate(scopes) {
       consent = answer === "y" || answer === "yes";
     }
     if (!consent) {
-      note(`    skipped — ${interactive ? "not consented" : "non-interactive; pass --accept-requirement " + req.command + " to install"}; \`oas doctor\` will keep warning until ${req.command} is on PATH`);
+      note(`    skipped — ${interactive ? "not consented" : "non-interactive; pass --accept-requirement " + req.command + " to install"}; \`oas doctor\` will keep warning until ${req.command} is ${req.kind === "runtime-package" ? `installed for ${req.runtime}` : "on PATH"}`);
       out.push(entryOf(req, "consent-required"));
       continue;
     }
     try {
       const r = runRequirementInstall(plan, JSON_MODE ? { stdio: ["ignore", 2, 2] } : {});
-      if (r.onPath) { note(`    installed — ${req.command} verified on PATH`); out.push(entryOf(req, "installed", { onPath: true })); }
-      else { note(`    FAILED: install ran but ${req.command} is still not on PATH — check your shell PATH/prefix`); out.push(entryOf(req, "failed", { onPath: false, reason: "install ran but the command is not on PATH" })); }
+      // A runtime package is verified in its runtime's package list, never on
+      // PATH — saying "on PATH" for one would be false either way it lands.
+      const where = req.kind === "runtime-package" ? `installed for ${req.runtime}` : "on PATH";
+      if (r.onPath) { note(`    installed — ${req.command} verified ${where}`); out.push(entryOf(req, "installed", { onPath: true })); }
+      else { note(`    FAILED: install ran but ${req.command} is still not ${where}${req.kind === "runtime-package" ? "" : " — check your shell PATH/prefix"}`); out.push(entryOf(req, "failed", { onPath: false, reason: `install ran but the requirement is still not ${where}` })); }
     } catch (e) {
       note(`    FAILED: ${e.message}`);
       out.push(entryOf(req, "failed", { onPath: false, reason: e.message }));
@@ -1679,7 +1699,7 @@ function spawnCmd() {
 
 function retireCmd() {
   const name = args[1];
-  if (!name || name.startsWith("--")) die("usage: oas retire <instance> [--self] [--delete-branch] [--keep-dir] [--json]");
+  if (!name || name.startsWith("--")) die("usage: oas retire <instance> [--self] [--delete-branch] [--keep-dir] [--force] [--json]");
   const isSelf = process.env.PI_AGENT_INSTANCE === name || process.env.OAS_INSTANCE === name;
   if (isSelf && !args.includes("--self")) die(`"${name}" is the calling instance — self-retire is irreversible; if your task is complete and you were told to retire, re-run with --self (finish your memory files FIRST; your session dies ~8s after)`);
   if (!isSelf && args.includes("--self")) die(`--self given but "${name}" is not the calling instance`);
@@ -1689,8 +1709,24 @@ function retireCmd() {
     const hit = findTeamInstance(dirFlag(), name);
     if (hit && resolve(hit.root) !== resolve(root)) { root = hit.root; console.log(`(cross-repo: instance homes at ${shortPath(root)})`); }
   }
-  const r = retireInstance(root, name, { self: isSelf, deleteBranch: args.includes("--delete-branch"), keepDir: args.includes("--keep-dir") });
-  if (args.includes("--json")) { console.log(JSON.stringify(r, null, 2)); return; }
+  const r = retireInstance(root, name, { self: isSelf, deleteBranch: args.includes("--delete-branch"), keepDir: args.includes("--keep-dir"), force: args.includes("--force") });
+  // Forced removal past an incomplete cleanup: the home is gone because the
+  // operator said so, but the external state it owed is still out there and
+  // nobody else will mention it again.
+  if (r.forcedIncomplete) {
+    console.error(`Removed ${r.retired} under --force with cleanup INCOMPLETE — this external state was NOT cleaned up and is now yours to remove by hand:`);
+    for (const f of r.forcedIncomplete) console.error(`  ${f}`);
+  }
+  if (args.includes("--json")) { console.log(JSON.stringify(r, null, 2)); if (r.rollbackIncomplete) process.exit(1); return; }
+  // An unsuccessful cleanup retry must NOT read as a completed retirement: the
+  // home and its external state are still there, and a zero exit would tell
+  // both a human and any script that the work is done.
+  if (r.rollbackIncomplete) {
+    console.error(`Cleanup for ${r.retired} is INCOMPLETE — the instance home is retained at ${r.retainedHome} because external state may still exist:`);
+    for (const f of r.rollbackIncomplete) console.error(`  ${f}`);
+    console.error(`Fix the cause and re-run \`oas retire ${r.retired}\`; the home holds the state that cleanup needs.`);
+    process.exit(1);
+  }
   console.log(`Retired ${r.retired} (agent ${r.agent})${r.worktreeRemoved ? ", worktree removed" : ""}${r.branchDeleted ? ", branch deleted" : ""}${r.harvested?.length ? `, harvested: ${r.harvested.join(", ")}` : ""}`);
   if (isSelf) console.log("This window dies in ~8s — say any goodbyes now.");
 }
@@ -2008,7 +2044,7 @@ Usage:
       [--instructions-file <f>|--def-file <f>] [--no-launch] [--json]
                                             with team: declared, unknown local souls
                                             resolve across the team scope's repos
-  oas retire <instance>                     retire an instance (window, hooks,
+  oas retire <instance> [--force]           retire an instance (window, hooks,
       [--self] [--delete-branch]            worktree, home); --self = retire the
       [--keep-dir] [--json]                 CALLING instance (delayed window kill)
   oas doctor [dir] [--soul <name>] [--json] resolved targets, trust, requirements;

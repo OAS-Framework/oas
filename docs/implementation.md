@@ -7,8 +7,10 @@ The reference implementation publishes two npm packages:
 - **`@oas-framework/pi`**: minimal pi adapter for instance-local resource
   exposure and memory session events. It registers no agent tools.
 
-Claude instances consume generated standard files directly; OAS redirects
-Claude's config home to the instance-local view.
+Claude instances consume the generated standard files directly through the
+instance home's `.claude/` and `CLAUDE.md` symlinks. OAS does **not** redirect
+Claude's config home: an isolated one cannot authenticate, and the operator's
+own Claude configuration is deliberately left enabled.
 
 ## Repository layout
 
@@ -79,6 +81,14 @@ an inherited slot and remains distinct from absence.
 
 `spawnInstance` resolves against the soul's repository and soul name. It:
 
+0. resolves and validates WHERE the home will be created, before any side
+   effect: the destination must be the agent directory's own `instances/`
+   child, that agent directory must lie inside this deployment, and a linked
+   worktree maps to the primary checkout — otherwise `E_NO_CANONICAL_ROOT` and
+   nothing is created. The check is repeated on the created directory before
+   anything is written into it. See
+   [souls-and-instances.md](souls-and-instances.md#deployment-prerequisite-the-agents-directory-must-be-operator-owned)
+   for the deployment prerequisite this rests on;
 1. calls `composeInstanceAgentsMd` without writing the soul;
 2. writes generated `AGENTS.md` and canonical compatibility symlinks;
 3. copies kernel + soul + active package skill trees into real directories in
@@ -90,12 +100,68 @@ an inherited slot and remains distinct from absence.
    files, hooks, capability metadata, and forward-only spawn lineage in
    `instance.json`.
 
-Pi launches with `--skill <instance>/.agents/skills` as an explicit path;
-ambient discovery (user, packages, work tree) remains enabled so existing
-skills coexist with the OAS-composed set. The pi adapter contributes
-only `oas-getting-started` outside an instance and the local directory inside
-one. Claude discovers the same set through the instance's
-`.claude/skills` symlink alongside the user's own configuration.
+Pi launches with `--no-skills --skill <instance-home>/.agents/skills
+--no-context-files --no-prompt-templates --append-system-prompt
+<instance-home>/AGENTS.md`. The OAS-managed skill set is exactly the composed
+one: no user, project, ancestor or package skill catalogs. It is not a claim
+that nothing else can reach the session — extensions stay ambient (below), and
+what they contribute stays with them.
+
+After the canonical soul and kernel text, every generated `AGENTS.md` states the
+runtime-neutral **home/work boundary** (`injects/instance-boundary.md`) — for
+every work mode and for capability service agents alike — immediately before the
+work-mode block it frames: `<instance-home>` (`$OAS_INSTANCE_HOME`) holds the
+brain, task, provenance and working state, and is where OAS operational/lifecycle
+commands are run from — together with the commands of whatever capabilities are
+active, `aw` among them when aweb messaging is — since they resolve scope from
+the working directory (`--dir <path>` reaches another deliberately); the home's
+`soul` link is to be treated as read-only because writes through it bypass the
+branch and review path; and `<instance-home>/work` is the repository or workspace
+view where repository reading, editing, building, testing, git and commits
+happen. It bounds *repository* work rather than forbidding all output elsewhere —
+episodic state lives in the home, and a service agent's own artifacts (a report
+written to a temp file before mailing it) are its role's business. What each mode
+actually permits is the work-mode block's call, which follows immediately.
+
+`--no-context-files` also suppresses the instance's *own* composed `AGENTS.md`,
+so that is delivered explicitly; the work tree's `AGENTS.md` stays readable by
+the file tools — readable, not auto-injected.
+
+Pi **extensions stay ambient**: operators run cross-agent extensions (web
+search, output formatting) that every instance should keep, so OAS does not
+pass `--no-extensions`. The accepted residue is narrow but real — an
+extension's `resources_discover` hook can contribute skill paths that survive
+`--no-skills`. Today only the OAS bridge does that, and inside an instance it
+contributes that instance's own `.agents/skills`, leaving the composed set
+unchanged.
+
+Runtime packages that active capabilities declare (see
+[capabilities](capabilities.md)) are verified at spawn and recorded in
+`instance.json`; a missing one fails the spawn with the consent command to fix
+it, rather than starting an agent whose instructions promise a capability it
+does not have. OAS does not resolve their extension entry points — pi owns that
+resolution, including globs and conventional directories.
+
+Claude discovers the same set natively through the instance's `.claude/skills`
+symlink, and its composed instructions through `CLAUDE.md -> AGENTS.md`.
+
+Claude Code's **own configuration stays enabled**: user and project skills,
+plugins, settings and `CLAUDE.md` all resolve into an OAS session as they
+normally would. That is a deliberate product choice — those mechanisms are
+powerful and the operator decides whether to use them; a deployment that wants
+only the OAS-composed surface achieves it by configuring everything OAS-side.
+So OAS passes no `--setting-sources`, no exclusions, and no synthetic plugin.
+
+Measured behavior worth knowing when reasoning about an instance: project
+skills resolve from the working directory up to the **repository root**, so an
+instance homed inside a repository with its own `.claude/skills` sees those
+too. Project *settings* — hooks, plugins, permissions, custom agents — resolve
+from the instance home rather than from ancestors.
+
+Both runtimes record what they actually expose in `instance.json` under
+`composition.materialized.runtimePosture`: the OAS-composed set, what is
+curtailed, and what remains ambient. The deviation from strict composition is
+auditable rather than implied.
 
 ## Instructions
 
@@ -103,9 +169,11 @@ The generated order is:
 
 1. canonical soul content;
 2. kernel OAS block;
-3. actual spawn work-mode block;
-4. active capability blocks in resolver order; and
-5. unconditional config blocks outermost to innermost.
+3. local-soul block (local souls only);
+4. **home/work boundary block** — runtime-neutral, every mode and every kind;
+5. actual spawn work-mode block;
+6. active capability blocks in resolver order; and
+7. unconditional config blocks outermost to innermost.
 
 Every generated block carries its source path. `oas doctor --soul <name>` uses
 the same composer and prints/returns the final text. Config-dependent prose is

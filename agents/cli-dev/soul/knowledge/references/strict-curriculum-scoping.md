@@ -11,25 +11,29 @@ timestamp: 2026-07-27
 Launch-path facts and maintainer rulings gathered while scoping strict instance
 curriculum enforcement:
 
-- Pi: `--no-skills` disables discovery; explicit `--skill <path>` still loads.
-  At capture time, `spawnInstance` already passed `--skill <home>/.agents/skills`
-  for ambient coexistence, so strict mode means adding `--no-skills` plus a
-  capability probe. The approved Pi mechanism is the scoped `--no-skills` probe,
-  explicit selected skills, fail-closed behavior, doctor diagnostics, and a
-  planted-ambient clean-room test.
-- Claude Code: `.claude/skills` is already a curated symlink, but personal
-  `~/.claude/skills`, plugins, and ancestor directories can leak in. Candidate
-  isolation is a per-instance `CLAUDE_CONFIG_DIR`; it needs a spike and should
-  fail closed on unverifiable versions. The Claude spike comes before production
-  implementation and must use real Claude, not shims, with evidence across
-  user, ancestor, worktree, package, and plugin skill discovery;
-  `CLAUDE.md`/`AGENTS.md` auto-context versus the generated instance file;
-  isolated config-home auth and model behavior; capability-selected runtime
-  extensions such as the aweb channel plugin surviving strict isolation as
-  declared provenance; native tools preserved; and known-good plus
-  unknown-version fail-closed behavior with doctor output. A version allowlist is
-  acceptable initially, but must report the maintenance path and tested band;
-  prefer a supported behavioral probe and do not monkeypatch.
+- Pi: verified on pi 0.80.10 that `--no-skills` disables discovered skills and
+  keeps explicit `--skill <path>` entries, but extension `resources_discover`
+  hooks still inject skills. Strict mode therefore needs `--no-skills --skill
+  <home>/.agents/skills --no-extensions -e <selected extension> ...` plus
+  `--no-context-files --no-prompt-templates` and explicit delivery of the
+  generated instance `AGENTS.md` through `--append-system-prompt <file>`. Built-in
+  tools survive; `--no-tools` must not be used for launch or skill-inventory
+  probes. See [pi strict launch](/lessons/pi-strict-launch-requires-no-extensions.md).
+  Do not enable that launch line before runtime extensions are capability
+  resources, because the aweb Pi extension currently comes only from user-global
+  Pi settings; see [the Pi runtime-extension blocker](/lessons/pi-strict-launch-blocked-on-runtime-extensions.md).
+  The package-presence fix is a Pi runtime-package requirement, not a PATH-based
+  host-command requirement; see [runtime-package requirements](/lessons/runtime-package-requirements.md).
+- Claude Code: verified on Claude Code 2.1.220 that an isolated
+  `CLAUDE_CONFIG_DIR` breaks OAuth/keychain auth. The working strict mechanism is
+  `--setting-sources ""` against the deployment's real config dir, plus
+  `--plugin-dir` for the composed instance skills as a session-only plugin,
+  `--plugin-dir` for each selected provider plugin, `--settings <file>`, and
+  `--append-system-prompt-file <home>/AGENTS.md`. This excludes user/project and
+  ancestor skills, ambient plugins, and project/ancestor `CLAUDE.md` while keeping
+  auth, built-ins, OAS-owned settings, and explicitly selected plugin MCP
+  servers. Use `--debug-file` output, not model self-report, as the oracle. See
+  [claude strict launch](/lessons/claude-strict-launch-setting-sources.md).
 - Sequencing: package-engine merges first; the strict-curriculum branch is cut
   from updated main, not from the package-engine feature branch, but remains in
   the same 0.19.0 release. Package-engine M2 must not claim strictness;
@@ -49,7 +53,11 @@ curriculum enforcement:
   strict-curriculum feature, with the package-config branch only owing the
   evidence and lesson. Resolving from locked/materialized sources removes the
   spawn-time race because materialization has a defined package-lifecycle
-  completion point, unlike a bare path probe.
+  completion point, unlike a bare path probe. The founder-decided sourcing for
+  `oas-aweb` is to vendor reviewed, MIT-attributed copies of the three aweb
+  Markdown skills with exact upstream repo/tag/commit provenance and
+  deterministic sync tooling, not to ship `@awebai/pi`/`@awebai/aw` and their
+  native/platform dependency closure just to obtain those skills.
 - `instance.json` already records skills and instructions with source
   provenance; the strict-curriculum Decision's surface-recording requirement is
   a small additive extension.

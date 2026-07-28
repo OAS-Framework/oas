@@ -8,15 +8,15 @@
       "trustedExecutables": true
     },
     "oas.review": {
-      "source": "marketplace:oas.review@1.1.7",
-      "version": "1.1.7",
-      "integrity": "sha256-c62ad64991ba7d48d0b0713fa9a04309d0c4db68c81b61e0080a231665506405",
+      "source": "marketplace:oas.review@1.2.0",
+      "version": "1.2.0",
+      "integrity": "sha256-b58741a6d31c06923108882bab58da7a8a7dda3036c68aa084bd5e31d904dfb9",
       "trustedExecutables": true
     },
     "oas.okf": {
-      "source": "marketplace:oas.okf@1.4.0",
-      "version": "1.4.0",
-      "integrity": "sha256-45c0cab49915fff18d97826bffb1cd0e4151e2930637744f707205dea4bc1499",
+      "source": "marketplace:oas.okf@1.4.1",
+      "version": "1.4.1",
+      "integrity": "sha256-75a6c0f47bfdc168110ceec0e16e81ec903b1f7dc864071d411a5d56a2dbb630",
       "trustedExecutables": true
     }
   }

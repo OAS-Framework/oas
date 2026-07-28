@@ -134,7 +134,12 @@ Rules (all enforced):
   no authentication.
 - **Informed, per-requirement consent.** Interactive `oas install` shows the
   exact command, source, version, and whether it changes user- or
-  machine-level state, then asks per requirement.
+  machine-level state, then asks per requirement. A plan may take **more than
+  one command** — a runtime package can need its source registered first — so
+  both the human and `--json` renderings carry `steps`, the ordered argv
+  sequence that will actually run, alongside `argv` (its final command). What
+  you consent to is the whole sequence; nothing is executed that the plan did
+  not show.
 - **Aggregation is scoped**: only capabilities *activated somewhere in the
   reconciled scopes* are considered, deduplicated by required command, and the
   report names which capabilities requested each command.

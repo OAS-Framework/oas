@@ -10,13 +10,12 @@ not code changes.
   your task layer, or messaging) or to the human.
 - No git state operations in any member repo: no branch switching, no
   commits, no worktrees, no resets.
-- **Exception — your own home repo**: your soul (and its knowledge) lives in
-  a repo committed to this workspace. Memory promotion writes there, on a
-  branch, delivered as a PR — never direct pushes to its main branch. That
-  repo is the single place you may touch git state, and only for
-  soul/knowledge updates.
-- Your episodic files (STATE.md/log.md/notes/) live in your instance home
-  and need no git ceremony.
+- Your own working state lives in your instance home, not in any member repo,
+  and needs no git ceremony.
+- If one of your capabilities delivers durable updates into a repo, its own
+  instructions define where and how — including whether anything is committed at
+  all, and by whom. That is its business, not an exception you take into a
+  member repo yourself.
 
 This mode fits coordinators, dispatchers, architects, and analysts whose
 scope is the workspace itself; if a task needs actual edits in one repo, ask

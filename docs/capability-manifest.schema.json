@@ -57,23 +57,64 @@
     "requires": {
       "type": "array",
       "items": {
-        "type": "object",
-        "required": [
-          "command",
-          "why"
-        ],
-        "properties": {
-          "command": {
-            "type": "string"
+        "oneOf": [
+          {
+            "title": "host command requirement",
+            "description": "A command that must be present on PATH before the capability can work.",
+            "type": "object",
+            "required": [
+              "command",
+              "why"
+            ],
+            "properties": {
+              "command": {
+                "type": "string"
+              },
+              "why": {
+                "type": "string"
+              },
+              "install": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
           },
-          "why": {
-            "type": "string"
-          },
-          "install": {
-            "type": "string"
+          {
+            "title": "runtime package requirement",
+            "description": "A package that must be installed into a specific runtime's own package manager. Raised only for deployments using that runtime, satisfied by the runtime's package list rather than by PATH, and installed only with explicit consent.",
+            "type": "object",
+            "required": [
+              "runtime",
+              "package",
+              "why"
+            ],
+            "properties": {
+              "runtime": {
+                "type": "string",
+                "enum": [
+                  "pi",
+                  "claude"
+                ]
+              },
+              "package": {
+                "type": "string",
+                "description": "Source spec in that runtime's own naming: \"npm:@scope/name\" for pi, \"plugin@marketplace\" for Claude."
+              },
+              "why": {
+                "type": "string"
+              },
+              "install": {
+                "type": "string",
+                "description": "Documentation URL shown alongside the consent prompt."
+              },
+              "marketplace": {
+                "type": "string",
+                "description": "Optional source to register before installing (Claude marketplaces). Shown at the consent prompt, since registering a third-party source is part of what is being agreed to."
+              }
+            },
+            "additionalProperties": false
           }
-        },
-        "additionalProperties": false
+        ]
       }
     },
     "commands": {
@@ -90,13 +131,73 @@
       "type": "object",
       "properties": {
         "soul-scaffold": {
-          "type": "string"
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "object",
+              "required": [
+                "command"
+              ],
+              "properties": {
+                "command": {
+                  "type": "string"
+                },
+                "required": {
+                  "const": false,
+                  "description": "Only the spawn hook may be required \u2014 retire and soul-scaffold run outside a spawn transaction."
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
         },
         "spawn": {
-          "type": "string"
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "object",
+              "required": [
+                "command"
+              ],
+              "properties": {
+                "command": {
+                  "type": "string"
+                },
+                "required": {
+                  "type": "boolean",
+                  "description": "When true, a failure fails the spawn and rolls it back."
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
         },
         "retire": {
-          "type": "string"
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "object",
+              "required": [
+                "command"
+              ],
+              "properties": {
+                "command": {
+                  "type": "string"
+                },
+                "required": {
+                  "const": false,
+                  "description": "Only the spawn hook may be required \u2014 retire and soul-scaffold run outside a spawn transaction."
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
         }
       },
       "additionalProperties": false

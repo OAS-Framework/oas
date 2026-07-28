@@ -1,15 +1,29 @@
 ---
 type: Lesson
-title: Capability skills declared under the work tree are dropped silently when deps are not installed
-description: oas.aweb declares its skill dirs as work-tree-relative node_modules paths, so an instance spawned into a fresh worktree before npm install composes without its messaging skills and spawn reports no warning.
-tags: [kernel, spawn, capabilities, skills, fail-open]
+title: Missing capability resources fail open while missing manifests fail closed
+description: Missing capability resources are silently filtered during spawn even though missing manifests fail closed, so fresh worktrees can spawn instances whose instructions reference absent skills.
+tags: [kernel, spawn, capabilities, fail-closed, composition, strict-curriculum]
 timestamp: 2026-07-27
 ---
 
 # Lesson
 
-`oas.aweb`'s manifest declares its skills as paths that resolve inside the
-instance's **work tree**:
+In a fresh linked worktree with no capability dependencies installed, the kernel
+shows an asymmetric failure posture:
+
+```text
+capabilitySkillDirs("oas.aweb", <worktree>)  ->  []      # silently empty, no error
+resolveOasConfig(<worktree>, "cli-dev")      ->  throws  # missing MANIFEST fails closed
+```
+
+A missing **manifest** fails closed loudly, while missing capability **resources**
+fail open silently. Spawn proceeds and the instance can receive an aweb injection
+that tells it to load `aweb-messaging` even though the skill was never composed
+into `.agents/skills/`.
+
+## Root cause
+
+`oas.aweb`'s manifest declared skills as work-tree-relative dependency paths:
 
 ```json
 "skills": [
@@ -19,45 +33,101 @@ instance's **work tree**:
 ]
 ```
 
-Spawn composes `.agents/skills/` once, at spawn time. When the work tree is a
-freshly created worktree whose dependencies have not been installed yet, those
-directories do not exist, and skill composition **drops them silently**:
+Those paths depend on incidental worktree `node_modules` state rather than locked
+package content. Nothing installs them in a fresh linked worktree before spawn.
+The same soul, config, and capability can compose correctly later from a warm
+worktree, which makes the defect look like a race or local setup issue.
+
+Observed symptoms:
 
 - spawn succeeds;
-- `instance.json` lists the reduced set (8 skills instead of 11) with no marker
-  that anything was expected and missing;
-- nothing is written to stderr, and `oas doctor` still prints the capability's
-  declared skill paths under `Active capabilities`, which reads as if they were
-  composed.
+- `instance.json` lists the reduced skill set with no marker that anything was
+  expected and missing;
+- nothing is written to stderr;
+- `oas doctor` still prints the capability's declared skill paths under `Active
+  capabilities`, which reads as if they were composed.
 
-Observed directly: this instance was composed at 12:22:13; running `npm ci` in
-the work tree at 12:31:49 for an unrelated reason created
-`node_modules/@awebai` afterwards. The instance's AGENTS.md instructs it to
-load `aweb-messaging` before its first `aw mail` of a session, and the skill
-was simply not in its set — it had to be read from its on-disk path instead.
+The self-concealing case is losing the messaging skills: the agent most needs
+those skills to report that its own composition is broken.
 
-Two things make this worse than a generic missing-file bug:
+## Declared versus resolved
 
-1. **The gap is silent and self-concealing.** The skills most likely to be lost
-   are the messaging ones, i.e. the ones an agent needs in order to report that
-   its own composition is broken.
-2. **It is a spawn-time race, not a static misconfiguration.** The same soul,
-   same config, and same capability compose correctly a minute later. Anything
-   that reproduces "works for me" from a warm tree will not see it.
+`capabilitySkillDirs()` returns only paths that resolved, so "declared nothing"
+and "declared three skills, none of which exist" both collapse to `[]`. Preserve
+the declaration channel separately from the resolved-only convenience view:
 
-Composition should not fail open here. A declared skill directory that does not
-exist is either a hard spawn error or, at minimum, a loud warning naming the
-capability and the unresolved path — the same fail-closed posture the kernel
-already applies to trust and hoisted-path containment. Whether capability skill
-paths should resolve against the work tree at all (rather than the capability's
-own installed root) is a contract question for the maintainer, since changing
-it would move every consumer's declared paths.
+```js
+capabilityDeclaredSkills(id, ctx) // -> [{ declared, path | undefined }]
+capabilitySkillDirs(id, ctx)      // unchanged: resolved-only view
+```
+
+Carry the same distinction for injections: keep the manifest's raw `inject:` as
+`injectDeclared` beside the resolved `inject`. Whenever a lookup can legitimately
+return nothing, an empty result must not be ambiguous with failed resolution.
+
+## Four silent filters
+
+At `lib/core.mjs` commit `a036634`, four sites could drop expected capability
+resources without making spawn fail:
+
+| site | code | behavior |
+|---|---|---|
+| capability skill paths | `:2069` `.map(manifestPath).filter(Boolean)` | missing path dropped |
+| skill materialization | `:2976` `if (!existsSync(source.path)) continue` | missing source skipped |
+| injections | `:2161-2164` `if (cap.inject && existsSync(...))` | missing injection omitted |
+| lifecycle hooks | `runLifecycleHooks` — "Failures never block" | identity minting can fail, spawn proceeds |
+
+## Fix shape
+
+Use a transaction shape of **preflight → materialize → assert → commit**:
+
+1. Compose the instance curriculum as a pure preflight (`composeInstanceAgentsMd()`
+   only reads the soul, config chain, and capability content) and enumerate every
+   active capability resource expected for the selected soul before any side
+   effect such as `mkdir`.
+2. Resolve resources only from locked/materialized package closures, not from
+   arbitrary spawn-time worktree disk state, and keep declaration records rather
+   than relying on resolved-only arrays.
+3. Materialize the selected resources into the instance.
+4. Assert expected-vs-materialized equality after materialization, including the
+   intentional exclusions. For example, `composeInstanceAgentsMd()` deliberately
+   drops knowledge-layer injections for capability agents because they are
+   ephemeral; an assertion that ignores that rule turns correct composition into
+   `E_COMPOSITION_INCOMPLETE`.
+5. Record both sets in `instance.json` with provenance.
+
+Preflight-before-`mkdir` is the cheapest rollback boundary: the common missing
+resource case leaves no scaffold to compensate. Missing required resources must
+fail spawn closed, with rollback and no zombie instance. Any check that truly
+must happen after creation should reduce rollback to removing the scaffold by
+comparing `expected == materialized`.
+
+Declaring resources under `node_modules/` is a **manifest defect**, not a runtime
+condition. The founder-decided sourcing for `oas-aweb` is to vendor reviewed,
+MIT-attributed copies of `aweb-messaging`, `aweb-team-membership`, and
+`aweb-identity` with exact upstream repo/tag/commit provenance and deterministic
+sync tooling. Do not re-open shipping `@awebai/pi`/`@awebai/aw` and their native
+or platform dependency closure just to obtain Markdown skills. Because this
+changes capability source bytes, refresh package version, source, and integrity
+with the implementation; see [capability source edits require lock refresh](/lessons/capability-source-edits-require-lock-refresh.md).
+
+## Composition record
+
+`instance.json` records the selected curriculum after spawn as
+`composition.expected` (type, source, declared, resolved, origin, level) and
+`composition.materialized` (the real copies, the canonical `.agents/skills`
+tree, and the verified `.claude/skills` alias). That makes an instance's
+curriculum auditable after the fact without re-resolving config that may have
+changed.
 
 # Related
 
-The dependency precondition itself is already recorded in
-[test-conventions](/playbooks/test-conventions.md) ("a clean checkout needs
-dependencies installed in both the repo root and `packages/desktop`") — but
-that entry frames it as a *test* concern. This lesson is that the same
-uninstalled-tree condition silently degrades *instance composition*, which no
-test currently covers.
+[Strict curriculum scoping](/references/strict-curriculum-scoping.md) records the
+release gate: every active-capability skill, injection, and plugin must resolve
+from locked/materialized sources, appear in the real Pi and Claude runtimes with
+provenance, fail closed when missing, and exclude inactive capabilities.
+
+The dependency precondition itself is also recorded in
+[test conventions](/playbooks/test-conventions.md), but that entry frames it as a
+test concern. This lesson is that the same uninstalled-tree condition silently
+degrades instance composition.
