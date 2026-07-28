@@ -9,7 +9,7 @@ import {
   aggregateMissingRequirements, capabilityRuntimeTargets, commandOnPath, diffConfigTexts, discoverWorkspaceScopes,
   lockedPackageCapabilities, normalizeRequirement, packageSpecIdentity, runtimePackageInstalled, runtimePackageStatus,
   parseProfileProvenance, profileProvenanceHeader, requirementInstallPlan,
-  resolveProfilePackage, runRequirementInstall, selectProfile, validateProfile,
+  readProfileText, resolveProfilePackage, runRequirementInstall, selectProfile, validateProfile,
 } from "../lib/packages.mjs";
 
 const CLI = resolve(new URL("../bin/oas.mjs", import.meta.url).pathname);
@@ -1819,5 +1819,32 @@ test("resolveProfilePackage selects the same contained package root acquisition 
 
   // Local paths stay exact directories.
   assert.equal(resolveProfilePackage(join(repo, "dist"), base).manifest.package, "example.other");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("resolveProfilePackage reads the profile at the PINNED ref, not HEAD (reviewer-da05e73)", () => {
+  const base = temp();
+  const repo = join(base, "repo");
+  fixturePackage(join(repo, "oas-package"));
+  gitRepo(repo);
+  execFileSync("git", ["-C", repo, "tag", "v1"]);
+  const pinned = execFileSync("git", ["-C", repo, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  // HEAD moves on: a diff that reads HEAD while claiming "@v1" compares the
+  // adopted snapshot against a profile the install never used.
+  write(join(repo, "oas-package", "configs/minimal/oas-config.yaml"), "name: workspace\n# CHANGED AFTER v1\n");
+  execFileSync("git", ["-C", repo, "add", "-A"]);
+  execFileSync("git", ["-C", repo, "commit", "-qm", "advance"]);
+  const head = execFileSync("git", ["-C", repo, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  assert.notEqual(head, pinned);
+
+  const clone = () => mkdtempSync(join(tmpdir(), "oas-clone-"));
+  for (const ref of ["v1", pinned]) {
+    const r = resolveProfilePackage(`file://${repo}@${ref}`, base, { clone: clone() });
+    assert.equal(r.commit, pinned, `${ref}: resolved commit is the pinned one`);
+    assert.doesNotMatch(readProfileText(r.manifest, selectProfile(r.manifest, "minimal")), /CHANGED AFTER v1/, `${ref}: profile text comes from the pinned ref`);
+    assert.equal(r.source, `git:file://${repo}@${ref}`);
+  }
+  const unpinned = resolveProfilePackage(`file://${repo}`, base, { clone: clone() });
+  assert.equal(unpinned.commit, head, "an unpinned source still resolves HEAD");
   rmSync(base, { recursive: true, force: true });
 });

@@ -3191,3 +3191,109 @@ test("payload roots never touch local capability development: owned/ and from: p
   assert.equal(lockText.packages, undefined);
   rmSync(base, { recursive: true, force: true });
 });
+
+test("the DEFAULT catalog resolver honors the entry's path, and a malformed one fails closed (reviewer-da05e73)", () => {
+  const base = temp();
+  const repo = repoWithPackages(join(base, "repo"), {
+    "dist/oas": { manifest: { package: "cat.def" }, capabilities: { cap: { capability: "cat.defcap" } } },
+    "oas-package": { manifest: { package: "cat.decoy" } },
+  });
+  const catalogFile = join(base, "catalog.json");
+  const prior = process.env.OAS_PACKAGE_CATALOG;
+  process.env.OAS_PACKAGE_CATALOG = catalogFile;
+  try {
+    // The production resolver — NOT an injected fixture — must carry `path`
+    // through, or every real catalog install silently gets the default root.
+    write(catalogFile, JSON.stringify({ packages: { "cat.def": { url: repo, path: "dist/oas" } } }));
+    const s = scope(base, "s1");
+    assert.equal(acquirePackage(s, "cat.def").root, "cat.def");
+    assert.equal(readPackageLocks(s).packages["cat.def"].path, "dist/oas");
+
+    // Absent path still falls back to the default contained root.
+    write(catalogFile, JSON.stringify({ packages: { "cat.decoy": { url: repo } } }));
+    const s2 = scope(base, "s2");
+    acquirePackage(s2, "cat.decoy");
+    assert.equal(readPackageLocks(s2).packages["cat.decoy"].path, DEFAULT_PACKAGE_PATH);
+
+    // A PRESENT but malformed path is a violation, never "absent" — a JSON
+    // null must not fall through to the default.
+    for (const [bad, code] of [[null, "invalid-source"], ["../out", "path-escape"], ["/abs", "invalid-source"], [7, "invalid-source"]]) {
+      write(catalogFile, JSON.stringify({ packages: { "cat.def": { url: repo, path: bad } } }));
+      const bs = scope(base, `bad-${String(bad).replace(/[^a-z0-9]/gi, "")}`);
+      assert.throws(() => acquirePackage(bs, "cat.def"), (e) => e.code === code && /catalog entry/.test(e.message), JSON.stringify(bad));
+      assert.ok(!existsSync(join(bs, OAS_LOCK_FILE)), `${JSON.stringify(bad)}: no lock written`);
+    }
+  } finally {
+    if (prior === undefined) delete process.env.OAS_PACKAGE_CATALOG;
+    else process.env.OAS_PACKAGE_CATALOG = prior;
+  }
+  assert.equal(normalizePackagePath(undefined), undefined, "only an ABSENT value defaults");
+  assert.throws(() => normalizePackagePath(null), (e) => e.code === "invalid-source", "a present null is a violation, not a default");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("lock sources parse against the exact normalized grammar — no downstream reclassification (reviewer-da05e73)", () => {
+  const integ = `sha256-${"0".repeat(64)}`, sha = "a".repeat(40);
+  const entry = (over) => ({ source: "git:https://h/x.git@v1", path: ".", version: "1", commit: sha, integrity: integ, capabilities: [], ...over });
+  assert.equal(validateLockEntry("p", entry(), {}, {}), true);
+  assert.equal(validateLockEntry("p", entry({ source: "catalog:oas.okf@v1.4.0" }), {}, {}), true);
+  assert.equal(validateLockEntry("p", entry({ source: "catalog:oas.okf" }), {}, {}), true);
+  assert.equal(validateLockEntry("p", entry({ source: "path:/abs/dir", commit: "local" }), {}, {}), true);
+  assert.equal(validateLockEntry("p", entry({ source: "git:git@host:org/repo.git@v2" }), {}, {}), true);
+
+  const rejected = [
+    // A catalog id that is not a package identity would be RE-PARSED as a
+    // local path by update and acquired from the operator's filesystem.
+    "catalog:../evil", "catalog:/etc", "catalog:UPPER", "catalog:oas.okf@",
+    // A relative path source is the same hole for the path kind.
+    "path:../evil", "path:relative/dir", "path:",
+    // A lock source never carries the selected root — it is the `path` field.
+    "git:https://h/x.git@v1#sub", "catalog:oas.okf#sub", "path:/abs#sub",
+    // Non-URL git payloads and empty halves.
+    "git:", "git:not-a-url@v1", "git:https://h/x.git@",
+  ];
+  for (const source of rejected) {
+    assert.throws(() => validateLockEntry("p", entry({ source, commit: source.startsWith("path:") ? "local" : sha }), {}, {}),
+      (e) => e.code === "invalid-lock", source);
+  }
+});
+
+test("a malformed lock source fails update/restore closed instead of acquiring a host directory (reviewer-da05e73)", () => {
+  const base = temp();
+  const s = scope(base);
+  const evilName = "evil";
+  const evil = pkgSource(join(base, evilName), { package: "cat.evil" });
+  // Hand-written lock whose catalog source would re-parse as a relative path.
+  writeFileSync(join(s, OAS_LOCK_FILE), JSON.stringify({
+    lockfileVersion: 2,
+    packages: { "cat.evil": { source: `catalog:../${evilName}`, path: ".", version: "1.0.0", commit: "a".repeat(40), integrity: packageIntegrity(evil), capabilities: [] } },
+  }, null, 2));
+  assert.throws(() => updatePackage(s, "cat.evil"), (e) => e.code === "invalid-lock");
+  assert.throws(() => restorePackages(s), (e) => e.code === "invalid-lock");
+  assert.throws(() => readPackageLocks(s), (e) => e.code === "invalid-lock");
+  assert.ok(!existsSync(join(installedPackagesDir(s), "cat.evil")), "nothing acquired from the reclassified source");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("a broken symlink at ANY depth of the package path is path-escape, not 'no package here' (reviewer-da05e73)", () => {
+  const base = temp();
+  const repo = repoWithPackages(join(base, "repo"), { "oas-package": { manifest: { package: "deep.pkg" } } });
+  symlinkSync(join(base, "nowhere"), join(repo, "dangling"));
+  mkdirSync(join(repo, "mid"), { recursive: true });
+  symlinkSync(join(base, "nowhere"), join(repo, "mid", "broken"));
+  symlinkSync(join(base, "outside-target"), join(repo, "mid", "out"));
+  mkdirSync(join(base, "outside-target", "pkg"), { recursive: true });
+  write(join(base, "outside-target", "pkg", "oas-package.json"), JSON.stringify({ package: "escaped.pkg", version: "1", description: "d", compatibility: { oas: ">=0.1.0" }, capabilities: [] }));
+  gitCommit(repo, "links");
+
+  for (const path of ["dangling", "dangling/sub", "mid/broken", "mid/broken/deeper", "mid/out/pkg"]) {
+    const s = scope(base, `s-${path.replace(/[^a-z]/gi, "")}`);
+    assert.throws(() => acquirePackage(s, `file://${repo}#${path}`), (e) => e.code === "path-escape", path);
+    assert.ok(!existsSync(join(s, OAS_LOCK_FILE)), `${path}: no lock written`);
+    assert.ok(!existsSync(installedPackagesDir(s)), `${path}: no store mutation`);
+  }
+  // A genuinely absent path is still "no package here", not a link failure.
+  const sAbsent = scope(base, "s-absent");
+  assert.throws(() => acquirePackage(sAbsent, `file://${repo}#mid/absent/deeper`), (e) => e.code === "invalid-source");
+  rmSync(base, { recursive: true, force: true });
+});

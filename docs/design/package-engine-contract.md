@@ -85,6 +85,13 @@ claiming the same OAS package identity still fail `duplicate-package-identity`.
   `path` field — never folded into the source string. It is stored in canonical
   form only and is never normalized or repaired on read: a non-canonical
   spelling is `invalid-lock`. `path:` sources always record `"."`.
+- A lock's `source` is parsed against **exactly** that writer grammar, and
+  never carries a `#<path>` fragment. Strictness is load-bearing rather than
+  cosmetic: `updatePackage` re-derives a source spec from this string, so a
+  payload that merely starts with a known scheme but is invalid for its kind
+  (`catalog:../evil`, `path:relative/dir`) would be RECLASSIFIED on update —
+  a catalog entry acquired from a host-relative directory. Such entries are
+  `invalid-lock` at parse, before update or restore can act on them.
 
 **Catalog resolver boundary** (all workstream 3 gets to plug into): the
 catalog is a pure mapping *official short ID → git repository (+ optional
