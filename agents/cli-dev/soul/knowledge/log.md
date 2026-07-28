@@ -1,6 +1,8 @@
 # Knowledge Log
 
 ## 2026-07-28
+* **Creation**: [hardening-a-git-invocation-drops-its-dwim](/lessons/hardening-a-git-invocation-drops-its-dwim.md) records that replacing git checkout porcelain with verified hash checkout closed option injection but also removed checkout's remote-branch DWIM, so plumbing hardening must enumerate and restore wanted porcelain conveniences explicitly.
+* **Update**: [public-refs-are-option-injection-vectors](/lessons/public-refs-are-option-injection-vectors.md) links the safe checkout shape to the remote-branch regression it introduced.
 * **Creation**: [public-refs-are-option-injection-vectors](/lessons/public-refs-are-option-injection-vectors.md) records that caller-supplied git refs can be option-injection vectors even in argv-based execFileSync calls, so package acquisition must resolve behind --end-of-options and verify the checked-out hash.
 * **Creation**: [tighten-a-reader-against-its-writer](/lessons/tighten-a-reader-against-its-writer.md) records that strict lock-source readers must round-trip every source the writer can emit, including catalog selectors with additional @ characters.
 * **Creation**: [component-walk-classifies-broken-links](/lessons/component-walk-classifies-broken-links.md) records why full-path existence probes cannot distinguish absent paths from intermediate broken links when path-escape taxonomy depends on component depth.

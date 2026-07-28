@@ -58,4 +58,6 @@ soul: [rollback probes](/lessons/rollback-probes-argv-and-fail-closed.md) must
 never interpolate public branch/ref values.
 
 See [lock source strictness](/lessons/lock-source-strictness-prevents-reclassification.md)
-for the sibling "persisted value re-parsed as input" hazard.
+for the sibling "persisted value re-parsed as input" hazard, and
+[hardening can drop porcelain DWIM](/lessons/hardening-a-git-invocation-drops-its-dwim.md)
+for the remote-branch regression this safe shape introduced.
