@@ -1,5 +1,14 @@
 # Knowledge Log
 
+## 2026-07-26
+* **Harvest**: promoted [Script-free npm materialization still installs peer dependencies](/lessons/npm-ci-materializes-peer-dependency-closure.md) as a Lesson about npm peer dependency closure materialization during script-free package checks — harvested from integrations-expert-official-packages-staging.
+* **Update**: skills/integration-craft — added npm-backed external package materialization guidance for script-free installs, peer/optional dependency inspection, full production audit, advisory escalation, and `node_modules` cleanup.
+* **Harvest**: promoted [Crossed coordination messages require state-anchor reconciliation](/lessons/crossed-messages-require-state-anchor-reconciliation.md) as a Lesson about reconciling stale asynchronous branch instructions before repeating destructive work — harvested from integrations-expert-official-packages-staging.
+* **Harvest**: promoted [Cross-resource validators must enforce cardinality before invariants](/lessons/manifest-validator-cardinality-must-fail-closed.md) as a Lesson about failing closed on missing or extra capability resources before cross-resource package checks — harvested from integrations-expert-official-packages-staging.
+* **Harvest**: promoted [Peer omission must align materialization, audit, and runtime proofs](/lessons/peer-omission-must-align-materialization-audit-and-tests.md) as a Lesson about matching npm peer-omission install, audit, and runtime evidence — harvested from integrations-expert-official-packages-staging.
+* **Harvest**: promoted [setup-node npm caching needs an explicit nested lock path](/lessons/setup-node-cache-needs-nested-lock-path.md) as a Lesson about pointing setup-node npm caching at nested package lockfiles — harvested from integrations-expert-official-packages-staging.
+* **Update**: skills/integration-craft — added exact-one package validator cardinality, npm peer-omission closure, and nested setup-node cache-path guidance.
+
 ## 2026-07-11
 * **Update**: [oas-jira settings contract](/decisions/oas-jira-settings-contract.md) now uses canonical capability binding settings and `capabilityMeta` instance metadata.
 * **Harvest**: promoted [Capability artifact paths must stay inside the integrity boundary](/lessons/capability-artifact-paths-must-be-integrity-bounded.md) as a Lesson about keeping locked external capability paths within the hashed artifact — harvested from integrations-expert-capability-packages-review.
