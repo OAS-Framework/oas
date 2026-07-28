@@ -1,5 +1,8 @@
 # Knowledge Log
 
+## 2026-07-28
+* **Harvest**: promoted [OAS payload-root repository layout (oas-package/) for official packages](/lessons/payload-root-repo-layout.md) as a Lesson about official package repo payload-root layout and path-resolution rules — harvested from integrations-expert-official-packages-payload-final.
+
 ## 2026-07-11
 * **Update**: [oas-jira settings contract](/decisions/oas-jira-settings-contract.md) now uses canonical capability binding settings and `capabilityMeta` instance metadata.
 * **Harvest**: promoted [Capability artifact paths must stay inside the integrity boundary](/lessons/capability-artifact-paths-must-be-integrity-bounded.md) as a Lesson about keeping locked external capability paths within the hashed artifact — harvested from integrations-expert-capability-packages-review.
