@@ -231,11 +231,16 @@ The earlier transitional v2 package-root shape and
 reader, or offline projection. Revised v2 requires top-level `packages` and
 `capabilities`; package rows contain package provenance/dependencies only, while
 capability path/version/integrity/trust live in the capability map. A nonempty
-v2 lock missing that map or carrying transitional package-row `capabilities`,
-`trustedCapabilities`, or `depsIntegrity` fields is rejected centrally with the
-typed `invalid-lock` code and an actionable unsupported-transitional-v2 message,
-before discovery or mutation. An empty packages-only lock may normalize as an
-empty revised-v2 lock because it carries no state. Pre-adoption local
+v2 lock missing that map is unsupported by itself; independently, any
+package-row `capabilities`, `trustedCapabilities`, or optional `depsIntegrity`
+field is transitional evidence. These are OR predicates—`depsIntegrity` is
+never required because dependency-free old packages omit it. Final package rows
+retain `path` and `dependencies`, so those are not discriminators. The reader
+rejects centrally with typed `invalid-lock` and actionable
+unsupported-transitional-v2 guidance before discovery or mutation. Raw lock
+scope discovery—not config-chain discovery—must find lock-only scopes. An empty
+packages-only lock may normalize as an empty revised-v2 lock because it carries
+no state; empty v1 files remain visible pending format migration. Pre-adoption local
 deployments may be recreated manually. Immutable package
 manifests using `configs` or a `.` capability root remain read-compatible only
 for acquiring their capabilities into the revised v2 shape.
