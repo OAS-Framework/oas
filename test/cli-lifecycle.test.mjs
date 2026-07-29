@@ -628,3 +628,64 @@ test("the Git package probe precedes the standalone route: it falls back only wh
   assert.equal(lockOf(d).packages["r.p"].path, ".");
   rmSync(base, { recursive: true, force: true });
 });
+
+// ---------- an upstream package-root move ----------
+
+test("an upstream package-root move: restore stays exact, a git selection is sticky, a catalog root is adopted and reported", () => {
+  const base = temp();
+  const repo = join(base, "repo");
+  const layout = (root) => pkgSource(join(repo, ...root.split("/")), "g.p", { "capabilities/c": { capability: "g.cap" } });
+  layout("pkgs/x");
+  const url = gitRepo(repo);
+  const catalogFile = join(base, "catalog.json");
+  const writeCatalog = (path) => writeFileSync(catalogFile,
+    JSON.stringify({ packages: { "g.p": { url, path } }, capabilities: { "g.cap": "g.p" } }, null, 2));
+  writeCatalog("pkgs/x");
+
+  const git = scope(base, "git");
+  const cat = scope(base, "cat");
+  assert.equal(cli(["install", `${url}#pkgs/x`, "--dir", git]).status, 0);
+  assert.equal(cli(["install", "g.p", "--dir", cat], { catalog: catalogFile }).status, 0);
+  const lockedCommit = lockOf(git).packages["g.p"].commit;
+
+  // Upstream moves the package root and the catalog follows it.
+  execFileSync("git", ["-C", repo, "rm", "-r", "-q", "pkgs"]);
+  layout("packages/x");
+  execFileSync("git", ["-C", repo, "add", "-A"]);
+  execFileSync("git", ["-C", repo, "commit", "-qm", "move the package root"]);
+  writeCatalog("packages/x");
+
+  // Restore is pinned to the LOCKED commit, where the old root still exists —
+  // a move upstream can never break an existing deployment.
+  for (const s of [git, cat]) {
+    const before = snapshot(join(s, ".agents"));
+    assert.equal(cli(["install", "--no-requirements", "--dir", s], { cwd: s, catalog: catalogFile }).status, 0, `${s}: restore broke`);
+    assert.deepEqual(snapshot(join(s, ".agents")), before, `${s}: restore was not byte-exact`);
+    assert.equal(lockOf(s).packages["g.p"].commit, lockedCommit);
+  }
+
+  // A GIT spec's path is the operator's own selection, so it stays sticky: the
+  // update re-reads the same root and fails rather than guessing a new one.
+  const stuck = cli(["update", "g.p", "--dir", git, "--json"], { cwd: git });
+  assert.notEqual(stuck.status, 0);
+  assert.match(failEnvelope(stuck).message, /package path "pkgs\/x" is not a directory/);
+  assert.equal(lockOf(git).packages["g.p"].path, "pkgs/x", "a failed update moved the lock");
+  // And acquisition never advances a locked source, whatever path you name.
+  const reacquire = cli(["install", `${url}#packages/x`, "--dir", git, "--json"], { cwd: git });
+  assert.equal(failEnvelope(reacquire, "integrity-drift").message.includes("oas update g.p"), true,
+    "the refusal must name the command that CAN advance it");
+
+  // A CATALOG entry owns its path, so an explicit update adopts the moved root
+  // — and says so, even though the payload bytes are unchanged.
+  const moved = cli(["update", "g.p", "--dir", cat, "--json"], { cwd: cat, catalog: catalogFile });
+  assert.equal(moved.status, 0, moved.stderr);
+  const r = okEnvelope(moved);
+  assert.equal(r.pathChanged, true);
+  assert.equal(r.before.path, "pkgs/x");
+  assert.equal(r.after.path, "packages/x");
+  assert.equal(lockOf(cat).packages["g.p"].path, "packages/x");
+  const human = cli(["update", "g.p", "--dir", cat], { cwd: cat, catalog: catalogFile });
+  assert.equal(human.status, 0, human.stderr);
+  assert.doesNotMatch(human.stdout, /MOVED/, "a second update has nothing left to move");
+  rmSync(base, { recursive: true, force: true });
+});
