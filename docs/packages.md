@@ -214,14 +214,18 @@ oas migrate --official --recursive --dir <team-root>             # apply
   working until the mapping publishes. A `--dry-run` containing held scopes is
   nonzero too (with the complete plan under `error.details`), so a readiness
   check can never read "planned" as "can migrate now".
-- **Custom entries are untouched.** `git:`/`path:`/unknown v1 sources are never
-  acquired by the guided mode: they are kept exactly as they are (as residue in
-  a scope that converts for its official capabilities, and untouched in a scope
-  with no official capabilities at all). Plain `oas migrate` still maps custom
-  sources and creates residue when asked.
+- **Custom entries are untouched, and they block the scope.** `git:`/`path:`/
+  unknown v1 sources are never acquired by the guided mode. A v2 lock has
+  `{packages, capabilities}` and no residue container, so there is nowhere for
+  such an entry to live: a scope with no official capabilities at all is simply
+  left on v1 (reported `skipped`, with the kept ids under `retained`), and a
+  **mixed** scope — official capabilities beside custom ones — is refused whole,
+  before anything is written, so the entries cannot be silently dropped. Plain
+  `oas migrate` maps custom sources, and converts such a scope completely once
+  every entry maps.
 - **One package, several capabilities.** When aliases map more than one legacy
-  capability onto the same package, all of them leave the residue map together
-  and the package is acquired once.
+  capability onto the same package, all of them convert together and the package
+  is acquired once.
 - **Per scope transactional.** Each scope acquires its package closure, writes
   its v2 lock, and only then removes the superseded v1 artifacts. A failing
   scope is rolled back byte-identically; other scopes keep their (truthfully

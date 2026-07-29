@@ -240,6 +240,12 @@ function doctorPackagesData(ctx, chain, { teamScope } = {}) {
       packages.push({ id, version: lock.version || null, level: lock._level, source: lock.source || null, path: lock.path || null, commit: lock.commit || null, capabilities: provided, dependencies: lock.dependencies || [], status: "broken", problems: [{ code: "missing-locked-package", detail: `locked in ${lock._file} but not installed — run oas install` }] });
     }
   }
+  // `migrationResidue` diagnoses PRE-EXISTING on-disk state: v1 capability
+  // entries found inside a lockfileVersion-2 document, written by an older
+  // release that converted around them. It is not a result field — migration
+  // itself never produces residue, because a v2 lock has no container for it
+  // and a scope that cannot convert completely stays v1 in full.
+  //
   // Legacy v1 files and v2 residue — the ENGINE's doctor shapes (its tests pin
   // status/action fields): empty/nonempty v1 = pending LOCK-FORMAT migration
   // (maintainer ruling — distinct from capability residue); v2 residue entries
@@ -1786,11 +1792,15 @@ function guidedMigrateCmd({ dir, dryRun, official, recursive }) {
       const acquire = plan.filter((s) => s.action === "acquire");
       const formatOnly = plan.some((s) => s.action === "convert-format");
       const keep = plan.filter((s) => s.action === "retain" || s.action === "manual");
-      // Generic (non-official) mode keeps `oas migrate`'s semantics even when
-      // nothing maps: converting a v1 file to v2 with residue IS the operation.
-      // Official mode never rewrites a scope it has no official work in.
+      // Both modes are ALL-OR-NOTHING: a v2 lock has no residue container, so a
+      // scope converts completely or stays v1 in full. `keep` entries therefore
+      // make a scope unconvertible rather than partially convertible — apply
+      // refuses it, and the plan says so rather than promising "ready".
+      // Official mode also never rewrites a scope it has no official work in.
+      const convertible = acquire.length || formatOnly || (!official && plan.length);
       const status = held.length ? "held"
-        : (acquire.length || formatOnly || (!official && plan.length)) ? "ready"
+        : (convertible && !keep.length) ? "ready"
+        : convertible ? "blocked"
         : "nothing";
       planned.push({ scope, file, status, plan, acquire, keep, held, warnings: w });
     } catch (e) {
@@ -1816,6 +1826,10 @@ function guidedMigrateCmd({ dir, dryRun, official, recursive }) {
       else out(`    keep       ${s.capabilityId}${s.v1?.source ? `  (${s.v1.source})` : ""} — not converted, entry kept unchanged`);
     }
     if (p.status === "nothing") out("    (nothing to migrate at this scope)");
+    if (p.status === "blocked") {
+      out(`    BLOCKED    this scope mixes convertible work with ${p.keep.length} entr${p.keep.length === 1 ? "y" : "ies"} that must stay lockfileVersion 1`);
+      out("               a capability-materialization lock has no place for them, so converting the rest would drop them — the WHOLE scope stays v1 and keeps working");
+    }
     if (p.status === "ready") {
       out(`    config     ${shortPath(join(p.scope, "oas-config.yaml"))} is NOT rewritten — capability ids, layers, targets, settings, exclusions and overrides stay valid (packages export the same ids)`);
       out("    trust      executable approvals are NOT carried over — they are re-earned after migrating (exact commands below)");
@@ -1835,8 +1849,10 @@ function guidedMigrateCmd({ dir, dryRun, official, recursive }) {
     // with a nonzero result in both modes, so automation can never read
     // "planned successfully" as "this deployment can migrate now"
     // (reviewer-90dbb36). The complete plan travels under error.details.
+    const mixed = planned.filter((p) => p.status === "blocked");
     const blocked = [
       ...(held.length ? [`${held.length} scope${held.length > 1 ? "s" : ""} held (no official package mapping yet)`] : []),
+      ...(mixed.length ? [`${mixed.length} scope${mixed.length > 1 ? "s" : ""} blocked (entries that must stay lockfileVersion 1)`] : []),
       ...(failed.length ? [`${failed.length} scope${failed.length > 1 ? "s" : ""} could not be planned`] : []),
     ];
     if (JSON_MODE) {
@@ -1844,9 +1860,10 @@ function guidedMigrateCmd({ dir, dryRun, official, recursive }) {
       jsonOk(result);
       return;
     }
-    out(`\nDry run — nothing was changed. ${actionable.length} scope${actionable.length === 1 ? "" : "s"} ready${held.length ? `, ${held.length} held` : ""}${failed.length ? `, ${failed.length} failed` : ""}.`);
+    out(`\nDry run — nothing was changed. ${actionable.length} scope${actionable.length === 1 ? "" : "s"} ready${held.length ? `, ${held.length} held` : ""}${mixed.length ? `, ${mixed.length} blocked` : ""}${failed.length ? `, ${failed.length} failed` : ""}.`);
     if (actionable.length) out(`Apply with: oas migrate${official ? " --official" : ""}${recursive ? " --recursive" : ""} --dir ${shellQuote(dir)}`);
     if (held.length) out("Held scopes stay on their v1 locks and their legacy capabilities keep working — re-run when the catalog publishes their packages.");
+    if (mixed.length) out("Blocked scopes stay on their v1 locks IN FULL and keep working — migration is all-or-nothing because a v2 lock has no place for an unconverted entry.");
     if (blocked.length) die(`${blocked.join("; ")} (${actionable.length} ready)`);
     return;
   }
@@ -1862,7 +1879,14 @@ function guidedMigrateCmd({ dir, dryRun, official, recursive }) {
       out(`\nHELD      ${shortPath(p.scope)} — left unchanged; its legacy capabilities keep working`);
       continue;
     }
-    if (p.status === "nothing") { row.status = "skipped"; continue; }
+    if (p.status === "nothing") {
+      // No official work here, so nothing is applied and nothing is rewritten.
+      // Say what the scope KEPT — `retained`, never `residue`: these entries
+      // were not left beside a conversion, there simply was no conversion.
+      row.status = "skipped";
+      if (p.keep.length) row.retained = p.keep.map((k) => k.capabilityId).filter(Boolean);
+      continue;
+    }
     let r;
     try { r = applyLegacyLockMigration(p.scope, opts); }
     catch (e) {
@@ -1874,14 +1898,16 @@ function guidedMigrateCmd({ dir, dryRun, official, recursive }) {
     }
     row.status = r.skipped ? "skipped" : r.formatConverted ? "format-converted" : "migrated";
     row.migrated = r.migrated;
-    row.residue = r.residue;
+    // `retained` exists only for a SKIPPED scope left entirely on v1; a scope
+    // that converts leaves nothing behind, and a mixed one is refused above.
+    if (r.retained) row.retained = r.retained;
     row.warnings = r.warnings;
     for (const t of r.trust || []) result.trust.push({ ...t, command: `oas trust ${t.capability} --dir ${shellQuote(p.scope)}` });
     out(`\n  ${shortPath(p.scope)}:`);
     for (const m of r.migrated) out(`    migrated   ${m.capability} → package ${m.package}@${m.version}`);
-    for (const c of r.residue) out(`    kept       ${c}  (unchanged legacy entry)`);
+    for (const c of r.retained || []) out(`    retained   ${c}  (this scope stays lockfileVersion 1, unchanged)`);
     for (const w of r.warnings) out(`    WARNING: ${w}`);
-    if (r.formatConverted) out(`    format     empty lockfileVersion 1 file → canonical v2 (no residue)`);
+    if (r.formatConverted) out(`    format     empty lockfileVersion 1 file → canonical v2`);
     else if (!r.skipped) out(`    ${shortPath(r.file)} is now lockfileVersion 2 — config activation (from: installed) is unchanged`);
   }
 
@@ -1945,9 +1971,8 @@ function migrateCmd() {
   try { r = applyLegacyLockMigration(dir); } catch (e) { cmdFail(e.code || "legacy-lock", e.message || e); return; }
   if (JSON_MODE) { jsonOk(r); return; }
   for (const m of r.migrated) console.log(`migrated  ${m.capability} → package ${m.package}@${m.version}`);
-  for (const c of r.residue) console.log(`residue   ${c}  (kept as a legacy capability lock)`);
   for (const w of r.warnings) console.log(`WARNING: ${w}`);
-  if (r.formatConverted) { console.log(`${shortPath(r.file)} was an empty lockfileVersion 1 file — converted to canonical v2 (no residue).`); return; }
+  if (r.formatConverted) { console.log(`${shortPath(r.file)} was an empty lockfileVersion 1 file — converted to canonical v2.`); return; }
   if (r.file) console.log(`${shortPath(r.file)} is now lockfileVersion 2. Config activation (from: installed) is unchanged; re-run \`oas trust\` for executable capabilities — package integrity approvals are not carried over.`);
 }
 
@@ -2057,12 +2082,20 @@ function init() {
     let journal;
     try { journal = beginRunJournal(dir); }
     catch (e) { bail(e.code || "E_JOURNAL_FAILED", e.message); return; }
-    let activated;
+    let activated = [];
     try {
       writeFileSync(file, text);
       note(`Created ${shortPath(file)} (${levelOf(dir)} level) from template ${template}`);
+      // The GATE is that the kernel can read this config: a template carrying a
+      // retired key or a broken shape is a broken template, and leaving it
+      // behind would break every later command at this scope.
+      configChain(dir);
       restore(dir);
-      activated = resolveOasConfig(dir).capabilities.map((c) => ({ capability: c.id, layer: c.layer || null }));
+      // Activation is NOT a gate. A template's whole point is to seed policy you
+      // then acquire — a capability it activates but nothing supplies yet is the
+      // expected state right after seeding, not a reason to refuse the config.
+      try { activated = resolveOasConfig(dir).capabilities.map((c) => ({ capability: c.id, layer: c.layer || null })); }
+      catch (e) { note(`NOTE: ${shortPath(file)} does not resolve yet — ${e.message}. Acquire what it activates (\`oas install <source>\`), then re-check with \`oas doctor\`.`); }
       journal.finalize();
     } catch (e) {
       const report = journal.rollback();

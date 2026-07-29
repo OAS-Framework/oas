@@ -300,9 +300,11 @@ lifecycle scripts never run at acquisition, and capability code/hook paths
 must resolve inside the locked package root.
 
 `oas migrate` maps a scope's v1 marketplace/git/path capability locks to
-package locks, preserving `from: installed` activation. Entries with no
-published package yet remain as legacy residue in the v2 lock (doctor flags
-them); executable approvals are never carried over.
+package locks, preserving `from: installed` activation. It is all-or-nothing:
+a v2 lock has no residue container, so a scope holding any entry with no
+published package yet stays on lockfileVersion 1 in full and keeps working
+(doctor flags it) rather than converting around it. Executable approvals are
+never carried over.
 
 All package operations are agent-callable: every command above supports
 `--json` (one stdout envelope; failures carry the contract's stable error

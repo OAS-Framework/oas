@@ -484,3 +484,22 @@ test("a template carrying keys this kernel refuses fails typed, and leaves no co
   assert.deepEqual(snapshot(scope), before, "a refused seed is byte-identical");
   rmSync(base, { recursive: true, force: true });
 });
+
+test("a template may activate what is not acquired yet: it seeds, says so, and does not roll back", () => {
+  const { base, catalog } = published();
+  const outer = join(base, "outer"); mkdirSync(outer, { recursive: true });
+  const seed = join(base, "seed", "oas-config.yaml");
+  // Seeding policy you then acquire is the whole point of a template — an
+  // unresolvable activation right after seeding is the expected state, not a
+  // broken config.
+  write(seed, "name: seeded\ncapabilities:\n  additive:\n    not.acquired.yet:\n      from: installed\n      global: true\n");
+  write(join(outer, "oas-config.yaml"), `name: outer\ntemplates:\n  house: ${seed}\n`);
+  const scope = gitify(join(outer, "repo"));
+
+  const r = cli(["init", "--template", "house", "--json", "--dir", scope], { catalog });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.deepEqual(envelope(r).result.activated, [], "nothing resolves yet, and that is fine");
+  assert.match(readFileSync(join(scope, "oas-config.yaml"), "utf8"), /not\.acquired\.yet/, "the config survives");
+  assert.match(r.stderr, /does not resolve yet/, "…and the run says so, on stderr, outside the envelope");
+  rmSync(base, { recursive: true, force: true });
+});

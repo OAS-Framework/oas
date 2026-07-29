@@ -275,8 +275,8 @@ capability list, dependency closure, and per-capability `trustedCapabilities`
 approvals; installed roots live in `.agents/packages/installed/`. See
 `docs/capabilities.md` (“Distribution packages”), the schemas
 `docs/oas-package.schema.json` / `docs/oas-lock.schema.json`, and
-`docs/design/package-engine-contract.md`. `oas migrate` maps v1 locks to v2,
-retaining unmappable entries as legacy residue.
+`docs/design/package-engine-contract.md`. `oas migrate` maps v1 locks to v2 all-or-nothing:
+a scope with any unmappable entry stays on v1 in full and keeps working.
 
 ## CLI
 
