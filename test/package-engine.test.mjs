@@ -8,7 +8,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import {
@@ -50,6 +50,23 @@ function pkgSource(dir, manifest, capabilities = {}) {
 }
 /** Activation of the resolved chain, as plain capability IDs. */
 function activeIds(dir) { return resolveOasConfig(dir, "any").capabilities.map((c) => c.id).sort(); }
+/** EVERY path under `dir` — directories included — with file digests. Compared
+ * whole, so a stray empty directory is as visible as a changed byte. */
+function treeFingerprint(dir) {
+  const out = [];
+  const walk = (d, rel) => {
+    for (const e of readdirSync(d, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      if (e.name === ".git") { out.push(".git/ (git's own state, not the scope's)"); continue; }
+      const p = join(d, e.name);
+      const r = rel ? `${rel}/${e.name}` : e.name;
+      if (e.isSymbolicLink()) out.push(`${r} -> ${readlinkSync(p)}`);
+      else if (e.isDirectory()) { out.push(`${r}/`); walk(p, r); }
+      else out.push(`${r} ${createHash("sha256").update(readFileSync(p)).digest("hex").slice(0, 16)}`);
+    }
+  };
+  walk(dir, "");
+  return out;
+}
 /** A scope with an oas-config.yaml so the config chain sees it. */
 function scope(base, name = "scope", config = "name: test\n") {
   const dir = join(base, name);
@@ -1106,6 +1123,138 @@ test("assertCommittable sees the COMPLETE staged plan — template bytes include
   assert.equal(readFileSync(join(s, ".agents/capabilities/.gitignore"), "utf8"), ignoreBefore);
   assert.deepEqual(readdirSync(join(s, ".agents/capabilities/installed")).sort(), ["x.a", "x.d"]);
 });
+
+test("a failed acquisition on a CLEAN scope leaves no .agents anchor behind — whole-tree fingerprint", () => {
+  const t = temp();
+  // Two refusals that reach different depths: one fails at manifest validation
+  // (before projection), one refuses at the pre-commit gate (after it). Both
+  // must leave a scope that never had a store byte-for-byte as they found it.
+  for (const [name, run] of [
+    ["manifest failure", (s) => {
+      const bad = join(t, "bad-manifest");
+      write(join(bad, "capabilities/a/oas.json"), JSON.stringify({ capability: "x.a", version: "1.0.0", description: "d", skills: ["missing"] }));
+      write(join(bad, "oas-package.json"), JSON.stringify({ package: "x.bad", version: "1.0.0", description: "d", compatibility: { oas: ">=0.1.0" }, capabilities: ["capabilities/a"] }));
+      throwsCode(() => acquirePackage(s, bad), "capability-not-self-contained", "manifest failure");
+    }],
+    ["gate refusal", (s) => {
+      const ok = pkgSource(join(t, "gatesrc"), { package: "x.ok" }, { "capabilities/a": { capability: "x.ok1" } });
+      assert.throws(() => acquirePackage(s, ok, { assertCommittable: () => { throw new Error("declined"); } }), /declined/);
+    }],
+  ]) {
+    const s = scope(t, `clean-${name.replace(/\s+/g, "-")}`);
+    const before = treeFingerprint(s);
+    assert.equal(before.length, 1, `${name}: the fixture really is a clean scope`);
+    assert.match(before[0], /^oas-config\.yaml /);
+    run(s);
+    assert.deepEqual(treeFingerprint(s), before, `${name}: no .agents/, no capabilities/, no installed/, nothing`);
+  }
+});
+
+test("anchor pruning removes only what the operation created — pre-existing empty parents and unrelated state survive", () => {
+  const t = temp();
+  const bad = join(t, "bad");
+  write(join(bad, "capabilities/a/oas.json"), JSON.stringify({ capability: "x.a", version: "1.0.0", description: "d", skills: ["missing"] }));
+  write(join(bad, "oas-package.json"), JSON.stringify({ package: "x.bad", version: "1.0.0", description: "d", compatibility: { oas: ">=0.1.0" }, capabilities: ["capabilities/a"] }));
+
+  // A PRE-EXISTING empty `.agents/` and `.agents/capabilities/` belong to the
+  // scope. The operation created only `installed/`, so only that may go.
+  const pre = scope(t, "pre-existing-empty");
+  mkdirSync(join(pre, ".agents/capabilities"), { recursive: true });
+  const preBefore = treeFingerprint(pre);
+  assert.deepEqual(preBefore.map((x) => x.split(" ")[0]), [".agents/", ".agents/capabilities/", "oas-config.yaml"]);
+  throwsCode(() => acquirePackage(pre, bad), "capability-not-self-contained", "pre-existing empty parents");
+  assert.deepEqual(treeFingerprint(pre), preBefore, "a pre-existing empty parent is never removed");
+
+  // Unrelated state under the parents is a hard stop, not something to reason about.
+  const owned = scope(t, "owned-state");
+  write(join(owned, ".agents/capabilities/owned/y/oas.json"), JSON.stringify({ capability: "y.own", version: "1.0.0", description: "d" }));
+  write(join(owned, ".agents/config-templates/adopted/x.p/default/adoption.json"), "{}");
+  const ownedBefore = treeFingerprint(owned);
+  throwsCode(() => acquirePackage(owned, bad), "capability-not-self-contained", "owned/adopted state");
+  assert.deepEqual(treeFingerprint(owned), ownedBefore, "owned/ and adopted/ survive untouched");
+
+  // A SUCCESSFUL acquire keeps its anchors: pruning is a no-op the moment the
+  // store is non-empty. Removing the last package empties the store but does
+  // NOT delete it — `installed/` was created by the acquire, not by the remove,
+  // and the rule is "only what THIS operation created". A later refused acquire
+  // at that scope must then leave the now-pre-existing empty store alone.
+  const live = scope(t, "live");
+  const good = pkgSource(join(t, "good"), { package: "x.good" }, { "capabilities/a": { capability: "x.a" } });
+  acquirePackage(live, good);
+  assert.ok(existsSync(artifact(live, "x.a")), "the store survives a successful acquire");
+  removePackage(live, "x.good");
+  assert.deepEqual(readdirSync(join(live, ".agents/capabilities/installed")), [], "the store is emptied");
+  const emptied = treeFingerprint(live);
+  throwsCode(() => acquirePackage(live, bad), "capability-not-self-contained", "refusal at a scope with an emptied store");
+  assert.deepEqual(treeFingerprint(live), emptied, "the emptied store is now pre-existing state, and survives the refusal");
+});
+
+test("assertCommittable exposes the declared fundamental layer, so a template binding the root package's OWN capability validates pre-commit", () => {
+  const t = temp();
+  const src = pkgSource(join(t, "src"), { package: "x.p", configTemplates: { default: { path: "c/d.yaml", default: true } } }, {
+    "capabilities/k": { capability: "x.knowledge", layer: "knowledge" },
+    "capabilities/plain": { capability: "x.plain" },
+  });
+  // The template binds a fundamental slot to a capability THIS package supplies.
+  // Pre-commit it is not materialized, not locked and not discoverable, so the
+  // preview is the only place the binding can be checked.
+  write(join(src, "c/d.yaml"), "name: demo\ncapabilities:\n  layers:\n    knowledge:\n      capability: x.knowledge\n");
+  const s = scope(t);
+  gitify(s);
+  const before = treeFingerprint(s);
+
+  // A gate that validates the template's layer bindings against the preview.
+  const validate = (p) => {
+    const declared = new Map(p.capabilities.map((c) => [c.capability, c.layer]));
+    for (const [slot, id] of Object.entries(bindingsOf(p.configTemplates[0].content))) {
+      if (!declared.has(id)) throw new Error(`template binds ${slot} to unknown capability ${id}`);
+      if (declared.get(id) !== slot) throw new Error(`template binds ${slot} to ${id}, which declares layer ${declared.get(id) ?? "none"}`);
+    }
+  };
+  let seen;
+  const r = acquirePackage(s, src, { assertCommittable: (p) => { seen = p; validate(p); } });
+
+  assert.equal(seen.capabilities.find((c) => c.capability === "x.knowledge").layer, "knowledge");
+  assert.equal(seen.capabilities.find((c) => c.capability === "x.plain").layer, null, "a capability declaring no layer reports null, not undefined");
+  // ONE descriptor shape: the return value carries the same field.
+  assert.equal(r.capabilities.find((c) => c.capability === "x.knowledge").layer, "knowledge");
+  assert.equal(r.capabilities.find((c) => c.capability === "x.plain").layer, null);
+  assert.ok(existsSync(artifact(s, "x.knowledge")), "a correct binding commits");
+
+  // A WRONG binding is caught by the same gate, and costs nothing to refuse.
+  const bad = pkgSource(join(t, "bad"), { package: "x.bad", configTemplates: { default: { path: "c/d.yaml", default: true } } }, {
+    "capabilities/k": { capability: "x.mis", layer: "tasks" },
+  });
+  write(join(bad, "c/d.yaml"), "name: demo\ncapabilities:\n  layers:\n    knowledge:\n      capability: x.mis\n");
+  const s2 = scope(t, "scope2");
+  gitify(s2);
+  const before2 = treeFingerprint(s2);
+  assert.throws(() => acquirePackage(s2, bad, { assertCommittable: validate }), /binds knowledge to x\.mis, which declares layer tasks/);
+  assert.deepEqual(treeFingerprint(s2), before2, "a refused layer binding leaves no lock, artifact, ignore file or anchor");
+
+  // ...and a binding to a capability nothing in the closure supplies.
+  const s3 = scope(t, "scope3");
+  const orphan = pkgSource(join(t, "orphan"), { package: "x.orphan", configTemplates: { default: { path: "c/d.yaml" } } }, { "capabilities/k": { capability: "x.here", layer: "knowledge" } });
+  write(join(orphan, "c/d.yaml"), "name: demo\ncapabilities:\n  layers:\n    knowledge:\n      capability: x.elsewhere\n");
+  assert.throws(() => acquirePackage(s3, orphan, { assertCommittable: validate }), /binds knowledge to unknown capability x\.elsewhere/);
+  assert.equal(existsSync(join(s3, ".agents")), false);
+  // The successful scope is unaffected by the two refusals beside it.
+  assert.notDeepEqual(treeFingerprint(s), before, "the committed scope did change — the fingerprint is not vacuous");
+});
+
+/** Minimal `capabilities.layers.<slot>.capability` reader for the fixtures above
+ * — the CLI lane owns real oas-config parsing; this only has to see bindings. */
+function bindingsOf(yaml) {
+  const out = {};
+  let slot = null;
+  for (const line of yaml.split("\n")) {
+    const s = /^ {4}([a-z]+):\s*$/.exec(line);
+    if (s) { slot = s[1]; continue; }
+    const c = /^ {6}capability:\s*(\S+)\s*$/.exec(line);
+    if (c && slot) { out[slot] = c[1]; slot = null; }
+  }
+  return out;
+}
 
 test("acquire is incremental: packages outside the closure keep their artifacts, rows and trust", () => {
   const t = temp();
