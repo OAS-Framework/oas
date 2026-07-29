@@ -29,6 +29,12 @@ All kernel/CLI behavior tests live in `test/capabilities.test.mjs`
 - **CLI behavior**: `spawnSync(process.execPath, [CLI, ...args], { cwd, env })`
   against `bin/oas.mjs` — test the actual command surface (init, install,
   spawn, retire, status), asserting on stdout/stderr and filesystem effects.
+  Helpers that spawn `bin/oas.mjs` must build child environments by exclusion:
+  strip inherited `OAS_*` / `PI_*`, pin `HOME` to a fixture directory, and set a
+  fixture `OAS_HOME_DIR`; otherwise tests run from inside an OAS instance can
+  resolve the live instance repo or laptop-level config/locks instead of the
+  temp scope. See
+  [CLI env hermeticity](/lessons/cli-tests-scrub-oas-pi-env.md).
 - Spawn probes in tests use `spawnInstance(..., { launch: false })`
   (scaffold-only) and inspect the created home.
 

@@ -1,6 +1,13 @@
 # Knowledge Log
 
 ## 2026-07-29
+* **Creation**: [clean-room-smoke-local-official-package](/lessons/clean-room-smoke-local-official-package.md) records that the tarball clean-room smoke must publish and catalog its own local official package because explicit official ids otherwise resolve through the real catalog under catalog-first.
+* **Creation**: [donor-2a82f0f-selective-port-ledger](/references/donor-2a82f0f-selective-port-ledger.md) records which frozen donor test ideas were ported into the capability-materialization CLI lane, which assertions were rejected as superseded, and the JSON requirement-field parity change the port forced.
+* **Update**: [package-payload-root-contract](/decisions/package-payload-root-contract.md) records that acquire-time path-mismatch diagnostics branch on the locked source kind: catalog locks can recommend update, Git locks must say remove-and-install with the intended fragment, and local path mismatches are unreachable.
+* **Creation**: [diagnostic-remedies-are-contracts](/lessons/diagnostic-remedies-are-contracts.md) records that diagnostics naming a repair path are behavior contracts and need branch-specific positive and negative assertions.
+* **Update**: [package-payload-root-contract](/decisions/package-payload-root-contract.md) merges the package-root-move note: Git root moves stay sticky and fail update until remove+install with the new fragment, while catalog root moves are adopted and reported as `pathChanged`; restore remains pinned to the locked commit/path.
+* **Creation**: [cli-tests-scrub-oas-pi-env](/lessons/cli-tests-scrub-oas-pi-env.md) records that CLI tests run inside an OAS instance must scrub inherited `OAS_*`/`PI_*`, pin fixture `HOME`, and set fixture `OAS_HOME_DIR` before spawning `bin/oas.mjs`.
+* **Update**: [test-conventions](/playbooks/test-conventions.md) adds the CLI helper hermeticity rule for spawned `bin/oas.mjs` tests.
 * **Creation**: [mixed-scope-migration-refuses-whole](/decisions/mixed-scope-migration-refuses-whole.md) records founder ruling that mixed guided official migration refuses the whole v1 scope, clears convertible for retain, removes residue from result shapes, and exposes blocked dry-run/apply status.
 * **Update**: [guided-official-migration-shape](/decisions/guided-official-migration-shape.md) replaces the old residue-or-hold warning with the final mixed-scope refusal contract.
 * **Update**: [guided-mixed-retain-needs-residue-or-hold](/lessons/guided-mixed-retain-needs-residue-or-hold.md) links the original data-loss lesson to the no-residue refusal ruling.

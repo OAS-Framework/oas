@@ -20,7 +20,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import {
@@ -41,13 +41,29 @@ function gitify(dir) {
   return dir;
 }
 
+/** Hermetic child environment. The suite runs INSIDE an OAS instance in this
+ * fleet, so two leaks have to be closed or a case silently reads real state:
+ *   - HOME: the config/lock walk climbs to `/` and unions the laptop level, so
+ *     a developer's own ~/oas-config.yaml or ~/oas-lock.json would be seen.
+ *   - OAS_* / PI_*: `OAS_HOME`/`PI_AGENT_HOME` make the CLI adopt the ambient
+ *     instance's `instance.json` and re-point its context at the REAL repo. */
+const HERMETIC_HOME = mkdtempSync(join(tmpdir(), "oas-classic-init-home-"));
+function hermeticEnv() {
+  const env = {};
+  for (const [k, v] of Object.entries(process.env)) if (!/^(OAS|PI)_/.test(k)) env[k] = v;
+  env.HOME = HERMETIC_HOME;
+  env.OAS_HOME_DIR = join(HERMETIC_HOME, ".oas");
+  return env;
+}
+
 /** Run the CLI with a fixture catalog bound through OAS_PACKAGE_CATALOG.
  * Passing `null` binds an EMPTY catalog — the clean-room shape, where the
  * official route is unavailable and init must say so instead of guessing. */
-function cli(argv, { catalog, cwd } = {}) {
-  const env = { ...process.env };
+function cli(argv, { catalog, cwd, env: extra } = {}) {
+  const env = hermeticEnv();
   if (catalog) env.OAS_PACKAGE_CATALOG = catalog;
   else delete env.OAS_PACKAGE_CATALOG;
+  Object.assign(env, extra);
   return spawnSync(process.execPath, [CLI, ...argv], { cwd: cwd || tmpdir(), env, encoding: "utf8" });
 }
 
@@ -99,8 +115,13 @@ function officialSources(base) {
       okf: {
         capability: "oas.okf", layer: "knowledge",
         commands: { harvest: "harvest.mjs" },
+        skills: ["skills"], inject: "inject.md",
         requires: [{ command: "definitely-not-a-real-cmd-xyz", why: "knowledge harvest needs it", install: "brew install nope" }],
-        _files: { "harvest.mjs": "// harvest\n" },
+        _files: {
+          "harvest.mjs": "// harvest\n",
+          "inject.md": "## Knowledge: fixture OKF\n\nWrite what you learn.\n",
+          "skills/okf/SKILL.md": "---\nname: okf\ndescription: Fixture OKF skill.\n---\n# OKF\n",
+        },
       },
     }),
     "oas.aweb": pkgSource(p("aweb"), "oas.aweb", {
@@ -501,5 +522,123 @@ test("a template may activate what is not acquired yet: it seeds, says so, and d
   assert.deepEqual(envelope(r).result.activated, [], "nothing resolves yet, and that is fine");
   assert.match(readFileSync(join(scope, "oas-config.yaml"), "utf8"), /not\.acquired\.yet/, "the config survives");
   assert.match(r.stderr, /does not resolve yet/, "…and the run says so, on stderr, outside the envelope");
+  rmSync(base, { recursive: true, force: true });
+});
+
+// ---------- the 0.19.4 regression, stated end to end ----------
+
+test("a deployment created seconds ago is never told to migrate: doctor reports no legacy lock and no official migration", () => {
+  const { base, catalog } = published();
+  const s = gitify(join(base, "scope"));
+  assert.equal(cli(["init", "--knowledge", "oas.okf", "--messaging", "oas.aweb", "--tasks", "none", "--dir", s], { catalog }).status, 0);
+
+  // THE regression. Through 0.19.4 a fresh init acquired its layers as legacy
+  // marketplace capabilities, so doctor greeted a brand-new deployment with
+  // `oas migrate --official --recursive`. Init's own output being clean is not
+  // enough — the bug was visible only from doctor, one command later.
+  const d = JSON.parse(cli(["doctor", s, "--json"], { cwd: s }).stdout);
+  assert.ok(!d.lockError, JSON.stringify(d.lockError));
+  assert.deepEqual(d.legacyLockFiles, [], "a brand-new deployment has no v1 lock files");
+  assert.ok(!d.officialMigration, "doctor must not ask a fresh init to run oas migrate --official");
+  assert.equal(JSON.stringify(d).includes("oas migrate"), false, "no migration advice anywhere in the report");
+
+  // The only thing wrong with a fresh deployment is what the operator has not
+  // consented to yet: the executable surfaces are untrusted, by design.
+  assert.deepEqual(d.capabilities.map((c) => c.id).sort(), ["oas.aweb", "oas.okf"]);
+  const listed = JSON.parse(cli(["list", "--dir", s, "--json"], { cwd: s }).stdout).result.capabilities;
+  assert.deepEqual([...new Set(listed.filter((c) => c.status !== "ok").map((c) => c.code))], ["untrusted-surface"],
+    JSON.stringify(listed));
+
+  const human = cli(["doctor", s], { cwd: s });
+  assert.equal(human.status, 0, human.stderr);
+  assert.doesNotMatch(human.stdout, /oas migrate/, "the human report is clean too");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("a host requirement is reported with its consent command and survives init: init never installs it", () => {
+  const { base, catalog } = published();
+  const s = gitify(join(base, "scope"));
+
+  const r = cli(["init", "--knowledge", "oas.okf", "--messaging", "none", "--tasks", "none", "--json", "--dir", s], { catalog });
+  assert.equal(r.status, 0, r.stderr);
+  const req = envelope(r).result.requirements.find((q) => q.command === "definitely-not-a-real-cmd-xyz");
+  assert.ok(req, "the missing host requirement is reported");
+  assert.equal(req.capability, "oas.okf", "the report names who asked for it");
+  assert.equal(req.why, "knowledge harvest needs it");
+  assert.equal(req.install, "brew install nope");
+  // The consent command is the ONLY way to install it, and init did not run it.
+  assert.match(req.consentCommand, /oas install --accept-requirement definitely-not-a-real-cmd-xyz/);
+  assert.match(req.consentCommand, new RegExp(s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), "the consent command is scoped to this deployment");
+
+  // Doctor still reports it afterwards: init changed nothing about the host.
+  const d = JSON.parse(cli(["doctor", s, "--json"], { cwd: s }).stdout);
+  assert.ok(d.missingHostRequirements.some((q) => q.command === "definitely-not-a-real-cmd-xyz"),
+    "a requirement init only reported must still be missing");
+  rmSync(base, { recursive: true, force: true });
+});
+
+// ---------- Pi and Claude scaffold parity over materialized capabilities ----------
+
+/** A PATH carrying stub `pi` and `claude` binaries, so spawn can resolve a
+ * runtime without one being installed. */
+function fakeRuntimes(base) {
+  const bin = join(base, "bin");
+  for (const name of ["pi", "claude"]) { write(join(bin, name), "#!/bin/sh\nexit 0\n"); chmodSync(join(bin, name), 0o755); }
+  return `${bin}:${process.env.PATH}`;
+}
+
+test("pi and Claude instances of a MATERIALIZED capability scaffold identically — only the runtime posture differs", () => {
+  const { base, catalog } = published();
+  const scope = gitify(join(base, "scope"));
+  const PATH = fakeRuntimes(base);
+
+  // A deployment built the way a fresh one is: the layer capability arrives as
+  // a package and is materialized flat, not copied into the repository.
+  assert.equal(cli(["init", "--knowledge", "oas.okf", "--messaging", "none", "--tasks", "none", "--dir", scope], { catalog }).status, 0);
+  assert.equal(cli(["trust", "oas.okf", "--dir", scope], { catalog }).status, 0, "the fixture must be trusted to compose its executable surface");
+  mkdirSync(join(scope, "agents"), { recursive: true }); // the roster root createAgent writes into
+  const created = cli(["create", "dev", "--repo", scope, "--work", "checkout", "--dir", scope], { catalog });
+  assert.equal(created.status, 0, created.stdout + created.stderr);
+
+  const homes = {};
+  for (const runtime of ["pi", "claude"]) {
+    const r = cli(["spawn", "dev", "--purpose", runtime, "--runtime", runtime, "--no-launch", "--json", "--dir", scope],
+      { catalog, cwd: scope, env: { PATH } });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    homes[runtime] = envelope(r).result;
+  }
+
+  const read = (home, ...rel) => readFileSync(join(home, ...rel), "utf8");
+  const skillsOf = (home) => readdirSync(join(home, ".agents", "skills")).sort();
+  const [pi, claude] = [homes.pi.home, homes.claude.home];
+
+  // PARITY: the composed skill set and the generated instructions are the same
+  // text. A capability materialized from a package must reach both runtimes
+  // through exactly one composition.
+  assert.deepEqual(skillsOf(pi), skillsOf(claude), "the runtimes received different skill sets");
+  assert.ok(skillsOf(pi).includes("okf"), `the materialized capability's skill is missing: ${skillsOf(pi).join(", ")}`);
+  assert.equal(read(pi, "AGENTS.md"), read(claude, "AGENTS.md"), "the generated instructions differ between runtimes");
+  assert.match(read(pi, "AGENTS.md"), /Knowledge: fixture OKF/, "the capability's injection did not compose");
+
+  for (const home of [pi, claude]) {
+    // The skill tree is real content, not a link into the materialized artifact
+    // — retiring an instance must never reach back into the deployment's store.
+    assert.equal(lstatSync(join(home, ".agents", "skills", "okf")).isSymbolicLink(), false);
+    // Canonical instructions in both: AGENTS.md is generated, CLAUDE.md aliases it.
+    assert.equal(lstatSync(join(home, "AGENTS.md")).isSymbolicLink(), false);
+    assert.equal(readlinkSync(join(home, "CLAUDE.md")), "AGENTS.md");
+    assert.equal(readlinkSync(join(home, ".claude", "skills")), join("..", ".agents", "skills"));
+    // And the instance records the capability by its materialized identity.
+    const meta = JSON.parse(read(home, "instance.json"));
+    assert.ok(meta.capabilities.some((c) => c.id === "oas.okf"), JSON.stringify(meta.capabilities));
+    assert.deepEqual(meta.skills.map((x) => x.name).sort(), skillsOf(home));
+  }
+
+  // The ONLY intended difference: how each runtime is told to load that set.
+  const commandOf = (home) => JSON.parse(read(home, "instance.json")).command;
+  assert.match(commandOf(pi), /--skill /);
+  assert.match(commandOf(pi), /--no-skills/);
+  assert.match(commandOf(pi), /--no-context-files/);
+  assert.doesNotMatch(commandOf(claude), /--no-skills/, "Claude loads the set through .claude/skills, not by flag");
   rmSync(base, { recursive: true, force: true });
 });

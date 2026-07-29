@@ -534,6 +534,35 @@ test("acquirePackage: a locked source never advances on acquire — integrity an
   assert.equal(readFileSync(join(s, OAS_LOCK_FILE), "utf8"), before, "lock unchanged");
 });
 
+test("acquirePackage: a path mismatch names the route that can actually resolve it — update for catalog, remove+reinstall for git", () => {
+  const t = temp();
+  const repoRoot = join(t, "repo");
+  pkgSource(join(repoRoot, "pkgs/x"), { package: "x.moved" }, { "capabilities/a": { capability: "x.a" } });
+  const first = gitify(repoRoot);
+  // The upstream moves the selected root.
+  pkgSource(join(repoRoot, "packages/x"), { package: "x.moved" }, { "capabilities/a": { capability: "x.a" } });
+  rmSync(join(repoRoot, "pkgs"), { recursive: true, force: true });
+  const moved = gitify(repoRoot);
+
+  // A GIT spec's "#<path>" is the operator's own selection, so `oas update`
+  // would keep the old root: the message must not name it.
+  const g = scope(t, "git");
+  acquirePackage(g, `file://${repoRoot}@${first}#pkgs/x`);
+  const gitErr = throwsCode(() => acquirePackage(g, `file://${repoRoot}@${moved}#packages/x`), "integrity-drift", "git path drift");
+  assert.match(gitErr.message, /package path "packages\/x" but the existing lock records "pkgs\/x"/);
+  assert.match(gitErr.message, /oas remove x\.moved/);
+  assert.match(gitErr.message, /config or dependent packages/, "removal blockers are stated, not implied");
+  assert.doesNotMatch(gitErr.message, /use `oas update/, "update cannot move a sticky git selection");
+
+  // A CATALOG entry owns its path, so an update genuinely adopts the new root.
+  const c = scope(t, "cat");
+  const catalog = (ref, path) => (id) => (id === "x.moved" ? { url: `file://${repoRoot}`, ref, path } : undefined);
+  acquirePackage(c, "x.moved", { catalog: catalog(first, "pkgs/x") });
+  const catErr = throwsCode(() => acquirePackage(c, "x.moved", { catalog: catalog(moved, "packages/x") }), "integrity-drift", "catalog path drift");
+  assert.match(catErr.message, /use `oas update x\.moved`/);
+  assert.doesNotMatch(catErr.message, /oas remove/);
+});
+
 test("acquirePackage: incompatible compatibility.oas floor is rejected before anything is written", () => {
   const t = temp();
   const src = pkgSource(join(t, "src"), { package: "x.p", compatibility: { oas: ">=999.0.0" } }, { "capabilities/a": { capability: "x.a" } });

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
 import {
-  chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, readdirSync, rmSync, writeFileSync,
+  chmodSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, readdirSync, rmSync, writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
@@ -50,11 +50,31 @@ try {
 
   const home = join(room, "home"); const fakeBin = join(room, "bin"); mkdirSync(home); mkdirSync(fakeBin);
   write(join(fakeBin, "pi"), "#!/bin/sh\nexit 0\n"); chmodSync(join(fakeBin, "pi"), 0o755);
+
+  // A CLEAN ROOM has no network. Without a bound catalog, `oas init` resolves
+  // its official layers through the real published catalog and fetches over
+  // the wire: a release machine behind a firewall would fail this smoke and
+  // the failure would look like a packaging defect. So the room publishes its
+  // own official package — the PACKED kernel's own bundled oas.okf, wrapped in
+  // a distribution manifest inside a local Git repository — and a catalog
+  // naming it. The materialization route is exercised for real, offline.
+  const officialRepo = join(room, "official", "oas-okf");
+  const payload = join(officialRepo, "oas-package");
+  write(join(payload, "oas-package.json"), JSON.stringify({
+    package: "oas.okf", version: "1.4.1", description: "clean-room official oas.okf",
+    compatibility: { oas: ">=0.1.0" }, capabilities: ["capabilities/oas-okf"],
+  }, null, 2));
+  cpSync(join(kernelRoot, "capabilities", "oas-okf"), join(payload, "capabilities", "oas-okf"), { recursive: true });
+  gitRepo(officialRepo);
+  const catalog = join(room, "catalog.json");
+  write(catalog, JSON.stringify({ packages: { "oas.okf": { url: `file://${officialRepo}`, path: "oas-package" } }, capabilities: {} }, null, 2));
+
   const env = {
     ...process.env,
     HOME: home,
     OAS_HOME_DIR: join(home, ".oas"),
     OAS_PKG_ROOT: kernelRoot,
+    OAS_PACKAGE_CATALOG: catalog,
     PATH: `${fakeBin}:${dirname(oas)}:${process.env.PATH}`,
   };
   Object.assign(process.env, env);
@@ -70,6 +90,26 @@ try {
   run(oas, ["init", "--raw", "--knowledge", "oas.okf", "--no-tmux-mouse", "--dir", modernRepo], { env });
   const initConfig = readFileSync(join(modernRepo, "oas-config.yaml"), "utf8");
   if (!/oas\.okf/.test(initConfig)) throw new Error("packed oas init did not activate declared knowledge package");
+
+  // What a fresh deployment must look like, checked from the PACKED kernel:
+  // a capability-materialization lock, a flat artifact, no package store, no
+  // v1 residue, and nothing trusted at acquisition.
+  const initLock = JSON.parse(readFileSync(join(modernRepo, "oas-lock.json"), "utf8"));
+  if (initLock.lockfileVersion !== 2) throw new Error(`fresh init wrote lockfileVersion ${initLock.lockfileVersion}`);
+  if (!initLock.packages || !initLock.capabilities) throw new Error("fresh lock is missing a required top-level map");
+  if (initLock.capabilities["oas.okf"]?.package !== "oas.okf") throw new Error("capability row lost its provider back-reference");
+  if (initLock.capabilities["oas.okf"].trusted !== false) throw new Error("acquisition granted executable trust");
+  for (const retired of ["capabilities", "trustedCapabilities", "depsIntegrity"]) {
+    if (Object.hasOwn(initLock.packages["oas.okf"], retired)) throw new Error(`package row carries retired key "${retired}"`);
+  }
+  if (!existsSync(join(modernRepo, ".agents", "capabilities", "installed", "oas.okf", "oas.json"))) throw new Error("capability was not materialized flat");
+  if (existsSync(join(modernRepo, ".agents", "packages"))) throw new Error("a package store was materialized");
+  if (!/installed/.test(readFileSync(join(modernRepo, ".agents", "capabilities", ".gitignore"), "utf8"))) throw new Error("materialized artifacts were not ignored");
+  // And the packed doctor must not greet a deployment created seconds ago with
+  // a migration: that regression shipped through 0.19.4.
+  const freshDoctor = JSON.parse(run(oas, ["doctor", modernRepo, "--json"], { env, capture: true }));
+  if (freshDoctor.lockError) throw new Error(`fresh scope has a lock the kernel refuses: ${freshDoctor.lockError.message}`);
+  if (freshDoctor.legacyLockFiles.length || freshDoctor.officialMigration) throw new Error("packed doctor asked a fresh deployment to migrate");
 
   core.createAgent(agentsRoot, { name: "probe", repo: modernRepo, work: "checkout", runtime: "pi", instructions: "# Packed probe\n\nCanonical instructions.\n" });
   const agent = core.findAgent(agentsRoot, "probe");
@@ -92,6 +132,7 @@ try {
     passed: true,
     kernelTarball: basename(kernelTgz), adapterTarball: basename(adapterTgz),
     initDoctor: true, exactSkills: skills, canonicalSoulUnchanged: true,
+    offlineOfficialCatalog: true, freshInitMaterialized: true, nothingToMigrate: true,
     adapterResolvedPackedKernel: true, cleanContractConfigAndSpawn: true,
   }, null, 2));
 } finally {

@@ -16,8 +16,23 @@ import {
 const CLI = resolve(new URL("../bin/oas.mjs", import.meta.url).pathname);
 function temp() { return mkdtempSync(join(tmpdir(), "oas-pkg-test-")); }
 function write(path, content) { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, content); }
+/** Hermetic child environment. The suite runs INSIDE an OAS instance in this
+ * fleet, so two leaks have to be closed or a case silently reads real state:
+ *   - HOME: the config/lock walk climbs to `/` and unions the laptop level, so
+ *     a developer's own ~/oas-config.yaml or ~/oas-lock.json would be seen.
+ *   - OAS_* / PI_*: `OAS_HOME`/`PI_AGENT_HOME` make the CLI adopt the ambient
+ *     instance's `instance.json` and re-point its context at the REAL repo. */
+const HERMETIC_HOME = mkdtempSync(join(tmpdir(), "oas-packages-home-"));
+function hermeticEnv() {
+  const env = {};
+  for (const [k, v] of Object.entries(process.env)) if (!/^(OAS|PI)_/.test(k)) env[k] = v;
+  env.HOME = HERMETIC_HOME;
+  env.OAS_HOME_DIR = join(HERMETIC_HOME, ".oas");
+  return env;
+}
+
 function cli(args, opts = {}) {
-  return spawnSync(process.execPath, [CLI, ...args], { encoding: "utf8", ...opts });
+  return spawnSync(process.execPath, [CLI, ...args], { encoding: "utf8", env: hermeticEnv(), ...opts });
 }
 function gitRepo(dir) {
   execFileSync("git", ["init", "-q", dir]);

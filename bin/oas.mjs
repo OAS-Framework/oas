@@ -2235,7 +2235,14 @@ function init() {
       file, level: levelOf(dir), raw, adopted: false,
       layers: Object.fromEntries(LAYERS.map((l) => [l, layers[l] ?? null])),
       acquired: acquisitions, activated,
-      requirements: r.capabilities.flatMap((c) => c.missingRequires.map((m) => ({ capability: c.id, command: m.command, install: m.install || null }))),
+      // Same facts the human run prints, in the same run: who asked, why, and
+      // the ONE copyable command that consents to installing it. Init never
+      // runs it — reporting a requirement and acting on it are separate steps,
+      // and an agent reading this envelope must be able to tell them apart.
+      requirements: r.capabilities.flatMap((c) => c.missingRequires.map((m) => ({
+        capability: c.id, command: m.command, why: m.why || null, install: m.install || null,
+        consentCommand: `oas install --accept-requirement ${m.command} --dir ${shellQuote(dir)}`,
+      }))),
     });
     return;
   }
