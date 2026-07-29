@@ -1,6 +1,8 @@
 # Knowledge Log
 
 ## 2026-07-29
+* **Creation**: [config-diff-fails-closed-on-drifted-source](/lessons/config-diff-fails-closed-on-drifted-source.md) records that `oas config diff` reads exact locked template bytes and refuses source drift with `integrity-drift` instead of presenting mutated source bytes as upstream.
+* **Creation**: [gate-preview-omission-requires-rollback-fallback](/lessons/gate-preview-omission-requires-rollback-fallback.md) records that pre-commit gates must defer only unverifiable checks to the first point where data exists and make post-commit failures rollback-equivalent to refusal.
 * **Creation**: [cpsync-aborts-on-unreadable-dirs](/lessons/cpsync-aborts-on-unreadable-dirs.md) records that Node 22 cpSync can abort rather than throw on unreadable directories, so recovery code must probe hostile input and hand-walk copies when failures must remain catchable.
 * **Update**: [run-level-rollback-journal-craft](/lessons/run-level-rollback-journal-craft.md) replaces the earlier happy-path cpSync flag note with a link to the unreadable-directory abort lesson.
 * **Creation**: [run-level-rollback-journal-craft](/lessons/run-level-rollback-journal-craft.md) records the CLI outer rollback journal lessons for off-scope backups, incomplete rollback retention, absence restoration, ancestor-pruned anchors, symlink boundaries, cpSync flags, and mutation-tested restore assertions.
