@@ -257,7 +257,7 @@ test("adopted snapshot stays an ordinary scoped config: retarget, disable, setti
 
 // ---------- config diff ----------
 
-test("oas config diff is report-only: shows drift, never merges or overwrites", () => {
+test("oas config diff is report-only: shows drift three ways, never writes a byte", () => {
   const base = temp();
   const pkg = fixturePackage(join(base, "pkg"));
   const ws = join(base, "ws"); mkdirSync(ws);
@@ -265,24 +265,38 @@ test("oas config diff is report-only: shows drift, never merges or overwrites", 
   const file = join(ws, "oas-config.yaml");
   const adopted = readFileSync(file, "utf8");
 
-  // no drift beyond the rewritten name line
-  const same = cli(["config", "diff", "--package", pkg, "--dir", ws]);
+  // Freshly adopted: the config, the recorded base and the template all agree,
+  // so there is genuinely nothing to report. (The config is the template
+  // verbatim, so this is exact rather than approximately clean.)
+  const same = cli(["config", "diff", "--dir", ws]);
   assert.equal(same.status, 0, same.stderr);
   assert.match(same.stdout, /report only/);
+  assert.match(same.stdout, /No differences/);
 
-  // local edit shows as drift; file untouched by diff
-  writeFileSync(file, adopted + "  # local note\n");
-  const r = cli(["config", "diff", "--package", pkg, "--config", "default", "--dir", ws]);
+  // A local edit shows as a local-only region, and diff writes nothing.
+  const edited = `${adopted}\n# local note\n`;
+  writeFileSync(file, edited);
+  const r = cli(["config", "diff", "--dir", ws]);
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /\+   # local note/);
-  assert.match(r.stdout, /differing line/);
-  assert.equal(readFileSync(file, "utf8"), adopted + "  # local note\n", "diff must not write");
+  assert.match(r.stdout, /LOCAL ONLY/);
+  assert.match(r.stdout, /# local note/);
+  assert.equal(readFileSync(file, "utf8"), edited, "diff must not write");
 
-  // provenance header supplies package/profile defaults — and since Gate 1,
-  // init --package <path> locks the closure, so the id resolves via the lock
-  const r2 = cli(["config", "diff", "--dir", ws]);
-  assert.equal(r2.status, 0, r2.stderr);
-  assert.match(r2.stdout, /report only/);
+  // The adopted base supplies the package and template — no flags needed. An
+  // explicit --config names the template within the adopted package.
+  const explicit = cli(["config", "diff", "--config", "default", "--dir", ws]);
+  assert.equal(explicit.status, 0, explicit.stderr);
+  assert.match(explicit.stdout, /example\.engineering:default/);
+
+  // Without an adopted base there is nothing to compare against, and that is a
+  // typed refusal rather than a guess at which template the config came from.
+  const bare = join(base, "bare"); mkdirSync(bare);
+  writeFileSync(join(bare, "oas-config.yaml"), "name: bare\n");
+  const orphan = cli(["config", "diff", "--dir", bare, "--json"]);
+  assert.equal(orphan.status, 1);
+  assert.equal(JSON.parse(orphan.stdout).error.code, "E_NO_ADOPTED_BASE");
+
+  rmSync(base, { recursive: true, force: true });
 });
 
 test("diffConfigTexts produces a minimal line diff", () => {
@@ -1575,7 +1589,7 @@ test("JSON envelope integrity: noisy installers cannot contaminate stdout, and p
 
 // ---------- doctor ----------
 
-test("doctor reports profile provenance, available-but-unapplied profiles, and missing host commands", () => {
+test("doctor reports the adopted template base, local-edit state, and missing host commands", () => {
   const base = temp();
   const pkg = fixturePackage(join(base, "pkg"));
   const ws = join(base, "ws"); mkdirSync(ws);
@@ -1593,19 +1607,23 @@ test("doctor reports profile provenance, available-but-unapplied profiles, and m
   assert.equal(cli(["use", "example.review", "--global", "--dir", ws]).status, 0);
   const r = cli(["doctor", ws], { cwd: ws });
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /Config profile provenance: .*adopted example\.engineering.*profile "default"/);
+  assert.match(r.stdout, /Adopted config template: .*adopted example\.engineering:default/);
+  assert.match(r.stdout, /local edits present/, "the config was hand-edited above, and doctor must say so");
+  assert.match(r.stdout, /recorded base .*config-templates\/adopted\/example\.engineering\/default/);
   assert.match(r.stdout, /Missing host commands/);
   assert.match(r.stdout, /review-helper-not-here — reviews \(requested by: example\.review\)/);
   assert.match(r.stdout, /install with consent: oas install --accept-requirement review-helper-not-here/);
 
-  // available-but-unapplied profile: a second locked+installed package with profiles, adopted nowhere
+  // A second installed package exports templates nobody adopted. Doctor must
+  // NOT enumerate them: in the flat model that list exists only behind a network
+  // fetch of the locked source, and a diagnostic must never go to the network.
   const other = fixturePackage(join(base, "other"), { id: "other.pkg", capabilities: { "capabilities/other-cap": { capability: "other.cap", version: "1.0.0", description: "x" } } });
   installFixturePackage(ws, other);
   const r2 = cli(["doctor", ws], { cwd: ws });
   assert.equal(r2.status, 0, r2.stderr);
   assert.match(r2.stdout, /Installed packages:/);
   assert.match(r2.stdout, /other\.pkg@1\.0\.0/);
-  assert.match(r2.stdout, /package other\.pkg exports config profiles \(default, minimal\) not applied at any scope/);
+  assert.doesNotMatch(r2.stdout, /other\.pkg exports config template/, "doctor must not advertise templates it would have to fetch to enumerate");
 });
 
 test("doctor --json carries schemaVersion 1 and the WS2 payload with field parity to the human report", () => {
@@ -1633,12 +1651,20 @@ test("doctor --json carries schemaVersion 1 and the WS2 payload with field parit
   assert.deepEqual(doc.packages.map((p) => p.id).sort(), ["example.engineering", "other.pkg"]);
   assert.ok(doc.packages.every((p) => p.version === "1.0.0"));
   assert.deepEqual(doc.packages.find((p) => p.id === "other.pkg").capabilities, ["other.cap"]);
-  // profileProvenance: the adopted snapshot
-  assert.equal(doc.profileProvenance.length, 1);
-  assert.equal(doc.profileProvenance[0].package, "example.engineering");
-  assert.equal(doc.profileProvenance[0].profile, "default");
-  // unappliedProfiles: other.pkg exports profiles, adopted nowhere
-  assert.deepEqual(doc.unappliedProfiles, [{ package: "other.pkg", profiles: ["default", "minimal"] }]);
+  // adoptedTemplates: the one recorded base, with the provenance the human
+  // report renders and the local-edit state doctor computes without a fetch.
+  assert.equal(doc.adoptedTemplates.length, 1);
+  const adoptedRow = doc.adoptedTemplates[0];
+  assert.equal(adoptedRow.package, "example.engineering");
+  assert.equal(adoptedRow.template, "default");
+  assert.equal(adoptedRow.status, "ok");
+  assert.equal(typeof adoptedRow.localChanges, "boolean");
+  assert.match(adoptedRow.hash, /^sha256-[0-9a-f]{64}$/);
+  assert.ok(adoptedRow.base.endsWith("config-templates/adopted/example.engineering/default/oas-config.yaml"));
+  // There is deliberately no "unapplied templates" field: enumerating those
+  // would require fetching each locked package's source.
+  assert.equal(doc.unappliedProfiles, undefined);
+  assert.equal(doc.unappliedTemplates, undefined);
   // missingHostRequirements: structured plan + consent command, no shell text
   const req = doc.missingHostRequirements.find((x) => x.command === "json-doctor-missing-cmd");
   assert.ok(req, JSON.stringify(doc.missingHostRequirements));
@@ -1648,7 +1674,7 @@ test("doctor --json carries schemaVersion 1 and the WS2 payload with field parit
   // field parity: every WS2 fact in the human report is present in JSON
   const human = cli(["doctor", ws], { cwd: ws });
   assert.match(human.stdout, /other\.pkg/);
-  assert.match(human.stdout, /profile "default"/);
+  assert.match(human.stdout, /example\.engineering:default/);
   assert.match(human.stdout, /json-doctor-missing-cmd/);
   assert.match(human.stdout, /oas install --accept-requirement json-doctor-missing-cmd --dir /);
 });
@@ -1896,7 +1922,7 @@ test("install --json requirements: all four consent outcomes with structured pla
   assert.equal(q4.onPath, false);
 });
 
-test("init --package --json: one envelope with lockFile/lockedPackages, stable error codes, no prompts", () => {
+test("init --package --json: one envelope with adoption + lock provenance, stable error codes, no prompts", () => {
   const base = temp();
   const pkg = fixturePackage(join(base, "pkg"));
   // adopt by locked package id so lockFile/lockedPackages are populated
@@ -1909,7 +1935,11 @@ test("init --package --json: one envelope with lockFile/lockedPackages, stable e
   assert.equal(env.schemaVersion, 1);
   assert.equal(env.ok, true);
   assert.equal(env.result.package, "example.engineering");
-  assert.equal(env.result.profile, "default");
+  assert.equal(env.result.template, "default");
+  assert.equal(env.result.adopted, true);
+  assert.match(env.result.contentIntegrity, /^sha256-[0-9a-f]{64}$/);
+  assert.equal(env.result.adoptedBase, join(ws, ".agents/config-templates/adopted/example.engineering/default/oas-config.yaml"));
+  assert.equal(env.result.adoptionMetadata, join(ws, ".agents/config-templates/adopted/example.engineering/default/adoption.json"));
   assert.equal(env.result.file, join(ws, "oas-config.yaml"));
   assert.deepEqual(env.result.capabilities, ["example.review", "example.delivery"]);
   assert.equal(env.result.lockFile, join(ws, "oas-lock.json"));
@@ -1921,17 +1951,17 @@ test("init --package --json: one envelope with lockFile/lockedPackages, stable e
   assert.equal(r2.status, 1);
   assert.equal(JSON.parse(r2.stdout).error.code, "E_CONFIG_EXISTS");
 
-  // E_PROFILE_AMBIGUOUS: multiple unmarked profiles, no --config
+  // E_TEMPLATE_AMBIGUOUS: multiple unmarked templates, no --config
   const multi = fixturePackage(join(base, "multi"), { id: "multi.pkg", configs: {
     a: { path: "configs/default/oas-config.yaml" }, b: { path: "configs/minimal/oas-config.yaml" },
   } });
   const w2 = join(base, "w2"); mkdirSync(w2);
   const r3 = cli(["init", "--package", multi, "--json", "--dir", w2]);
-  assert.equal(JSON.parse(r3.stdout).error.code, "E_PROFILE_AMBIGUOUS");
-  // E_PROFILE_NOT_FOUND: explicit unknown profile
+  assert.equal(JSON.parse(r3.stdout).error.code, "E_TEMPLATE_AMBIGUOUS");
+  // E_TEMPLATE_NOT_FOUND: explicit unknown template
   const r4 = cli(["init", "--package", multi, "--config", "nope", "--json", "--dir", w2]);
-  assert.equal(JSON.parse(r4.stdout).error.code, "E_PROFILE_NOT_FOUND");
-  // E_PROFILE_INVALID: unsupplied capability (fresh scope + distinct capability ids —
+  assert.equal(JSON.parse(r4.stdout).error.code, "E_TEMPLATE_NOT_FOUND");
+  // E_TEMPLATE_INVALID: unsupplied capability (fresh scope + distinct capability ids —
   // acquisition is real now, so same-scope duplicate capability exports would collide)
   const bad = fixturePackage(join(base, "bad"), { id: "bad.pkg",
     capabilities: { "capabilities/bad-cap": { capability: "bad.cap", version: "1.0.0", description: "x" } },
@@ -1940,7 +1970,7 @@ test("init --package --json: one envelope with lockFile/lockedPackages, stable e
     }, configs: { x: { path: "configs/x/oas-config.yaml", default: true } } });
   const w3 = join(base, "w3"); mkdirSync(w3);
   const r5 = cli(["init", "--package", bad, "--json", "--dir", w3]);
-  assert.equal(JSON.parse(r5.stdout).error.code, "E_PROFILE_INVALID");
+  assert.equal(JSON.parse(r5.stdout).error.code, "E_TEMPLATE_INVALID");
   // engine code pass-through: broken manifest fails without writing a config
   // (engine gap a is fixed: JSON null manifests carry invalid-package-manifest)
   const broken = join(base, "broken");
@@ -1952,42 +1982,43 @@ test("init --package --json: one envelope with lockFile/lockedPackages, stable e
   assert.equal(existsSync(join(w4, "oas-config.yaml")), false, "no failure path may write a config");
 });
 
-test("config diff --json: envelope with diff array; zero differences exits 0 with differingLines 0; provenance defaults", () => {
+test("config diff --json: one envelope with the three-way plan; no drift is a clean plan at exit 0", () => {
   const base = temp();
   const pkg = fixturePackage(join(base, "pkg"));
-  const ws = join(base, "workspace"); // matches the profile's `name: workspace` — zero-diff baseline
-  mkdirSync(ws, { recursive: true });
-  installFixturePackage(ws, pkg);
-  assert.equal(cli(["init", "--package", "example.engineering", "--dir", ws, "--no-tmux-mouse"]).status, 0);
-  // provenance-derived defaults: NO --package/--config flags, resolved via the locked id
-  const same = cli(["config", "diff", "--json", "--dir", ws], { cwd: ws });
-  assert.equal(same.status, 0, same.stdout);
-  const e1 = JSON.parse(same.stdout);
-  assert.equal(e1.ok, true);
-  assert.equal(e1.result.differingLines, 0);
-  assert.equal(e1.result.package, "example.engineering");
-  assert.equal(e1.result.profile, "default");
-  // drift shows in the diff array; the file is untouched
+  const ws = join(base, "ws"); mkdirSync(ws);
+  assert.equal(cli(["init", "--package", pkg, "--dir", ws, "--no-tmux-mouse", "--json"]).status, 0);
   const file = join(ws, "oas-config.yaml");
-  const before = readFileSync(file, "utf8");
-  writeFileSync(file, before + "  # local note\n");
-  const drift = cli(["config", "diff", "--json", "--dir", ws], { cwd: ws });
-  assert.equal(drift.status, 0);
-  const e2 = JSON.parse(drift.stdout);
-  assert.equal(e2.result.differingLines, 1);
-  assert.deepEqual(e2.result.diff.filter((d) => d.kind !== "same"), [{ kind: "local", line: "  # local note" }]);
-  assert.equal(readFileSync(file, "utf8"), before + "  # local note\n", "diff must not write");
-  // error code: no config at scope
-  const r3 = cli(["config", "diff", "--json", "--dir", join(base, "empty")]);
-  assert.equal(JSON.parse(r3.stdout).error.code, "E_NO_CONFIG");
-  // valueless --config is usage error, not silent default selection
-  const r4 = cli(["config", "diff", "--config", "--json", "--dir", ws], { cwd: ws });
-  assert.equal(r4.status, 1);
-  assert.equal(JSON.parse(r4.stdout).error.code, "E_USAGE");
-  // zero-profile package reports E_NO_PROFILES, not ambiguity
-  const bare = fixturePackage(join(base, "bare"), { id: "bare.pkg", configs: {} });
-  const r5 = cli(["config", "diff", "--package", bare, "--json", "--dir", ws], { cwd: ws });
-  assert.equal(JSON.parse(r5.stdout).error.code, "E_NO_PROFILES");
+
+  // Freshly adopted: a clean plan with no regions, exit 0.
+  const clean = cli(["config", "diff", "--dir", ws, "--json"]);
+  assert.equal(clean.status, 0, clean.stderr);
+  const cleanPayload = JSON.parse(clean.stdout);
+  assert.equal(cleanPayload.schemaVersion, 1);
+  assert.equal(cleanPayload.ok, true);
+  assert.equal(cleanPayload.result.clean, true);
+  assert.deepEqual(cleanPayload.result.regions, []);
+  assert.deepEqual(cleanPayload.result.counts, { upstream: 0, local: 0, conflict: 0, agreed: 0 });
+  assert.match(cleanPayload.result.contentIntegrity, /^sha256-[0-9a-f]{64}$/);
+
+  // A local edit becomes a local-only region carrying its own decision metadata.
+  writeFileSync(file, `${readFileSync(file, "utf8")}\n# local note\n`);
+  const drift = cli(["config", "diff", "--dir", ws, "--json"]);
+  assert.equal(drift.status, 0, drift.stderr);
+  const region = JSON.parse(drift.stdout).result.regions[0];
+  assert.equal(region.kind, "local");
+  assert.equal(region.recommended, "local");
+  assert.match(region.digest, /^sha256-[0-9a-f]{64}$/);
+  assert.ok(region.startLine >= 1);
+  assert.match(region.local, /# local note/);
+
+  // Failures are the same single envelope on stdout.
+  const bare = join(base, "bare"); mkdirSync(bare);
+  const noConfig = cli(["config", "diff", "--dir", bare, "--json"]);
+  assert.equal(noConfig.status, 1);
+  assert.equal(noConfig.stdout.trimEnd().split("\n").length, 1, "exactly one envelope");
+  assert.equal(JSON.parse(noConfig.stdout).error.code, "E_NO_CONFIG");
+
+  rmSync(base, { recursive: true, force: true });
 });
 
 test("init --package on a configless scope sees same-lock dependency capabilities in the closure", () => {
