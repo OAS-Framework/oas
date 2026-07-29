@@ -1,6 +1,7 @@
 # Knowledge Log
 
 ## 2026-07-29
+* **Update**: [Packages materialize capabilities while config templates remain explicitly adopted local policy](/decisions/capability-materialization-and-config-template-sync.md) keeps `lockfileVersion: 2` and replaces the unadopted transitional package-root v2 shape in place; there is no v3, no v2 compatibility reader/converter, and v1 migrates directly to the final flat capability materialization.
 * **Creation**: [Packages materialize capabilities while config templates remain explicitly adopted local policy](/decisions/capability-materialization-and-config-template-sync.md) supersedes the persistent package-store/config-profile shape: package acquisition stages temporarily, capabilities are the flat versioned installed entities under `.agents`, package templates use `config-templates/`, one active config and adopted base exist per scope, and sync/reset/switch operations are explicit and guided.
 * **Update**: [Distribution packages, config profiles, and consented host requirements](/decisions/distribution-packages-config-profiles-and-requirements.md) now points its storage/template details to the accepted capability-materialization decision while preserving package transaction, config sovereignty, and consent principles.
 

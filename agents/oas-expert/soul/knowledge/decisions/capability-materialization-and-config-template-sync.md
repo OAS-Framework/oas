@@ -82,11 +82,15 @@ package supplied it.
 
 ## Lock package provenance and installed capability identity separately
 
-The next lock format records both levels:
+The package lock remains `lockfileVersion: 2`, but its transitional
+package-root shape is replaced in place by the final capability-materialization
+shape. No v3 format or v2-to-v3 migration exists; the founder explicitly chose
+simplicity because the transitional v2 contract has no external adoption that
+must be preserved. The revised v2 records both levels:
 
 ```json
 {
-  "lockfileVersion": 3,
+  "lockfileVersion": 2,
   "packages": {
     "example.engineering": {
       "source": "git:https://example.invalid/engineering.git@v3.0.0",
@@ -216,23 +220,21 @@ second config.
 
 ## Migration and compatibility
 
-The kernel continues to read:
+The kernel continues to read valid v1 capability locks and their
+`.agents/capabilities/installed/` artifacts so existing 0.18 deployments keep
+working. Guided official migration converts v1 directly into the revised v2
+lock and flat installed-capability artifacts. Custom owned/path capabilities
+remain unchanged and executable trust is never broadened.
 
-- valid v1 capability locks and `.agents/capabilities/installed/` artifacts;
-- valid v2 package locks and `.agents/packages/installed/` roots; and
-- immutable package manifests using `configs` or a `.` capability root.
+The earlier transitional v2 package-root shape and
+`.agents/packages/installed/` store receive no product migration path, dual
+reader, or offline projection. If encountered by the revised release they fail
+clearly as unsupported/invalid rather than being guessed or silently converted;
+pre-adoption local deployments may be recreated manually. Immutable package
+manifests using `configs` or a `.` capability root remain read-compatible only
+for acquiring their capabilities into the revised v2 shape.
 
-Migration is explicit and transactional:
-
-- v1 artifacts gain package provenance only when a catalog mapping exists;
-- v2 installed package roots are projected into flat installed capability
-  artifacts using their already-locked bytes when possible, avoiding network;
-- v3 is written only after every capability and adopted-template base is valid;
-- old stores are removed only after the new lock and artifacts are durable;
-- custom owned/path capabilities are unchanged; and
-- executable trust is never broadened during migration.
-
-A failed conversion leaves the prior lock and store byte-identical. Doctor
+A failed v1 conversion leaves the prior lock and store byte-identical. Doctor
 reports the exact migration state and command.
 
 # Consequences
@@ -245,6 +247,6 @@ reports the exact migration state and command.
   cascading.
 - Guided template synchronization becomes safe because the original base is
   visible and portable.
-- The change is a storage/lock contract transition and requires a compatibility
-  release, official package revisions, migration gates, fresh onboarding
+- The change replaces the transitional v2 storage contract in place and requires
+  official package revisions, v1 migration gates, fresh onboarding
   updates, and documentation changes before publication.
