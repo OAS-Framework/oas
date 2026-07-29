@@ -40,7 +40,7 @@
       "additionalProperties": false
     },
     "capabilities": {
-      "description": "Package-relative DEDICATED capability roots, each containing one capability oas.json. At least one is required — config-only and empty packages are rejected. A root of \".\" (the package root itself) is only accepted from a legacy 0.19 manifest (one still using the `configs` spelling), so already-published packages stay consumable and migratable; newly authored packages use conventional roots such as \"capabilities/<slug>\". Paths must not escape the package root after symlink resolution, and everything the capability declares must resolve inside its OWN root — a capability that reaches package-only paths cannot be materialized and is rejected.",
+      "description": "Package-relative DEDICATED capability roots, each containing one capability oas.json. At least one is required — config-only and empty packages are rejected. A root of \".\" (the package root itself) is READ COMPATIBILITY for already-published packages only (e.g. oas.authoring@1.0.0, which is capabilities:[\".\"] and ships no templates at all): the compatibility reader accepts it whenever the manifest does not carry `configTemplates`, and rejects it as soon as it does, because a `configTemplates` manifest is unambiguously new. Authoring must never emit \".\"; newly authored packages use conventional roots such as \"capabilities/<slug>\". Paths must not escape the package root after symlink resolution, and everything the capability declares must resolve inside its OWN root — a capability that reaches package-only paths cannot be materialized and is rejected.",
       "type": "array",
       "minItems": 1,
       "items": {
@@ -86,7 +86,7 @@
       }
     },
     "configs": {
-      "description": "DEPRECATED 0.19 spelling of `configTemplates`, readable only so immutable published 0.19 package tags stay consumable and migratable. A manifest carrying it is treated as a legacy-format manifest (which is also the only way a \".\" capability root is accepted). New authoring must emit `configTemplates`; carrying both spellings is an invalid manifest.",
+      "description": "DEPRECATED 0.19 spelling of `configTemplates`, readable only so immutable published 0.19 package tags stay consumable. Both spellings normalize to one descriptor shape; the diagnostic `legacySpelling` flag records which was used. It is NOT the discriminator for a \".\" capability root — published legacy packages exist with neither spelling. New authoring must emit `configTemplates`; carrying both spellings is an invalid manifest.",
       "type": "object",
       "propertyNames": {
         "pattern": "^[a-z0-9][a-z0-9._-]*$"

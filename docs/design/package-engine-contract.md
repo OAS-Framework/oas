@@ -1,19 +1,20 @@
-# Package engine contract (capability materialization, lock v3)
+# Package engine contract (capability materialization, lock v2)
 
 Status: **FROZEN** for the capability-materialization delivery. This document is
 the resolver / projection / lock API that the config-and-CLI lane builds
 against. It implements the accepted Decision "Packages materialize capabilities
-while config templates remain explicitly adopted local policy" (2026-07-29); the
-Decision is authoritative where this document is silent. It supersedes the
-package-store portions of the previous freeze (lock v2, `.agents/packages/installed/`)
-while keeping the source grammar, contained-package-root contract, integrity
-discipline and error taxonomy of that freeze intact. Contract changes go through
-the coordinator to the maintainer.
+while config templates remain explicitly adopted local policy" (2026-07-29) as
+amended by the founder's simplification ruling: the capability-materialization
+`{ packages, capabilities }` lock **replaces** the earlier package-root
+`lockfileVersion: 2` in place and **remains `lockfileVersion: 2`**. There is no
+lock v3, and there is no compatibility path or migration for the earlier
+transitional v2 shape — it is unsupported input, rejected rather than converted.
+Contract changes go through the coordinator to the maintainer.
 
 Companion machine-readable schemas:
 
 - [`docs/oas-package.schema.json`](../oas-package.schema.json) — `oas-package.json`
-- [`docs/oas-lock.schema.json`](../oas-lock.schema.json) — `oas-lock.json` v3 (+ readable v2, v1)
+- [`docs/oas-lock.schema.json`](../oas-lock.schema.json) — `oas-lock.json` v2 (+ readable, usable v1)
 
 Addendum: [`package-runtime-api.md`](./package-runtime-api.md) — the public
 package-runtime CLI boundary, npm runtime closure semantics, incremental
@@ -27,14 +28,14 @@ activatable, trustable thing a user actually runs. Acquisition stages a package
 closure in a temporary transaction directory, validates the whole selected
 payload, **materializes** each declared capability into a flat, self-contained
 artifact under `.agents/capabilities/installed/<capability-id>/`, writes the
-exact v3 lock, and discards staging. There is **no persistent package root** in
-final v3 operation. Acquisition activates nothing and trusts nothing. Config
-templates are package source material that installation never applies.
+exact lock, and discards staging. There is **no persistent package root**.
+Acquisition activates nothing and trusts nothing. Config templates are package
+source material that installation never applies.
 
 ## 1. Package source grammar and normalized identity
 
-*(Unchanged from the previous freeze. Restated because the lock's `source` and
-`path` fields are parsed against exactly this grammar.)*
+*(Unchanged. Restated because the lock's `source` and `path` fields are parsed
+against exactly this grammar.)*
 
 A **package source spec** (CLI argument, or an entry in a manifest's
 `dependencies[]`) takes one of four forms:
@@ -60,7 +61,7 @@ is selected by the source contract — never hardcoded at a use site:
   `@ref` parsing so a path can never be mistaken for part of a ref. One
   fragment maximum; a second `#` is `invalid-source`.
 - **Catalog entries** carry it as data: `{ url, ref?, path? }`. The catalog
-  owns its packages' roots, so an entry may move one (see §4 `updatePackage`).
+  owns its packages' roots, so an entry may move one (see §5.5 `updatePackage`).
 - **Omitted** on either: the default is **`oas-package`**.
 - **Local paths** never take one. `oas install /repo/custom-root` treats that
   exact directory as the package root whatever it is named, and locks `.`.
@@ -134,22 +135,29 @@ addendum §4):
    are rejected: `invalid-package-manifest`. A package's reason to exist is the
    capabilities it materializes.
 2. **Dedicated capability roots.** Each entry names a directory carrying one
-   `oas.json`. Newly authored packages must not use `"."`; conventional roots
-   are `capabilities/<slug>/`.
-3. **`configTemplates` is the canonical spelling.** `configs` is accepted as a
-   deprecated read-only alias so immutable published 0.19 tags stay consumable
-   and migratable. Carrying **both** is `invalid-package-manifest`.
-4. **Legacy-format detection is by spelling.** A manifest carrying `configs` is
-   a *legacy-format* manifest, and that is the **only** context in which a `"."`
-   capability root is accepted. A manifest without `configs` is new-format: a
-   `"."` root is `invalid-package-manifest`.
-   *(Consequence: `oas install` of an immutable 0.19 `.`-layout package still
-   works — that is the compatibility this window exists for — but the projection
-   rules of §3 still apply, and a `.` layout that cannot be projected
-   self-contained fails rather than degrading.)*
+   `oas.json`. Authoring never emits `"."`; conventional roots are
+   `capabilities/<slug>/`.
+3. **`configTemplates` is the canonical spelling and is OPTIONAL.** A package
+   that ships no template is perfectly valid — installation is about
+   capabilities. `configs` is accepted as a deprecated read-only alias so
+   immutable published tags stay consumable; both spellings normalize to one
+   descriptor shape carrying a diagnostic `legacySpelling`. Carrying **both** is
+   `invalid-package-manifest`.
+4. **Legacy `"."` capability roots are read compatibility, and the discriminator
+   is `configTemplates` — never `configs`.** Published packages exist with a
+   `"."` root and *no* template map at all (`oas.authoring@1.0.0` is
+   `capabilities: ["."]` with neither spelling), so keying acceptance on
+   `configs` would strand them. The rule is therefore:
+   - a manifest **without** `configTemplates` may declare `"."` — the
+     compatibility reader accepts it and projects it;
+   - a manifest **with** `configTemplates` is unambiguously new, and `"."` is
+     `invalid-package-manifest`;
+   - authoring tooling rejects and never emits `"."` regardless.
+   `"."` remains exclusive with any other capability path (it would nest one
+   capability inside another).
 5. **Self-containment.** Everything a capability declares (`skills`, `inject`,
-   `commands`, `hooks`, `agents`, and any resource path) must resolve **inside
-   that capability's own root** after symlink resolution. A capability reaching
+   `commands`, `hooks`, `agents`) must exist and resolve **inside that
+   capability's own root** after symlink resolution. A capability reaching
    package-only paths, sibling capabilities, or outside the package is
    `capability-not-self-contained` — it cannot be materialized, and the engine
    fails rather than silently installing a broken artifact.
@@ -163,7 +171,7 @@ addendum §4):
 
 ```text
 <scope>/oas-config.yaml                              zero or one active config
-<scope>/oas-lock.json                                lock (v3)
+<scope>/oas-lock.json                                lock (v2)
 <scope>/.agents/capabilities/.gitignore              contains exactly `installed/`
 <scope>/.agents/capabilities/owned/<id>/             authored; normally committed
 <scope>/.agents/capabilities/installed/<id>/         MATERIALIZED artifact; ignored
@@ -173,55 +181,83 @@ addendum §4):
                                                       NEVER ignored)
 ```
 
-- There is **no `<scope>/.agents/packages/installed/`** in final v3 operation. A
-  package checkout exists only inside a transaction staging directory, which is
-  created under `.agents/capabilities/installed/.staging-<pid>-<rand>/` (same
-  filesystem as the destination, so the commit phase is a rename; already
-  gitignored; skipped by discovery because it is dot-prefixed) and removed
-  unconditionally when the transaction ends.
+- There is **no `<scope>/.agents/packages/`** in this model at all. A package
+  checkout exists only inside a transaction staging directory, which is created
+  under `.agents/capabilities/installed/.staging-<random>/` (same filesystem as
+  the destination, so the commit phase is a rename; already gitignored; skipped
+  by discovery because it is dot-prefixed) and removed unconditionally when the
+  transaction ends.
 - The **materialized artifact** at `installed/<id>/` is the complete validated
   capability root: its `oas.json`, skills, injections, commands, hooks,
   capability-defined agents, and its materialized runtime closure
   (`node_modules`, §6). It additionally carries a generated
-  **`.oas-installation.json`** provenance file:
+  **`.oas-installation.json`** provenance file.
 
-  ```json
-  {
-    "capability": "example.review", "version": "2.1.0",
-    "package": "example.engineering", "packageVersion": "3.0.0",
-    "source": "catalog:example.engineering", "commit": "0123…", 
-    "packagePath": "oas-package", "capabilityPath": "capabilities/example-review",
-    "installedBy": "0.20.0"
-  }
-  ```
+### 3.1 `.oas-installation.json` — deterministic, replayable provenance
 
-  It is **inside** the hashed tree: tampering with provenance is integrity drift.
-  The lock remains authoritative; this file is for inspection and diagnosis.
+The file is **inside** the hashed tree, so tampering with it is integrity drift.
+That is only sound if a future kernel reprojecting the same locked bytes
+produces the same file, so it contains **nothing about the writing kernel** —
+only lock-, source- and manifest-derived values:
+
+```json
+{
+  "schemaVersion": 1,
+  "capability": "example.review",
+  "version": "2.1.0",
+  "package": "example.engineering",
+  "packageVersion": "3.0.0",
+  "source": "catalog:example.engineering",
+  "commit": "0123456789abcdef0123456789abcdef01234567",
+  "packagePath": "oas-package",
+  "capabilityPath": "capabilities/example-review"
+}
+```
+
+Binding serialization: exactly these keys, in exactly this order,
+`JSON.stringify(obj, null, 2)` plus a single trailing `"\n"`, written with mode
+`0o644`. `schemaVersion` is a constant of the format, bumped only by an explicit
+contract change (which is itself an integrity change, so it is visible). Every
+field must agree with the lock rows it was projected from; a disagreement is
+`invalid-lock` at read time, and a modified file is `integrity-drift`. Bare
+restore under a newer kernel therefore reproduces the identical artifact hash.
+
+### 3.2 Integrity boundaries
+
 - **Capability artifact integrity** (`capabilityArtifactIntegrity`) hashes
   **every byte** under the artifact root — no exclusions, including
   `node_modules` and `.oas-installation.json`. It is the only thing executable
-  trust binds to, which is why the previous freeze's separate `depsIntegrity`
-  binding no longer exists at capability level: the runtime closure is *inside*
-  the artifact.
+  trust binds to; the runtime closure is *inside* the artifact, so there is no
+  separate dependency digest anywhere in this model.
 - **Package payload integrity** (`packageIntegrity`) hashes the staged package
   subtree excluding any `node_modules` and a root `oas-lock.json`. It proves the
   distribution bytes and is what bare restore re-verifies before reprojecting.
 - `.agents/capabilities/owned/<id>/` and `from: path:<dir>` keep their exact
   current semantics, precedence, and structural trust. `from: installed` means
   the flat installed-capability store regardless of which package supplied it.
-- **Git ignore maintenance** (`ensureInstalledGitignore`): at a Git-backed scope
-  the engine ensures `.agents/capabilities/.gitignore` contains `installed/`
-  **and nothing else it added** — it never writes `owned/` and never touches
-  `.agents/config-templates/`. Outside version control it is a no-op returning
-  `false`: non-Git scopes use the same layout without fake Git state. It runs
-  after the artifact+lock transaction has committed and is **best-effort**: an
-  unwritable ignore file never turns a committed transaction into an error.
 
-## 4. Lock v3
+### 3.3 Git ignore maintenance is part of the transaction
+
+`ensureInstalledGitignore` is **not** post-commit convenience. At a Git-backed
+scope the engine **preflights** `.agents/capabilities/.gitignore` before any
+authoritative mutation: it snapshots the prior bytes (or the file's absence),
+ensures the file contains `installed/`, and if it cannot do so **fails before
+any artifact or lock mutation**. If the transaction later fails, the ignore
+bytes are rolled back with everything else. It writes `installed/` and nothing
+else: `owned/` holds authored capabilities and
+`.agents/config-templates/adopted/` holds portable adopted bases, and neither is
+ever ignored or touched. Outside version control it is a no-op: a non-Git scope
+uses the same layout without pretending Git owns its durability.
+
+The engine owns this for acquire, restore, update and v1 migration. The CLI lane
+keeps its own outer rollback journal and snapshots the prior ignore state
+alongside its other state; no engine transaction handle or callback is exchanged.
+
+## 4. Lock v2 (capability materialization)
 
 ```json
 {
-  "lockfileVersion": 3,
+  "lockfileVersion": 2,
   "packages": {
     "example.engineering": {
       "source": "git:https://example.invalid/engineering.git@v3.0.0",
@@ -244,34 +280,68 @@ addendum §4):
 }
 ```
 
-- Package rows exact-lock the transport unit: `source`, selected package `path`,
-  `version`, `commit`, package payload `integrity`, and **package-identity**
-  `dependencies`. A package row no longer lists capabilities and no longer
-  carries trust: the `capabilities` map's `package` back-reference is the single
-  provider truth, so the two levels cannot disagree.
-- Capability rows exact-lock the installed entity: `version` (from the
-  capability's own `oas.json`), provider `package`, dedicated manifest `path`
-  inside that package, materialized artifact `integrity`, and boolean `trusted`
-  bound **only** to that capability integrity.
+- Both top-level maps are **required**. `packages` rows exact-lock the transport
+  unit: `source`, selected package `path`, `version`, `commit`, package payload
+  `integrity`, and **package-identity** `dependencies` — always present, an
+  empty array when there are none. `capabilities` rows exact-lock the installed
+  entity: `version` (from the capability's own `oas.json`), provider `package`,
+  dedicated manifest `path` inside that package, materialized artifact
+  `integrity`, and boolean `trusted` bound **only** to that artifact integrity.
+- A package row carries **no** capability list and **no** trust: the capability
+  rows' `package` back-reference is the single provider truth, so the two levels
+  cannot disagree.
 - Semantic invariants validated before any consumption (`invalid-lock`):
   every `capabilities.*.package` is a key of `packages`; every
   `packages.*.dependencies[]` id is a key of `packages`, with no self-dependency
   and no cycle; canonical `path` spellings; `path:` sources require
   `commit: "local"` and `path: "."`; `git:`/`catalog:` require an exact 40-hex
-  commit; sha256 digest shapes; array uniqueness; package-identity charset on
-  every map key, read into null-prototype maps so raw-JSON
-  `__proto__`/`constructor` keys cannot forge entries.
-- **v3 has no residue container.** `capabilities` *is* the capability map. A v1
-  lock therefore converts to v3 only when every one of its entries converts
-  (§7); a scope that cannot fully convert stays v1 and keeps working.
+  commit; sha256 digest shapes; array uniqueness.
+- **Prototype safety is global.** Every map is read into a null-prototype
+  object with identity-charset-validated keys, and *every* lookup or membership
+  check keyed by a package or capability ID uses `Object.hasOwn` or such a map —
+  central read, dependency graph, provider resolution, trust, update and remove
+  alike. Raw parsed JSON returns inherited `constructor`, `toString` or
+  `valueOf` for `map[id]` when no own entry exists, so a prototype-named or
+  hostile ID must never be able to impersonate a provider, a dependency or a
+  trust entry, or to bypass a membership check.
+
+### 4.1 The unsupported transitional v2 shape
+
+The earlier package-root spelling of `lockfileVersion: 2` is **unsupported
+input**. It is detected centrally, **before any discovery or mutation**, and
+rejected with typed `invalid-lock` and an actionable message naming the
+unsupported transitional v2 shape and scope recreation. It is never converted
+and never partially interpreted.
+
+Detection uses **direct raw lock-scope reads** — walking ancestor directories
+that own an `oas-lock.json`, *not* `configChain`, so lock-only scopes with no
+config are visible — and this exact OR predicate:
+
+1. a **nonempty** `lockfileVersion: 2` document with no top-level `capabilities`
+   map is unsupported transitional v2 **by itself**; **independently**
+2. any package row for which
+   `Object.hasOwn(row, "capabilities") || Object.hasOwn(row, "trustedCapabilities") || Object.hasOwn(row, "depsIntegrity")`
+   is forbidden transitional evidence.
+
+The row test is **own-property presence, never truthiness or array length**: an
+empty `capabilities: []`, an empty `trustedCapabilities: []`, and a dependency-free
+old row that carries `capabilities`/`trustedCapabilities` but no `depsIntegrity`
+are all still transitional. Package-row `path` and `dependencies` are **never**
+tells — the current shape retains both.
+
+An **empty** transitional `{ "lockfileVersion": 2, "packages": {} }` carries no
+state and is semantically identical to an empty current lock, so it normalizes
+to `{ lockfileVersion: 2, packages: {}, capabilities: {} }`. An empty
+`lockfileVersion: 1` file does **not** normalize: it remains pending explicit
+format migration.
 
 ## 5. Exported kernel functions (`lib/core.mjs`)
 
 All functions are runtime-neutral and dependency-free like the rest of the
 kernel. Errors are thrown `Error`s carrying `code` (§8) and, where relevant,
-`provenance`.
+`provenance`. Typed engine codes and messages pass through the CLI verbatim.
 
-### 5.1 Source, manifest, integrity (unchanged shapes unless noted)
+### 5.1 Source, manifest, integrity
 
 ```js
 export function parsePackageSource(spec, { baseDir } = {})
@@ -280,15 +350,14 @@ export function normalizePackagePath(raw, opts)
 export function inspectGitSourceRoot(spec)
 export function resolvePackageRoot(checkout, packagePath, spec)
 export function gitCheckoutExactRef(dir, ref, spec)
-export function packageIntegrity(dir)           // payload hash; excludes node_modules
-export function capabilityArtifactIntegrity(dir) // NEW: materialized artifact hash, no exclusions
-export function capabilityIntegrity(dir)         // legacy v1 artifact hash (kept for v1 reads)
+export function packageIntegrity(dir)            // payload hash; excludes node_modules
+export function capabilityArtifactIntegrity(dir) // materialized artifact hash, no exclusions
+export function capabilityIntegrity(dir)         // v1 artifact hash (legacy capability store)
 
 /** Load + validate an oas-package.json against §2. Returns the manifest plus
- * _dir, _legacyFormat (true when the deprecated `configs` spelling was used),
- * _configTemplates (normalized {name: {path, description?, default?}} from
- * either spelling), and
- * _capabilities: [{ id, rel, dir, manifest }].
+ * _dir, _legacySpelling (true when the deprecated `configs` key was used),
+ * _configTemplates (normalized { name: { path, description?, default } } from
+ * either spelling), and _capabilities: [{ id, rel, dir, manifest }].
  * @throws "invalid-package-manifest", "path-escape", "duplicate-capability-id",
  *         "retired-capability"
  */
@@ -305,43 +374,40 @@ export function assertCapabilitySelfContained(capDir, manifest)
 ### 5.2 Locks
 
 ```js
-/** THE strict lock reader/validator for v1, v2 AND v3. Returns
- * { version, packages, capabilities, legacy } or null when the file is absent.
- * Every violation is a typed invalid-lock with file/package provenance. Old
- * locks are read as they are — never normalized, repaired or rewritten.
+/** THE strict lock reader/validator for v1 and v2. Returns
+ * { version, packages, capabilities, legacyCapabilities } — all null-prototype
+ * and validated — or null when the file is absent. Rejects the unsupported
+ * transitional v2 shape (§4.1) centrally, with NO side effects. Old locks are
+ * read as they are: never normalized, repaired or rewritten (the one exception
+ * is the state-free empty transitional document of §4.1).
  */
 export function parseLockFileStrict(file)
 
-/** Read every lock visible from a directory (config-chain levels PLUS any
- * ancestor owning an oas-lock.json), closest scope wins per identity.
+/** Read every lock visible from a directory — every ancestor owning an
+ * oas-lock.json, plus config-chain levels — closest scope wins per identity.
  * SOLE strict reader; consumers never see an invalid lock as absent or usable.
  * @returns {{
- *   packages: Record<pkgId, PackageRow & { _file, _level, _lockfileVersion }>,
- *   capabilities: Record<capId, CapabilityRow & { _file, _level }>, // v3 only
- *   legacy: Array<{ file, level, lockfileVersion, capabilities }>,  // v1 files + v2 residue
- *   migration: Array<{ file, level, lockfileVersion, kind: "v1"|"v1-empty"|"v2"|"v2-residue",
- *                      packages: string[], capabilities: string[] }>
+ *   packages: Record<pkgId, PackageRow & { _file, _level }>,
+ *   capabilities: Record<capId, CapabilityRow & { _file, _level }>,
+ *   legacy: Array<{ file, level, lockfileVersion, capabilities }>,   // v1 files
+ *   migration: Array<{ file, level, lockfileVersion, kind: "v1"|"v1-empty",
+ *                      capabilities: string[] }>
  * }}
- *   // `migration` is provenance ONLY: it says which scopes still need an
- *   // explicit conversion and what they hold. Reading never converts anything.
- *   // v2 package rows appear in `packages` tagged _lockfileVersion: 2 so doctor
- *   // can diagnose them; they carry v2 fields (capabilities[],
- *   // trustedCapabilities[], depsIntegrity) and MUST NOT be treated as v3.
+ *   // `migration` is provenance ONLY: which scopes still need an explicit
+ *   // conversion and what they hold. Reading never converts anything.
  */
 export function readPackageLocks(startDir)
 
-/** Write/replace (entry) or delete (entry === null) one v3 package row.
- * Validates the COMPLETE prospective document before writing. Refuses a v1/v2
- * file: code "legacy-lock" (migrate first). An absent file, or an empty v1
- * file ({} / {capabilities:{}}), is treated as a fresh v3 document.
- * @returns {string} lock file path
+/** Write/replace (entry) or delete (entry === null) one package row / one
+ * capability row. Each validates the COMPLETE prospective document before
+ * writing. An existing v1 lock — INCLUDING an empty one — is `legacy-lock`:
+ * conversion happens only through explicit migration, so only an ABSENT lock is
+ * a fresh document.
  */
 export function writePackageLock(levelDir, packageId, entry)
-
-/** Same, for one v3 capability row. */
 export function writeCapabilityLockEntry(levelDir, capabilityId, entry)
 
-/** Semantic validation of one v3 row against the whole document (§4). */
+/** Semantic validation of one row against the whole document (§4). */
 export function validateLockEntry(packageId, entry, allPackages, opts)
 export function validateCapabilityLockEntry(capabilityId, entry, allPackages, opts)
 ```
@@ -356,10 +422,12 @@ export function validateCapabilityLockEntry(capabilityId, entry, allPackages, op
  * collisions and capability-ID collisions (within the closure, and against
  * capabilities already locked at this scope by packages outside it); asserts
  * every capability is self-contained; materializes each capability's runtime
- * closure IN STAGING; then atomically swaps every projected artifact into
- * `.agents/capabilities/installed/<id>/` and writes the v3 lock. On any failure
- * before the swap, the store and lock are byte-identical to the pre-operation
- * state. Staging is always removed.
+ * closure IN STAGING; preflights the scope's `.gitignore` (§3.3); then
+ * atomically swaps every projected artifact into
+ * `.agents/capabilities/installed/<id>/` and writes the lock. On ANY failure —
+ * before OR during the commit phase — every already-renamed artifact, the lock
+ * bytes and the ignore bytes are rolled back to the pre-operation state.
+ * Staging is always removed.
  *
  * ACTIVATES NOTHING and TRUSTS NOTHING: `trusted` is false for every capability
  * whose artifact integrity is not byte-identical to the one already locked.
@@ -368,7 +436,7 @@ export function validateCapabilityLockEntry(capabilityId, entry, allPackages, op
  * @param {string} spec      package source spec
  * @param {{ catalog?, replace?: boolean, expectPackage?: string, rootSnapshot? }} [opts]
  * @returns {{
- *   root: string,                       // root package identity
+ *   root: string,
  *   lockFile: string,
  *   installed: Array<{ package, version, source, path, commit, integrity,
  *                      dependencies: string[], capabilities: string[], kept: boolean }>,
@@ -377,10 +445,11 @@ export function validateCapabilityLockEntry(capabilityId, entry, allPackages, op
  *                         executableSurface: { commands: string[], hooks: string[] } }>,
  *   configTemplates: Array<{ package, template, path, description?, default: boolean,
  *                            content: string, contentIntegrity: string,
- *                            legacySpelling: boolean }>
+ *                            legacySpelling?: boolean }>
  * }}
  *   // `configTemplates` carries VALIDATED descriptors AND payload bytes read
- *   // from staging before it is discarded, so the config lane can offer/adopt a
+ *   // from staging before it is discarded, with digests identical to what
+ *   // `readLockedConfigTemplates` would return, so the config lane can adopt a
  *   // template inside the same transaction without a second fetch. Acquisition
  *   // itself applies none of them.
  * @throws "invalid-source", "invalid-package-manifest", "path-escape",
@@ -390,7 +459,7 @@ export function validateCapabilityLockEntry(capabilityId, entry, allPackages, op
  */
 export function acquirePackage(levelDir, spec, opts)
 
-/** Bare restore from a v3 lock, for every visible lock-owning scope.
+/** Bare restore, for every visible lock-owning scope.
  *
  * Preflight parses and caches the COMPLETE visible chain before any fetch,
  * staging or swap. Per capability: a present artifact whose integrity equals the
@@ -399,8 +468,8 @@ export function acquirePackage(levelDir, spec, opts)
  * its payload integrity is verified against the package row, the capability is
  * reprojected, its artifact integrity is verified against the capability row,
  * and only then swapped in. NEVER advances source/version/commit/path, never
- * changes `trusted`, never converts a lock. v1/v2 scopes are reported as
- * `legacy` with their migration action.
+ * changes `trusted`, never converts a lock. v1 scopes restore through the
+ * existing legacy capability path and are reported with their migration action.
  *
  * @returns {Array<{ package?, capability?, level, status:
  *   "ok"|"restored"|"failed"|"legacy", dir?, reason?, code? }>}
@@ -408,12 +477,12 @@ export function acquirePackage(levelDir, spec, opts)
  */
 export function restorePackages(startDir, opts)
 
-/** Derive the package/provider view from the v3 lock + the flat capability
- * store — NOT from a package root (there is none). Closest scope wins per
- * package identity; two same-scope packages claiming one capability ID is
+/** Derive the package/provider view from the lock + the flat capability store —
+ * NOT from a package root (there is none). Closest scope wins per package
+ * identity; two same-scope packages claiming one capability ID is
  * duplicate-capability-id.
  * @returns {Array<{ package, version, level, source, path, commit, integrity,
- *   dependencies: string[], lockfileVersion: 3,
+ *   dependencies: string[],
  *   capabilities: Array<{ id, version, path, dir, integrity, trusted,
  *                         installed: boolean, manifest? }> }>}
  *   // `installed:false` + absent `manifest` = locked but not materialized —
@@ -421,7 +490,6 @@ export function restorePackages(startDir, opts)
  */
 export function listInstalledPackages(startDir)
 
-/** Path of a materialized capability artifact at a scope. */
 export function installedCapabilityDir(levelDir, capabilityId)
 export const CAPABILITY_INSTALLATION_FILE   // ".oas-installation.json"
 ```
@@ -460,8 +528,8 @@ export function approveCapability(levelDir, id, { allCapabilities } = {})
  * - Trust is preserved ONLY for capabilities whose new artifact integrity is
  *   byte-identical to the locked one; any change sets `trusted: false`.
  * - Exports that no longer exist are removed ONLY when safe: no config in the
- *   chain references them and no other locked package depends on the provider.
- *   Otherwise the whole update fails `remove-blocked` with the blockers.
+ *   chain references them. Otherwise the whole update fails `remove-blocked`
+ *   and the pre-operation state is restored.
  * @returns {{ package, level, changed, pathChanged, before, after, installed,
  *   capabilities, configTemplates, addedCapabilities, removedCapabilities,
  *   retiredArtifacts, invalidatedApprovals }}
@@ -484,20 +552,20 @@ export function removePackage(startDir, packageId)
  * — the config lane's `oas config diff` / `oas config sync` / `oas config adopt`
  * input.
  *
- * Stages the locked source (source + commit + path) in a temp directory,
- * validates the manifest, verifies the payload integrity against the package
+ * Stages the locked source (source + commit + path), validates the manifest and
+ * its resource containment, verifies the payload integrity against the package
  * row, reads the requested template bytes, and removes staging. It NEVER
- * persists a package root, never exposes a path into one, never mutates the
- * lock or the capability store, and never advances anything.
+ * persists a package root, never exposes a path into one, never mutates the lock
+ * or the capability store, and never advances anything. A plain list of what is
+ * installed must NOT call this — it is a network operation.
  *
- * @param {string} startDir
- * @param {string} packageId
  * @param {{ template?: string, catalog? }} [opts]  template omitted = all of them
  * @returns {{ package, source, version, commit, path, integrity,
- *   templates: Array<{ template, path, description?, default: boolean,
- *                      content: string, contentIntegrity: string }> }}
+ *   templates: Array<{ template, path, description?, default, content,
+ *                      contentIntegrity, legacySpelling? }> }}
  *   // `integrity` is the package PAYLOAD integrity, verified equal to the lock;
- *   // `contentIntegrity` is the sha256 of the template bytes themselves.
+ *   // `contentIntegrity` is `sha256-<64 lowercase hex>` over the exact template
+ *   // content bytes. The CLI lane owns oas-config schema/policy validation.
  * @throws "unknown-capability" (no such locked package), "invalid-lock",
  *         "integrity-drift", "invalid-package-manifest", "invalid-source",
  *         "unknown-config-template"
@@ -505,43 +573,32 @@ export function removePackage(startDir, packageId)
 export function readLockedConfigTemplates(startDir, packageId, opts)
 ```
 
-### 5.7 Migration
+### 5.7 Migration (v1 only)
 
 ```js
-/** Plan the conversion of one scope's lock to v3. PURE — applies nothing.
+/** Plan the conversion of one scope's v1 lock. PURE — applies nothing.
  *
- * v1 sources: `marketplace:` entries map through the catalog (aliases first,
- * then identity); `git:`/`path:` entries map to package specs when the source
- * really is a package. Anything unmappable makes the SCOPE unconvertible —
- * v3 has no residue container — so it is reported as `hold`/`manual` and the
- * scope stays v1.
- * v2 sources: every locked package row is projected. When the installed package
- * root is present and its integrity matches the row, projection uses those
- * EXACT bytes and performs NO network access; otherwise the exact locked source
- * is re-fetched.
+ * `marketplace:` entries map through the catalog (aliases first, then identity);
+ * `git:`/`path:` entries map to package specs when the source really is a
+ * package. Anything unmappable makes the SCOPE unconvertible — the lock has no
+ * residue container — so it is reported as `hold`/`manual` and the scope stays
+ * v1 and keeps working.
  *
- * @returns {{ from: 1|2|3, convertible: boolean,
- *   plan: Array<{ capabilityId?, package?, v1?, v2?, source?, spec?,
- *                 action: "acquire"|"project-local"|"refetch"|"convert-format"
- *                       |"hold"|"manual"|"keep-owned" , reason? }>,
+ * @returns {{ from: 1|2, convertible: boolean,
+ *   plan: Array<{ capabilityId?, v1?, package?, spec?,
+ *                 action: "acquire"|"convert-format"|"hold"|"manual"|"retain" ,
+ *                 reason? }>,
  *   warnings: string[] }}
  */
 export function migrateLegacyLock(levelDir, opts)
 
-/** Apply that plan, transactionally.
- *
- * - Conversion is explicit and all-or-nothing per scope.
- * - v2: capabilities are projected from already-locked bytes without network
- *   when available; `trustedCapabilities` carries over to `trusted` ONLY for
- *   capabilities projected from LOCAL bytes whose package integrity matched the
- *   v2 lock (same bytes the user approved — never a broadening); a capability
- *   that had to be re-fetched lands untrusted.
- * - `.agents/packages/installed/` is removed only AFTER the v3 artifacts and
- *   lock are durable.
- * - Any failure restores the prior lock BYTE-IDENTICALLY, removes everything the
- *   conversion created, and leaves the old store untouched.
- * - Owned/path capabilities are not touched.
- * @returns {{ from, migrated, residue, skipped?, removedStore?, warnings, file, trust }}
+/** Apply that plan, transactionally and all-or-nothing per scope. Executable
+ * approvals are never carried over — a v1 capability artifact and a materialized
+ * artifact are different bytes — and the returned `trust[]` names every surface
+ * to re-approve. Any failure restores the original v1 lock BYTE-IDENTICALLY,
+ * removes everything the conversion created, and leaves superseded v1 artifacts
+ * in place.
+ * @returns {{ migrated, residue, skipped?, warnings, file, trust }}
  * @throws "official-mapping-unavailable", "legacy-lock", "invalid-lock", …
  */
 export function applyLegacyLockMigration(levelDir, opts)
@@ -549,15 +606,12 @@ export function applyLegacyLockMigration(levelDir, opts)
 
 ## 6. Runtime closure in the materialized model
 
-The npm rules of the addendum §2 are unchanged in kind and change in *placement*:
-
 - **Materialization roots are the declared CAPABILITY roots**, each carrying
   both `package.json` and `package-lock.json`. A package-root-only closure has
-  no durable home in v3 and is **not** materialized — it is package tooling. If a
+  no durable home and is **not** materialized — it is package tooling. If a
   capability actually needs it, self-containment (§2.5) fails and the package is
-  rejected: that is the "fail rather than silently retain package-only paths"
-  rule. (For a legacy `.` capability root, capability root == package root, so
-  the package-root closure *is* the capability closure.)
+  rejected. (For a legacy `"."` capability root, capability root == package root,
+  so the package-root closure *is* the capability closure.)
 - `npm ci --omit=dev --omit=peer --ignore-scripts --no-audit --no-fund` only;
   no npm lifecycle scripts ever run, at any phase.
 - Transaction-wide platform-invariance preflight over EVERY materialization
@@ -568,23 +622,27 @@ The npm rules of the addendum §2 are unchanged in kind and change in *placement
 - Materialization happens **in staging**; a failure fails the whole transaction
   with the store and lock unchanged.
 - The closure is inside the artifact, so it is covered by the capability's
-  `integrity` — there is no separate `depsIntegrity` at capability level.
-  Tampering with a materialized dependency invalidates `trusted` exactly like
-  source drift, and bare restore reprojects it.
+  `integrity`. Tampering with a materialized dependency invalidates `trusted`
+  exactly like source drift, and bare restore reprojects it.
 
-## 7. Compatibility and migration
+## 7. Compatibility
 
-The kernel continues to **read**:
+**v1 stays usable without any implicit conversion.** Runtime discovery, exact
+restore, trust checks and approval updates, and `doctor`/`list` diagnosis all
+continue to work against v1 locks and the existing
+`.agents/capabilities/installed/` v1 artifacts. Ordinary use of an unconverted
+deployment must not require migration; only lifecycle *mutation* through the new
+package surface does (`legacy-lock`, naming the explicit command). Guided
+official migration converts a v1 scope **directly** into this flat capability
+materialization.
 
-- valid v1 capability locks and their `.agents/capabilities/installed/` artifacts
-  (legacy standalone-capability restore and trust keep working unchanged);
-- valid v2 package locks and their `.agents/packages/installed/` roots; and
-- immutable package manifests using `configs` or a `"."` capability root.
+**Immutable published package manifests** using `configs`, or a `"."` capability
+root, remain readable and projectable under §2.3–2.4.
 
-The kernel **writes** only v3. Conversion is explicit (`oas migrate`),
-transactional and all-or-nothing per scope; a failed conversion leaves the prior
-lock and store byte-identical; unmappable v1 scopes stay v1 and keep working;
-owned/path capabilities are unchanged; and executable trust is never broadened.
+**The earlier transitional package-root v2** is unsupported input (§4.1): it
+fails clearly rather than being guessed at or converted. Existing local
+pre-adoption state is recreated by reinstalling; there is no product migration
+path, and there is no compatibility subsystem to maintain.
 
 ## 8. Error taxonomy
 
@@ -595,7 +653,7 @@ Stable `error.code` values (also the `--json` envelope codes):
 | `invalid-source` | source spec parses to none of the four grammar forms |
 | `invalid-package-manifest` | `oas-package.json` missing/invalid against §2, or a declared path does not identify the expected resource kind |
 | `path-escape` | a declared path resolves outside its containment root after symlink resolution (package root when staging, capability root when projecting, artifact root at runtime) |
-| `capability-not-self-contained` | **new** — a declared capability cannot be materialized as a self-contained artifact (a declared resource resolves outside its capability root, or is missing) |
+| `capability-not-self-contained` | a declared capability cannot be materialized as a self-contained artifact (a declared resource is missing, or resolves outside its capability root) |
 | `dependency-cycle` | package dependency graph contains a cycle (provenance: the cycle path) |
 | `duplicate-package-identity` | two sources claim the same package identity at one scope (provenance: both sources) |
 | `duplicate-capability-id` | two packages export the same capability ID at one scope, or one package exports it twice (provenance: both) |
@@ -603,15 +661,15 @@ Stable `error.code` values (also the `--json` envelope codes):
 | `capability-list-mismatch` | a locked capability's provider package no longer exports it at the locked path |
 | `incompatible-oas` | `compatibility.oas` floor not met by the running kernel |
 | `retired-capability` | a package exports / config references a capability the kernel has retired |
-| `legacy-lock` | operation requires lockfileVersion 3 but the scope has v1 or v2 — run the migration command |
-| `invalid-lock` | lock violates the semantic invariants of §4 — fail closed, no normalization, no auto-repair |
+| `legacy-lock` | operation requires the current lock shape but the scope has v1 — run the explicit migration command |
+| `invalid-lock` | lock violates the semantic invariants of §4, **or** is the unsupported transitional v2 shape of §4.1 — fail closed, no normalization, no auto-repair, no side effects |
 | `unknown-capability` | trust/update/remove/template target is not present in the visible locks |
 | `unknown-config-template` | the package has no config template by that name |
 | `remove-blocked` | removal target is still referenced by config or by a dependent locked package (provenance: the blockers) |
 | `official-mapping-unavailable` | guided official migration cannot map a legacy official capability yet; the scope was left unchanged |
 
-Fail-closed enforcement points: `readPackageLocks`, `listInstalledPackages` and
-`parseLockFileStrict` RAISE — consumers never see an invalid lock as absent or
+Fail-closed enforcement points: `parseLockFileStrict`, `readPackageLocks` and
+`listInstalledPackages` RAISE — consumers never see an invalid lock as absent or
 usable data; the writers validate the complete prospective document before
 writing; restore, trust queries, approval, update/remove/migration planning and
 the template reader all validate before acting. Doctor is the only consumer that
@@ -635,12 +693,13 @@ continues past an invalid lock, and it never uses the invalid data.
 - No silent lock advancement anywhere: bare restore never changes
   source/version/commit/path; only an explicit `oas update <package-id>` may.
 - No npm lifecycle scripts, ever; production closure only; platform-invariant
-  closures required in v1.
+  closures required.
 - Existing config targeting / layer / injection / override / scope-precedence
   semantics are unchanged, including `from: installed`, `from: owned`,
   `from: path:<dir>`, `none` for inherited layers, and injection ejection.
 - `.agents/capabilities/owned/<id>` and `from: path:<dir>` capability development
   are untouched by package paths and keep their existing structural/executable
   trust, targeting, override and composition semantics.
-- Git-backed scopes ignore `installed/` only; `owned/` and adopted config-template
-  data are never ignored. Non-Git scopes work without fake Git state.
+- Git-backed scopes ignore `installed/` only, ensured transactionally; `owned/`
+  and adopted config-template data are never ignored. Non-Git scopes work
+  without fake Git state.

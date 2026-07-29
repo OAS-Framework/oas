@@ -2,14 +2,14 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://oas.dev/schemas/oas-lock.schema.json",
   "title": "OAS lockfile (oas-lock.json)",
-  "description": "Scope-local lockfile. lockfileVersion 3 records BOTH levels of the materialization model: `packages` locks the transport unit (exact source + commit + selected root + payload integrity + package-identity dependencies) and `capabilities` locks the installed entity (the materialized artifact under .agents/capabilities/installed/<id>/, its provider package, its dedicated manifest path inside that package, its artifact integrity, and its executable trust). lockfileVersion 2 (package store) and lockfileVersion 1 (per-capability marketplace locks) remain READABLE for diagnosis and explicit migration; neither is written any more, and neither is normalized or repaired on read. A lock never advances silently on restore.",
+  "description": "Scope-local lockfile. lockfileVersion 2 records BOTH levels of the capability-materialization model: `packages` locks the transport unit (exact source + commit + selected root + payload integrity + package-identity dependencies) and `capabilities` locks the installed entity (the materialized artifact under .agents/capabilities/installed/<id>/, its provider package, its dedicated manifest path inside that package, its artifact integrity, and its executable trust). Both maps are REQUIRED. lockfileVersion 1 (per-capability marketplace locks) remains readable and usable and converts only through explicit migration. The earlier transitional package-root spelling of lockfileVersion 2 — package rows carrying `capabilities`/`trustedCapabilities`/`depsIntegrity`, and/or no top-level capability map — is UNSUPPORTED: it is rejected as an invalid lock, never converted and never partially interpreted. A lock never advances silently on restore.",
   "type": "object",
   "required": [
     "lockfileVersion"
   ],
   "oneOf": [
     {
-      "title": "lockfileVersion 3 — package provenance + materialized capability identity",
+      "title": "lockfileVersion 2 — package provenance + materialized capability identity",
       "type": "object",
       "required": [
         "lockfileVersion",
@@ -18,10 +18,10 @@
       ],
       "properties": {
         "lockfileVersion": {
-          "const": 3
+          "const": 2
         },
         "packages": {
-          "description": "Map of package identity → exact provenance of the transport unit for the full dependency closure at this scope. A package row proves WHERE the bytes came from; it does not describe an installed directory (there is no persistent package store in v3). The capabilities a package supplies are read off the `capabilities` map's `package` back-reference, so the two levels can never disagree.",
+          "description": "Map of package identity → exact provenance of the transport unit for the full dependency closure at this scope. A package row proves WHERE the bytes came from; it does not describe an installed directory, because there is no persistent package store. Which capabilities a package supplies is read off the `capabilities` map's `package` back-reference, so the two levels can never disagree — a package row carrying a capability list, a trust list, or a dependency-closure digest is the unsupported transitional shape.",
           "type": "object",
           "propertyNames": {
             "pattern": "^[a-z0-9][a-z0-9._-]*$"
@@ -33,7 +33,8 @@
               "path",
               "version",
               "commit",
-              "integrity"
+              "integrity",
+              "dependencies"
             ],
             "properties": {
               "source": {
@@ -63,7 +64,7 @@
                 "pattern": "^sha256-[0-9a-f]{64}$"
               },
               "dependencies": {
-                "description": "Package identities of direct dependencies (each present in this lock's packages map). Package-identity references only — never source strings.",
+                "description": "Package identities of direct dependencies, each a key of this lock's packages map. ALWAYS recorded — an empty array when the package has none, so a reader never has to distinguish absent from empty. Package-identity references only, never source strings.",
                 "type": "array",
                 "items": {
                   "type": "string",
@@ -76,7 +77,7 @@
           }
         },
         "capabilities": {
-          "description": "Map of capability ID → the materialized installed entity at .agents/capabilities/installed/<id>/. Every entry names the package that supplied it; that package MUST be a key of this lock's `packages` map.",
+          "description": "Map of capability ID → the materialized installed entity at .agents/capabilities/installed/<id>/. REQUIRED (empty object when the scope locks nothing). Every entry names the package that supplied it; that package MUST be a key of this lock's `packages` map.",
           "type": "object",
           "propertyNames": {
             "minLength": 1
@@ -102,7 +103,7 @@
                 "pattern": "^[a-z0-9][a-z0-9._-]*$"
               },
               "path": {
-                "description": "Canonical, package-relative path of the capability's DEDICATED root inside the provider package — the directory carrying its oas.json. Records exactly what was projected, so a package that moves a capability root is visible as a change. \".\" is only valid for a legacy (0.19, `configs`-spelling) package whose capability root is the package root; newly authored packages use dedicated roots such as \"capabilities/<slug>\".",
+                "description": "Canonical, package-relative path of the capability's DEDICATED root inside the provider package — the directory carrying its oas.json. Records exactly what was projected, so a package that moves a capability root is visible as a change. \".\" occurs only for an already-published legacy package whose capability root is the package root; newly authored packages use dedicated roots such as \"capabilities/<slug>\".",
                 "type": "string",
                 "pattern": "^(\\.|(?!~)(?![A-Za-z]:[/\\\\])(?!\\.\\.?(/|$))[^/\\\\]+(/(?!\\.\\.?(/|$))[^/\\\\]+)*)$",
                 "minLength": 1
@@ -113,7 +114,7 @@
                 "pattern": "^sha256-[0-9a-f]{64}$"
               },
               "trusted": {
-                "description": "Whether this capability's executable surface (commands/hooks) is approved at exactly this artifact integrity. Reset to false whenever the artifact integrity changes. Official catalog identity never grants it; a package-level approval does not exist.",
+                "description": "Whether this capability's executable surface (commands/hooks) is approved at exactly this artifact integrity. Reset to false whenever the artifact integrity changes. Official catalog identity never grants it; there is no package-level approval.",
                 "type": "boolean"
               }
             },
@@ -124,107 +125,7 @@
       "additionalProperties": false
     },
     {
-      "title": "lockfileVersion 2 — package store (readable for diagnosis and migration only)",
-      "type": "object",
-      "required": [
-        "lockfileVersion",
-        "packages"
-      ],
-      "properties": {
-        "lockfileVersion": {
-          "const": 2
-        },
-        "packages": {
-          "description": "Map of package identity → exact lock entry for the full dependency closure at this scope, as written by 0.19 into .agents/packages/installed/. Never written by this kernel; `oas migrate` projects it into v3.",
-          "type": "object",
-          "propertyNames": {
-            "pattern": "^[a-z0-9][a-z0-9._-]*$"
-          },
-          "additionalProperties": {
-            "type": "object",
-            "required": [
-              "source",
-              "path",
-              "version",
-              "commit",
-              "integrity",
-              "capabilities"
-            ],
-            "properties": {
-              "source": {
-                "type": "string",
-                "pattern": "^(catalog:[a-z0-9][a-z0-9._-]*(@[^#]+)?|path:/[^#]*|git:(https?://|file://|git@|ssh://|git://)[^#]+)$"
-              },
-              "path": {
-                "type": "string",
-                "pattern": "^(\\.|(?!~)(?![A-Za-z]:[/\\\\])(?!\\.\\.?(/|$))[^/\\\\]+(/(?!\\.\\.?(/|$))[^/\\\\]+)*)$",
-                "minLength": 1
-              },
-              "version": {
-                "type": "string",
-                "minLength": 1
-              },
-              "commit": {
-                "type": "string",
-                "pattern": "^([0-9a-f]{40}|local)$"
-              },
-              "integrity": {
-                "description": "sha256 tree hash of the installed package root.",
-                "type": "string",
-                "pattern": "^sha256-[0-9a-f]{64}$"
-              },
-              "depsIntegrity": {
-                "description": "sha256 digest of the materialized runtime dependency closure under the installed package root.",
-                "type": "string",
-                "pattern": "^sha256-[0-9a-f]{64}$"
-              },
-              "capabilities": {
-                "type": "array",
-                "items": {
-                  "type": "string",
-                  "minLength": 1
-                },
-                "uniqueItems": true
-              },
-              "dependencies": {
-                "type": "array",
-                "items": {
-                  "type": "string",
-                  "pattern": "^[a-z0-9][a-z0-9._-]*$"
-                },
-                "uniqueItems": true
-              },
-              "trustedCapabilities": {
-                "description": "Capability IDs whose executable surfaces were approved at exactly this package integrity. Subset of capabilities.",
-                "type": "array",
-                "items": {
-                  "type": "string",
-                  "minLength": 1
-                },
-                "uniqueItems": true
-              }
-            },
-            "additionalProperties": false
-          }
-        },
-        "capabilities": {
-          "description": "OPTIONAL legacy v1 capability-lock residue retained by 0.19 staged migration. Same entry shape as lockfileVersion 1. v3 has no residue container: a scope carrying residue converts only when every residue entry converts too.",
-          "type": "object",
-          "additionalProperties": {
-            "type": "object",
-            "required": [
-              "source",
-              "version",
-              "integrity"
-            ],
-            "additionalProperties": true
-          }
-        }
-      },
-      "additionalProperties": false
-    },
-    {
-      "title": "lockfileVersion 1 — legacy per-capability marketplace locks (readable for migration only)",
+      "title": "lockfileVersion 1 — legacy per-capability marketplace locks (readable and usable; converts only through explicit migration)",
       "type": "object",
       "required": [
         "lockfileVersion",
