@@ -58,6 +58,18 @@ capabilities must never enter commits. It must not ignore `owned/` or
 bases are intentionally reviewable/committable. Non-Git scopes use the same
 layout without pretending Git owns their durability.
 
+## Official catalog resolution is authoritative
+
+For a capability ID mapped by the official catalog, fresh classic init and
+explicit installation always acquire that catalog package and materialize its
+capabilities under the revised-v2 contract. They never fall back implicitly to
+the kernel's bundled legacy marketplace: that would recreate v1 state and grant
+legacy acquisition trust. Catalog source unavailability fails clearly and
+rolls the operation back. Offline operators use `--raw`, an explicit local
+package/profile source, or an operator-supplied local catalog; OAS does not add
+an ambient cache or compatibility bridge in this contract. Tests use hermetic
+local catalogs and never depend on live network.
+
 ## Materialized capabilities are self-contained
 
 For a new-format package, every capability entry names a dedicated capability
@@ -223,8 +235,13 @@ second config.
 The kernel continues to read valid v1 capability locks and their
 `.agents/capabilities/installed/` artifacts so existing 0.18 deployments keep
 working. Guided official migration converts v1 directly into the revised v2
-lock and flat installed-capability artifacts. Custom owned/path capabilities
-remain unchanged and executable trust is never broadened.
+lock and flat installed-capability artifacts. Revised v2 has no legacy-residue
+container: if any row at one v1 scope must be retained, handled manually, or
+held—including custom Git/path locks—the entire scope is blocked and remains
+byte-identical usable v1. Official rows are not partially acquired, committed,
+or removed. A scope with no convertible official work reports skipped plus its
+retained IDs; dry-run and apply agree on readiness. Custom owned/path
+capabilities remain unchanged and executable trust is never broadened.
 
 The earlier transitional v2 package-root shape and
 `.agents/packages/installed/` store receive no product migration path, dual
