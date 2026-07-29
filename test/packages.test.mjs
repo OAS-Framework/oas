@@ -766,7 +766,77 @@ test("run journal keeps its backup outside the protected tree and refuses escapi
   mkdirSync(join(escaped, ".agents"), { recursive: true });
   symlinkSync(outside, join(escaped, ".agents/capabilities"));
   assert.throws(() => beginRunJournal(escaped), (e) => e.code === "E_JOURNAL_PATH_ESCAPE");
-  for (const d of [dir, escaped, outside]) rmSync(d, { recursive: true, force: true });
+
+  // A CONTAINED alias is refused too: it makes two journal entries address the
+  // same bytes, so restoring one would delete or overwrite the other and the
+  // result would depend on entry order.
+  const aliased = temp();
+  mkdirSync(join(aliased, ".agents/real-capabilities"), { recursive: true });
+  symlinkSync("./real-capabilities", join(aliased, ".agents/capabilities"));
+  assert.throws(() => beginRunJournal(aliased), (e) => e.code === "E_JOURNAL_SYMLINK_COMPONENT");
+
+  for (const d of [dir, escaped, outside, aliased]) rmSync(d, { recursive: true, force: true });
+});
+
+test("run journal leaves no backup residue when construction itself fails", { skip: process.getuid?.() === 0 ? "runs as root: permissions cannot be enforced" : false }, () => {
+  const backupRoot = temp();
+  const residue = () => readdirSync(backupRoot).filter((n) => n.startsWith("oas-run-journal-"));
+
+  // Failure DURING snapshotting: the capability store cannot be read, so the
+  // copy throws after the backup directory already exists.
+  const dir = populatedScope();
+  const store = join(dir, ".agents/capabilities/installed");
+  chmodSync(store, 0o000);
+  try {
+    assert.throws(() => beginRunJournal(dir, { backupRoot }));
+  } finally { chmodSync(store, 0o700); }
+  assert.deepEqual(residue(), [], "a failed snapshot must not strand a partial backup");
+
+  // Failure from a refused layout, after mkdtemp: same guarantee.
+  const aliased = temp();
+  mkdirSync(join(aliased, ".agents/real-capabilities"), { recursive: true });
+  symlinkSync("./real-capabilities", join(aliased, ".agents/capabilities"));
+  assert.throws(() => beginRunJournal(aliased, { backupRoot }), (e) => e.code === "E_JOURNAL_SYMLINK_COMPONENT");
+  assert.deepEqual(residue(), []);
+
+  // And the original typed error survives the cleanup rather than being masked.
+  assert.throws(() => beginRunJournal(dir, { backupRoot, extraPaths: ["../escape.yaml"] }), (e) => e.code === "E_JOURNAL_PATH_ESCAPE");
+  assert.deepEqual(residue(), []);
+
+  for (const d of [dir, aliased, backupRoot]) rmSync(d, { recursive: true, force: true });
+});
+
+test("run journal path input is canonical, unique, and collision-free between a/b and a__b", () => {
+  const dir = populatedScope();
+  write(join(dir, "a/b"), "nested\n");
+  write(join(dir, "a__b"), "flat\n");
+
+  // Distinct artifacts whose flattened names are identical: a separator-
+  // substitution backup key would restore one over the other.
+  const journal = beginRunJournal(dir, { extraPaths: ["a/b", "a__b"] });
+  writeFileSync(join(dir, "a/b"), "nested-clobbered\n");
+  writeFileSync(join(dir, "a__b"), "flat-clobbered\n");
+  assert.equal(journal.rollback().complete, true);
+  assert.equal(readFileSync(join(dir, "a/b"), "utf8"), "nested\n");
+  assert.equal(readFileSync(join(dir, "a__b"), "utf8"), "flat\n");
+
+  // Fail-closed on ambiguous input rather than interpreting it.
+  assert.throws(() => beginRunJournal(dir, { extraPaths: ["a/b", "a/b"] }), (e) => e.code === "E_JOURNAL_DUPLICATE_PATH");
+  assert.throws(() => beginRunJournal(dir, { extraPaths: ["a/b", "./a/b"] }), (e) => e.code === "E_JOURNAL_DUPLICATE_PATH");
+  assert.throws(() => beginRunJournal(dir, { extraPaths: ["oas-config.yaml"] }), (e) => e.code === "E_JOURNAL_DUPLICATE_PATH");
+  assert.throws(() => beginRunJournal(dir, { extraPaths: [""] }), (e) => e.code === "E_JOURNAL_BAD_PATH");
+  assert.throws(() => beginRunJournal(dir, { extraPaths: ["   "] }), (e) => e.code === "E_JOURNAL_BAD_PATH");
+  assert.throws(() => beginRunJournal(dir, { extraPaths: ["."] }), (e) => e.code === "E_JOURNAL_BAD_PATH");
+  assert.throws(() => beginRunJournal(dir, { extraPaths: ["a\\b"] }), (e) => e.code === "E_JOURNAL_BAD_PATH");
+  assert.throws(() => beginRunJournal(dir, { extraPaths: [42] }), (e) => e.code === "E_JOURNAL_BAD_PATH");
+
+  // Canonicalization is real: "./a//b" is the same entry as "a/b" and restores it.
+  const j2 = beginRunJournal(dir, { extraPaths: ["./a//b"] });
+  assert.ok(j2.protected.some((p) => p.path === "a/b"));
+  writeFileSync(join(dir, "a/b"), "again\n");
+  assert.equal(j2.rollback().complete, true);
+  assert.equal(readFileSync(join(dir, "a/b"), "utf8"), "nested\n");
+  rmSync(dir, { recursive: true, force: true });
 });
 
 // ---------- lock v2 reading ----------
