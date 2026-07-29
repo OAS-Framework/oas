@@ -597,6 +597,73 @@ test("a dropped export retires INSIDE the update transaction — a failure keeps
   assert.ok(Object.hasOwn(lockOf(s).capabilities, "x.a"));
 });
 
+test("staged bytes are ignored BEFORE they exist — git never sees the staging tree", () => {
+  const t = temp();
+  const s = scope(t);
+  gitify(s);
+  const src = pkgSource(join(t, "src"), { package: "x.p" }, { "capabilities/a": { capability: "x.a" } });
+  // -uall matters: plain porcelain COLLAPSES an untracked directory to
+  // ".agents/", which would hide every staged path and make this test pass for
+  // the wrong reason.
+  const porcelain = () => execFileSync("git", ["-C", s, "status", "--porcelain", "-uall"], { encoding: "utf8" });
+
+  // The pre-commit gate runs with staging fully populated — fetched, projected
+  // and validated. Every one of those bytes lives under installed/, inside the
+  // work tree. If the ignore only lands at commit time, git sees them here.
+  let duringGate;
+  acquirePackage(s, src, { assertCommittable: () => { duringGate = porcelain(); } });
+  assert.ok(duringGate !== undefined, "the gate never ran");
+  assert.doesNotMatch(duringGate, /\.staging/, `staging was visible to git:\n${duringGate}`);
+  assert.doesNotMatch(duringGate, /capabilities\/installed\//, `materialized artifacts were visible to git:\n${duringGate}`);
+  // The ignore itself is the only thing that shows up, and it is meant to be
+  // committed.
+  // The ignore file itself is the only generated thing git may see: it is meant
+  // to be committed.
+  const after = porcelain();
+  assert.match(after, /\.agents\/capabilities\/\.gitignore/);
+  assert.doesNotMatch(after, /capabilities\/installed\//, `materialized artifacts are committable:\n${after}`);
+});
+
+test("a refused acquisition leaves no ignore file and no anchor it created", () => {
+  const t = temp();
+  const s = scope(t);
+  gitify(s);
+  const before = treeFingerprint(s);
+  assert.equal(existsSync(join(s, ".agents")), false, "the fixture must start with no store");
+
+  const src = pkgSource(join(t, "src"), { package: "x.p" }, { "capabilities/a": { capability: "x.a" } });
+  throwsCode(() => acquirePackage(s, src, {
+    assertCommittable: () => { const e = new Error("refused"); e.code = "refused"; throw e; },
+  }), "refused", "refused at the gate");
+
+  // The ignore was written before staging opened, so it — and the anchors that
+  // writing it created — must come back out.
+  assert.deepEqual(treeFingerprint(s), before, "a refused acquisition left state behind");
+  assert.equal(existsSync(join(s, ".agents")), false, "an anchor created by the ignore preflight survived");
+  assert.doesNotMatch(execFileSync("git", ["-C", s, "status", "--porcelain", "-uall"], { encoding: "utf8" }), /\.agents/);
+});
+
+test("a scope that ALREADY ignores installed/ keeps its exact bytes through a refusal", () => {
+  const t = temp();
+  const s = scope(t);
+  gitify(s);
+  // A hand-written ignore with its own unrelated content and no trailing rule
+  // ordering OAS would choose.
+  const file = join(s, ".agents", "capabilities", ".gitignore");
+  const original = "# ours\nscratch/\ninstalled/\n";
+  write(file, original);
+  const src = pkgSource(join(t, "src"), { package: "x.p" }, { "capabilities/a": { capability: "x.a" } });
+
+  throwsCode(() => acquirePackage(s, src, {
+    assertCommittable: () => { const e = new Error("refused"); e.code = "refused"; throw e; },
+  }), "refused", "refused at the gate");
+  assert.equal(readFileSync(file, "utf8"), original, "an existing ignore was rewritten");
+
+  // And a SUCCESSFUL run leaves it alone too — the rule is already there.
+  acquirePackage(s, src);
+  assert.equal(readFileSync(file, "utf8"), original, "a successful run rewrote an ignore that already covered installed/");
+});
+
 test("the CANONICAL template location is enforced, and the deprecated spelling stays exempt", () => {
   const t = temp();
   const mk = (name, templates, key = "configTemplates") => {
