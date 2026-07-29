@@ -6,11 +6,11 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { resolveOasConfig, capabilityIntegrity, acquirePackage, loadPackageManifestAt, parsePackageSource, readPackageLocks } from "../lib/core.mjs";
 import {
-  aggregateMissingRequirements, applyConfigMerge, beginRunJournal, capabilityRuntimeTargets, commandOnPath, diffConfigTexts, discoverWorkspaceScopes,
+  aggregateMissingRequirements, applyConfigMerge, beginRunJournal, capabilityRuntimeTargets, commandOnPath, discoverWorkspaceScopes,
   planConfigMerge, splitConfigLines,
   lockedPackageCapabilities, normalizeRequirement, packageSpecIdentity, runtimePackageInstalled, runtimePackageStatus,
-  parseProfileProvenance, profileProvenanceHeader, requirementInstallPlan,
-  readProfileText, resolveProfilePackage, runRequirementInstall, selectProfile, validateProfile,
+  requirementInstallPlan,
+  runRequirementInstall, selectConfigTemplate, validateConfigTemplate,
 } from "../lib/packages.mjs";
 
 const CLI = resolve(new URL("../bin/oas.mjs", import.meta.url).pathname);
@@ -86,90 +86,68 @@ const loadFixtureManifest = (dir) => loadPackageManifestAt(dir);
 
 // ---------- manifest ----------
 
-test("profile selection: marked default, single profile, explicit name, multiple unmarked require a choice", () => {
-  const base = temp();
-  const m = loadFixtureManifest(fixturePackage(join(base, "pkg")));
-  assert.equal(selectProfile(m).name, "default");
-  assert.equal(selectProfile(m, "minimal").name, "minimal");
-  assert.throws(() => selectProfile(m, "nope"), /no config profile "nope"/);
+test("config template selection: marked default, single template, explicit name, multiple unmarked require a choice", () => {
+  const tpl = (template, extra = {}) => ({ template, path: `config-templates/${template}/oas-config.yaml`, content: "name: w\n", contentIntegrity: `sha256-${"0".repeat(64)}`, default: false, ...extra });
 
-  const single = loadFixtureManifest(fixturePackage(join(base, "single"), { configs: { only: { path: "configs/default/oas-config.yaml" } } }));
-  assert.equal(selectProfile(single).name, "only");
+  // explicit name wins
+  assert.equal(selectConfigTemplate([tpl("a"), tpl("b")], "b", "p").template, "b");
+  // the single marked default wins when nothing is named
+  assert.equal(selectConfigTemplate([tpl("a", { default: true }), tpl("b")], undefined, "p").template, "a");
+  // a lone template needs no marking
+  assert.equal(selectConfigTemplate([tpl("only")], undefined, "p").template, "only");
 
-  const multi = loadFixtureManifest(fixturePackage(join(base, "multi"), { configs: {
-    a: { path: "configs/default/oas-config.yaml" }, b: { path: "configs/minimal/oas-config.yaml" },
-  } }));
-  assert.throws(() => selectProfile(multi), /none marked default.*--config/s);
-
-  const none = loadFixtureManifest(fixturePackage(join(base, "none"), { configs: {} }));
-  assert.throws(() => selectProfile(none), (e) => e.code === "E_NO_PROFILES" && /exports no config profiles/.test(e.message));
-  // typed codes on the other selection failures
-  assert.throws(() => selectProfile(multi), (e) => e.code === "E_PROFILE_AMBIGUOUS");
-  assert.throws(() => selectProfile(m, "nope"), (e) => e.code === "E_PROFILE_NOT_FOUND");
+  // several unmarked: refuse rather than guess which policy the adopter wanted
+  assert.throws(() => selectConfigTemplate([tpl("a"), tpl("b")], undefined, "p"),
+    (e) => e.code === "E_TEMPLATE_AMBIGUOUS" && /--config/.test(e.message));
+  // named but absent, and a package exporting none at all
+  assert.throws(() => selectConfigTemplate([tpl("a")], "nope", "p"), (e) => e.code === "E_TEMPLATE_NOT_FOUND");
+  assert.throws(() => selectConfigTemplate([], undefined, "p"), (e) => e.code === "E_NO_TEMPLATES");
 });
 
 // ---------- profile validation ----------
 
-test("profile validation: schema, dependency closure, layer agreement, agent types, path escapes", () => {
+test("config template validation: schema, dependency closure, layer agreement, agent types, path escapes", () => {
   const base = temp();
-  const m = loadFixtureManifest(fixturePackage(join(base, "pkg")));
-  assert.deepEqual(validateProfile(m, selectProfile(m)), []);
+  /** Build a template descriptor straight from a body — validation reads the
+   * descriptor's bytes, not a package directory, because in the materialized
+   * model the only template bytes available are the ones a reader handed over. */
+  const descriptor = (content, template = "default") => ({
+    template, path: `config-templates/${template}/oas-config.yaml`, content,
+    contentIntegrity: `sha256-${"0".repeat(64)}`, default: true,
+  });
+  const providers = (entries) => new Map(entries);
+  const OWN = providers([["example.review", { capability: "example.review" }], ["example.delivery", { capability: "example.delivery", layer: "knowledge" }]]);
 
-  // capability not supplied by package or dependency closure
-  const orphan = loadFixtureManifest(fixturePackage(join(base, "orphan"), { extraFiles: {
-    "configs/orphan/oas-config.yaml": "name: w\ncapabilities:\n  additive:\n    ghost.cap:\n      from: installed\n      global: true\n",
-  }, configs: { orphan: { path: "configs/orphan/oas-config.yaml", default: true } } }));
-  const errs1 = validateProfile(orphan, selectProfile(orphan));
-  assert.ok(errs1.some((e) => /ghost\.cap is not supplied/.test(e)), errs1.join("; "));
-  // ... but a dependency-supplied capability (with its provider manifest) passes
-  assert.deepEqual(validateProfile(orphan, selectProfile(orphan), { dependencyProviders: new Map([["ghost.cap", { capability: "ghost.cap" }]]) }), []);
-  // a dependency-supplied capability bound to a LAYER with a mismatched provider
-  // manifest is rejected (reviewer-455ba15 fix 3) — and an id-only (manifest-less)
-  // provider cannot silently pass layer validation either
-  const depLayer = loadFixtureManifest(fixturePackage(join(base, "dep-layer"), {
-    capabilities: { "capabilities/own": { capability: "own.cap", version: "1.0.0", description: "x", compatibility: { oas: ">=0.6.2" } } },
-    extraFiles: { "configs/l/oas-config.yaml": "name: w\ncapabilities:\n  layers:\n    knowledge:\n      capability: dep.knowledge\n      from: installed\n" },
-    configs: { l: { path: "configs/l/oas-config.yaml", default: true } },
-  }));
-  const wrongDep = validateProfile(depLayer, selectProfile(depLayer), { dependencyProviders: new Map([["dep.knowledge", { capability: "dep.knowledge", layer: "messaging" }]]) });
-  assert.ok(wrongDep.some((e) => /layer knowledge binds dep\.knowledge, but its manifest declares layer "messaging"/.test(e)), wrongDep.join("; "));
-  const manifestless = validateProfile(depLayer, selectProfile(depLayer), { dependencyProviders: new Map([["dep.knowledge", null]]) });
-  assert.ok(manifestless.some((e) => /provider manifest is not available to verify the layer/.test(e)), manifestless.join("; "));
-  const rightDep = validateProfile(depLayer, selectProfile(depLayer), { dependencyProviders: new Map([["dep.knowledge", { capability: "dep.knowledge", layer: "knowledge" }]]) });
-  assert.deepEqual(rightDep, []);
+  const good = descriptor("name: w\n\ncapabilities:\n  layers:\n    knowledge:\n      capability: example.delivery\n  additive:\n    example.review: {}\n");
+  assert.deepEqual(validateConfigTemplate(good, "p", { dependencyProviders: OWN }), []);
 
-  // layer disagreement with the capability manifest
-  const wrongLayer = loadFixtureManifest(fixturePackage(join(base, "wrong-layer"), { extraFiles: {
-    "configs/w/oas-config.yaml": "name: w\ncapabilities:\n  layers:\n    messaging:\n      capability: example.delivery\n      from: installed\n",
-  }, configs: { w: { path: "configs/w/oas-config.yaml", default: true } } }));
-  const errs2 = validateProfile(wrongLayer, selectProfile(wrongLayer));
-  assert.ok(errs2.some((e) => /layer messaging binds example\.delivery, but its manifest declares layer "knowledge"/.test(e)), errs2.join("; "));
+  // a capability nobody in the closure supplies
+  const orphan = descriptor("name: w\ncapabilities:\n  additive:\n    ghost.cap:\n      from: installed\n");
+  assert.ok(validateConfigTemplate(orphan, "p", { dependencyProviders: OWN }).some((e) => /ghost\.cap is not supplied/.test(e)));
+  // ...and passes once a dependency provides it
+  assert.deepEqual(validateConfigTemplate(orphan, "p", { dependencyProviders: providers([["ghost.cap", { capability: "ghost.cap" }]]) }), []);
 
-  // syntactically invalid agent type
-  const badType = loadFixtureManifest(fixturePackage(join(base, "bad-type"), { extraFiles: {
-    "configs/t/oas-config.yaml": "name: w\nagent-types:\n  Bad_Type:\n    description: nope\n",
-  }, configs: { t: { path: "configs/t/oas-config.yaml", default: true } } }));
-  assert.ok(validateProfile(badType, selectProfile(badType)).some((e) => /agent type "Bad_Type"/.test(e)));
+  // layer agreement is checked against the ACTUAL provider manifest
+  const layerBind = descriptor("name: w\ncapabilities:\n  layers:\n    knowledge:\n      capability: dep.knowledge\n");
+  assert.ok(validateConfigTemplate(layerBind, "p", { dependencyProviders: providers([["dep.knowledge", { layer: "messaging" }]]) })
+    .some((e) => /declares layer "messaging"/.test(e)));
+  assert.deepEqual(validateConfigTemplate(layerBind, "p", { dependencyProviders: providers([["dep.knowledge", { layer: "knowledge" }]]) }), []);
+  // a provider whose manifest is unavailable cannot have its layer verified
+  assert.ok(validateConfigTemplate(layerBind, "p", { dependencyProviders: providers([["dep.knowledge", null]]) })
+    .some((e) => /not available to verify the layer/.test(e)));
 
-  // schema-invalid profile (unknown top-level key)
-  const badSchema = loadFixtureManifest(fixturePackage(join(base, "bad-schema"), { extraFiles: {
-    "configs/s/oas-config.yaml": "name: w\ntotally-unknown-key: 1\n",
-  }, configs: { s: { path: "configs/s/oas-config.yaml", default: true } } }));
-  assert.ok(validateProfile(badSchema, selectProfile(badSchema)).some((e) => /unsupported oas-config key/.test(e)));
+  // agent-type syntax, path escapes, and config schema
+  assert.ok(validateConfigTemplate(descriptor("name: w\nagent-types:\n  Bad_Type: {}\n"), "p", { dependencyProviders: OWN })
+    .some((e) => /agent type "Bad_Type"/.test(e)));
+  assert.ok(validateConfigTemplate(descriptor("name: w\ncapabilities:\n  additive:\n    example.review:\n      injection-override: ../../escape\n"), "p", { dependencyProviders: OWN })
+    .some((e) => /escapes the target scope/.test(e)));
+  assert.ok(validateConfigTemplate(descriptor("name: w\nnot-a-key: 1\n"), "p", { dependencyProviders: OWN })
+    .some((e) => /unsupported oas-config key/.test(e)));
+  // a template referencing a host path is never adoptable policy
+  assert.ok(validateConfigTemplate(descriptor("name: w\ncapabilities:\n  additive:\n    x.cap:\n      from: path:/tmp/x\n"), "p", { dependencyProviders: OWN })
+    .some((e) => /not host paths/.test(e)));
 
-  // paths escaping the target scope
-  const escape = loadFixtureManifest(fixturePackage(join(base, "escape"), { extraFiles: {
-    "configs/e/oas-config.yaml": "name: w\ncapabilities:\n  layers:\n    knowledge:\n      capability: example.delivery\n      from: installed\n      injection-override: ../../outside.md\nwork-modes:\n  worktree:\n    setup: /usr/bin/evil\n",
-  }, configs: { e: { path: "configs/e/oas-config.yaml", default: true } } }));
-  const errs3 = validateProfile(escape, selectProfile(escape));
-  assert.ok(errs3.some((e) => /injection-override escapes the target scope/.test(e)), errs3.join("; "));
-  assert.ok(errs3.some((e) => /work-modes\.worktree\.setup escapes/.test(e)), errs3.join("; "));
-
-  // profiles must not reference host paths
-  const hostPath = loadFixtureManifest(fixturePackage(join(base, "host-path"), { extraFiles: {
-    "configs/h/oas-config.yaml": "name: w\ncapabilities:\n  additive:\n    x.cap:\n      from: path:/abs/dir\n      global: true\n",
-  }, configs: { h: { path: "configs/h/oas-config.yaml", default: true } } }));
-  assert.ok(validateProfile(hostPath, selectProfile(hostPath)).some((e) => /must reference installed capabilities, not host paths/.test(e)));
+  rmSync(base, { recursive: true, force: true });
 });
 
 // ---------- init --package (CLI) ----------
@@ -319,12 +297,6 @@ test("oas config diff is report-only: shows drift three ways, never writes a byt
   rmSync(base, { recursive: true, force: true });
 });
 
-test("diffConfigTexts produces a minimal line diff", () => {
-  const d = diffConfigTexts("a\nb\nc\n", "a\nx\nc\n");
-  assert.deepEqual(d, [
-    { kind: "same", line: "a" }, { kind: "local", line: "b" }, { kind: "package", line: "x" }, { kind: "same", line: "c" },
-  ]);
-});
 
 // ---------- config template three-way merge (byte-preserving) ----------
 //
@@ -2159,7 +2131,7 @@ test("configless-scope provider shadowing: own-scope acquired manifests override
   const r = cli(["init", "--package", rootSrc, "--json", "--dir", ws]);
   assert.equal(r.status, 1, `inner provider's layer (messaging) must govern:\n${r.stdout}`);
   const env = JSON.parse(r.stdout);
-  assert.equal(env.error.code, "E_PROFILE_INVALID");
+  assert.equal(env.error.code, "E_TEMPLATE_INVALID");
   assert.match(env.error.message, /layer knowledge binds dep\.cap, but its manifest declares layer "messaging"/);
   assert.equal(existsSync(join(ws, "oas-config.yaml")), false, "no invalid snapshot written");
 });
@@ -2374,12 +2346,6 @@ test("oas.dev end-to-end at a NON-GIT multi-repo team root: targeting, overrides
 
 // ---------- provenance helpers ----------
 
-test("profile provenance header round-trips through the parser", () => {
-  const header = profileProvenanceHeader({ pkg: "acme.pkg", version: "2.0.0", profile: "default", commit: "abcdef1234567890" });
-  const prov = parseProfileProvenance(header + "\nname: x\n");
-  assert.deepEqual(prov, { package: "acme.pkg", ref: "abcdef123456", profile: "default" });
-  assert.equal(parseProfileProvenance("name: x\n"), undefined);
-});
 
 test("commandOnPath finds executables only via PATH lookup", () => {
   assert.equal(commandOnPath("sh"), true);
@@ -2739,66 +2705,5 @@ test("the JSON consent plan shows every step the installer will run (reviewer-fi
   rmSync(base, { recursive: true, force: true });
 });
 
-test("resolveProfilePackage selects the same contained package root acquisition would lock", () => {
-  const base = temp();
-  const repo = join(base, "repo");
-  fixturePackage(join(repo, "oas-package"));
-  fixturePackage(join(repo, "dist"), { id: "example.other" });
-  // A DIFFERENT package at the repository root must never be what a profile
-  // diff reads when the source selects a contained root.
-  fixturePackage(repo, { id: "example.rootdecoy" });
-  gitRepo(repo);
 
-  const clone = () => mkdtempSync(join(tmpdir(), "oas-clone-"));
-  const dflt = resolveProfilePackage(`file://${repo}`, base, { clone: clone() });
-  assert.equal(dflt.manifest.package, "example.engineering", "no fragment selects oas-package/");
-  assert.equal(dflt.source, `git:file://${repo}`, "the recorded source never carries the fragment");
-  assert.equal(resolveProfilePackage(`file://${repo}#dist`, base, { clone: clone() }).manifest.package, "example.other");
-  assert.equal(resolveProfilePackage(`file://${repo}#.`, base, { clone: clone() }).manifest.package, "example.rootdecoy");
-  assert.throws(() => resolveProfilePackage(`file://${repo}#nope`, base, { clone: clone() }), (e) => e.code === "invalid-source");
-  assert.throws(() => resolveProfilePackage(`file://${repo}#../escape`, base, { clone: clone() }), (e) => e.code === "path-escape");
 
-  // Local paths stay exact directories.
-  assert.equal(resolveProfilePackage(join(repo, "dist"), base).manifest.package, "example.other");
-  rmSync(base, { recursive: true, force: true });
-});
-
-test("resolveProfilePackage reads the profile at the PINNED ref, not HEAD (reviewer-da05e73)", () => {
-  const base = temp();
-  const repo = join(base, "repo");
-  fixturePackage(join(repo, "oas-package"));
-  gitRepo(repo);
-  execFileSync("git", ["-C", repo, "tag", "v1"]);
-  const pinned = execFileSync("git", ["-C", repo, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
-  // HEAD moves on: a diff that reads HEAD while claiming "@v1" compares the
-  // adopted snapshot against a profile the install never used.
-  write(join(repo, "oas-package", "configs/minimal/oas-config.yaml"), "name: workspace\n# CHANGED AFTER v1\n");
-  execFileSync("git", ["-C", repo, "add", "-A"]);
-  execFileSync("git", ["-C", repo, "commit", "-qm", "advance"]);
-  const head = execFileSync("git", ["-C", repo, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
-  assert.notEqual(head, pinned);
-
-  const clone = () => mkdtempSync(join(tmpdir(), "oas-clone-"));
-  for (const ref of ["v1", pinned]) {
-    const r = resolveProfilePackage(`file://${repo}@${ref}`, base, { clone: clone() });
-    assert.equal(r.commit, pinned, `${ref}: resolved commit is the pinned one`);
-    assert.doesNotMatch(readProfileText(r.manifest, selectProfile(r.manifest, "minimal")), /CHANGED AFTER v1/, `${ref}: profile text comes from the pinned ref`);
-    assert.equal(r.source, `git:file://${repo}@${ref}`);
-  }
-  const unpinned = resolveProfilePackage(`file://${repo}`, base, { clone: clone() });
-  assert.equal(unpinned.commit, head, "an unpinned source still resolves HEAD");
-  rmSync(base, { recursive: true, force: true });
-});
-
-test("resolveProfilePackage rejects an option-like ref instead of reading HEAD (reviewer-39c11e1)", () => {
-  const base = temp();
-  const repo = join(base, "repo");
-  fixturePackage(join(repo, "oas-package"));
-  gitRepo(repo);
-  const clone = () => mkdtempSync(join(tmpdir(), "oas-clone-"));
-  for (const ref of ["--detach", "--guess", "no-such-tag"]) {
-    assert.throws(() => resolveProfilePackage(`file://${repo}@${ref}`, base, { clone: clone() }),
-      (e) => e.code === "invalid-source" && /does not resolve to a commit/.test(e.message), ref);
-  }
-  rmSync(base, { recursive: true, force: true });
-});

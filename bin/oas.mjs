@@ -34,7 +34,7 @@ import {
   spawnInstance, retireInstance, upsertLocalAgent, defaultRepo, RELATIONS,
 } from "../lib/core.mjs";
 import {
-  aggregateMissingRequirements, beginRunJournal, diffConfigTexts, discoverMigrationScopes, discoverWorkspaceScopes,
+  aggregateMissingRequirements, beginRunJournal, discoverMigrationScopes, discoverWorkspaceScopes,
   adoptedTemplateDir, applyConfigMerge, lockedPackageCapabilities, planConfigMerge, readAdoptedTemplate, requirementInstallPlan,
   writeFileAtomic,
   runRequirementInstall, selectConfigTemplate, validateConfigTemplate, writeAdoptedTemplate,
@@ -1204,6 +1204,56 @@ function dependencyClosureProviders(rootId, dir, staged = []) {
   return { capabilities };
 }
 
+/** Adopt a template from a package ALREADY locked at this scope: read its exact
+ * locked templates, validate, then write config + base + metadata under the run
+ * journal. Nothing is fetched beyond the locked source, and nothing is
+ * re-acquired — the lock is already the truth about what is installed here. */
+function initPackageFromLock(packageId, dir, file, lockedRoot, configFlag, bail, note) {
+  let locked, chosen;
+  try { locked = readLockedConfigTemplates(dir, packageId); }
+  catch (e) { bail(e.code || "E_TEMPLATE_READ_FAILED", e.message); return; }
+  try { chosen = selectConfigTemplate(locked.templates, configFlag, packageId); }
+  catch (e) { bail(e.code || "E_TEMPLATE_AMBIGUOUS", e.message); return; }
+
+  const errors = validateConfigTemplate(chosen, packageId, {
+    dependencyProviders: dependencyClosureProviders(packageId, dir).capabilities,
+  });
+  if (errors.length) bail("E_TEMPLATE_INVALID", `config template "${chosen.template}" of package ${packageId} failed validation:\n  - ${errors.join("\n  - ")}`);
+
+  note(`Package ${packageId}${locked.version ? `@${locked.version}` : ""} is already locked here — adopting its config template "${chosen.template}" without re-acquiring.`);
+
+  let journal;
+  try { journal = beginRunJournal(dir); }
+  catch (e) { bail(e.code || "E_JOURNAL_FAILED", e.message); return; }
+  let adoption;
+  try {
+    adoption = writeAdoptedTemplate(dir, file, {
+      package: packageId, template: chosen,
+      root: { source: locked.source, version: locked.version, commit: locked.commit, path: locked.path },
+    });
+    journal.finalize();
+  } catch (e) {
+    const report = journal.rollback();
+    bail("E_ADOPT_FAILED", report.complete ? e.message : `${e.message} — ${report.summary}`);
+    return;
+  }
+
+  const locks = readPackageLocks(dir);
+  const capabilities = Object.entries(locks.capabilities).filter(([, c]) => c.package === packageId).map(([id]) => id);
+  note(`Created ${shortPath(file)} (${levelOf(dir)} level) from config template ${packageId}:${chosen.template}`);
+  if (JSON_MODE) {
+    jsonOk({
+      package: packageId, version: locked.version || null, commit: locked.commit || null,
+      template: chosen.template, adopted: true, file, capabilities,
+      adoptedBase: adoption.baseFile, adoptionMetadata: adoption.metadataFile,
+      contentIntegrity: chosen.contentIntegrity,
+      lockFile: lockedRoot._file || join(dir, OAS_LOCK_FILE), lockedPackages: Object.keys(locks.packages),
+    });
+    return;
+  }
+  offerTmuxMouseScrolling();
+}
+
 /** oas init --package <source> [--config <name>]: acquire a package AND adopt
  * one of its config templates as this scope's local config.
  *
@@ -1268,6 +1318,17 @@ function initPackage(src, dir, file) {
   // Opened BEFORE acquisition: a snapshot taken afterwards would record the new
   // lock, artifacts and ignore bytes as the "pre-existing" state and could
   // never undo them.
+  // An id already locked at this scope is adopted from the LOCK, not
+  // re-acquired: its exact source/commit is already pinned, the capabilities are
+  // already materialized, and going to the network (or the catalog) to re-fetch
+  // what the lock already names would be a different package than the one
+  // installed here. This is the `oas init --package <id>` half of the documented
+  // <id|path|git-url> form.
+  let lockedRoot = null;
+  try { lockedRoot = readPackageLocks(dir).packages[src] || null; }
+  catch { /* an invalid lock surfaces with its own typed code below */ }
+  if (lockedRoot) { initPackageFromLock(src, dir, file, lockedRoot, configFlag, bail, note); return; }
+
   // Constructed inside its own guard: a journal that cannot be built (a symlink
   // component, an unreadable snapshot, a backup that would land inside the
   // scope) must still leave the command with exactly one JSON envelope. There
