@@ -1,12 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync, chmodSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, symlinkSync, writeFileSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { resolveOasConfig, capabilityIntegrity, acquirePackage, loadPackageManifestAt, parsePackageSource, readPackageLocks } from "../lib/core.mjs";
 import {
-  aggregateMissingRequirements, applyConfigMerge, capabilityRuntimeTargets, commandOnPath, diffConfigTexts, discoverWorkspaceScopes,
+  aggregateMissingRequirements, applyConfigMerge, beginRunJournal, capabilityRuntimeTargets, commandOnPath, diffConfigTexts, discoverWorkspaceScopes,
   planConfigMerge, splitConfigLines,
   lockedPackageCapabilities, normalizeRequirement, packageSpecIdentity, runtimePackageInstalled, runtimePackageStatus,
   parseProfileProvenance, profileProvenanceHeader, requirementInstallPlan,
@@ -543,6 +543,230 @@ test("a plan region binds to the exact three texts it was computed from", () => 
   assert.notEqual(a.regions[0].digest, b.regions[0].digest);
   assert.notEqual(a.planDigest, b.planDigest);
   assert.equal(a.planDigest, planConfigMerge("a: 1\n", "a: local\n", "a: upstream\n").planDigest);
+});
+
+// ---------- run-level rollback journal (CLI-private) ----------
+//
+// The run-level guarantee — a later failure rolls back only THIS run's changes
+// and leaves pre-existing bytes/artifacts identical — spans artifacts no single
+// engine call covers, so the CLI owns it. These tests exercise the mechanism
+// against real filesystem state; no engine symbol is involved.
+
+/** Exact fingerprint of a tree: relative path, type, mode, and content or link
+ * target. Two trees with equal fingerprints are byte- and behaviour-identical
+ * for our purposes, which is what "restored exactly" has to mean. */
+function fingerprint(root) {
+  const out = [];
+  const walk = (dir, prefix) => {
+    if (!existsSync(dir)) return;
+    for (const ent of readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      const abs = join(dir, ent.name);
+      const rel = prefix ? `${prefix}/${ent.name}` : ent.name;
+      const st = lstatSync(abs);
+      if (st.isSymbolicLink()) out.push(`${rel} symlink -> ${readlinkSync(abs)}`);
+      else if (st.isDirectory()) { out.push(`${rel} dir ${(st.mode & 0o777).toString(8)}`); walk(abs, rel); }
+      else out.push(`${rel} file ${(st.mode & 0o777).toString(8)} ${readFileSync(abs).toString("base64")}`);
+    }
+  };
+  walk(root, "");
+  return out.join("\n");
+}
+
+/** A scope with a pre-existing installed capability, lock, config, ignore file
+ * and adopted base — i.e. the state a second run must not damage. */
+function populatedScope({ git = false } = {}) {
+  const dir = temp();
+  write(join(dir, "oas-config.yaml"), "# hand written\nname: acme\n");
+  write(join(dir, "oas-lock.json"), JSON.stringify({ lockfileVersion: 2, packages: {}, capabilities: {} }, null, 2));
+  write(join(dir, ".agents/capabilities/.gitignore"), "installed/\n");
+  write(join(dir, ".agents/capabilities/installed/example.review/oas.json"), '{"capability":"example.review"}');
+  write(join(dir, ".agents/capabilities/installed/example.review/.oas-installation.json"), '{"package":"example.engineering"}');
+  writeFileSync(join(dir, ".agents/capabilities/installed/example.review/run.sh"), "#!/bin/sh\necho hi\n", { mode: 0o755 });
+  symlinkSync("./oas.json", join(dir, ".agents/capabilities/installed/example.review/manifest-link"));
+  write(join(dir, ".agents/capabilities/owned/acme.local/oas.json"), '{"capability":"acme.local"}');
+  write(join(dir, ".agents/config-templates/adopted/example.engineering/default/oas-config.yaml"), "name: acme\n");
+  write(join(dir, ".agents/config-templates/adopted/example.engineering/default/adoption.json"), '{"template":"default"}');
+  if (git) gitRepo(dir);
+  return dir;
+}
+
+test("run journal restores a scope byte-identically after a failed multi-step run (Git and non-Git layouts)", () => {
+  for (const git of [false, true]) {
+    const dir = populatedScope({ git });
+    const before = fingerprint(dir);
+    const journal = beginRunJournal(dir);
+
+    // A run that gets a long way in before failing: rewrites the config, the
+    // lock, the ignore file and the adopted base, replaces the pre-existing
+    // same-name capability, and adds a new one.
+    writeFileSync(join(dir, "oas-config.yaml"), "name: rewritten-by-the-run\n");
+    writeFileSync(join(dir, "oas-lock.json"), '{"lockfileVersion":2,"packages":{"x":{}},"capabilities":{}}');
+    writeFileSync(join(dir, ".agents/capabilities/.gitignore"), "installed/\nowned/\n");
+    rmSync(join(dir, ".agents/capabilities/installed/example.review"), { recursive: true, force: true });
+    write(join(dir, ".agents/capabilities/installed/example.review/oas.json"), '{"capability":"example.review","version":"9.9.9"}');
+    write(join(dir, ".agents/capabilities/installed/example.audit/oas.json"), '{"capability":"example.audit"}');
+    write(join(dir, ".agents/config-templates/adopted/other.package/default/oas-config.yaml"), "name: other\n");
+
+    // Proof the assertion below has teeth: without the rollback, the scope is
+    // genuinely different. A restore test that would also pass against a no-op
+    // rollback measures nothing.
+    assert.notEqual(fingerprint(dir), before, "fixture failed to mutate the scope");
+
+    const report = journal.rollback();
+    assert.equal(report.complete, true, `rollback reported incomplete: ${report.summary}`);
+    assert.equal(fingerprint(dir), before, `scope not byte-identical after rollback (git=${git})`);
+    // The owned capability was never in the blast radius.
+    assert.equal(readFileSync(join(dir, ".agents/capabilities/owned/acme.local/oas.json"), "utf8"), '{"capability":"acme.local"}');
+    assert.equal(existsSync(journal.backupDir), false, "a complete rollback must clean its backup");
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("run journal blocker regression: a pre-existing same-name capability, its provenance, lock and adopted base return exactly", () => {
+  const dir = populatedScope();
+  const capDir = join(dir, ".agents/capabilities/installed/example.review");
+  const originalManifest = readFileSync(join(capDir, "oas.json"));
+  const originalProvenance = readFileSync(join(capDir, ".oas-installation.json"));
+  const originalLock = readFileSync(join(dir, "oas-lock.json"));
+  const originalBase = readFileSync(join(dir, ".agents/config-templates/adopted/example.engineering/default/oas-config.yaml"));
+  const originalMode = lstatSync(join(capDir, "run.sh")).mode & 0o777;
+
+  const journal = beginRunJournal(dir);
+  // The run materializes over the SAME capability id, rewrites its provenance
+  // and the lock, advances the adopted base — then fails.
+  writeFileSync(join(capDir, "oas.json"), '{"capability":"example.review","version":"2.0.0"}');
+  writeFileSync(join(capDir, ".oas-installation.json"), '{"package":"someone.else"}');
+  writeFileSync(join(capDir, "run.sh"), "#!/bin/sh\nrm -rf /\n", { mode: 0o644 });
+  rmSync(join(capDir, "manifest-link"), { force: true });
+  writeFileSync(join(dir, "oas-lock.json"), "{}");
+  writeFileSync(join(dir, ".agents/config-templates/adopted/example.engineering/default/oas-config.yaml"), "name: upstream\n");
+
+  assert.equal(journal.rollback().complete, true);
+  assert.deepEqual(readFileSync(join(capDir, "oas.json")), originalManifest);
+  assert.deepEqual(readFileSync(join(capDir, ".oas-installation.json")), originalProvenance);
+  assert.deepEqual(readFileSync(join(dir, "oas-lock.json")), originalLock);
+  assert.deepEqual(readFileSync(join(dir, ".agents/config-templates/adopted/example.engineering/default/oas-config.yaml")), originalBase);
+  assert.equal(lstatSync(join(capDir, "run.sh")).mode & 0o777, originalMode, "executable bit must survive rollback");
+  assert.equal(lstatSync(join(capDir, "manifest-link")).isSymbolicLink(), true, "symlink must be restored as a symlink");
+  assert.equal(readlinkSync(join(capDir, "manifest-link")), "./oas.json");
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("run journal removes what the run created, including the .agents anchor, but only while empty", () => {
+  const bare = temp();
+  const journal = beginRunJournal(bare);
+  assert.equal(journal.anchorCreatedByRun, true);
+
+  write(join(bare, "oas-config.yaml"), "name: fresh\n");
+  write(join(bare, "oas-lock.json"), "{}");
+  write(join(bare, ".agents/capabilities/.gitignore"), "installed/\n");
+  write(join(bare, ".agents/capabilities/installed/example.review/oas.json"), "{}");
+  write(join(bare, ".agents/config-templates/adopted/example.engineering/default/adoption.json"), "{}");
+
+  assert.notEqual(fingerprint(bare), "", "fixture failed to create anything to remove");
+  assert.equal(journal.rollback().complete, true);
+  assert.equal(fingerprint(bare), "", "a fresh-scope rollback must leave nothing behind, anchor included");
+  rmSync(bare, { recursive: true, force: true });
+
+  // Same run, but the scope also holds an owned capability the run never made:
+  // the anchor is NOT ours to delete once something else lives under it.
+  const withOwned = temp();
+  write(join(withOwned, ".agents/capabilities/owned/acme.local/oas.json"), "{}");
+  const j2 = beginRunJournal(withOwned);
+  assert.equal(j2.anchorCreatedByRun, false);
+  write(join(withOwned, ".agents/capabilities/installed/example.review/oas.json"), "{}");
+  write(join(withOwned, ".agents/capabilities/.gitignore"), "installed/\n");
+  assert.equal(j2.rollback().complete, true);
+  assert.equal(existsSync(join(withOwned, ".agents/capabilities/owned/acme.local/oas.json")), true);
+  assert.equal(existsSync(join(withOwned, ".agents/capabilities/installed")), false);
+  assert.equal(existsSync(join(withOwned, ".agents/capabilities/.gitignore")), false);
+  rmSync(withOwned, { recursive: true, force: true });
+});
+
+test("run journal restores the capability .gitignore's prior bytes, and its prior ABSENCE", () => {
+  // Prior bytes: the engine's transactional ensure rewrote it; rollback undoes that.
+  const withIgnore = populatedScope();
+  const j1 = beginRunJournal(withIgnore);
+  writeFileSync(join(withIgnore, ".agents/capabilities/.gitignore"), "installed/\nowned/\nadopted/\n");
+  assert.equal(j1.rollback().complete, true);
+  assert.equal(readFileSync(join(withIgnore, ".agents/capabilities/.gitignore"), "utf8"), "installed/\n");
+  rmSync(withIgnore, { recursive: true, force: true });
+
+  // Prior absence: the engine created it during an operation that succeeded
+  // before the run failed later — compensating it is the CLI journal's job.
+  const withoutIgnore = temp();
+  write(join(withoutIgnore, ".agents/capabilities/owned/acme.local/oas.json"), "{}");
+  const j2 = beginRunJournal(withoutIgnore);
+  write(join(withoutIgnore, ".agents/capabilities/.gitignore"), "installed/\n");
+  assert.equal(j2.rollback().complete, true);
+  assert.equal(existsSync(join(withoutIgnore, ".agents/capabilities/.gitignore")), false);
+  rmSync(withoutIgnore, { recursive: true, force: true });
+});
+
+test("run journal rollback is truthful about partial failure instead of hiding it", { skip: process.getuid?.() === 0 ? "runs as root: permissions cannot be enforced" : false }, () => {
+  const dir = populatedScope();
+  const journal = beginRunJournal(dir);
+  writeFileSync(join(dir, "oas-config.yaml"), "name: rewritten\n");
+  writeFileSync(join(dir, "oas-lock.json"), "{}");
+
+  // Injected failure: make the scope directory unwritable so the config cannot
+  // be replaced, while the artifacts under .agents still can be.
+  chmodSync(dir, 0o500);
+  let report;
+  try { report = journal.rollback(); } finally { chmodSync(dir, 0o700); }
+
+  assert.equal(report.complete, false);
+  assert.match(report.summary, /^ROLLBACK INCOMPLETE — /);
+  assert.match(report.summary, /oas-config\.yaml/);
+  assert.ok(report.failures.length > 0, "failures must be enumerated, not summarised away");
+  assert.equal(existsSync(journal.backupDir), true, "an incomplete rollback must KEEP the backup — it is the only surviving copy");
+
+  // Recoverable: with the permission restored, rolling back again completes.
+  const second = journal.rollback();
+  assert.equal(second.complete, true, second.summary);
+  assert.equal(readFileSync(join(dir, "oas-config.yaml"), "utf8"), "# hand written\nname: acme\n");
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("run journal finalize and rollback are idempotent, mutually exclusive, and clean up the backup", () => {
+  const dir = populatedScope();
+  const j1 = beginRunJournal(dir);
+  writeFileSync(join(dir, "oas-config.yaml"), "name: kept\n");
+  j1.finalize();
+  j1.finalize(); // idempotent
+  assert.equal(existsSync(j1.backupDir), false);
+  assert.equal(readFileSync(join(dir, "oas-config.yaml"), "utf8"), "name: kept\n", "finalize must never revert the run's work");
+  assert.throws(() => j1.rollback(), (e) => e.code === "E_JOURNAL_FINALIZED");
+
+  const j2 = beginRunJournal(dir);
+  writeFileSync(join(dir, "oas-config.yaml"), "name: discarded\n");
+  assert.equal(j2.rollback().complete, true);
+  const again = j2.rollback(); // idempotent
+  assert.equal(again.complete, true);
+  assert.deepEqual([again.restored, again.removed], [[], []]);
+  assert.throws(() => j2.finalize(), (e) => e.code === "E_JOURNAL_ROLLED_BACK");
+  assert.equal(readFileSync(join(dir, "oas-config.yaml"), "utf8"), "name: kept\n");
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("run journal keeps its backup outside the protected tree and refuses escaping paths", () => {
+  const dir = populatedScope();
+  const journal = beginRunJournal(dir);
+  assert.equal(journal.backupDir.startsWith(`${dir}/`), false, "backup inside the scope would be destroyed by the restore it enables");
+  journal.finalize();
+
+  assert.throws(() => beginRunJournal(dir, { backupRoot: dir }), (e) => e.code === "E_JOURNAL_BACKUP_INSIDE_SCOPE");
+  assert.throws(() => beginRunJournal(dir, { extraPaths: ["../outside.yaml"] }), (e) => e.code === "E_JOURNAL_PATH_ESCAPE");
+  assert.throws(() => beginRunJournal(join(dir, "nope")), (e) => e.code === "E_JOURNAL_NO_SCOPE");
+
+  // An INTERMEDIATE component that leaves the scope is fatal: restoring through
+  // it would delete outer-scope state this run never owned.
+  const escaped = temp();
+  const outside = temp();
+  mkdirSync(join(escaped, ".agents"), { recursive: true });
+  symlinkSync(outside, join(escaped, ".agents/capabilities"));
+  assert.throws(() => beginRunJournal(escaped), (e) => e.code === "E_JOURNAL_PATH_ESCAPE");
+  for (const d of [dir, escaped, outside]) rmSync(d, { recursive: true, force: true });
 });
 
 // ---------- lock v2 reading ----------
