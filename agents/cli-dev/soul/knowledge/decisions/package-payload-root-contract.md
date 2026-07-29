@@ -66,11 +66,20 @@ byte-different locks claim the same pin.
 Path changes are lock advancement. A plain `oas install` that resolves a
 payload path different from the lock's `path` fails with `integrity-drift` before
 integrity comparison, because two different roots can contain byte-identical
-trees. Restore passes the locked path as an override that beats both the spec
-and the catalog entry, so neither an upstream `git mv` nor a repointed catalog
-can change what a bare restore installs. A bare restore is also pinned to the
-locked commit, where the old root still exists, so an upstream move cannot break
-an existing deployment.
+trees. The acquire-time path-mismatch diagnostic must branch on the **locked**
+source kind because that is the source `oas update` re-resolves from: catalog
+locks may recommend `oas update <pkg>` because the catalog entry owns `path`,
+Git locks must not recommend update because the operator's `#<path>` fragment is
+sticky across updates and must instead be repaired by remove-then-install with
+the intended fragment, and local path locks always select `.` so this mismatch is
+unreachable. See [diagnostic remedies are contracts](/lessons/diagnostic-remedies-are-contracts.md)
+for the testing lesson.
+
+Restore passes the locked path as an override that beats both the spec and the
+catalog entry, so neither an upstream `git mv` nor a repointed catalog can change
+what a bare restore installs. A bare restore is also pinned to the locked commit,
+where the old root still exists, so an upstream move cannot break an existing
+deployment.
 
 # Test fixture facts
 
