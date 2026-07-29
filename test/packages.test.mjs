@@ -599,6 +599,33 @@ test("init --package is ADOPTION, not an install alias: default template selecti
   for (const d of [pkg, scope, ambiguous, scope2, scope3, noTemplates, scope4]) rmSync(d, { recursive: true, force: true });
 });
 
+test("a journal that cannot even be constructed still yields exactly one JSON envelope", () => {
+  const scope = temp();
+  const outside = temp();
+  mkdirSync(join(scope, ".agents"), { recursive: true });
+  // An intermediate symlink leaving the scope: the journal refuses to snapshot
+  // through it, and that refusal happens before anything is acquired.
+  symlinkSync(outside, join(scope, ".agents/capabilities"));
+  const pkg = materializedPackage(temp());
+
+  const r = cli(["init", "--package", pkg, "--dir", scope, "--json"]);
+  assert.equal(r.status, 1);
+  // Exactly one envelope on stdout — not a stack trace, not two objects.
+  const parsed = JSON.parse(r.stdout);
+  assert.equal(r.stdout.trimEnd().split("\n").length, 1, "stdout must carry ONE envelope and nothing else");
+  assert.equal(parsed.ok, false);
+  assert.equal(parsed.schemaVersion, 1);
+  assert.equal(parsed.error.code, "E_JOURNAL_PATH_ESCAPE");
+  assert.doesNotMatch(r.stdout, /at .*\(.*:\d+:\d+\)/, "no stack trace may reach stdout");
+
+  // And nothing was acquired or written.
+  assert.equal(existsSync(join(scope, "oas-lock.json")), false);
+  assert.equal(existsSync(join(scope, "oas-config.yaml")), false);
+  assert.deepEqual(readdirSync(outside), [], "the escaping target must be untouched");
+
+  for (const d of [scope, outside, pkg]) rmSync(d, { recursive: true, force: true });
+});
+
 test("adoption failure AFTER the engine commits rolls the whole run back: pre-existing same-name capability, lock, ignore and base return", () => {
   const scope = temp();
   execFileSync("git", ["init", "-q", scope]); // Git-backed, so the ignore file is part of the transaction

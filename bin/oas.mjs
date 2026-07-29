@@ -1260,7 +1260,14 @@ function initPackage(src, dir, file) {
   // Opened BEFORE acquisition: a snapshot taken afterwards would record the new
   // lock, artifacts and ignore bytes as the "pre-existing" state and could
   // never undo them.
-  const journal = beginRunJournal(dir);
+  // Constructed inside its own guard: a journal that cannot be built (a symlink
+  // component, an unreadable snapshot, a backup that would land inside the
+  // scope) must still leave the command with exactly one JSON envelope. There
+  // is nothing to roll back yet, so its typed code goes straight to bail.
+  let journal;
+  try { journal = beginRunJournal(dir); }
+  catch (e) { bail(e.code || "E_JOURNAL_FAILED", e.message); return; }
+
   /** Undo the run, then report. `code` is the engine's verbatim code for
    * acquisition failures and a stable CLI code for our own write failures — a
    * raw errno like ENOTDIR is not a contract automation can branch on. */
