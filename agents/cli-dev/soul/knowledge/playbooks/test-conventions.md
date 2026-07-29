@@ -3,7 +3,7 @@ type: Playbook
 title: Test conventions in test/capabilities.test.mjs
 description: Kernel and CLI tests run node:test against temp directories with fixture souls, fake/runtime tmux shims on PATH, spawnSync of bin/oas.mjs for CLI behavior, and regression coverage at the layer where bugs occurred.
 tags: [testing, conventions, fixtures, cli, regression, tmux]
-timestamp: 2026-07-28
+timestamp: 2026-07-29
 ---
 
 # The house style
@@ -127,6 +127,10 @@ All kernel/CLI behavior tests live in `test/capabilities.test.mjs`
   at config-chain levels; a bare git repo without `oas-config.yaml` can silently
   hide a fixture and turn the assertion into `E_UNKNOWN_COMMAND` instead of
   exercising manifest code.
+- `assertCapabilitySelfContained` reads `manifest.commands` values as command
+  strings (`"<script> [args…]"`). The object form (`{ exec: "x.mjs" }`)
+  stringifies to `[object Object]` and fails containment with a confusing
+  message.
 - Symlink-containment walker tests should use a real `npm ci` `file:` dependency
   layout when validating package materialization: npm creates `node_modules/dep`
   as a relative symlink, and the security regression shape can require an

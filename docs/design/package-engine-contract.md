@@ -559,6 +559,16 @@ export function capabilityTrust(a, b)
  * have displayed the full executable-surface summary first). Writes
  * `trusted: true` on the capability rows. Non-executable capabilities need no
  * approval (no-op, reported in `skipped`). Official identity grants nothing.
+ *
+ * Two preconditions per target, BOTH required before any flag is set:
+ *   1. the materialized artifact hashes to the capability row's `integrity`;
+ *   2. its `.oas-installation.json` agrees with that capability row and its
+ *      provider package row.
+ * Integrity alone is not sufficient — a provenance file edited and then
+ * re-hashed into its row leaves every byte matching its recorded digest with
+ * only the ORIGIN disagreeing, and approval is what unlocks execution. Both are
+ * checked for every target before the single lock write, so a bulk approval
+ * commits nothing when one capability's origin is disputed.
  * @throws "unknown-capability", "integrity-drift", "invalid-lock"
  */
 export function approveCapability(levelDir, id, { allCapabilities } = {})
