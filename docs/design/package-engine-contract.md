@@ -422,19 +422,46 @@ export function validateCapabilityLockEntry(capabilityId, entry, allPackages, op
  * collisions and capability-ID collisions (within the closure, and against
  * capabilities already locked at this scope by packages outside it); asserts
  * every capability is self-contained; materializes each capability's runtime
- * closure IN STAGING; preflights the scope's `.gitignore` (§3.3); then
- * atomically swaps every projected artifact into
- * `.agents/capabilities/installed/<id>/` and writes the lock. On ANY failure —
- * before OR during the commit phase — every already-renamed artifact, the lock
- * bytes and the ignore bytes are rolled back to the pre-operation state.
- * Staging is always removed.
+ * closure IN STAGING; calls `opts.assertCommittable` (below); preflights the
+ * scope's `.gitignore` (§3.3); then atomically swaps every projected artifact
+ * into `.agents/capabilities/installed/<id>/` and writes the lock. On ANY
+ * failure — before OR during the commit phase — every already-renamed artifact,
+ * the lock bytes and the ignore bytes are rolled back to the pre-operation
+ * state. Staging is always removed.
+ *
+ * A v1 lock at the scope is refused BEFORE any source fetch, staging, ignore or
+ * artifact work — every v1, INCLUDING AN EMPTY ONE. An empty v1 is still an
+ * unconverted scope: converting it as a side effect of `oas install` is the
+ * implicit migration §7 forbids, and failing later would make the caller pay for
+ * a fetch to learn it.
  *
  * ACTIVATES NOTHING and TRUSTS NOTHING: `trusted` is false for every capability
  * whose artifact integrity is not byte-identical to the one already locked.
  *
  * @param {string} levelDir  scope directory owning the store + lock
  * @param {string} spec      package source spec
- * @param {{ catalog?, replace?: boolean, expectPackage?: string, rootSnapshot? }} [opts]
+ * @param {{ catalog?, replace?: boolean, expectPackage?: string, rootSnapshot?,
+ *           assertCommittable?: (preview) => void }} [opts]
+ *   // `assertCommittable` is the PRE-COMMIT GATE. It is called exactly once,
+ *   // after the whole closure is projected in staging and BEFORE the ignore
+ *   // preflight, the artifact swap and the lock write — so the scope is still
+ *   // completely untouched. It receives the full staged outcome:
+ *   //
+ *   //   { root, packages: [{ package, version, source, path, commit, integrity,
+ *   //                        dependencies, capabilities }],
+ *   //     capabilities: [{ capability, version, package, path, integrity,
+ *   //                      trusted, status, executableSurface }],
+ *   //     configTemplates }   // identical descriptors to the return value's,
+ *   //                         // including `content` and `contentIntegrity`
+ *   //
+ *   // It is a PURE GATE: inspect and (optionally) throw, nothing else. A throw
+ *   // propagates unchanged, staging is discarded, and NOTHING is mutated — no
+ *   // ignore file, no artifact, no lock byte — so a refusal needs no rollback.
+ *   // This is what lets guided `oas init --package` present and validate the
+ *   // complete selected template plan before any engine mutation, and what lets
+ *   // `oas update` refuse a config-referenced export drop byte-exactly (§5.5).
+ *   // Staging paths are deliberately NOT exposed: the gate decides, it does not
+ *   // reach into the transaction.
  * @returns {{
  *   root: string,
  *   lockFile: string,
@@ -560,18 +587,33 @@ export function removePackage(startDir, packageId)
  * installed must NOT call this — it is a network operation.
  *
  * @param {{ template?: string, catalog? }} [opts]  template omitted = all of them
- * @returns {{ package, source, version, commit, path, integrity,
+ * @returns {{ package, source, version, commit, path, integrity, legacySpelling,
  *   templates: Array<{ template, path, description?, default, content,
- *                      contentIntegrity, legacySpelling? }> }}
- *   // `integrity` is the package PAYLOAD integrity, verified equal to the lock;
- *   // `contentIntegrity` is `sha256-<64 lowercase hex>` over the exact template
- *   // content bytes. The CLI lane owns oas-config schema/policy validation.
+ *                      contentIntegrity, legacySpelling }> }}
+ *   // `integrity` is the package PAYLOAD integrity, verified equal to the lock.
+ *   // The CLI lane owns oas-config schema/policy validation.
  * @throws "unknown-capability" (no such locked package), "invalid-lock",
  *         "integrity-drift", "invalid-package-manifest", "invalid-source",
  *         "unknown-config-template"
  */
 export function readLockedConfigTemplates(startDir, packageId, opts)
 ```
+
+**One template descriptor shape, two readers.** Acquisition (§5.3
+`configTemplates`) and this locked reader produce the SAME descriptor, field for
+field, and both carry `legacySpelling` on **every template item** — the root
+`legacySpelling` here is a package-level convenience duplicate, not the only
+place it appears. A consumer must never have to know which reader produced a
+descriptor in order to read it.
+
+**`contentIntegrity` digests the exact FILE BYTES**, not the decoded string:
+`sha256-<64 lowercase hex>` over the bytes on disk. Digesting the decoded string
+would hash U+FFFD replacement characters for any byte sequence that failed to
+decode, yielding a digest nothing can reproduce from the file — and adoption
+compares template bytes. Config templates are UTF-8 text by contract, so the
+decode is **fail-closed**: undecodable bytes are `invalid-package-manifest`, a
+malformed package, never silently repaired. Acquisition and the locked reader
+therefore agree byte-for-byte and digest-for-digest on the same locked source.
 
 ### 5.7 Migration (v1 only)
 

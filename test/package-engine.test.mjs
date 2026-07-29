@@ -7,6 +7,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -537,6 +538,38 @@ test("acquirePackage: a v1 lock at the scope blocks package install with legacy-
   assert.equal(existsSync(artifact(s, "x.a")), false);
 });
 
+test("an EMPTY v1 scope is refused too, and refused BEFORE the source is ever fetched", () => {
+  const t = temp();
+  const s = scope(t);
+  gitify(s);
+  write(join(s, OAS_LOCK_FILE), JSON.stringify({ lockfileVersion: 1, capabilities: {} }, null, 2));
+  const lockBefore = readFileSync(join(s, OAS_LOCK_FILE), "utf8");
+  // A source that CANNOT be fetched: reaching the fetch would raise
+  // invalid-source, so `legacy-lock` proves the preflight ran first.
+  const missing = join(t, "no-such-source");
+  assert.equal(existsSync(missing), false);
+  const e = throwsCode(() => acquirePackage(s, missing), "legacy-lock", "empty v1 scope");
+  assert.match(e.message, /oas migrate/);
+  // An empty v1 is an UNCONVERTED scope, not an absent lock: install must never
+  // convert it as a side effect, and `lockDraft` refuses it identically.
+  assert.equal(readFileSync(join(s, OAS_LOCK_FILE), "utf8"), lockBefore, "lock bytes untouched — never converted implicitly");
+  assert.equal(existsSync(join(s, ".agents/capabilities/installed")), false, "no store, no staging");
+  assert.equal(existsSync(join(s, ".agents/capabilities/.gitignore")), false, "no ignore file was written");
+  // And a fetchable source is refused identically — the refusal is about the
+  // scope, not about the spec.
+  const repo = pkgSource(join(t, "repo", "oas-package"), { package: "x.p" }, { "capabilities/a": { capability: "x.a" } });
+  const commit = gitify(join(t, "repo"));
+  throwsCode(() => acquirePackage(s, `file://${join(t, "repo")}@${commit}#oas-package`), "legacy-lock", "empty v1, valid source");
+  assert.equal(readFileSync(join(s, OAS_LOCK_FILE), "utf8"), lockBefore);
+  assert.equal(existsSync(join(s, ".agents/capabilities/installed")), false);
+  assert.ok(existsSync(join(repo, "oas-package.json")), "the source itself is untouched");
+  // The whole point of refusing: explicit migration is still the only way in.
+  applyLegacyLockMigration(s);
+  assert.equal(lockOf(s).lockfileVersion, 2);
+  acquirePackage(s, `file://${join(t, "repo")}@${commit}#oas-package`);
+  assert.ok(existsSync(artifact(s, "x.a")));
+});
+
 test("acquirePackage: catalog is identity/discovery only — resolution grants no trust and advances no lock", () => {
   const t = temp();
   const repo = pkgSource(join(t, "repo", "oas-package"), { package: "x.official" }, { "capabilities/a": { capability: "x.a", commands: { go: "bin/go.mjs run" } } });
@@ -885,6 +918,74 @@ test("readLockedConfigTemplates: exact locked bytes, no persisted package root, 
   assert.deepEqual(readdirSync(join(s, ".agents/capabilities/installed")), ["x.a"]);
 });
 
+test("both template readers produce ONE descriptor shape — legacySpelling sits on every item, canonical and legacy alike", () => {
+  const t = temp();
+  // Canonical spelling.
+  const modern = pkgSource(join(t, "modern"), { package: "x.modern", configTemplates: { default: { path: "c/d.yaml", default: true, description: "recommended" }, minimal: { path: "c/m.yaml" } } }, { "capabilities/a": { capability: "x.a" } });
+  write(join(modern, "c/d.yaml"), "name: full\n");
+  write(join(modern, "c/m.yaml"), "name: minimal\n");
+  const s = scope(t);
+  const acq = acquirePackage(s, modern);
+  const locked = readLockedConfigTemplates(s, "x.modern");
+  const KEYS = ["content", "contentIntegrity", "default", "legacySpelling", "path", "template"]; // sorted
+  for (const item of locked.templates) {
+    assert.equal(Object.hasOwn(item, "legacySpelling"), true, `${item.template}: legacySpelling is per-descriptor, not root-only`);
+    assert.equal(item.legacySpelling, false);
+  }
+  assert.equal(locked.legacySpelling, false, "the root value stays available as a package-level convenience");
+  // Field-for-field agreement between the two readers: acquisition's descriptor
+  // is the locked reader's plus `package`. A consumer must never need to know
+  // which reader produced a descriptor.
+  for (const item of locked.templates) {
+    const staged = acq.configTemplates.find((x) => x.template === item.template);
+    assert.deepEqual(Object.keys(staged).sort(), ["package", ...Object.keys(item)].sort(), `${item.template}: same fields`);
+    assert.deepEqual({ ...staged, package: undefined }, { ...item, package: undefined }, `${item.template}: same values`);
+  }
+  assert.deepEqual(Object.keys(locked.templates.find((x) => x.template === "default")).sort(), [...KEYS, "description"].sort());
+  assert.deepEqual(Object.keys(locked.templates.find((x) => x.template === "minimal")).sort(), KEYS, "an absent description is absent, not undefined");
+
+  // Legacy spelling: same shape, flag flipped, on every item.
+  const d = join(t, "legacy");
+  write(join(d, "capabilities/a/oas.json"), JSON.stringify({ capability: "x.l", version: "1.0.0", description: "d" }));
+  write(join(d, "configs/default/oas-config.yaml"), "name: legacy\n");
+  write(join(d, "oas-package.json"), JSON.stringify({ package: "x.legacy", version: "1.0.0", description: "d", compatibility: { oas: ">=0.1.0" }, capabilities: ["capabilities/a"], configs: { default: { path: "configs/default/oas-config.yaml", default: true } } }));
+  const s2 = scope(t, "scope2");
+  const acq2 = acquirePackage(s2, d);
+  const locked2 = readLockedConfigTemplates(s2, "x.legacy");
+  assert.equal(locked2.templates[0].legacySpelling, true);
+  assert.equal(acq2.configTemplates[0].legacySpelling, true);
+  assert.deepEqual(Object.keys(locked2.templates[0]).sort(), KEYS);
+});
+
+test("contentIntegrity digests the EXACT file bytes, and undecodable template bytes fail closed", () => {
+  const t = temp();
+  const src = pkgSource(join(t, "src"), { package: "x.p", configTemplates: { default: { path: "c/d.yaml", default: true } } }, { "capabilities/a": { capability: "x.a" } });
+  // Bytes chosen so a lossy read would differ from the file: a lone CR, a BOM,
+  // a NUL and a multi-byte character all survive an exact-byte digest.
+  const bytes = Buffer.from([0xef, 0xbb, 0xbf, 0x6e, 0x61, 0x6d, 0x65, 0x3a, 0x20, 0xc3, 0xa9, 0x00, 0x0d, 0x0a]);
+  write(join(src, "c/d.yaml"), "");
+  writeFileSync(join(src, "c/d.yaml"), bytes);
+  const expected = `sha256-${createHash("sha256").update(bytes).digest("hex")}`;
+  const s = scope(t);
+  const acq = acquirePackage(s, src);
+  const locked = readLockedConfigTemplates(s, "x.p");
+  assert.equal(acq.configTemplates[0].contentIntegrity, expected, "acquisition digests the file bytes");
+  assert.equal(locked.templates[0].contentIntegrity, expected, "the locked reader agrees, byte for byte");
+  // The digest must reproduce from the bytes an adopter would write back.
+  assert.equal(`sha256-${createHash("sha256").update(Buffer.from(locked.templates[0].content, "utf8")).digest("hex")}`, expected, "content round-trips to the same bytes");
+
+  // Invalid UTF-8 is a malformed package, never silently repaired to U+FFFD —
+  // a replacement-character digest is one nothing can reproduce from the file.
+  const bad = pkgSource(join(t, "bad"), { package: "x.bad", configTemplates: { default: { path: "c/d.yaml" } } }, { "capabilities/a": { capability: "x.badcap" } });
+  write(join(bad, "c/d.yaml"), "");
+  writeFileSync(join(bad, "c/d.yaml"), Buffer.from([0x6e, 0x3a, 0x20, 0xff, 0xfe, 0x0a]));
+  const s2 = scope(t, "scope2");
+  const e = throwsCode(() => acquirePackage(s2, bad), "invalid-package-manifest", "invalid UTF-8 template");
+  assert.match(e.message, /UTF-8/);
+  assert.equal(existsSync(join(s2, OAS_LOCK_FILE)), false, "the package never installed");
+  assert.equal(existsSync(artifact(s2, "x.badcap")), false);
+});
+
 test("readLockedConfigTemplates normalizes the deprecated configs spelling and flags it", () => {
   const t = temp();
   const d = join(t, "legacy");
@@ -948,6 +1049,62 @@ test("a failed transaction leaves store, lock and ignore bytes byte-identical", 
   assert.equal(capabilityArtifactIntegrity(artifact(s, "x.a")), artifactBefore);
   assert.equal(existsSync(artifact(s, "x.b")), false);
   assert.deepEqual(readdirSync(join(s, ".agents/capabilities/installed")), ["x.a"], "staging removed");
+});
+
+test("assertCommittable sees the COMPLETE staged plan — template bytes included — and a throw mutates nothing", () => {
+  const t = temp();
+  const dep = pkgSource(join(t, "dep"), { package: "x.dep" }, { "capabilities/d": { capability: "x.d" } });
+  const src = pkgSource(join(t, "src"), { package: "x.p", dependencies: [dep], configTemplates: { default: { path: "c/d.yaml", default: true, description: "recommended" } } }, {
+    "capabilities/a": { capability: "x.a", version: "2.1.0", commands: { go: "bin/go.mjs run" } },
+  });
+  write(join(src, "capabilities/a/bin/go.mjs"), "//\n");
+  write(join(src, "c/d.yaml"), "name: adopted\n");
+  const s = scope(t);
+  gitify(s);
+
+  // 1. A refusing gate: the CLI's guided `oas init --package` decides against
+  //    the plan it was shown. NOTHING may have moved.
+  let seen;
+  const refuse = () => acquirePackage(s, src, { assertCommittable: (p) => { seen = p; throw new Error("operator declined the plan"); } });
+  assert.throws(refuse, /operator declined the plan/);
+  assert.equal(existsSync(join(s, OAS_LOCK_FILE)), false, "no lock byte");
+  assert.equal(existsSync(join(s, ".agents/capabilities/installed")), false, "no artifact, no staging residue, not even the store root it had to create");
+  assert.equal(existsSync(join(s, ".agents/capabilities/.gitignore")), false, "the ignore preflight had not run yet");
+
+  // The preview is the full staged outcome, not just identities.
+  assert.equal(seen.root, "x.p");
+  const pkg = seen.packages.find((p) => p.package === "x.p");
+  assert.deepEqual(Object.keys(pkg).sort(), ["capabilities", "commit", "dependencies", "integrity", "package", "path", "source", "version"]);
+  assert.deepEqual(pkg.dependencies, ["x.dep"], "the whole closure is visible, not only the root");
+  assert.deepEqual(seen.packages.map((p) => p.package).sort(), ["x.dep", "x.p"]);
+  const cap = seen.capabilities.find((c) => c.capability === "x.a");
+  assert.equal(cap.version, "2.1.0");
+  assert.equal(cap.trusted, false);
+  assert.equal(cap.status, "installed");
+  assert.deepEqual(cap.executableSurface, { commands: ["go"], hooks: [] }, "the surface to approve is presentable BEFORE committing");
+  assert.equal(Object.hasOwn(cap, "dir"), false, "staging paths are not exposed — the gate decides, it does not reach in");
+  // Template bytes and digests are present, so adoption can be validated first.
+  assert.equal(seen.configTemplates[0].content, "name: adopted\n");
+  assert.equal(seen.configTemplates[0].description, "recommended");
+  assert.match(seen.configTemplates[0].contentIntegrity, /^sha256-[0-9a-f]{64}$/);
+
+  // 2. The observed bytes/digest are exactly what a committed acquire returns.
+  const declined = { ...seen };
+  const ok = acquirePackage(s, src, { assertCommittable: () => {} });
+  assert.deepEqual(ok.configTemplates, declined.configTemplates, "the declined preview was the truth, not an estimate");
+  assert.deepEqual(ok.capabilities.map((c) => c.capability).sort(), declined.capabilities.map((c) => c.capability).sort());
+  assert.equal(lockOf(s).capabilities["x.a"].integrity, declined.capabilities.find((c) => c.capability === "x.a").integrity);
+
+  // 3. Refusing an UPDATE is byte-exact for the same reason.
+  const lockBefore = readFileSync(join(s, OAS_LOCK_FILE), "utf8");
+  const artifactBefore = capabilityArtifactIntegrity(artifact(s, "x.a"));
+  const ignoreBefore = readFileSync(join(s, ".agents/capabilities/.gitignore"), "utf8");
+  write(join(src, "capabilities/a/new.md"), "changed\n");
+  assert.throws(() => acquirePackage(s, src, { replace: true, expectPackage: "x.p", assertCommittable: () => { throw new Error("nope"); } }), /nope/);
+  assert.equal(readFileSync(join(s, OAS_LOCK_FILE), "utf8"), lockBefore);
+  assert.equal(capabilityArtifactIntegrity(artifact(s, "x.a")), artifactBefore);
+  assert.equal(readFileSync(join(s, ".agents/capabilities/.gitignore"), "utf8"), ignoreBefore);
+  assert.deepEqual(readdirSync(join(s, ".agents/capabilities/installed")).sort(), ["x.a", "x.d"]);
 });
 
 test("acquire is incremental: packages outside the closure keep their artifacts, rows and trust", () => {
