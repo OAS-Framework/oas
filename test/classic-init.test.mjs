@@ -518,3 +518,55 @@ test("a template may activate what is not acquired yet: it seeds, says so, and d
   assert.match(r.stderr, /does not resolve yet/, "…and the run says so, on stderr, outside the envelope");
   rmSync(base, { recursive: true, force: true });
 });
+
+// ---------- the 0.19.4 regression, stated end to end ----------
+
+test("a deployment created seconds ago is never told to migrate: doctor reports no legacy lock and no official migration", () => {
+  const { base, catalog } = published();
+  const s = gitify(join(base, "scope"));
+  assert.equal(cli(["init", "--knowledge", "oas.okf", "--messaging", "oas.aweb", "--tasks", "none", "--dir", s], { catalog }).status, 0);
+
+  // THE regression. Through 0.19.4 a fresh init acquired its layers as legacy
+  // marketplace capabilities, so doctor greeted a brand-new deployment with
+  // `oas migrate --official --recursive`. Init's own output being clean is not
+  // enough — the bug was visible only from doctor, one command later.
+  const d = JSON.parse(cli(["doctor", s, "--json"], { cwd: s }).stdout);
+  assert.ok(!d.lockError, JSON.stringify(d.lockError));
+  assert.deepEqual(d.legacyLockFiles, [], "a brand-new deployment has no v1 lock files");
+  assert.ok(!d.officialMigration, "doctor must not ask a fresh init to run oas migrate --official");
+  assert.equal(JSON.stringify(d).includes("oas migrate"), false, "no migration advice anywhere in the report");
+
+  // The only thing wrong with a fresh deployment is what the operator has not
+  // consented to yet: the executable surfaces are untrusted, by design.
+  assert.deepEqual(d.capabilities.map((c) => c.id).sort(), ["oas.aweb", "oas.okf"]);
+  const listed = JSON.parse(cli(["list", "--dir", s, "--json"], { cwd: s }).stdout).result.capabilities;
+  assert.deepEqual([...new Set(listed.filter((c) => c.status !== "ok").map((c) => c.code))], ["untrusted-surface"],
+    JSON.stringify(listed));
+
+  const human = cli(["doctor", s], { cwd: s });
+  assert.equal(human.status, 0, human.stderr);
+  assert.doesNotMatch(human.stdout, /oas migrate/, "the human report is clean too");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("a host requirement is reported with its consent command and survives init: init never installs it", () => {
+  const { base, catalog } = published();
+  const s = gitify(join(base, "scope"));
+
+  const r = cli(["init", "--knowledge", "oas.okf", "--messaging", "none", "--tasks", "none", "--json", "--dir", s], { catalog });
+  assert.equal(r.status, 0, r.stderr);
+  const req = envelope(r).result.requirements.find((q) => q.command === "definitely-not-a-real-cmd-xyz");
+  assert.ok(req, "the missing host requirement is reported");
+  assert.equal(req.capability, "oas.okf", "the report names who asked for it");
+  assert.equal(req.why, "knowledge harvest needs it");
+  assert.equal(req.install, "brew install nope");
+  // The consent command is the ONLY way to install it, and init did not run it.
+  assert.match(req.consentCommand, /oas install --accept-requirement definitely-not-a-real-cmd-xyz/);
+  assert.match(req.consentCommand, new RegExp(s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), "the consent command is scoped to this deployment");
+
+  // Doctor still reports it afterwards: init changed nothing about the host.
+  const d = JSON.parse(cli(["doctor", s, "--json"], { cwd: s }).stdout);
+  assert.ok(d.missingHostRequirements.some((q) => q.command === "definitely-not-a-real-cmd-xyz"),
+    "a requirement init only reported must still be missing");
+  rmSync(base, { recursive: true, force: true });
+});
