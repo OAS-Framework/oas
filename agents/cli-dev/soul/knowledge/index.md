@@ -123,6 +123,9 @@ read what the current task needs, not everything.
 * [playbooks/test-conventions.md](playbooks/test-conventions.md) - Kernel and CLI tests run node:test against temp directories with fixture souls, fake/runtime tmux shims on PATH, spawnSync of bin/oas.mjs for CLI behavior, and regression coverage at the layer where bugs occurred.
 
 ## References
+* [references/frozen-revised-v2-engine-seam-answers.md](references/frozen-revised-v2-engine-seam-answers.md) - The seven engine seam contracts the coordinator froze for the CLI lane — locked template reader, digest, acquire return, listing, run-level transaction ownership, gitignore ownership, and error pass-through.
+* [references/revised-v2-lock-discriminator-cli-coverage.md](references/revised-v2-lock-discriminator-cli-coverage.md) - The exact OR predicate that rejects a transitional package-root v2 lock, which row fields are not tells, and what the CLI lane must pin around lock-only scopes and legacy lock writes.
+* [references/transitional-lock-tells-are-presence-not-truthiness.md](references/transitional-lock-tells-are-presence-not-truthiness.md) - Why the revised-v2 discriminator must use Object.hasOwn rather than truthiness, and the measured prototype behaviour of JSON.parse that makes package-id lookups the real bypass vector.
 * [references/strict-curriculum-scoping.md](references/strict-curriculum-scoping.md) - Launch-path facts and maintainer rulings for strict instance curriculum enforcement, including the 0.19.0 release gate for complete active-capability resource materialization.
 * [references/claude-project-skill-discovery-root-bound.md](references/claude-project-skill-discovery-root-bound.md) - Claude Code project skills load from the starting directory through every parent up to the repository root, and no supported flag restricts ancestor .claude/skills even though claudeMdExcludes can exclude ancestor CLAUDE.md files.
 

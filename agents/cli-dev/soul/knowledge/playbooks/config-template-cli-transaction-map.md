@@ -80,6 +80,10 @@ pre-existing same-name installed capability must come back byte-identical.
 
 # Engine seams this lane needs frozen
 
+Coordinator-frozen revised-v2 answers are recorded in
+[frozen revised-v2 engine seam answers](/references/frozen-revised-v2-engine-seam-answers.md).
+The original questions remain here as the CLI lane's transaction map.
+
 Recorded as questions for the coordinator, not assumptions:
 
 1. **Locked-template reader** — signature and return shape for reading a

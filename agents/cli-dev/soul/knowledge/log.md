@@ -1,6 +1,10 @@
 # Knowledge Log
 
 ## 2026-07-29
+* **Creation**: [transitional-lock-tells-are-presence-not-truthiness](/references/transitional-lock-tells-are-presence-not-truthiness.md) records the binding pin that revised-v2 transitional lock tells are own-property presence rather than truthiness, and that lock maps need null-prototype access for hostile package ids.
+* **Creation**: [revised-v2-lock-discriminator-cli-coverage](/references/revised-v2-lock-discriminator-cli-coverage.md) records the exact transitional package-root-v2 rejection predicate, row fields that are not tells, lock-only scope visibility, and CLI coverage obligations.
+* **Creation**: [frozen-revised-v2-engine-seam-answers](/references/frozen-revised-v2-engine-seam-answers.md) records the coordinator-frozen revised-v2 CLI/config-template seam contracts for the locked template reader, digest spelling, acquire return, template listing, CLI-owned run-level transaction, `.gitignore` compensation, typed error pass-through, and final lock discriminator.
+* **Update**: [config-template-cli-transaction-map](/playbooks/config-template-cli-transaction-map.md) links its open seam questions to the frozen revised-v2 answers while preserving the original question map.
 * **Creation**: [byte-preserving-three-way-config-merge](/lessons/byte-preserving-three-way-config-merge.md) records why config-template sync must merge line ranges from the local file instead of reserializing YAML, including adjacency-conflict behavior and the no-op/template-reconstruction invariants.
 * **Creation**: [config-template-cli-transaction-map](/playbooks/config-template-cli-transaction-map.md) records the CLI-owned artifacts, transaction order, rollback boundaries, and frozen engine-seam questions for config-template adoption, diff, sync, reset, adopt, and fresh classic init.
 
