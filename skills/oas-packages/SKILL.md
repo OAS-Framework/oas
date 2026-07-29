@@ -14,7 +14,7 @@ description: >-
 
 A **package** is the install/update/review unit: one git repo (or local dir)
 with an `oas-package.json` exporting one or more **capabilities** (the
-activation unit) and optional config profiles. Acquiring a package activates
+activation unit) and optional config templates. Acquiring a package activates
 NOTHING — activation stays in `oas-config.yaml` (see the oas-config skill).
 Never hand-edit `oas-lock.json` or the stores; every operation below is a CLI
 command, and all of them take `--json` (one stdout envelope, stable error
@@ -74,11 +74,14 @@ installed. Once workstream 3 publishes them as catalog packages, the same id
 acquires as a package with NO automatic executable trust. Doctor's migration
 residue reporting tracks the cutover per scope.
 
-Dependencies declared in `oas-package.json` must be pinnable (official
-selector, tag/commit, or path). The whole closure is exact-locked in the
-scope's `oas-lock.json` (`lockfileVersion: 2`): source, exact commit, tree
-integrity, exported capabilities, dependencies, per-capability approvals.
-Installed roots live in `<scope>/.agents/packages/installed/` (gitignored).
+Installing a package MATERIALIZES each capability it exports into
+`<scope>/.agents/capabilities/installed/<id>/` (gitignored). There is no
+persistent package store. Dependencies declared in `oas-package.json` must be
+pinnable (official selector, tag/commit, or path). The whole closure is
+exact-locked in the scope's `oas-lock.json` (`lockfileVersion: 2`), which
+records two maps: `packages` (source, exact commit, selected path, payload
+integrity, dependencies) and `capabilities` (each artifact's version, provider
+package, path, integrity, trust).
 
 ## Everyday operations
 
@@ -94,36 +97,35 @@ oas remove <package>           # refuses while config or dependent packages refe
 
 ## Trust
 
-Executable surfaces (commands/hooks) are blocked until approved at the
-provider package's EXACT integrity:
+Executable surfaces (commands/hooks) are blocked until approved at each
+capability artifact's EXACT integrity:
 
 ```
 oas trust <capability>                     # approve only that capability
 oas trust <package> --all-capabilities     # explicit bulk; prints the full executable surface first
 ```
 
-Any integrity change (update, drift) invalidates every approval — re-review,
-then re-trust. Skill/instruction/config-only capabilities need lock integrity
-but no approval. Official-catalog identity is NOT executable trust.
+Any artifact integrity change (update, drift) resets that capability's trust —
+re-review, then re-trust. Skill/instruction/config-only capabilities need lock
+integrity but no approval. Official-catalog identity is NOT executable trust.
 
 ## Runtime dependencies
 
-A package (root or per-capability dir) may check in `package.json` +
-`package-lock.json`; OAS materializes it with
-`npm ci --omit=dev --omit=peer --ignore-scripts` — production tree only, no
-lifecycle scripts. The source hash excludes `node_modules`, but the
-materialized closure is hashed SEPARATELY as the lock's `depsIntegrity` and
-verified by trust and restore — tampering materialized deps invalidates
-approvals like source drift. Closures must be platform-invariant in v1.
-Host peer APIs are reached only through the supported runtime
-boundary, never auto-installed.
+A capability may check in `package.json` + `package-lock.json`; OAS materializes
+it with `npm ci --omit=dev --omit=peer --ignore-scripts` — production tree only,
+no lifecycle scripts. The package payload hash EXCLUDES `node_modules`. The
+materialized `node_modules` is instead part of that capability's own artifact
+integrity, so tampering with materialized deps resets the capability's trust
+just like source drift, and restore re-verifies it. Closures must be
+platform-invariant. Host peer APIs are reached only through the supported
+runtime boundary, never auto-installed.
 
 ## Migration from v1 locks
 
 ```
 oas migrate --dry-run          # plan: which v1 capability locks map to packages
 oas migrate                    # atomic: converts mappable entries, retains the rest
-                               # as residue in the v2 lock; rolls back on failure
+                               # as residue in the revised v2 lock; rolls back on failure
 ```
 
 Residue entries keep legacy restore/trust semantics and show in doctor as

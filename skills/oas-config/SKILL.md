@@ -4,9 +4,9 @@ description: >-
   How to configure OAS deployments with oas-config.yaml and the oas CLI.
   Use for capability activation, fundamental-layer integrations, agent
   types, targeting souls, binding settings, injection overrides, config
-  scopes, or adopting a package config profile. Triggers: "bind a layer",
+  scopes, or adopting a package config template. Triggers: "bind a layer",
   "target these souls", "agent type", "override an injection", "oas use",
-  "oas init", "configure OAS", "oas-config.yaml", "adopt a profile".
+  "oas init", "configure OAS", "oas-config.yaml", "adopt a config template".
   Package acquisition/update/remove, locks, restore, and trust mechanics
   belong to the oas-packages skill.
 ---
@@ -101,21 +101,27 @@ oas use <capability> --soul <name> [--settings k=v [k2=v2 ...]]
 
 `oas init` creates config and activates only explicit defaults.
 
-## Package config profiles
+## Package config templates
 
-A distribution package can ship reference config profiles. Adopting one
-snapshots it as this scope's ordinary `oas-config.yaml` — with provenance,
-never live inheritance:
+A distribution package can ship reference **config templates**. Adopting one
+writes it as this scope's ordinary `oas-config.yaml` and records the exact
+template as a commit-safe **adopted base** — provenance, never live inheritance.
+Installing the package alone adopts no template.
 
 ```bash
-oas init --package <id|path|git-url> [--config <name>]  # preview, validate, snapshot
-oas config diff [--package <id> --config <name>]        # report drift; never merges
+oas init --package <id|path|git-url> [--config <name>]   # acquire + adopt one template
+oas config diff                                          # report drift; never merges
+oas config sync [--accept <regionId>=local|package]      # apply upstream; keep local edits
+oas config sync --reset --yes                            # discard local; take the template verbatim
+oas config adopt <package> [--config <name>]             # switch to a different base
 ```
 
-The snapshot is yours: retarget, disable, re-set, or replace anything the
-profile enabled; nested repository configs override it per the normal
-cascade; package updates never rewrite it. See docs/packages.md for the
-full adoption/reconciliation UX.
+The config is yours: retarget, disable, re-set, or replace anything the template
+enabled; nested repository configs override it per the normal cascade; package
+updates never rewrite it or the adopted base. `oas config sync` preserves your
+untouched bytes, comments, and formatting, and a region changed both locally and
+upstream is a conflict you must resolve explicitly. See docs/packages.md for the
+full adoption and sync UX.
 
 ## Fundamental layers
 
