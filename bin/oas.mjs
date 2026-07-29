@@ -24,7 +24,7 @@ import {
   acquireCapability, restoreCapabilities, marketplaceCapabilities,
   capabilityManifests, capabilityManifest, capabilityMissingRequires, capabilityIntegrity, capabilityTrust, capabilityExecutablePath,
   readCapabilityLocks, writeCapabilityLock,
-  parsePackageSource, inspectGitSourceRoot, acquirePackage, restorePackages, listInstalledPackages, readPackageLocks, readLockedConfigTemplates, residueEntryViolation,
+  parsePackageSource, inspectGitSourceRoot, acquirePackage, restorePackages, listInstalledPackages, readPackageLocks, readLockedConfigTemplates,
   officialCapabilityPackage, officialPackageCatalog,
   approveCapability, updatePackage, removePackage, migrateLegacyLock, applyLegacyLockMigration,
   packageIntegrity, capabilityArtifactIntegrity, verifyCapabilityInstallation, installedCapabilityDir, installedCapabilitiesDir, ownedCapabilitiesDir, loadPackageManifestAt,
@@ -42,6 +42,7 @@ import {
 
 const args = process.argv.slice(2);
 const cmd = args[0];
+const HELP_WORDS = new Set(["help", "--help", "-h"]);
 const flag = (name) => {
   const i = args.indexOf(`--${name}`);
   return i >= 0 ? (args[i + 1] && !args[i + 1].startsWith("--") ? args[i + 1] : true) : undefined;
@@ -197,7 +198,7 @@ function capabilityHealth(level, cap, capRow, pkgRow) {
 function doctorPackagesData(ctx, chain, { teamScope } = {}) {
   // reviewer-455ba15 fix 4: the ENGINE diagnostics the human doctor renders
   // (invalid locks, missing artifacts, integrity/runtime-closure drift,
-  // capability-list mismatches, untrusted surfaces, legacy/residue states)
+  // capability-list mismatches, untrusted surfaces, legacy-lock states)
   // are computed HERE so doctor --json exposes them structurally — machine
   // consumers see every state the human report calls broken. Fail-closed
   // reads are diagnosed, never consumed as data and never swallowed.
@@ -239,21 +240,13 @@ function doctorPackagesData(ctx, chain, { teamScope } = {}) {
       packages.push({ id, version: lock.version || null, level: lock._level, source: lock.source || null, path: lock.path || null, commit: lock.commit || null, capabilities: provided, dependencies: lock.dependencies || [], status: "broken", problems: [{ code: "missing-locked-package", detail: `locked in ${lock._file} but not installed — run oas install` }] });
     }
   }
-  // Legacy v1 files and v2 residue — the ENGINE's doctor shapes (its tests pin
-  // status/action fields): empty/nonempty v1 = pending LOCK-FORMAT migration
-  // (maintainer ruling — distinct from capability residue); v2 residue entries
-  // carry pending-migration or invalid-lock with the retry/fix action.
+  // Supported v1 scopes — empty or not — are pending an explicit LOCK-FORMAT
+  // migration (maintainer ruling). There is no second view beside this one:
+  // migration never produces residue, and the superseded transitional v2 shape
+  // is rejected wholesale by the strict reader, so it reaches doctor as the
+  // single `lockError` diagnosis above rather than as partially parsed entries.
   const legacyLockFiles = pkgLocks.legacy
-    .filter((l) => l.lockfileVersion !== 2)
     .map((l) => ({ file: l.file, level: l.level, lockfileVersion: l.lockfileVersion ?? 1, empty: !Object.keys(l.capabilities || {}).length, status: "pending-format-migration", action: `oas migrate --dir ${l.level}` }));
-  const migrationResidue = pkgLocks.legacy
-    .filter((l) => l.lockfileVersion === 2)
-    .flatMap((l) => Object.entries(l.capabilities || {}).map(([id, lock]) => {
-      const violation = residueEntryViolation(lock);
-      return violation
-        ? { id, file: l.file, level: l.level, source: lock?.source || null, status: "invalid-lock", violation, action: `fix or remove the entry in ${l.file} (never auto-repaired)` }
-        : { id, file: l.file, level: l.level, source: lock.source, status: "pending-migration", action: `oas migrate --dir ${l.level}` };
-    }));
   // Adoption provenance now comes from the visible, commit-safe adopted base —
   // not from a provenance comment the local config could lose to an edit.
   const adoptedTemplates = [];
@@ -292,7 +285,7 @@ function doctorPackagesData(ctx, chain, { teamScope } = {}) {
       ? `oas install --accept-requirement ${req.command} --dir ${shellQuote(ctx)}`
       : null,
   }));
-  return { lockError: lockBroken, packages, legacyLockFiles, migrationResidue, adoptedTemplates, missingHostRequirements, officialMigration: officialMigrationState(pkgLocks.legacy, { teamScope, ctx }) };
+  return { lockError: lockBroken, packages, legacyLockFiles, adoptedTemplates, missingHostRequirements, officialMigration: officialMigrationState(pkgLocks.legacy, { teamScope, ctx }) };
 }
 
 function doctorJson(dir) {
@@ -326,11 +319,10 @@ retiredLocks: (() => { try { return Object.entries(readCapabilityLocks(ctx)); } 
       .map(([id, m]) => ({ id, dir: m._dir, origin: m._origin, reason: retiredCapabilityReason(id) })),
     // Shared WS2+engine package payload (fix 4: human and JSON doctor derive
     // from ONE computation; fail-closed reads are diagnosed via lockError —
-    // doctorPackagesData carries the engine's residue/legacy-lock shapes).
+    // doctorPackagesData carries the engine's legacy-lock shapes).
     packages: pkg.packages,
     lockError: pkg.lockError,
     legacyLockFiles: pkg.legacyLockFiles,
-    migrationResidue: pkg.migrationResidue,
     officialMigration: pkg.officialMigration,
     adoptedTemplates: pkg.adoptedTemplates,
     missingHostRequirements: pkg.missingHostRequirements,
@@ -439,7 +431,7 @@ function doctor(dir) {
     console.log(`  ERROR: ${pkg.lockError.message} [${pkg.lockError.code}]`);
     if (pkg.lockError.file) console.log(`         fix or remove the offending entry in ${shortPath(pkg.lockError.file)} — the lock is never auto-repaired; package operations fail closed until it is valid`);
   }
-  if (!pkg.lockError && !pkg.packages.length && !pkg.legacyLockFiles.length && !pkg.migrationResidue.length) console.log("  (none)");
+  if (!pkg.lockError && !pkg.packages.length && !pkg.legacyLockFiles.length) console.log("  (none)");
   for (const p of pkg.packages) {
     console.log(`  ${p.id}@${p.version}  [${levelOf(p.level)} ${shortPath(p.level)}]`);
     for (const prob of p.problems) {
@@ -448,12 +440,8 @@ function doctor(dir) {
     }
   }
   for (const l of pkg.legacyLockFiles) {
-    if (l.empty) console.log(`  WARNING: ${shortPath(l.file)} is an empty lockfileVersion ${l.lockfileVersion} file — pending lock-format migration: run \`oas migrate --dir ${shortPath(l.level)}\` (converts to canonical v2, no residue)`);
+    if (l.empty) console.log(`  WARNING: ${shortPath(l.file)} is an empty lockfileVersion ${l.lockfileVersion} file — pending lock-format migration: run \`oas migrate --dir ${shortPath(l.level)}\` (converts to canonical v2)`);
     else console.log(`  WARNING: ${shortPath(l.file)} is lockfileVersion ${l.lockfileVersion} — \`oas migrate\` maps its capability locks to packages`);
-  }
-  for (const res of pkg.migrationResidue) {
-    if (res.status === "invalid-lock") console.log(`  ERROR: residue entry ${res.id} in ${shortPath(res.file)} is malformed (${res.violation}) — never auto-repaired; fix or remove the entry [invalid-lock]`);
-    else console.log(`  NOTE: ${res.id} in ${shortPath(res.file)} is legacy migration residue (${res.source}) — pending migration: re-run \`oas migrate --dir ${shortPath(res.level)}\` when its official package publishes, or remove the entry if the capability is abandoned`);
   }
   if (pkg.officialMigration) {
     const om = pkg.officialMigration;
@@ -733,7 +721,8 @@ function install() {
   let lockFile;
   try { lockFile = writeCapabilityLock(dir, r.manifest.capability, lock); }
   catch (e) {
-    // Refused lock write (e.g. legacy-lock: v2 scope rejects NEW residue) must
+    // Refused lock write (e.g. legacy-lock: a converted scope rejects a NEW v1
+    // capability entry) must
     // not strand the acquired artifact — compensate before failing.
     rmSync(r.dest, { recursive: true, force: true });
     cmdFail(e.code || "legacy-lock", e.message); return;
@@ -1735,7 +1724,12 @@ function removeCmd() {
   let r;
   try { r = removePackage(dir, id); } catch (e) { cmdFail(e.code || "remove-blocked", e.message || e); return; }
   if (JSON_MODE) { jsonOk(r); return; }
-  console.log(`Removed package ${r.package} (${shortPath(r.dir)}) and its entry in ${shortPath(r.lockFile)}.`);
+  // There is no package directory to name — a package is transport, and what
+  // actually leaves the disk is its materialized capability artifacts.
+  console.log(`Removed package ${r.package} from ${shortPath(r.lockFile)}.`);
+  console.log(r.capabilities.length
+    ? `  capabilities de-materialized: ${r.capabilities.join(", ")}`
+    : "  it supplied no capabilities at this scope.");
 }
 
 /** The team boundary a guided migration walks, when the scope declares one.
@@ -1780,11 +1774,15 @@ function guidedMigrateCmd({ dir, dryRun, official, recursive }) {
       const acquire = plan.filter((s) => s.action === "acquire");
       const formatOnly = plan.some((s) => s.action === "convert-format");
       const keep = plan.filter((s) => s.action === "retain" || s.action === "manual");
-      // Generic (non-official) mode keeps `oas migrate`'s semantics even when
-      // nothing maps: converting a v1 file to v2 with residue IS the operation.
-      // Official mode never rewrites a scope it has no official work in.
+      // Both modes are ALL-OR-NOTHING: a v2 lock has no residue container, so a
+      // scope converts completely or stays v1 in full. `keep` entries therefore
+      // make a scope unconvertible rather than partially convertible — apply
+      // refuses it, and the plan says so rather than promising "ready".
+      // Official mode also never rewrites a scope it has no official work in.
+      const convertible = acquire.length || formatOnly || (!official && plan.length);
       const status = held.length ? "held"
-        : (acquire.length || formatOnly || (!official && plan.length)) ? "ready"
+        : (convertible && !keep.length) ? "ready"
+        : convertible ? "blocked"
         : "nothing";
       planned.push({ scope, file, status, plan, acquire, keep, held, warnings: w });
     } catch (e) {
@@ -1810,6 +1808,10 @@ function guidedMigrateCmd({ dir, dryRun, official, recursive }) {
       else out(`    keep       ${s.capabilityId}${s.v1?.source ? `  (${s.v1.source})` : ""} — not converted, entry kept unchanged`);
     }
     if (p.status === "nothing") out("    (nothing to migrate at this scope)");
+    if (p.status === "blocked") {
+      out(`    BLOCKED    this scope mixes convertible work with ${p.keep.length} entr${p.keep.length === 1 ? "y" : "ies"} that must stay lockfileVersion 1`);
+      out("               a capability-materialization lock has no place for them, so converting the rest would drop them — the WHOLE scope stays v1 and keeps working");
+    }
     if (p.status === "ready") {
       out(`    config     ${shortPath(join(p.scope, "oas-config.yaml"))} is NOT rewritten — capability ids, layers, targets, settings, exclusions and overrides stay valid (packages export the same ids)`);
       out("    trust      executable approvals are NOT carried over — they are re-earned after migrating (exact commands below)");
@@ -1829,8 +1831,10 @@ function guidedMigrateCmd({ dir, dryRun, official, recursive }) {
     // with a nonzero result in both modes, so automation can never read
     // "planned successfully" as "this deployment can migrate now"
     // (reviewer-90dbb36). The complete plan travels under error.details.
+    const mixed = planned.filter((p) => p.status === "blocked");
     const blocked = [
       ...(held.length ? [`${held.length} scope${held.length > 1 ? "s" : ""} held (no official package mapping yet)`] : []),
+      ...(mixed.length ? [`${mixed.length} scope${mixed.length > 1 ? "s" : ""} blocked (entries that must stay lockfileVersion 1)`] : []),
       ...(failed.length ? [`${failed.length} scope${failed.length > 1 ? "s" : ""} could not be planned`] : []),
     ];
     if (JSON_MODE) {
@@ -1838,9 +1842,10 @@ function guidedMigrateCmd({ dir, dryRun, official, recursive }) {
       jsonOk(result);
       return;
     }
-    out(`\nDry run — nothing was changed. ${actionable.length} scope${actionable.length === 1 ? "" : "s"} ready${held.length ? `, ${held.length} held` : ""}${failed.length ? `, ${failed.length} failed` : ""}.`);
+    out(`\nDry run — nothing was changed. ${actionable.length} scope${actionable.length === 1 ? "" : "s"} ready${held.length ? `, ${held.length} held` : ""}${mixed.length ? `, ${mixed.length} blocked` : ""}${failed.length ? `, ${failed.length} failed` : ""}.`);
     if (actionable.length) out(`Apply with: oas migrate${official ? " --official" : ""}${recursive ? " --recursive" : ""} --dir ${shellQuote(dir)}`);
     if (held.length) out("Held scopes stay on their v1 locks and their legacy capabilities keep working — re-run when the catalog publishes their packages.");
+    if (mixed.length) out("Blocked scopes stay on their v1 locks IN FULL and keep working — migration is all-or-nothing because a v2 lock has no place for an unconverted entry.");
     if (blocked.length) die(`${blocked.join("; ")} (${actionable.length} ready)`);
     return;
   }
@@ -1856,7 +1861,14 @@ function guidedMigrateCmd({ dir, dryRun, official, recursive }) {
       out(`\nHELD      ${shortPath(p.scope)} — left unchanged; its legacy capabilities keep working`);
       continue;
     }
-    if (p.status === "nothing") { row.status = "skipped"; continue; }
+    if (p.status === "nothing") {
+      // No official work here, so nothing is applied and nothing is rewritten.
+      // Say what the scope KEPT — `retained`, never `residue`: these entries
+      // were not left beside a conversion, there simply was no conversion.
+      row.status = "skipped";
+      if (p.keep.length) row.retained = p.keep.map((k) => k.capabilityId).filter(Boolean);
+      continue;
+    }
     let r;
     try { r = applyLegacyLockMigration(p.scope, opts); }
     catch (e) {
@@ -1868,14 +1880,16 @@ function guidedMigrateCmd({ dir, dryRun, official, recursive }) {
     }
     row.status = r.skipped ? "skipped" : r.formatConverted ? "format-converted" : "migrated";
     row.migrated = r.migrated;
-    row.residue = r.residue;
+    // `retained` exists only for a SKIPPED scope left entirely on v1; a scope
+    // that converts leaves nothing behind, and a mixed one is refused above.
+    if (r.retained) row.retained = r.retained;
     row.warnings = r.warnings;
     for (const t of r.trust || []) result.trust.push({ ...t, command: `oas trust ${t.capability} --dir ${shellQuote(p.scope)}` });
     out(`\n  ${shortPath(p.scope)}:`);
     for (const m of r.migrated) out(`    migrated   ${m.capability} → package ${m.package}@${m.version}`);
-    for (const c of r.residue) out(`    kept       ${c}  (unchanged legacy entry)`);
+    for (const c of r.retained || []) out(`    retained   ${c}  (this scope stays lockfileVersion 1, unchanged)`);
     for (const w of r.warnings) out(`    WARNING: ${w}`);
-    if (r.formatConverted) out(`    format     empty lockfileVersion 1 file → canonical v2 (no residue)`);
+    if (r.formatConverted) out(`    format     empty lockfileVersion 1 file → canonical v2`);
     else if (!r.skipped) out(`    ${shortPath(r.file)} is now lockfileVersion 2 — config activation (from: installed) is unchanged`);
   }
 
@@ -1939,9 +1953,8 @@ function migrateCmd() {
   try { r = applyLegacyLockMigration(dir); } catch (e) { cmdFail(e.code || "legacy-lock", e.message || e); return; }
   if (JSON_MODE) { jsonOk(r); return; }
   for (const m of r.migrated) console.log(`migrated  ${m.capability} → package ${m.package}@${m.version}`);
-  for (const c of r.residue) console.log(`residue   ${c}  (kept as a legacy capability lock)`);
   for (const w of r.warnings) console.log(`WARNING: ${w}`);
-  if (r.formatConverted) { console.log(`${shortPath(r.file)} was an empty lockfileVersion 1 file — converted to canonical v2 (no residue).`); return; }
+  if (r.formatConverted) { console.log(`${shortPath(r.file)} was an empty lockfileVersion 1 file — converted to canonical v2.`); return; }
   if (r.file) console.log(`${shortPath(r.file)} is now lockfileVersion 2. Config activation (from: installed) is unchanged; re-run \`oas trust\` for executable capabilities — package integrity approvals are not carried over.`);
 }
 
@@ -2044,18 +2057,35 @@ function init() {
     let text;
     try { text = loadTemplateConfig(template, dir); }
     catch (e) { bail(e.code || "E_TEMPLATE_SOURCE", e.message); return; }
-    writeFileSync(file, text);
-    note(`Created ${shortPath(file)} (${levelOf(dir)} level) from template ${template}`);
-    restore(dir);
-    if (JSON_MODE) {
-      // A seeded config that cannot resolve is reported through the envelope,
-      // never as an uncaught stack: it is the one thing a JSON caller must see.
-      let activated;
+    // Seeding is a transaction too. A template can carry keys this kernel
+    // refuses, or lock entries that will not restore; either way the config this
+    // run wrote must not be left behind for the next command to trip over, and
+    // the failure must be a typed error rather than an uncaught stack.
+    let journal;
+    try { journal = beginRunJournal(dir); }
+    catch (e) { bail(e.code || "E_JOURNAL_FAILED", e.message); return; }
+    let activated = [];
+    try {
+      writeFileSync(file, text);
+      note(`Created ${shortPath(file)} (${levelOf(dir)} level) from template ${template}`);
+      // The GATE is that the kernel can read this config: a template carrying a
+      // retired key or a broken shape is a broken template, and leaving it
+      // behind would break every later command at this scope.
+      configChain(dir);
+      restore(dir);
+      // Activation is NOT a gate. A template's whole point is to seed policy you
+      // then acquire — a capability it activates but nothing supplies yet is the
+      // expected state right after seeding, not a reason to refuse the config.
       try { activated = resolveOasConfig(dir).capabilities.map((c) => ({ capability: c.id, layer: c.layer || null })); }
-      catch (e) { bail(e.code || "E_CONFIG_UNRESOLVABLE", `${shortPath(file)} was created from template ${template} but does not resolve: ${e.message}`); return; }
-      jsonOk({ file, level: levelOf(dir), raw, adopted: false, template, acquired: [], activated, requirements: [] });
+      catch (e) { note(`NOTE: ${shortPath(file)} does not resolve yet — ${e.message}. Acquire what it activates (\`oas install <source>\`), then re-check with \`oas doctor\`.`); }
+      journal.finalize();
+    } catch (e) {
+      const report = journal.rollback();
+      const detail = `${shortPath(file)} could not be seeded from template ${template}: ${e.message}`;
+      bail(e.code || "E_TEMPLATE_UNUSABLE", report.complete ? detail : `${detail} — ${report.summary}`);
       return;
     }
+    if (JSON_MODE) { jsonOk({ file, level: levelOf(dir), raw, adopted: false, template, acquired: [], activated, requirements: [] }); return; }
     offerTmuxMouseScrolling();
     return;
   }
@@ -2768,10 +2798,14 @@ else if (cmd === "version" || cmd === "--version" || cmd === "-v") versionCmd();
 else if (cmd === "spawn") { try { spawnCmd(); } catch (e) { if (JSON_MODE) jsonFail("E_SPAWN_FAILED", e.message || e); throw e; } }
 else if (cmd === "retire") retireCmd();
 else if (cmd === "create") createCmd();
-else if (cmd && !cmd.startsWith("--") && capabilityCommand()) { /* dispatched */ }
+// `!HELP_WORDS.has(cmd)`: usage NEVER depends on deployment state. `help` is a
+// word, so without this it reaches the capability dispatch, which resolves the
+// config chain and reads every lock in it — and a scope whose lock the kernel
+// refuses could then not print its own usage, which is exactly when you need it.
+else if (cmd && !cmd.startsWith("--") && !HELP_WORDS.has(cmd) && capabilityCommand()) { /* dispatched */ }
 // No matching kernel command or capability namespace: in --json mode the help
 // text must NOT contaminate stdout — still one envelope object, nonzero exit.
-else if (cmd && !cmd.startsWith("--") && JSON_MODE) jsonFail("E_UNKNOWN_COMMAND", `unknown command "${cmd}" — no kernel subcommand or active capability namespace matches`);
+else if (cmd && !cmd.startsWith("--") && !HELP_WORDS.has(cmd) && JSON_MODE) jsonFail("E_UNKNOWN_COMMAND", `unknown command "${cmd}" — no kernel subcommand or active capability namespace matches`);
 else {
   console.log(`oas — Open Agent Specialization
 
@@ -2883,5 +2917,5 @@ Usage:
                                             capability is active (e.g. oas okf harvest)
 
 Layers: ${LAYERS.join(", ")}. Level detection: ~ → laptop, .git → repo, else workspace.`);
-  process.exit(cmd && !["help", "--help", "-h"].includes(cmd) ? 1 : 0);
+  process.exit(cmd && !HELP_WORDS.has(cmd) ? 1 : 0);
 }

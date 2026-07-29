@@ -148,8 +148,10 @@ path order, ancestors first), then applies each scope transactionally.
   (nonzero exit, `--dry-run` included); legacy capabilities keep working. A
   converting scope moves whole to revised v2 — there is no residue container, so
   a converted lock never carries leftover v1 entries.
-- `git:`/`path:`/unknown and owned capabilities are left byte-identical by
-  guided mode; plain `oas migrate` is the way to convert custom sources.
+- `git:`/`path:`/unknown entries are never acquired by guided mode. A scope
+  containing only those entries is skipped with their IDs under `retained`; a
+  scope mixing them with official capabilities is blocked whole and stays v1.
+  Plain `oas migrate` can convert custom sources only when every entry maps.
 - After it runs: `oas trust <capability> --dir <scope>` for each executable
   surface it names (approvals never transfer), then `oas install --dir <scope>`
   — already-installed host requirements verify, nothing is reinstalled.
@@ -165,11 +167,12 @@ confirming the legacy capabilities remain supported.
 
 `oas doctor [dir] [--json]` distinguishes: missing locked package (run
 `oas install`), integrity drift (reacquire/update explicitly — approvals are
-already invalid), capability-list mismatch, untrusted executable surface
-(`oas trust <capability>`), a legacy v1 lock pending migration (with the exact
-`oas migrate --dir <scope>` retry and `officialMigration` readiness for guided
-upgrades), and an unsupported transitional-v2 lock (fix or remove the entry —
-never auto-repaired).
+already invalid), a capability whose `.oas-installation.json` disagrees with
+the lock, untrusted executable surface (`oas trust <capability>`), and a legacy
+v1 lock pending migration (`legacyLockFiles[]` plus `officialMigration`
+readiness). A refused lock — including the superseded transitional v2 shape —
+is reported as the single `lockError` diagnosis and is never partially
+interpreted.
 
 Source of truth beyond this skill: `oas --help` output,
 `docs/oas-package.schema.json`, `docs/oas-lock.schema.json`, and

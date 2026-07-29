@@ -1214,7 +1214,7 @@ test("lock v2 packages map is read scope-wise (contract envelope) and supplies c
   assert.equal(r3.legacy[0].lockfileVersion, 1);
 });
 
-test("empty v1 locks: reconcile LEGACY rows, doctor pending-format-migration (distinct from residue), lock-only-scope discovery", () => {
+test("empty v1 locks: reconcile LEGACY rows, doctor pending-format-migration, lock-only-scope discovery", () => {
   const base = temp();
   const ws = join(base, "ws");
   write(join(ws, "oas-config.yaml"), "name: ws\nteam:\n  name: t\n");
@@ -1227,18 +1227,50 @@ test("empty v1 locks: reconcile LEGACY rows, doctor pending-format-migration (di
   const r = cli(["install", "--no-requirements", "--dir", ws], { cwd: ws });
   assert.equal(r.status, 0, r.stdout);
   assert.match(r.stdout, /LEGACY\s+.*member\/oas-lock\.json/);
-  // (c) doctor: pending lock-format migration line, DISTINCT from residue
+  // (c) doctor: a supported v1 scope is ONE diagnosis — pending lock-format
+  // migration. There is no second "residue" view to disagree with it.
   const d = cli(["doctor", member], { cwd: ws });
   assert.equal(d.status, 0, d.stderr);
   assert.match(d.stdout, /empty lockfileVersion 1 file — pending lock-format migration/);
-  assert.doesNotMatch(d.stdout, /migration residue/);
-  // (d) doctor --json: legacyLockFiles entry (empty: true), migrationResidue stays empty
+  assert.doesNotMatch(d.stdout, /residue/i);
+  // (d) doctor --json: legacyLockFiles entry (empty: true), and nothing else.
   const dj = JSON.parse(cli(["doctor", member, "--json"], { cwd: ws }).stdout);
   const lf = dj.legacyLockFiles.find((l) => l.level === member);
   assert.ok(lf, JSON.stringify(dj.legacyLockFiles));
   assert.equal(lf.empty, true);
   assert.equal(lf.status, "pending-format-migration");
-  assert.deepEqual(dj.migrationResidue, [], "empty v1 is never capability residue");
+  assert.equal(Object.hasOwn(dj, "migrationResidue"), false);
+  assert.equal(dj.lockError, null, "a supported v1 lock is not an error");
+});
+
+test("doctor on the SUPERSEDED transitional v2 shape is one typed invalid-lock diagnosis, with no partial data", () => {
+  const scope = temp();
+  write(join(scope, "oas-config.yaml"), "name: broken\n");
+  // The package-root lock: lockfileVersion 2 with NO top-level capabilities map.
+  // The strict reader rejects it wholesale, so doctor must surface exactly that
+  // — never a partially parsed row, and never a "residue" view of its entries.
+  write(join(scope, "oas-lock.json"), JSON.stringify({
+    lockfileVersion: 2,
+    packages: { "a.b": { source: "path:/x", path: ".", version: "1.0.0", integrity: `sha256-${"0".repeat(64)}`, capabilities: ["a.cap"], trustedCapabilities: [] } },
+  }, null, 2));
+
+  const r = cli(["doctor", scope, "--json"], { cwd: scope });
+  const dj = JSON.parse(r.stdout);
+  // ONE typed diagnosis, and NO partial data of any kind: the chain itself does
+  // not resolve, so there is no packages/legacy view to disagree with it — and
+  // certainly no "residue" view of entries the reader refused to interpret.
+  assert.equal(dj.error.code, "invalid-lock");
+  assert.match(dj.error.message, /unsupported transitional package-root lockfileVersion 2/);
+  assert.match(dj.error.message, /recreate the scope's state with `oas install`/);
+  assert.deepEqual(Object.keys(dj).sort(), ["context", "error"]);
+  assert.doesNotMatch(r.stdout, /residue/i);
+
+  // Human doctor is a REPORT: it stays exit 0 and names the fault, rather than
+  // dying, so an operator can still read the rest of the resolved deployment.
+  const human = cli(["doctor", scope], { cwd: scope });
+  assert.match(human.stderr + human.stdout, /unsupported transitional package-root lockfileVersion 2/);
+  assert.doesNotMatch(human.stderr + human.stdout, /residue/i);
+  rmSync(scope, { recursive: true, force: true });
 });
 
 test("discoverWorkspaceScopes: deterministic path order with pruning of stores, vendor dirs, instances, and nested team boundaries", () => {
@@ -1282,7 +1314,7 @@ test("bare oas install at a team boundary prints the boundary FIRST, restores ea
   write(join(ws, "oas-config.yaml"), "name: ws\nteam:\n  name: t\n");
   // a descendant scope with an unrestorable lock
   write(join(ws, "member", "oas-config.yaml"), "name: member\n");
-  // entry shape passes the strict residue validator (b3ac4c6) so the failure
+  // entry shape passes the strict legacy-entry validator (b3ac4c6) so the failure
   // under test stays the unrestorable SOURCE, not a malformed-entry raise.
   write(join(ws, "member", "oas-lock.json"), JSON.stringify({ lockfileVersion: 1, capabilities: { "ghost.cap": { source: "path:/nonexistent-src", version: "1.0.0", integrity: `sha256-${"a".repeat(64)}` } } }));
   const r = cli(["install", "--no-requirements", "--dir", ws], { cwd: ws });
@@ -2857,4 +2889,50 @@ test("a capability whose .oas-installation.json disagrees with the lock is DIAGN
   assert.equal(JSON.parse(readFileSync(lockFile, "utf8")).capabilities["exec.cap"].trusted, false);
 
   for (const d of [pkg, scope]) rmSync(d, { recursive: true, force: true });
+});
+
+test("remove and update speak capability provenance: no phantom package directory, retired artifacts named", () => {
+  const pkg = executablePackage(temp());
+  const scope = temp();
+  assert.equal(cli(["install", pkg, "--dir", scope]).status, 0);
+  const artifact = join(scope, ".agents/capabilities/installed/exec.cap");
+  assert.ok(existsSync(artifact));
+
+  const human = cli(["remove", "exec.pkg", "--dir", scope]);
+  assert.equal(human.status, 0, human.stderr);
+  // A package is transport: there is no package directory to name, and what
+  // actually leaves the disk is its materialized capability artifacts.
+  assert.doesNotMatch(human.stdout, /undefined/, "no stale package-directory field");
+  assert.match(human.stdout, /capabilities de-materialized: exec\.cap/);
+  assert.equal(existsSync(artifact), false);
+  assert.equal(JSON.parse(readFileSync(join(scope, "oas-lock.json"), "utf8")).capabilities["exec.cap"], undefined);
+
+  // The JSON envelope carries the same capability list, not a package path.
+  const scope2 = temp();
+  assert.equal(cli(["install", pkg, "--dir", scope2]).status, 0);
+  const r = cli(["remove", "exec.pkg", "--dir", scope2, "--json"]);
+  assert.equal(r.status, 0, r.stderr);
+  const payload = JSON.parse(r.stdout).result;
+  assert.equal(payload.package, "exec.pkg");
+  assert.deepEqual(payload.capabilities, ["exec.cap"]);
+  assert.equal(Object.hasOwn(payload, "dir"), false, "there is no package root to report");
+
+  for (const d of [pkg, scope, scope2]) rmSync(d, { recursive: true, force: true });
+});
+
+test("oas help never depends on deployment state: a lock the kernel refuses still prints usage", () => {
+  const scope = temp();
+  // The superseded transitional-v2 shape: the kernel refuses to interpret it.
+  write(join(scope, "oas-lock.json"), JSON.stringify({ lockfileVersion: 2, packages: { "a.b": { source: "path:/x", path: ".", version: "1.0.0", integrity: "sha256-" + "0".repeat(64) } } }, null, 2));
+  write(join(scope, "oas-config.yaml"), "name: broken\n");
+  // Any ordinary command fails closed on it — that is the contract.
+  assert.notEqual(cli(["list", "--dir", scope], { cwd: scope }).status, 0);
+  // Usage must NOT: help is exactly what you reach for when a scope is broken.
+  for (const argv of [["help"], ["--help"], ["-h"]]) {
+    const r = cli(argv, { cwd: scope });
+    assert.equal(r.status, 0, `${argv[0]}: ${r.stderr}`);
+    assert.match(r.stdout, /oas — Open Agent Specialization/);
+    assert.match(r.stdout, /oas init/);
+  }
+  rmSync(scope, { recursive: true, force: true });
 });

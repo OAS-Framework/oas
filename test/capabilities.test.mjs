@@ -737,7 +737,9 @@ test("oas type add declares agent types; inject eject copies a packaged default 
 test("init --template snapshots a local or named template with provenance and rewrites name", () => {
   const base = temp();
   const tpl = join(base, "template.yaml");
-  writeFileSync(tpl, "name: template-origin\ncapabilities:\n  oas.okf:\n    source: bundled\n    global: true\nlayers:\n  tasks: none\n");
+  // `layers:` moved under `capabilities.layers` — the top-level spelling is
+  // refused outright, so a template carrying it can never be seeded.
+  writeFileSync(tpl, "name: template-origin\ncapabilities:\n  layers:\n    tasks: none\n  additive:\n    oas.okf:\n      from: installed\n      global: true\n");
   const repo = join(base, "proj"); mkdirSync(repo);
   let r = spawnSync(process.execPath, [CLI, "init", "--template", tpl, "--dir", repo, "--no-tmux-mouse"], { encoding: "utf8" });
   assert.equal(r.status, 0, r.stderr);

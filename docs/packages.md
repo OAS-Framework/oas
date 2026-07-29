@@ -336,24 +336,18 @@ oas migrate --official --recursive --dir <team-root>             # apply
 - **Config files are not rewritten.** Packages export the same capability IDs,
   so activation, layer bindings, targets, settings, exclusions, and injection
   overrides remain valid byte-for-byte.
-- **All-or-nothing per scope.** If this release's catalog cannot map every
-  official capability at a scope, that scope is left completely untouched
-  (byte-identical v1) and the run reports it as held with a nonzero exit. Legacy
-  capabilities keep working until the mapping publishes. A successful run
-  converts the whole scope to revised v2 at once — there is no residue container,
-  so a converted lock never carries leftover v1 entries. A `--dry-run`
-  containing held scopes is nonzero too (with the complete plan under
-  `error.details`), so a readiness check can never read "planned" as "can
-  migrate now".
-- **Custom entries are left to plain `oas migrate`.** The guided `--official`
-  mode never touches `git:`/`path:`/unknown v1 sources — it converts only
-  official capabilities and leaves the rest byte-identical. Plain `oas migrate`
-  (without `--official`) is how you convert custom sources, and it is
-  all-or-nothing too: it converts a scope only when every entry maps to a
-  package, otherwise the scope stays v1.
+- **Held, never half-converted.** If any official capability cannot map, the
+  whole scope stays byte-identical v1 and the run is nonzero. A `--dry-run`
+  reports the same blocked status, so readiness cannot be mistaken for success.
+- **Custom entries block a mixed guided scope.** `git:`/`path:`/unknown v1
+  sources are never acquired by `--official`. A scope containing only those
+  entries is skipped and reports their IDs under `retained`; a scope mixing them
+  with official capabilities is refused before any write. Plain `oas migrate`
+  can convert custom sources only when every entry in the scope maps to a
+  package. There is no residue container.
 - **One package, several capabilities.** When catalog aliases map more than one
-  legacy capability onto the same package, they convert together and the package
-  is acquired once.
+  legacy capability onto the same package, all of them convert together and the
+  package is acquired once.
 - **Per scope transactional.** Each scope acquires its package closure, writes
   a fresh revised v2 lock, and only then removes the superseded v1 artifacts. A
   failing scope is rolled back byte-identically. Other scopes keep their

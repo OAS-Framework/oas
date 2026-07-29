@@ -1531,6 +1531,64 @@ test("migrate: one unmappable entry keeps the WHOLE scope on v1, byte-identical,
   assert.equal(readFileSync(join(s, OAS_LOCK_FILE), "utf8"), before, "the scope stays v1, byte-identical");
 });
 
+test("migrate: guided official mode refuses a MIXED scope — `retain` clears convertible and blocks the whole conversion", () => {
+  const t = temp();
+  const repo = pkgSource(join(t, "repo", "oas-package"), { package: "x.official" }, { "capabilities/a": { capability: "x.a", commands: { go: "bin/go.mjs run" } } });
+  write(join(repo, "capabilities/a/bin/go.mjs"), "//\n");
+  const commit = gitify(join(t, "repo"));
+  const catalog = (id) => (id === "x.official" ? { url: `file://${join(t, "repo")}`, ref: commit, path: "oas-package" } : undefined);
+  const aliases = { "x.a": "x.official" };
+
+  // One official capability the catalog CAN map, beside a git: and a path:
+  // entry the guided mode keeps unchanged. Both source kinds are pinned: the
+  // refusal must not depend on which one appears.
+  const s = scope(t, "scope", "name: t\ncapabilities:\n  additive:\n    x.a:\n      global: true\n      from: installed\n");
+  const v1 = {
+    lockfileVersion: 1,
+    capabilities: {
+      "x.a": { source: "marketplace:x.a@1.0.0", version: "1.0.0", integrity: `sha256-${"a".repeat(64)}` },
+      "x.fromgit": { source: "git:https://host/custom.git", version: "0.3.0", integrity: `sha256-${"b".repeat(64)}` },
+      "x.frompath": { source: `path:${join(t, "vendor")}`, version: "0.2.0", integrity: `sha256-${"c".repeat(64)}` },
+    },
+  };
+  write(join(s, OAS_LOCK_FILE), JSON.stringify(v1, null, 2));
+  const before = treeFingerprint(s);
+
+  // PLAN: retain clears convertible exactly like hold and manual do. Without
+  // this the apply below would convert x.a and drop the other two rows.
+  const plan = migrateLegacyLock(s, { catalog, aliases, official: true });
+  assert.equal(plan.convertible, false, "a retained entry has nowhere to live in a v2 lock");
+  assert.deepEqual(plan.plan.filter((p) => p.action === "retain").map((p) => p.capabilityId).sort(), ["x.frompath", "x.fromgit"].sort());
+  assert.ok(plan.plan.some((p) => p.capabilityId === "x.a" && p.action === "acquire"), "the official entry IS mappable — that is what makes this mixed");
+
+  // APPLY: refused before any lock, artifact or ignore mutation.
+  const e = throwsCode(() => applyLegacyLockMigration(s, { catalog, aliases, official: true }), "legacy-lock", "mixed scope");
+  for (const id of ["x.fromgit", "x.frompath"]) assert.ok(e.message.includes(id), e.message);
+  assert.match(e.message, /NOTHING was changed and the whole v1 scope stays usable/);
+  assert.match(e.message, /without --official/, "both retained sources are package-mappable, so plain migrate is named");
+
+  // Byte-identical: the whole tree, not just the lock — no partial acquisition,
+  // no ignore file, no anchor directory left behind.
+  assert.deepEqual(treeFingerprint(s), before, "a refused mixed scope is byte-identical");
+  assert.equal(existsSync(artifact(s, "x.a")), false, "not one official artifact was materialized");
+  assert.equal(lockOf(s).lockfileVersion, 1);
+
+  // No official work at all: a truthful no-op that REPORTS what it retained.
+  const s2 = scope(t, "scope2");
+  write(join(s2, OAS_LOCK_FILE), JSON.stringify({ lockfileVersion: 1, capabilities: { "x.fromgit": v1.capabilities["x.fromgit"] } }, null, 2));
+  const skipped = applyLegacyLockMigration(s2, { catalog, aliases, official: true });
+  assert.equal(skipped.skipped, true);
+  assert.deepEqual(skipped.retained, ["x.fromgit"]);
+  assert.equal(Object.hasOwn(skipped, "residue"), false, "there is no residue container, so no result may name one");
+  assert.equal(lockOf(s2).lockfileVersion, 1);
+
+  // And no result shape anywhere claims residue.
+  const s3 = scope(t, "scope3");
+  write(join(s3, OAS_LOCK_FILE), JSON.stringify({ lockfileVersion: 1, capabilities: {} }));
+  assert.equal(Object.hasOwn(applyLegacyLockMigration(s3), "residue"), false);
+  rmSync(t, { recursive: true, force: true });
+});
+
 test("migrate: guided official mode holds an unmappable official capability and leaves the scope untouched", () => {
   const t = temp();
   const s = scope(t);

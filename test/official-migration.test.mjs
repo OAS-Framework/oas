@@ -81,10 +81,10 @@ function officialSources(base) {
   const p = (n) => join(base, "pkgs", n);
   return {
     "oas.okf": pkgSource(p("okf"), "oas.okf", {
-      okf: { capability: "oas.okf", layer: "knowledge", commands: { harvest: { exec: "harvest.mjs" } }, requires: [{ command: "git", why: "knowledge bundles live in git" }], _files: { "harvest.mjs": "// harvest\n" } },
+      okf: { capability: "oas.okf", layer: "knowledge", commands: { harvest: "harvest.mjs" }, requires: [{ command: "git", why: "knowledge bundles live in git" }], _files: { "harvest.mjs": "// harvest\n" } },
     }),
     "oas.dev": pkgSource(p("dev"), "oas.dev", {
-      review: { capability: "oas.review", commands: { review: { exec: "review.mjs" } }, _files: { "review.mjs": "// review\n" } },
+      review: { capability: "oas.review", commands: { review: "review.mjs" }, _files: { "review.mjs": "// review\n" } },
     }),
     "oas.aweb": pkgSource(p("aweb"), "oas.aweb", {
       aweb: { capability: "oas.aweb", hooks: { spawn: "spawn.mjs" }, _files: { "spawn.mjs": "// spawn\n" } },
@@ -124,7 +124,10 @@ function legacyCap(level, capId, { dirName, manifest = {}, source, version = "1.
  *                           plus an owned capability that is not locked at all
  * base/outer/team/nested    descendant scope: config + v1 lock (oas.aweb)
  */
-function deploy018(base) {
+/** `custom: false` drops the git:/path: capabilities, giving the all-official
+ * cutover shape — the only shape a guided upgrade can actually convert, since
+ * a mixed scope is refused whole. */
+function deploy018(base, { custom = true } = {}) {
   const outer = join(base, "outer");
   write(join(outer, "oas-config.yaml"), "name: outer\ncapabilities:\n  additive:\n    oas.authoring:\n      from: installed\n      global: true\n");
   legacyCap(outer, "oas.authoring");
@@ -146,26 +149,32 @@ function deploy018(base) {
     "      global: true",
     "      settings:",
     "        depth: full",
-    "    custom.cap:",
-    "      from: installed",
-    "      global: true",
+    ...(custom ? [
+      "    custom.cap:",
+      "      from: installed",
+      "      global: true",
+    ] : []),
     "    mine.cap:",
     "      from: owned",
     "      global: true",
-    "    vendored.cap:",
-    "      from: path:vendor/vendored",
-    "      global: true",
+    ...(custom ? [
+      "    vendored.cap:",
+      "      from: path:vendor/vendored",
+      "      global: true",
+    ] : []),
     "",
   ].join("\n"));
   legacyCap(team, "oas.okf", { manifest: { layer: "knowledge" }, version: "1.4.1" });
   legacyCap(team, "oas.review", { version: "1.2.0" });
-  legacyCap(team, "custom.cap", { dirName: "custom", source: `git:https://host/custom.git`, version: "0.3.0" });
+  if (custom) legacyCap(team, "custom.cap", { dirName: "custom", source: `git:https://host/custom.git`, version: "0.3.0" });
   // Owned capability: authored at this scope, never locked, never migrated.
   write(join(ownedCapabilitiesDir(team), "mine", "oas.json"), JSON.stringify({ capability: "mine.cap", version: "0.1.0", description: "mine" }, null, 2));
   // from: path capability — locked with a path: v1 source, like 0.18 did.
-  const vendored = join(team, "vendor", "vendored");
-  write(join(vendored, "oas.json"), JSON.stringify({ capability: "vendored.cap", version: "0.2.0", description: "vendored" }, null, 2));
-  writeCapabilityLock(team, "vendored.cap", { source: `path:${vendored}`, version: "0.2.0", integrity: capabilityIntegrity(vendored), trustedExecutables: true });
+  if (custom) {
+    const vendored = join(team, "vendor", "vendored");
+    write(join(vendored, "oas.json"), JSON.stringify({ capability: "vendored.cap", version: "0.2.0", description: "vendored" }, null, 2));
+    writeCapabilityLock(team, "vendored.cap", { source: `path:${vendored}`, version: "0.2.0", integrity: capabilityIntegrity(vendored), trustedExecutables: true });
+  }
 
   const nested = join(team, "nested");
   write(join(nested, "oas-config.yaml"), "name: nested\ncapabilities:\n  additive:\n    oas.aweb:\n      from: installed\n      global: true\n");
@@ -228,7 +237,7 @@ test("no catalog mappings (0.19.0): doctor says not yet available and the guided
   assert.equal(env.ok, false);
   assert.equal(env.error.code, "E_MIGRATE_FAILED");
   assert.deepEqual(env.error.details.scopes.map((s) => s.status), ["held", "held", "held"]);
-  // Held is a hold, not a conversion: no residue was created anywhere.
+  // Held is a hold, not a conversion: nothing anywhere was rewritten.
   assert.deepEqual(snapshot(outer), before, "every official v1 state is untouched when mappings are missing");
   rmSync(base, { recursive: true, force: true });
 });
@@ -244,11 +253,18 @@ test("dry-run across outer + team + nested scopes is deterministic, complete and
   const first = json(cli(team, catalog, "migrate", "--official", "--recursive", "--dir", team, "--dry-run", "--json"));
   const second = json(cli(nested, catalog, "migrate", "--official", "--recursive", "--dir", team, "--dry-run", "--json"));
   assert.deepEqual(first, second, "the plan does not depend on the cwd and does not drift between runs");
-  assert.equal(first.ok, true);
-  assert.equal(first.result.dryRun, true);
-  assert.deepEqual(first.result.scopes.map((s) => s.level), [outer, team, nested], "ancestors are planned before descendants");
-  assert.deepEqual(first.result.scopes.map((s) => s.status), ["ready", "ready", "ready"]);
-  const teamPlan = first.result.scopes.find((s) => s.level === team).plan;
+  // The team scope mixes official capabilities with a git: and a path: entry the
+  // guided upgrade keeps unchanged. A capability-materialization lock has no
+  // place for those, so that scope is BLOCKED, not ready — and a dry run that
+  // contains one is nonzero, so automation can never read it as ready.
+  assert.equal(first.ok, false);
+  const details = first.error.details;
+  assert.equal(first.error.code, "E_MIGRATE_FAILED");
+  assert.match(first.error.message, /1 scope blocked \(entries that must stay lockfileVersion 1\).*2 ready/);
+  assert.equal(details.dryRun, true);
+  assert.deepEqual(details.scopes.map((s) => s.level), [outer, team, nested], "ancestors are planned before descendants");
+  assert.deepEqual(details.scopes.map((s) => s.status), ["ready", "blocked", "ready"]);
+  const teamPlan = details.scopes.find((s) => s.level === team).plan;
   assert.deepEqual(teamPlan.filter((p) => p.action === "acquire").map((p) => [p.capability, p.package, p.spec, p.via]), [
     ["oas.okf", "oas.okf", "oas.okf", "identity"],
     ["oas.review", "oas.dev", "oas.dev", "alias"],
@@ -257,29 +273,83 @@ test("dry-run across outer + team + nested scopes is deterministic, complete and
   assert.deepEqual(snapshot(outer), before, "a dry run writes nothing");
 
   const human = cli(team, catalog, "migrate", "--official", "--recursive", "--dir", team, "--dry-run");
-  assert.equal(human.status, 0, human.stderr);
+  assert.notEqual(human.status, 0, "dry-run and apply agree: a blocked scope is not a ready migration");
   assert.match(human.stdout, /migrate\s+oas\.review → package oas\.dev\s+\(catalog alias: package oas\.dev exports oas\.review\)/);
   assert.match(human.stdout, /keep\s+custom\.cap\s+\(git:https:\/\/host\/custom\.git\) — not converted/);
   assert.match(human.stdout, /is NOT rewritten — capability ids, layers, targets, settings/);
   assert.match(human.stdout, /executable approvals are NOT carried over/);
-  assert.match(human.stdout, /Dry run — nothing was changed\. 3 scopes ready\./);
+  assert.match(human.stdout, /BLOCKED\s+this scope mixes convertible work with 2 entries that must stay lockfileVersion 1/);
+  assert.match(human.stdout, /Dry run — nothing was changed\. 2 scopes ready, 1 blocked\./);
+  assert.match(human.stdout, /Blocked scopes stay on their v1 locks IN FULL and keep working/);
   assert.deepEqual(snapshot(outer), before);
   rmSync(base, { recursive: true, force: true });
 });
 
-test("guided migration: config bytes preserved, exact v2 graph, superseded artifacts removed, custom/owned/path untouched, trust + requirements reported", () => {
+test("a MIXED scope is refused byte-identically: no official artifact is even partially acquired, and the whole v1 scope keeps working", () => {
   const base = temp();
   const { outer, team, nested } = deploy018(base);
   const catalog = writeCatalog(join(base, "catalog.json"), officialSources(base), ["oas.okf", "oas.dev", "oas.aweb", "oas.authoring"]);
-  const configsBefore = Object.fromEntries([outer, team, nested].map((d) => [d, readFileSync(join(d, "oas-config.yaml"), "utf8")]));
-  const customArtifact = snapshot(join(installedCapabilitiesDir(team), "custom"));
-  const ownedArtifact = snapshot(ownedCapabilitiesDir(team));
-  const vendoredArtifact = snapshot(join(team, "vendor"));
+  // The team scope's OWN files: `nested/` is a separate scope that converts on
+  // its own, so including it would compare two different verdicts.
+  const ownFiles = (d) => Object.fromEntries(Object.entries(snapshot(d)).filter(([k]) => !k.startsWith("nested/")));
+  const teamBefore = ownFiles(team);
   const legacyLock = JSON.parse(readFileSync(join(team, OAS_LOCK_FILE), "utf8"));
+  const resolvedBefore = resolveOasConfig(team).capabilities.map((c) => c.id).sort();
+
+  const r = cli(team, catalog, "migrate", "--official", "--recursive", "--dir", team, "--json");
+  assert.notEqual(r.status, 0, "a run containing a blocked scope is not a success");
+  const env = json(r);
+  assert.equal(env.ok, false);
+  assert.equal(env.error.code, "E_MIGRATE_FAILED");
+  const byScope = Object.fromEntries(env.error.details.scopes.map((x) => [x.level, x]));
+  // Dry run and apply agree: the team scope is refused, its neighbours convert.
+  assert.equal(byScope[team].status, "failed");
+  assert.equal(byScope[team].error.code, "legacy-lock");
+  assert.equal(byScope[outer].status, "migrated");
+  assert.equal(byScope[nested].status, "migrated");
+
+  // The refusal NAMES every retained entry — both source kinds — and says the
+  // whole v1 scope stays usable.
+  for (const [id, src] of [["custom.cap", "git:https://host/custom.git"], ["vendored.cap", "path:"]]) {
+    assert.ok(byScope[team].error.message.includes(id), byScope[team].error.message);
+    assert.ok(byScope[team].error.message.includes(src), byScope[team].error.message);
+  }
+  assert.match(byScope[team].error.message, /NOTHING was changed and the whole v1 scope stays usable/);
+  // Both retained sources are package-mappable, so the guidance names the exact
+  // command that CAN convert this scope completely.
+  assert.match(byScope[team].error.message, new RegExp(`\`oas migrate --dir ${team.replace(/[.*+?^$()|[\]\\]/g, "\\$&")}\` \\(without --official\\)`));
+
+  // 1. NOTHING at the refused scope moved: lock bytes, config, artifacts, the
+  //    ignore file, trust. Not one official artifact was partially acquired.
+  assert.deepEqual(ownFiles(team), teamBefore, "a refused scope is byte-identical");
+  assert.deepEqual(JSON.parse(readFileSync(join(team, OAS_LOCK_FILE), "utf8")), legacyLock);
+  assert.equal(existsSync(join(installedCapabilitiesDir(team), "oas.okf")), false, "no materialized artifact was created");
+  assert.equal(existsSync(join(installedCapabilitiesDir(team), "oas.review")), false);
+  assert.ok(existsSync(join(installedCapabilitiesDir(team), "oas-okf")), "the v1 artifact is still there");
+
+  // 2. and the scope still RESOLVES — the whole point of refusing.
+  assert.deepEqual(resolveOasConfig(team).capabilities.map((c) => c.id).sort(), resolvedBefore);
+  assert.ok(resolvedBefore.includes("custom.cap") && resolvedBefore.includes("vendored.cap"));
+
+  // 3. the human report says the same thing.
+  const human = cli(team, catalog, "migrate", "--official", "--recursive", "--dir", team);
+  assert.notEqual(human.status, 0);
+  assert.match(human.stdout, /BLOCKED\s+this scope mixes convertible work with 2 entries/);
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("guided migration of an ALL-OFFICIAL scope: config bytes preserved, exact v2 graph, superseded artifacts removed, owned untouched, trust + requirements reported", () => {
+  const base = temp();
+  const { outer, team, nested } = deploy018(base, { custom: false });
+  const catalog = writeCatalog(join(base, "catalog.json"), officialSources(base), ["oas.okf", "oas.dev", "oas.aweb", "oas.authoring"]);
+  const configsBefore = Object.fromEntries([outer, team, nested].map((d) => [d, readFileSync(join(d, "oas-config.yaml"), "utf8")]));
+  const ownedArtifact = snapshot(ownedCapabilitiesDir(team));
 
   const env = json(cli(team, catalog, "migrate", "--official", "--recursive", "--dir", team, "--json"));
   assert.equal(env.ok, true, JSON.stringify(env));
   assert.deepEqual(env.result.scopes.map((s) => [s.level, s.status]), [[outer, "migrated"], [team, "migrated"], [nested, "migrated"]]);
+  // There is no residue container, so no result shape may claim one.
+  for (const sc of env.result.scopes) assert.equal(Object.hasOwn(sc, "residue"), false, JSON.stringify(sc));
 
   // 1. config files are byte-for-byte what they were.
   for (const [d, text] of Object.entries(configsBefore)) assert.equal(readFileSync(join(d, "oas-config.yaml"), "utf8"), text, `${d} config rewritten`);
@@ -296,30 +366,33 @@ test("guided migration: config bytes preserved, exact v2 graph, superseded artif
     assert.equal(e.version, "2.0.0");
     assert.match(e.commit, /^[0-9a-f]{40}$/);
     assert.match(e.integrity, /^sha256-[0-9a-f]{64}$/);
-    assert.deepEqual(e.capabilities, expectCaps);
     assert.deepEqual(e.dependencies, []);
-    assert.deepEqual(e.trustedCapabilities, [], "executable approvals are re-earned, never carried over");
+    // Package rows lock the TRANSPORT only; the capability rows' provider
+    // back-reference is the single truth about what a package supplies.
+    assert.equal(Object.hasOwn(e, "capabilities"), false);
+    assert.equal(Object.hasOwn(e, "trustedCapabilities"), false);
+    for (const cap of expectCaps) {
+      assert.equal(lock.capabilities[cap].package, id);
+      assert.equal(lock.capabilities[cap].trusted, false, "executable approvals are re-earned, never carried over");
+    }
   }
-  // 3. custom/path entries survive as residue, byte-identical to their v1 form.
-  assert.deepEqual(Object.keys(lock.capabilities).sort(), ["custom.cap", "vendored.cap"]);
-  for (const id of ["custom.cap", "vendored.cap"]) assert.deepEqual(lock.capabilities[id], legacyLock.capabilities[id]);
+  assert.deepEqual(Object.keys(lock.capabilities).sort(), ["oas.okf", "oas.review"]);
 
-  // 4. only superseded official artifacts are removed.
+  // 3. superseded official artifacts are removed; owned capabilities are not touched.
   assert.equal(existsSync(join(installedCapabilitiesDir(team), "oas-okf")), false);
   assert.equal(existsSync(join(installedCapabilitiesDir(team), "oas-review")), false);
-  assert.deepEqual(snapshot(join(installedCapabilitiesDir(team), "custom")), customArtifact);
+  assert.ok(existsSync(join(installedCapabilitiesDir(team), "oas.okf", "oas.json")), "materialized flat, by capability id");
   assert.deepEqual(snapshot(ownedCapabilitiesDir(team)), ownedArtifact);
-  assert.deepEqual(snapshot(join(team, "vendor")), vendoredArtifact);
 
-  // 5. activation behavior is unchanged — same ids, same layer, same settings, now package-provided.
+  // 4. activation behavior is unchanged — same ids, same layer, same settings, now package-provided.
   const r = resolveOasConfig(team);
   assert.equal(r.layers.knowledge.id, "oas.okf");
-  assert.deepEqual(r.capabilities.map((c) => c.id).sort(), ["custom.cap", "mine.cap", "oas.authoring", "oas.okf", "oas.review", "vendored.cap"]);
+  assert.deepEqual(r.capabilities.map((c) => c.id).sort(), ["mine.cap", "oas.authoring", "oas.okf", "oas.review"]);
   assert.equal(r.capabilities.find((c) => c.id === "oas.review").settings.depth, "full");
   assert.equal(capabilityManifests(team)["oas.okf"]._package, "oas.okf");
   assert.equal(capabilityManifests(team)["oas.review"]._package, "oas.dev");
 
-  // 6. trust must be re-earned, with exact commands; installed host requirements need no reinstall.
+  // 5. trust must be re-earned, with exact commands; installed host requirements need no reinstall.
   assert.deepEqual(env.result.trust.map((t) => t.capability).sort(), ["oas.aweb", "oas.okf", "oas.review"]);
   assert.ok(env.result.trust.every((t) => t.command === `oas trust ${t.capability} --dir ${t.level}`), JSON.stringify(env.result.trust));
   assert.deepEqual(env.result.requirements, [], "git is on PATH — an installed requirement is verified, not reinstalled");
@@ -329,7 +402,9 @@ test("guided migration: config bytes preserved, exact v2 graph, superseded artif
 
 test("one scope's failure rolls that scope back byte-identically and the aggregate reports the truth", () => {
   const base = temp();
-  const { outer, team, nested } = deploy018(base);
+  // All-official: a mixed scope would be refused before it could demonstrate a
+  // rollback, and the point here is the rollback of a scope that DID start.
+  const { outer, team, nested } = deploy018(base, { custom: false });
   const sources = officialSources(base);
   // Injected failure: the catalog entry for oas.aweb resolves to a package that
   // does not export oas.aweb — the nested scope's conversion must fail.
@@ -352,19 +427,25 @@ test("one scope's failure rolls that scope back byte-identically and the aggrega
   rmSync(base, { recursive: true, force: true });
 });
 
-test("a scope with only custom capabilities is left on v1, untouched, by the guided command", () => {
+test("a scope with only custom capabilities is left on v1, untouched, and reports what it RETAINED", () => {
   const base = temp();
   const custom = join(base, "custom-only");
   write(join(custom, "oas-config.yaml"), "name: custom\n");
   legacyCap(custom, "only.cap", { dirName: "only", source: "git:https://host/only.git" });
+  legacyCap(custom, "vendor.cap", { dirName: "vendor", source: "path:/somewhere/vendor" });
   const catalog = writeCatalog(join(base, "catalog.json"), officialSources(base), ["oas.okf", "oas.dev"]);
   const before = snapshot(custom);
 
   const env = json(cli(custom, catalog, "migrate", "--official", "--dir", custom, "--json"));
-  assert.equal(env.ok, true);
-  assert.deepEqual(env.result.scopes.map((s) => s.status), ["skipped"]);
+  assert.equal(env.ok, true, "no official work is a truthful no-op, not a failure");
+  const [scope] = env.result.scopes;
+  assert.equal(scope.status, "skipped");
+  // `retained` — never `residue`: nothing was kept BESIDE a conversion, because
+  // there was no conversion. There is no residue container to report.
+  assert.deepEqual(scope.retained.sort(), ["only.cap", "vendor.cap"]);
+  assert.equal(Object.hasOwn(scope, "residue"), false);
   assert.deepEqual(snapshot(custom), before, "a lock with no official capabilities is not even reformatted");
-  assert.equal(JSON.parse(readFileSync(join(custom, OAS_LOCK_FILE), "utf8")).lockfileVersion, 1);
+  assert.equal(JSON.parse(readFileSync(join(custom, OAS_LOCK_FILE), "utf8")).lockfileVersion ?? 1, 1);
   rmSync(base, { recursive: true, force: true });
 });
 
@@ -372,10 +453,10 @@ test("several legacy capabilities aliased to ONE package migrate together, acqui
   const base = temp();
   // One package exporting two capabilities, both reached through catalog aliases —
   // the shape oas.dev already has, and the shape that must not collide with its
-  // own not-yet-converted residue during acquisition.
+  // own still-unconverted v1 entries during acquisition.
   const bundle = pkgSource(join(base, "pkgs", "bundle"), "oas.bundle", {
     a: { capability: "oas.a" },
-    b: { capability: "oas.b", commands: { go: { exec: "go.mjs" } }, _files: { "go.mjs": "// go\n" } },
+    b: { capability: "oas.b", commands: { go: "go.mjs" }, _files: { "go.mjs": "// go\n" } },
   });
   const catalog = writeCatalog(join(base, "catalog.json"), { "oas.bundle": bundle }, ["oas.bundle"], { "oas.a": "oas.bundle", "oas.b": { package: "oas.bundle" } });
   const scope = join(base, "scope");
@@ -393,8 +474,13 @@ test("several legacy capabilities aliased to ONE package migrate together, acqui
   ]);
   const lock = JSON.parse(readFileSync(join(scope, OAS_LOCK_FILE), "utf8"));
   assert.deepEqual(Object.keys(lock.packages), ["oas.bundle"]);
-  assert.deepEqual(lock.packages["oas.bundle"].capabilities.sort(), ["oas.a", "oas.b"]);
-  assert.equal(lock.capabilities, undefined, "no residue is left behind by a multi-capability package");
+  // Package rows lock the TRANSPORT only; the capability rows' `package`
+  // back-reference is the single provider truth, so BOTH aliases land as
+  // capability rows naming the one package that was acquired once.
+  assert.equal(Object.hasOwn(lock.packages["oas.bundle"], "capabilities"), false);
+  assert.deepEqual(Object.keys(lock.capabilities).sort(), ["oas.a", "oas.b"]);
+  for (const id of ["oas.a", "oas.b"]) assert.equal(lock.capabilities[id].package, "oas.bundle");
+  assert.deepEqual(Object.values(lock.capabilities).map((c) => c.trusted), [false, false], "executable approvals are re-earned, never carried over");
   assert.deepEqual(env.result.trust.map((t) => t.capability), ["oas.b"], "only the executable capability needs re-approval");
   assert.deepEqual(resolveOasConfig(scope).capabilities.map((c) => c.id).sort(), ["oas.a", "oas.b"]);
   rmSync(base, { recursive: true, force: true });
@@ -423,24 +509,38 @@ test("a held dry run reports nonzero — automation can never read it as ready (
   rmSync(base, { recursive: true, force: true });
 });
 
-test("--recursive without --official keeps generic migrate semantics (unmappable entries become residue)", () => {
+test("--recursive without --official refuses a scope it cannot fully map, leaving its v1 lock working", () => {
   const base = temp();
   const root = join(base, "generic");
   write(join(root, "oas-config.yaml"), "name: generic\n");
   legacyCap(root, "some.cap", { dirName: "some" });
   const catalog = writeCatalog(join(base, "catalog.json"), officialSources(base), []);
+  const before = snapshot(root);
 
-  const env = json(cli(root, catalog, "migrate", "--recursive", "--dir", root, "--json"));
-  assert.equal(env.ok, true, JSON.stringify(env));
-  assert.deepEqual(env.result.mode, "generic");
-  assert.deepEqual(env.result.scopes.map((s) => s.status), ["migrated"]);
+  // A capability-materialization lock has NO residue container, so there is
+  // nowhere for an unmappable v1 entry to live. Converting only the mappable
+  // entries would silently drop the rest, so the scope stays v1 IN FULL and
+  // keeps working — the refusal is the feature, not a failure to implement one.
+  const r = cli(root, catalog, "migrate", "--recursive", "--dir", root, "--json");
+  assert.notEqual(r.status, 0, "a scope that cannot be converted is not a success");
+  const env = json(r);
+  assert.equal(env.ok, false);
+  assert.equal(env.error.code, "E_MIGRATE_FAILED");
+  assert.deepEqual(env.error.details.mode, "generic");
+  const [scope] = env.error.details.scopes;
+  assert.equal(scope.status, "failed");
+  assert.equal(scope.error.code, "legacy-lock");
+  assert.match(scope.error.message, /this scope cannot be converted yet — some\.cap/);
+  assert.match(scope.error.message, /left unchanged and its v1 capabilities keep working/);
+
+  assert.deepEqual(snapshot(root), before, "a refused scope is byte-identical");
   const lock = JSON.parse(readFileSync(join(root, OAS_LOCK_FILE), "utf8"));
-  assert.equal(lock.lockfileVersion, 2, "generic mode still performs the residue conversion the guided mode holds on");
+  assert.equal(lock.lockfileVersion ?? 1, 1, "it is still a v1 lock");
   assert.deepEqual(Object.keys(lock.capabilities), ["some.cap"]);
   rmSync(base, { recursive: true, force: true });
 });
 
-test("rerun is idempotent and the migrated deployment reaches zero v1 files / zero residue", () => {
+test("rerun is idempotent and the migrated deployment reaches zero v1 lock files", () => {
   const base = temp();
   // All-official deployment (the plain existing-user cutover).
   const root = join(base, "deployment");
@@ -469,7 +569,8 @@ test("rerun is idempotent and the migrated deployment reaches zero v1 files / ze
   assert.equal(inst.status, 0, inst.stderr || inst.stdout);
   const doc = JSON.parse(cli(root, catalog, "doctor", root, "--json").stdout);
   assert.deepEqual(doc.legacyLockFiles, [], "no v1 lock files remain");
-  assert.deepEqual(doc.migrationResidue, [], "no residue remains");
+  assert.equal(Object.hasOwn(doc, "migrationResidue"), false, "there is no residue view — migration never produces residue");
+  assert.equal(doc.lockError, null, "and every lock in the chain reads cleanly");
   assert.equal(doc.officialMigration, null, "nothing left to migrate");
   assert.deepEqual(doc.packages.flatMap((p) => p.problems), [], JSON.stringify(doc.packages));
   rmSync(base, { recursive: true, force: true });
@@ -477,7 +578,8 @@ test("rerun is idempotent and the migrated deployment reaches zero v1 files / ze
 
 test("CLI surface: help documents the guided command and the JSON contract is one stable envelope", () => {
   const base = temp();
-  const { team } = deploy018(base);
+  // All-official, so a successful dry run is available to pin the SUCCESS shape.
+  const { team } = deploy018(base, { custom: false });
   const catalog = writeCatalog(join(base, "catalog.json"), officialSources(base), ["oas.okf", "oas.dev", "oas.aweb", "oas.authoring"]);
 
   const help = cli(base, catalog, "help");
@@ -490,6 +592,8 @@ test("CLI surface: help documents the guided command and the JSON contract is on
   assert.deepEqual(Object.keys(env.result.scopes[0]).sort(), ["error", "file", "level", "levelKind", "plan", "status", "warnings"]);
   assert.deepEqual(Object.keys(env.result.scopes[0].plan[0]).sort(), ["action", "capability", "note", "package", "reason", "source", "spec", "via"]);
   assert.equal(env.result.mode, "official");
+  // There is no residue container, so no scope row may carry a `residue` key.
+  for (const sc of env.result.scopes) assert.equal(Object.hasOwn(sc, "residue"), false);
 
   // Failure stays the exact three-key envelope, with the complete report under error.details.
   write(join(team, OAS_LOCK_FILE), "{ not json");

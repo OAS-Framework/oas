@@ -652,9 +652,12 @@ therefore agree byte-for-byte and digest-for-digest on the same locked source.
  *
  * `marketplace:` entries map through the catalog (aliases first, then identity);
  * `git:`/`path:` entries map to package specs when the source really is a
- * package. Anything unmappable makes the SCOPE unconvertible — the lock has no
- * residue container — so it is reported as `hold`/`manual` and the scope stays
- * v1 and keeps working.
+ * package. Anything the scope cannot convert makes the WHOLE SCOPE
+ * unconvertible — the lock has no residue container, so an entry left behind
+ * would have nowhere to live and would simply be dropped. `hold`, `manual` AND
+ * `retain` therefore all clear `convertible`, and the scope stays v1 in full
+ * and keeps working. (`retain` is the guided mode's "keep this custom entry
+ * unchanged"; keeping it is only possible by keeping the entire scope.)
  *
  * @returns {{ from: 1|2, convertible: boolean,
  *   plan: Array<{ capabilityId?, v1?, package?, spec?,
@@ -670,7 +673,16 @@ export function migrateLegacyLock(levelDir, opts)
  * to re-approve. Any failure restores the original v1 lock BYTE-IDENTICALLY,
  * removes everything the conversion created, and leaves superseded v1 artifacts
  * in place.
- * @returns {{ migrated, residue, skipped?, warnings, file, trust }}
+ *
+ * A MIXED scope — official work beside `retain` entries — is refused
+ * `legacy-lock` BEFORE any lock, artifact or ignore mutation: not one official
+ * artifact is partially acquired, and the config, store and trust of that scope
+ * are byte-identical afterwards.
+ *
+ * There is NO residue result and no residue container. `retained` appears only
+ * on a `skipped` scope — one with no official work at all, left entirely on v1 —
+ * and lists the v1 capability ids that were left untouched.
+ * @returns {{ migrated, skipped?, retained?, formatConverted?, warnings, file, trust }}
  * @throws "official-mapping-unavailable", "legacy-lock", "invalid-lock", …
  */
 export function applyLegacyLockMigration(levelDir, opts)
