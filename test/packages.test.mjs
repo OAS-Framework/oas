@@ -27,6 +27,26 @@ function gitRepo(dir) {
   execFileSync("git", ["-C", dir, "commit", "-qm", "init"]);
 }
 
+/** A revised-v2 lock document. Package rows carry NO capability list and no
+ * trust — the capability rows' `package` back-reference is the single provider
+ * truth, and a package row carrying `capabilities`/`trustedCapabilities` is the
+ * forbidden transitional shape. */
+function lockV2({ pkg = "example.engineering", source, path = ".", version = "1.0.0", commit = "local", integrity = `sha256-${"0".repeat(64)}`, dependencies = [], capabilities = {} } = {}) {
+  const caps = {};
+  for (const [id, spec] of Object.entries(capabilities)) {
+    caps[id] = {
+      version: spec.version || "1.0.0", package: spec.package || pkg,
+      path: spec.path || `capabilities/${id.split(".").pop()}`,
+      integrity: spec.integrity || `sha256-${"1".repeat(64)}`, trusted: spec.trusted ?? false,
+    };
+  }
+  return JSON.stringify({
+    lockfileVersion: 2,
+    packages: { [pkg]: { source, path, version, commit, integrity, dependencies } },
+    capabilities: caps,
+  }, null, 2);
+}
+
 /** Contract-level fixture package (per the Decision's oas-package.json shape). */
 function fixturePackage(dir, { id = "example.engineering", configs, capabilities, dependencies, extraFiles = {} } = {}) {
   const caps = capabilities ?? {
@@ -1200,7 +1220,12 @@ test("lock v2 packages map is read scope-wise (contract envelope) and supplies c
   write(join(ws2, "oas-config.yaml"), "name: ws2\n");
   write(join(ws2, "oas-lock.json"), JSON.stringify({ lockfileVersion: 1, capabilities: { "old.cap": { source: "marketplace:old.cap@1.0.0", version: "1.0.0", integrity: `sha256-${"0".repeat(64)}` } } }));
   const r2 = readPackageLocks(ws2);
-  assert.deepEqual({ ...r2.packages }, {});
+  // Lock maps are null-prototype by contract, so a hostile package id spelled
+  // "constructor" or "toString" cannot impersonate an entry via map[id].
+  assert.equal(Object.getPrototypeOf(r2.packages), null);
+  assert.equal(Object.getPrototypeOf(r2.capabilities), null);
+  assert.equal(r2.packages.toString, undefined, "an inherited name must not resolve as a package");
+  assert.deepEqual(Object.keys(r2.packages), []);
   assert.equal(r2.legacy.length, 1);
   assert.ok(r2.legacy[0].capabilities["old.cap"]);
   // an EMPTY v1 lock SURFACES as legacy with provenance (maintainer ruling,
@@ -1210,9 +1235,9 @@ test("lock v2 packages map is read scope-wise (contract envelope) and supplies c
   write(join(ws3, "oas-config.yaml"), "name: ws3\n");
   write(join(ws3, "oas-lock.json"), JSON.stringify({ lockfileVersion: 1, capabilities: {} }));
   const r3 = readPackageLocks(ws3);
-  assert.deepEqual({ ...r3.packages }, {});
+  assert.deepEqual(Object.keys(r3.packages), []);
   assert.equal(r3.legacy.length, 1, "empty v1 lock must not disappear from the envelope");
-  assert.deepEqual(r3.legacy[0].capabilities, {});
+  assert.deepEqual(Object.keys(r3.legacy[0].capabilities), []);
   assert.equal(r3.legacy[0].level, ws3);
   assert.equal(r3.legacy[0].lockfileVersion, 1);
 });
@@ -1306,10 +1331,10 @@ test("non-team bare install also verifies v2 package locks (chain path, no bound
   const pkg = fixturePackage(join(base, "pkg"));
   const ws = join(base, "ws");
   write(join(ws, "oas-config.yaml"), "name: ws\n"); // NO team:
-  write(join(ws, "oas-lock.json"), JSON.stringify({ lockfileVersion: 2, packages: { "example.engineering": {
-    source: `path:${pkg}`, path: ".", version: "1.0.0", commit: "local", integrity: `sha256-${"0".repeat(64)}`,
-    capabilities: ["example.review", "example.delivery"], dependencies: [], trustedCapabilities: [],
-  } } }, null, 2));
+  write(join(ws, "oas-lock.json"), lockV2({ source: `path:${pkg}`, capabilities: {
+    "example.review": { path: "capabilities/example-review" },
+    "example.delivery": { path: "capabilities/example-delivery" },
+  } }));
   const r = cli(["install", "--no-requirements", "--dir", ws], { cwd: ws });
   assert.equal(r.status, 1, `non-team scope with a missing locked package must fail:\n${r.stdout}`);
   assert.match(r.stdout, /FAILED\s+package example\.engineering/);
@@ -1317,10 +1342,9 @@ test("non-team bare install also verifies v2 package locks (chain path, no bound
   // ancestor package locks are checked at a team boundary too
   const outer = join(base, "outer");
   const inner = join(outer, "team");
-  write(join(outer, "oas-lock.json"), JSON.stringify({ lockfileVersion: 2, packages: { "example.engineering": {
-    source: `path:${pkg}`, path: ".", version: "1.0.0", commit: "local", integrity: `sha256-${"0".repeat(64)}`,
-    capabilities: ["example.review"], dependencies: [], trustedCapabilities: [],
-  } } }, null, 2));
+  write(join(outer, "oas-lock.json"), lockV2({ source: `path:${pkg}`, capabilities: {
+    "example.review": { path: "capabilities/example-review" },
+  } }));
   write(join(inner, "oas-config.yaml"), "name: team\nteam:\n  name: t\n");
   const r2 = cli(["install", "--no-requirements", "--dir", inner], { cwd: inner });
   assert.equal(r2.status, 1, `ancestor package lock must be checked at a team boundary:\n${r2.stdout}`);
