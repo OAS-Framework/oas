@@ -1,6 +1,7 @@
 # Knowledge Log
 
 ## 2026-07-29
+* **Creation**: [unreachable-guards-cannot-be-mutation-verified](/lessons/unreachable-guards-cannot-be-mutation-verified.md) records that a removal mutant which does not change behavior usually means another layer already guarantees the condition, so delete the unreachable guard and pin the ordering guarantee instead.
 * **Creation**: [integrity-alone-cannot-see-disputed-origin](/lessons/integrity-alone-cannot-see-disputed-origin.md) records that repaired integrity cannot prove provenance agreement, so `oas trust` checks capability health and refuses lock/provenance disagreement before approval.
 * **Creation**: [catalog-first-classic-init-costs](/lessons/catalog-first-classic-init-costs.md) records that catalog-routed classic init is networked package acquisition, does not auto-trust executables, and must re-check layer agreement against the materialized manifest inside the rollback transaction.
 * **Creation**: [classic-init-own-scope-capability-store](/lessons/classic-init-own-scope-capability-store.md) records why classic init reads the target scope's installed/owned capability stores directly before config-chain discovery.
