@@ -34,6 +34,13 @@ marketplace behaviors:
    entries are not acquired by guided official migration. A scope with no
    official work returns `skipped` and does not reformat its v1 file.
 
+   Implementation warning: a mixed scope with at least one official `acquire`
+   and at least one non-official `retain` cannot simply be rewritten to
+   revised-v2 while omitting the retained v1 rows. The revised-v2 shape has no
+   v1 residue container, so the engine must either hold the whole mixed scope or
+   add an explicit residue strategy. See [mixed guided migration retain needs
+   residue or a hold](/lessons/guided-mixed-retain-needs-residue-or-hold.md).
+
 # Catalog shape
 
 The catalog is data, not code:
