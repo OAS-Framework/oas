@@ -112,7 +112,10 @@ Behavior:
 - **The adopted base is recorded.** Adoption writes the exact template as a
   commit-safe base under `.agents/config-templates/adopted/<package>/<template>/`,
   alongside an `adoption.json` recording source, version, commit, path, and hash.
-  Commit it — `oas config diff` and `oas config sync` compare against it.
+  Commit it — `oas config diff` and `oas config sync` compare against it. For a
+  local `path:` source, `adoption.json` records `source: null` with
+  `localSource: true`, so no absolute machine path leaks into the committed
+  metadata; the exact source stays only in the authoritative lock.
 
 ### Your config is yours (adopter sovereignty)
 
