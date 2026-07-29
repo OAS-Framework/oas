@@ -1,6 +1,11 @@
 # Knowledge Log
 
 ## 2026-07-29
+* **Creation**: [catalog-first-classic-init-costs](/lessons/catalog-first-classic-init-costs.md) records that catalog-routed classic init is networked package acquisition, does not auto-trust executables, and must re-check layer agreement against the materialized manifest inside the rollback transaction.
+* **Creation**: [classic-init-own-scope-capability-store](/lessons/classic-init-own-scope-capability-store.md) records why classic init reads the target scope's installed/owned capability stores directly before config-chain discovery.
+* **Update**: [init-acquires-before-config-exists](/lessons/init-acquires-before-config-exists.md) links the narrower mid-init acquisition-result lesson to the broader own-scope capability-store blind spot.
+* **Update**: [marketplace-trust-and-hoisted-paths](/lessons/marketplace-trust-and-hoisted-paths.md) distinguishes kernel marketplace auto-trust from catalog package acquisition during classic init.
+* **Update**: [test-conventions](/playbooks/test-conventions.md) records that `assertCapabilitySelfContained` expects `manifest.commands` values as command strings, not object forms.
 * **Creation**: [config-diff-fails-closed-on-drifted-source](/lessons/config-diff-fails-closed-on-drifted-source.md) records that `oas config diff` reads exact locked template bytes and refuses source drift with `integrity-drift` instead of presenting mutated source bytes as upstream.
 * **Creation**: [gate-preview-omission-requires-rollback-fallback](/lessons/gate-preview-omission-requires-rollback-fallback.md) records that pre-commit gates must defer only unverifiable checks to the first point where data exists and make post-commit failures rollback-equivalent to refusal.
 * **Creation**: [cpsync-aborts-on-unreadable-dirs](/lessons/cpsync-aborts-on-unreadable-dirs.md) records that Node 22 cpSync can abort rather than throw on unreadable directories, so recovery code must probe hostile input and hand-walk copies when failures must remain catchable.
