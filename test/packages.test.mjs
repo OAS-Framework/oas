@@ -683,6 +683,36 @@ test("adoption failure AFTER the engine commits rolls the whole run back: pre-ex
   for (const d of [scope, pkg]) rmSync(d, { recursive: true, force: true });
 });
 
+test("oas --help documents the implemented template commands and carries no retired vocabulary", () => {
+  const help = cli(["--help"]).stdout;
+
+  // The vocabulary is templates and adopted bases. "profile", "snapshot" and
+  // "package store" all named things this architecture removed; leaving them in
+  // help is how users end up looking for commands that no longer exist.
+  for (const retired of [/profile/i, /snapshot/i, /package store/i]) {
+    assert.doesNotMatch(help, retired, `retired vocabulary still in oas --help: ${retired}`);
+  }
+
+  // Every implemented form is documented.
+  assert.match(help, /oas config diff \[--config <template>\]/);
+  assert.match(help, /oas config sync \[--accept <r>=local\|package\]/);
+  assert.match(help, /oas config sync --reset --yes/);
+  assert.match(help, /oas config adopt <package>/);
+  assert.match(help, /oas init \[--raw\]/);
+  assert.match(help, /adopt one config TEMPLATE from a package/);
+
+  // And the flags those forms depend on.
+  for (const flag of ["--accept", "--reset", "--yes", "--config <template>"]) {
+    assert.ok(help.includes(flag), `oas --help omits ${flag}`);
+  }
+
+  // Help must not promise a command that is not wired: every documented
+  // `oas config <sub>` has to be one the dispatcher accepts.
+  for (const sub of [...help.matchAll(/oas config (\w+)/g)].map((m) => m[1])) {
+    assert.ok(["diff", "sync", "adopt"].includes(sub), `oas --help documents an unimplemented subcommand: config ${sub}`);
+  }
+});
+
 // ---------- oas config sync / --reset / adopt ----------
 
 /** Publish a new template body (and version) for an already-installed fixture. */

@@ -2573,11 +2573,21 @@ Usage:
                                             transactionally, keeps custom/owned entries
                                             untouched, and prints the exact trust/install
                                             follow-up (held when the catalog cannot map yet)
-  oas config diff [--package <id|url|path>] report how the local snapshot differs from the
-      [--config <name>] [--dir <d>] [--json] package's current profile — never merges/overwrites;
-                                            an adopted snapshot's provenance header supplies
-                                            --package/--config defaults; --json emits one
-                                            envelope (differingLines 0 = no drift)
+  oas config diff [--config <template>]     three-way report: your config vs the recorded
+      [--dir <d>] [--json]                  adopted base vs the template in the current exact
+                                            lock — reports only, never writes; the adopted
+                                            base supplies the package/template defaults
+  oas config sync [--accept <r>=local|package] apply the template's changes to your config,
+      [--dir <d>] [--json]                  region by region, preserving every untouched local
+                                            byte, comment and ordering; local-only edits stay;
+                                            conflicts need an explicit --accept and are never
+                                            chosen for you; advances the recorded base
+  oas config sync --reset --yes             replace your config with the template verbatim;
+      [--config <template>] [--dir <d>]     previews every local change it discards, refuses
+      [--json]                              without --yes, and keeps a recoverable .bak
+  oas config adopt <package>                switch to another installed package's template,
+      [--config <template>] [--accept ...]  rebasing your one local config; exactly one adopted
+      [--dir <d>] [--json]                  base survives, and a failed switch changes nothing
   oas trust <capability> [--dir <dir>]      approve that capability's commands/hooks at
                                             the provider package's exact integrity
   oas trust <package> --all-capabilities    explicit bulk approval with a full
@@ -2591,9 +2601,10 @@ Usage:
   oas inject eject <cap|work-mode|oas>      copy a packaged injection to the conventional
       [--dir <d>]                           .agents/injections/ path and set injection-override
   oas init [--raw] [--dir <dir>]            create an oas-config.yaml here
-      [--package <id|path|git-url>]         adopt a package config profile as a local
-      [--config <name>] [--json]            snapshot (default profile unless --config;
-      [--template <name|path|git-url>]      refuses to overwrite an existing config;
+      [--package <id|path|git-url>]         adopt one config TEMPLATE from a package as your
+      [--config <template>] [--json]        own local config and record the exact adopted base
+      [--template <name|path|git-url>]      (named template, else the marked default, else the
+                                            only one); refuses to overwrite an existing config;
       [--knowledge <id|none>]               --json = one result envelope, noninteractive);
       [--messaging <id|none>]               or seed from a template config (named via
       [--tasks <id|none>]                   outer templates: map, a local file, or a
