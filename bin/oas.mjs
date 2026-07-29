@@ -175,6 +175,11 @@ function officialMigrationState(legacyLocks, { teamScope, ctx }) {
  * Order matters: a missing artifact cannot be hashed, drifted bytes make an
  * approval meaningless (so trust is not ALSO reported), and provenance is only
  * worth reading once the bytes are the locked ones. */
+/** The lock rows AT one level. Never the merged maps: those resolve each
+ * identity independently, so an outer scope's capability can be paired with a
+ * nearer scope's package of the same id — a provider that never exported it. */
+const levelRows = (locks, level) => locks.levels.find((l) => l.level === level) || { packages: Object.create(null), capabilities: Object.create(null) };
+
 function capabilityHealth(level, cap, capRow, pkgRow) {
   const dir = installedCapabilityDir(level, cap.id);
   if (!cap.installed) return { status: "missing", code: "missing-capability-artifact", dir, detail: `capability ${cap.id} is locked but not materialized — run \`oas install\` to re-materialize it` };
@@ -1119,7 +1124,9 @@ function trust() {
   // Package-backed approval path (per-capability, or explicit bulk on a package id).
   let pkgs, locks;
   try { pkgs = listInstalledPackages(dir); locks = readPackageLocks(dir); } catch (e) { cmdFail(e.code || "invalid-lock", e.message || e); return; }
-  const backing = all ? pkgs.find((p) => p.package === id) : pkgs.find((p) => p.capabilities.some((c) => c.id === id));
+  // findLast: the listing runs outermost → innermost, and an identity resolves
+  // to the CLOSEST scope that locks it — the same rule the merged lock maps use.
+  const backing = all ? pkgs.findLast((p) => p.package === id) : pkgs.findLast((p) => p.capabilities.some((c) => c.id === id));
   if (backing) {
     if (all) {
       // Contract-required pre-approval review of the FULL executable surface:
@@ -1136,9 +1143,10 @@ function trust() {
     // integrity, but integrity alone cannot see a `.oas-installation.json` that
     // claims a different origin than the lock — and approving a capability whose
     // own provenance is disputed is exactly the thing trust must not do.
+    const trustRows = levelRows(locks, backing.level);
     const disputed = backing.capabilities
       .filter((c) => all || c.id === id)
-      .map((c) => capabilityHealth(backing.level, c, locks.capabilities[c.id], locks.packages[backing.package]))
+      .map((c) => capabilityHealth(backing.level, c, trustRows.capabilities[c.id], trustRows.packages[backing.package]))
       .filter((h) => h.status !== "ok" && h.status !== "untrusted");
     if (disputed.length) { cmdFail(disputed[0].code || "invalid-lock", `refusing to trust: ${disputed.map((h) => h.detail).join("; ")}`); return; }
     let r;
@@ -1681,8 +1689,9 @@ function listCmd() {
   // pins. Trust is per capability — there is no package-level approval to list.
   const capabilities = [];
   for (const p of pkgs) {
+    const rows = levelRows(locks, p.level);
     for (const c of p.capabilities) {
-      const h = capabilityHealth(p.level, c, locks.capabilities[c.id], locks.packages[p.package]);
+      const h = capabilityHealth(p.level, c, rows.capabilities[c.id], rows.packages[p.package]);
       capabilities.push({
         capability: c.id, version: c.version || null, package: p.package, level: p.level,
         path: c.path || null, dir: h.dir, integrity: c.integrity || null,

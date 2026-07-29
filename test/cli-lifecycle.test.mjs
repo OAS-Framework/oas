@@ -822,3 +822,58 @@ test("a package exporting a hostile capability id cannot be acquired — nothing
   }
   rmSync(base, { recursive: true, force: true });
 });
+
+// ---------- I4: a capability's provider is resolved at ITS OWN level ----------
+
+test("nested scopes locking the same package id at different versions keep their own provenance", () => {
+  const base = temp();
+  // The same package IDENTITY at two versions, exporting DISJOINT capabilities.
+  // The merged lock view resolves each identity independently — closest wins —
+  // so the inner x.p@2 row is what `locks.packages["x.p"]` returns even for the
+  // outer scope's x.b. Provenance must not come from there.
+  const outerSrc = pkgSource(join(base, "outer-src"), "x.p", { "capabilities/b": { capability: "x.b" } }, { version: "1.0.0" });
+  write(join(outerSrc, "oas-package.json"), JSON.stringify({
+    package: "x.p", version: "1.0.0", description: "outer", compatibility: { oas: ">=0.1.0" }, capabilities: ["capabilities/b"],
+  }, null, 2));
+  const innerSrc = pkgSource(join(base, "inner-src"), "x.p", { "capabilities/a": { capability: "x.a", commands: { go: "go.mjs" }, _files: { "go.mjs": "//\n" } } });
+  write(join(innerSrc, "oas-package.json"), JSON.stringify({
+    package: "x.p", version: "2.0.0", description: "inner", compatibility: { oas: ">=0.1.0" }, capabilities: ["capabilities/a"],
+  }, null, 2));
+
+  const outer = scope(base, "outer");
+  const inner = join(outer, "inner");
+  write(join(inner, "oas-config.yaml"), "name: inner\n");
+  assert.equal(cli(["install", outerSrc, "--dir", outer]).status, 0);
+  assert.equal(cli(["install", innerSrc, "--dir", inner]).status, 0);
+  assert.equal(lockOf(outer).packages["x.p"].version, "1.0.0");
+  assert.equal(lockOf(inner).packages["x.p"].version, "2.0.0");
+
+  // From the inner scope BOTH capabilities are visible, and each must report
+  // the version of the package that actually exported it.
+  const envelope2 = okEnvelope(cli(["list", "--dir", inner, "--json"], { cwd: inner }));
+  const listed = envelope2.capabilities;
+  const byId = Object.fromEntries(listed.map((c) => [c.capability, c]));
+  assert.ok(byId["x.a"] && byId["x.b"], `both capabilities must be visible: ${listed.map((c) => c.capability).join(", ")}`);
+  // Each capability is attributed to the scope that actually locked it — the
+  // outer one must not be re-homed onto the nearer package of the same id.
+  assert.equal(byId["x.b"].level, outer, "the outer capability was attributed to the inner scope");
+  assert.equal(byId["x.a"].level, inner);
+  // Both package rows survive, each at its own version and level.
+  const providers = envelope2.packages.filter((p) => p.package === "x.p")
+    .map((p) => [p.level, p.version]).sort();
+  assert.deepEqual(providers, [[inner, "2.0.0"], [outer, "1.0.0"]].sort(),
+    `both provider rows must survive: ${JSON.stringify(envelope2.packages)}`);
+  // Neither is reported as damaged: same-level provenance agrees for both.
+  for (const c of listed) assert.notEqual(c.status, "provenance-mismatch", `${c.capability}: ${c.detail}`);
+
+  // Trusting the package from the inner scope writes ONLY inner rows: the outer
+  // lock is not this command's to rewrite.
+  const outerBefore = readFileSync(join(outer, OAS_LOCK_FILE), "utf8");
+  const t = cli(["trust", "x.p", "--all-capabilities", "--dir", inner, "--json"], { cwd: inner });
+  assert.equal(t.status, 0, t.stdout);
+  assert.deepEqual(okEnvelope(t).approved, ["x.a"], "a bulk approval crossed a lock level");
+  assert.equal(readFileSync(join(outer, OAS_LOCK_FILE), "utf8"), outerBefore, "the outer lock was rewritten");
+  assert.equal(lockOf(inner).capabilities["x.a"].trusted, true);
+  assert.equal(lockOf(outer).capabilities["x.b"].trusted, false, "an outer capability was silently trusted");
+  rmSync(base, { recursive: true, force: true });
+});
