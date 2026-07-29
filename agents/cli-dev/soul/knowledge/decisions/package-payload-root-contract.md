@@ -3,7 +3,7 @@ type: Decision
 title: Configurable package payload roots are selected explicitly per source kind
 description: Git package roots are selected by a #<path> fragment, catalog roots by a catalog path field, local paths by their named directory, and locks keep the canonical path separate from source so updates and restores can preserve the right owner.
 tags: [packages, kernel, lock-v2, acquisition]
-timestamp: 2026-07-28
+timestamp: 2026-07-29
 ---
 
 The package engine contract now treats a Git repository as a container that may
@@ -39,6 +39,22 @@ The dependency-closure dedupe key is therefore `source#path`. Comparing only
 resolved twice, silently dropping one instead of raising
 `duplicate-package-identity`.
 
+During `oas update`, that ownership difference becomes visible when an upstream
+root is renamed:
+
+- Git update rebuilds `<url>[@<ref>]#<locked path>` and fails `invalid-source` if
+  the old path no longer exists. Re-acquiring with the new path is not the repair
+  path because acquire refuses to advance a locked source as `integrity-drift`,
+  and update still resolves the stale fragment; the operator must remove the
+  package and then install the new `#<path>`.
+- Catalog update rebuilds `<id>[@<selector>]`, re-reads the entry path, moves the
+  lock to the new root, and reports `pathChanged` even if no bytes or version
+  changed. The CLI prints the path-only movement as:
+
+  ```text
+  package path pkgs/x → packages/x (the selected package root MOVED in the source)
+  ```
+
 # Canonical path and lock advancement
 
 Every spelling of the root (`""`, `"."`, `"./"`, `"./."`) normalizes to `"."`.
@@ -52,7 +68,23 @@ payload path different from the lock's `path` fails with `integrity-drift` befor
 integrity comparison, because two different roots can contain byte-identical
 trees. Restore passes the locked path as an override that beats both the spec
 and the catalog entry, so neither an upstream `git mv` nor a repointed catalog
-can change what a bare restore installs.
+can change what a bare restore installs. A bare restore is also pinned to the
+locked commit, where the old root still exists, so an upstream move cannot break
+an existing deployment.
+
+# Test fixture facts
+
+- `DEFAULT_PACKAGE_PATH` is `"oas-package"`; a bare Git source looks for
+  `oas-package/oas-package.json`, and `#.` selects the repository root.
+- `file://<dir>` is the network-free Git spelling. The `git:` shorthand demands
+  `host/org/repo`, and a `path:` source forces `packagePath: "."` and rejects any
+  `#<path>` fragment.
+- On catalog update, `pathOverride` is undefined, so
+  `pathOverride ?? entryPath ?? DEFAULT_PACKAGE_PATH` and
+  `entryPath ?? pathOverride ?? DEFAULT_PACKAGE_PATH` are equivalent for that
+  code path; a mutant swapping them can survive legitimately. Pair this fixture
+  with the [CLI spawned-process hermeticity lesson](/lessons/cli-tests-scrub-oas-pi-env.md)
+  when testing `test/cli-lifecycle.test.mjs` cases.
 
 See [payload root subtree extraction](/lessons/payload-root-subtree-extraction.md)
 for how acquisition cuts the selected bytes out of the clone.
