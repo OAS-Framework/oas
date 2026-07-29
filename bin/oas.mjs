@@ -1197,7 +1197,10 @@ function dependencyClosureProviders(rootId, dir, staged = []) {
   }
   // Same-run acquisition visibility: the root's own exports exist only in
   // staging while the gate runs, and a template that binds them must validate.
-  for (const c of staged) capabilities.set(c.capability, c.manifest || null);
+  // Preview rows carry the declared `layer` (null when none) — the minimum the
+  // layer-agreement check needs — so a staged capability is represented by that
+  // one field rather than a manifest the engine deliberately does not expose.
+  for (const c of staged) capabilities.set(c.capability, c.manifest ?? { layer: c.layer ?? null });
   return { capabilities };
 }
 
@@ -1246,12 +1249,12 @@ function initPackage(src, dir, file) {
     if (executable.length) note(`  executable surfaces needing separate approval: ${executable.map((c) => c.capability).join(", ")} (\`oas trust <id>\`)`);
 
     chosen = selectConfigTemplate(templates, configFlag, preview.root); // throws typed codes
-    // Layer bindings onto this package's OWN capabilities cannot be checked
-    // here — preview rows carry no manifest — so they are deferred to the
-    // post-commit re-validation below, which rolls the run back on disagreement.
+    // Every check now refuses PRE-COMMIT, layer agreement included: preview
+    // capability rows carry the declared layer, so a template binding a slot to
+    // one of the package's own staged capabilities is validated here, with the
+    // scope untouched and no rollback needed.
     const errors = validateConfigTemplate(chosen, preview.root, {
       dependencyProviders: dependencyClosureProviders(preview.root, dir, projected).capabilities,
-      deferUnknownLayers: true,
     });
     if (errors.length) {
       const e = new Error(`config template "${chosen.template}" of package ${preview.root} failed validation:\n  - ${errors.join("\n  - ")}`);
@@ -1289,11 +1292,12 @@ function initPackage(src, dir, file) {
   note(`Acquired + locked: ${acq.installed.map((p) => `${p.package}@${p.version}`).join(", ")} → ${shortPath(acq.lockFile)}`);
   const capabilities = acq.capabilities.map((c) => c.capability);
 
-  // The deferred half of template validation. The capabilities are materialized
-  // now, so every layer binding can finally be checked against the real
-  // manifest. A disagreement here is still a refusal: the journal restores the
-  // scope completely, so nothing of this run survives — the user sees the same
-  // outcome as a gate refusal.
+  // DEFENCE IN DEPTH, not the primary check. The gate above already validated
+  // every binding against the preview's declared layers; this re-checks them
+  // against the manifests actually written to disk, so a projection that
+  // disagreed with its own preview cannot leave a broken config behind. It
+  // should never fire — and if it does, the journal restores the scope
+  // completely, so nothing of the run survives.
   const materialized = new Map();
   for (const c of acq.capabilities) {
     let manifest = null;
