@@ -1,9 +1,9 @@
 ---
 type: Decision
-title: Guided official migration uses catalog aliases and per-scope holds
-description: Guided official migration (`oas migrate --official [--recursive]`) maps legacy marketplace capabilities through catalog aliases, holds a scope unchanged when an official mapping is missing, and retains non-official entries without rewriting.
+title: Guided official migration uses catalog aliases and mixed-scope refusals
+description: Guided official migration maps legacy marketplace capabilities through catalog aliases, holds scopes unchanged when official mappings are missing, skips non-official-only scopes, and refuses mixed acquire-plus-retain scopes before mutation.
 tags: [packages, migration, catalog, oas-lock, cli]
-timestamp: 2026-07-28
+timestamp: 2026-07-29
 ---
 
 # Decision
@@ -30,16 +30,20 @@ marketplace behaviors:
    convert the file to v2 and keep the entry as residue, but guided official
    migration must leave that scope's v1 lock byte-for-byte usable until the
    official package mapping exists.
-3. **Non-official entries are retained.** Git, path, unknown, and retired
-   entries are not acquired by guided official migration. A scope with no
-   official work returns `skipped` and does not reformat its v1 file.
+3. **Non-official-only scopes are skipped; mixed acquire-plus-retain scopes
+   refuse.** Git, path, unknown, and retired entries are not acquired by guided
+   official migration. A scope with no official work returns `skipped` and does
+   not reformat its v1 file; its untouched ids are reported under `retained`.
 
-   Implementation warning: a mixed scope with at least one official `acquire`
-   and at least one non-official `retain` cannot simply be rewritten to
-   revised-v2 while omitting the retained v1 rows. The revised-v2 shape has no
-   v1 residue container, so the engine must either hold the whole mixed scope or
-   add an explicit residue strategy. See [mixed guided migration retain needs
-   residue or a hold](/lessons/guided-mixed-retain-needs-residue-or-hold.md).
+   A mixed scope with at least one official `acquire` and at least one
+   non-official `retain` is `blocked`/refused before lock, artifact, or ignore
+   mutation. `retain` clears `convertible` the same way `hold` and `manual` do
+   so dry-run and apply agree that the scope is not convertible. The refusal
+   message names every retained entry, states the whole v1 scope remains usable,
+   and, when every retained source is package-mappable, names plain
+   `oas migrate` as the complete conversion path. Do not add a revised-v2
+   `residue` container. See [mixed scope migration refuses whole](/decisions/mixed-scope-migration-refuses-whole.md)
+   and the original [residue-or-hold failure lesson](/lessons/guided-mixed-retain-needs-residue-or-hold.md).
 
 # Catalog shape
 

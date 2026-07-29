@@ -1,6 +1,9 @@
 # Knowledge Log
 
 ## 2026-07-29
+* **Creation**: [mixed-scope-migration-refuses-whole](/decisions/mixed-scope-migration-refuses-whole.md) records founder ruling that mixed guided official migration refuses the whole v1 scope, clears convertible for retain, removes residue from result shapes, and exposes blocked dry-run/apply status.
+* **Update**: [guided-official-migration-shape](/decisions/guided-official-migration-shape.md) replaces the old residue-or-hold warning with the final mixed-scope refusal contract.
+* **Update**: [guided-mixed-retain-needs-residue-or-hold](/lessons/guided-mixed-retain-needs-residue-or-hold.md) links the original data-loss lesson to the no-residue refusal ruling.
 * **Creation**: [guided-mixed-retain-needs-residue-or-hold](/lessons/guided-mixed-retain-needs-residue-or-hold.md) records that guided official migration cannot rewrite a mixed official-plus-custom v1 lock to revised-v2 without either holding the scope or providing a residue container for retained custom rows.
 * **Update**: [guided-official-migration-shape](/decisions/guided-official-migration-shape.md) links the non-official retain policy to the mixed-scope residue-or-hold implementation warning.
 * **Creation**: [usage-must-not-resolve-deployment-state](/lessons/usage-must-not-resolve-deployment-state.md) records that help/usage/version surfaces must bypass deployment resolution or catch it as diagnostics so broken config chains and locks cannot block explanatory output.

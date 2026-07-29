@@ -1,7 +1,7 @@
 ---
 type: Lesson
 title: Mixed guided migration retain needs residue or a hold
-description: A guided official migration scope that both acquires official packages and retains custom v1 entries cannot be rewritten to revised-v2 without either a residue container or a hold, because retained rows otherwise vanish while the report says they were kept.
+description: A guided official migration scope that both acquires official packages and retains custom v1 entries cannot be rewritten to revised-v2; the accepted fix is to refuse the whole mixed scope unchanged rather than add a residue container.
 tags: [packages, migration, oas-lock, residue, capability-materialization]
 timestamp: 2026-07-29
 ---
@@ -38,18 +38,21 @@ A revised-v2 lock has `{packages, capabilities}` and no place for a v1
 package. Any scope with at least one `acquire` and at least one `retain` needs an
 explicit product choice before the file is rewritten.
 
+# Resolution
+
+The product choice is now made: [mixed scope migration refuses whole](/decisions/mixed-scope-migration-refuses-whole.md).
+Do not add an explicit residue container. A mixed official-plus-custom guided
+scope must be held/refused before any mutation, with the whole v1 scope left
+byte-identical and usable.
+
 # Future rule
 
 Do not claim a custom entry was retained unless the resulting lock can still
-resolve it. The safe choices are:
+resolve it. For guided official migration, the safe choice is the fail-closed
+one: hold the whole mixed scope unchanged, matching the manual branch's
+behavior, and report the blocked state so dry-run cannot look ready.
 
-- hold the whole mixed scope unchanged, matching the manual branch's
-  fail-closed behavior; or
-- add an explicit residue container and own the resulting dual-shape lock
-  contract.
-
-Until that choice is made, regression coverage for guided official migration
-must include a mixed official-plus-custom scope and assert the post-migration
-lock, not only the plan report. This sharpens the [guided official migration
-shape](/decisions/guided-official-migration-shape.md) and the existing
-[batched residue migration lesson](/lessons/residue-collision-during-batched-migration.md).
+Regression coverage for guided official migration must include a mixed
+official-plus-custom scope and assert the post-migration lock, not only the plan
+report. This sharpens the [guided official migration shape](/decisions/guided-official-migration-shape.md)
+and the existing [batched residue migration lesson](/lessons/residue-collision-during-batched-migration.md).
