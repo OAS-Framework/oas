@@ -154,38 +154,46 @@ test("profile validation: schema, dependency closure, layer agreement, agent typ
 
 // ---------- init --package (CLI) ----------
 
-test("oas init --package: previews, validates, snapshots with provenance; default and explicit profiles; overwrite refusal", () => {
+test("oas init --package: adopts a template verbatim with a recorded base; default and explicit choice; refusals write nothing", () => {
   const base = temp();
   const pkg = fixturePackage(join(base, "pkg"));
   const ws = join(base, "ws"); mkdirSync(ws);
 
   const r = cli(["init", "--package", pkg, "--dir", ws, "--no-tmux-mouse"]);
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /profile "default"/);
-  assert.match(r.stdout, /exports capabilities: example\.review, example\.delivery/);
+  assert.match(r.stdout, /Config template "default"/);
+  assert.match(r.stdout, /installs 2 capability\(ies\): example\.review, example\.delivery/);
+
   const file = join(ws, "oas-config.yaml");
   const text = readFileSync(file, "utf8");
-  assert.match(text, /^# package: example\.engineering@\S+ profile: default \(snapshot/);
-  assert.match(text, /capability: example\.delivery/);
-  // name rewritten to the target scope
-  assert.match(text, new RegExp(`^name: ws$`, "m"));
-  const prov = parseProfileProvenance(text);
-  assert.equal(prov.package, "example.engineering");
-  assert.equal(prov.profile, "default");
+  const templateText = readFileSync(join(pkg, "configs/default/oas-config.yaml"), "utf8");
+  // The adopted config is the template's EXACT bytes. It is not rewritten on the
+  // way in — not even `name:` — because the recorded base must equal the
+  // template, so that the first `oas config diff` truthfully reports no drift.
+  assert.equal(text, templateText, "the adopted config must be the template byte for byte");
+  const adoptedDir = join(ws, ".agents/config-templates/adopted/example.engineering/default");
+  assert.equal(readFileSync(join(adoptedDir, "oas-config.yaml"), "utf8"), templateText, "the recorded base must be the same exact bytes");
+  const meta = JSON.parse(readFileSync(join(adoptedDir, "adoption.json"), "utf8"));
+  assert.equal(meta.package, "example.engineering");
+  assert.equal(meta.template, "default");
+  assert.match(meta.hash, /^sha256-[0-9a-f]{64}$/);
+  // Commit-safe: a local source is recorded as such, never as a machine path.
+  assert.equal(meta.source, null);
+  assert.equal(meta.localSource, true);
 
   // refusal to overwrite an existing config
   const r2 = cli(["init", "--package", pkg, "--dir", ws, "--no-tmux-mouse"]);
   assert.equal(r2.status, 1);
   assert.match(r2.stderr, /already exists/);
-  assert.equal(readFileSync(file, "utf8"), text, "existing snapshot must not be rewritten");
+  assert.equal(readFileSync(file, "utf8"), text, "an existing config must not be rewritten");
 
-  // explicit profile choice
+  // explicit template choice
   const ws2 = join(base, "ws2"); mkdirSync(ws2);
   const r3 = cli(["init", "--package", pkg, "--config", "minimal", "--dir", ws2, "--no-tmux-mouse"]);
   assert.equal(r3.status, 0, r3.stderr);
-  assert.match(readFileSync(join(ws2, "oas-config.yaml"), "utf8"), /profile: minimal/);
+  assert.equal(existsSync(join(ws2, ".agents/config-templates/adopted/example.engineering/minimal/adoption.json")), true);
 
-  // multiple unmarked profiles require --config
+  // multiple unmarked templates require --config, and refuse before touching anything
   const multiPkg = fixturePackage(join(base, "multi"), { id: "multi.pkg", configs: {
     a: { path: "configs/default/oas-config.yaml" }, b: { path: "configs/minimal/oas-config.yaml" },
   } });
@@ -193,9 +201,9 @@ test("oas init --package: previews, validates, snapshots with provenance; defaul
   const r4 = cli(["init", "--package", multiPkg, "--dir", ws3, "--no-tmux-mouse"]);
   assert.equal(r4.status, 1);
   assert.match(r4.stderr, /--config/);
-  assert.equal(existsSync(join(ws3, "oas-config.yaml")), false);
+  assert.deepEqual(readdirSync(ws3), [], "an ambiguous refusal must leave the scope completely untouched");
 
-  // invalid profile refuses to snapshot
+  // an invalid template refuses, and leaves nothing behind
   const badPkg = fixturePackage(join(base, "bad"), { id: "bad.pkg", extraFiles: {
     "configs/x/oas-config.yaml": "name: w\ncapabilities:\n  additive:\n    ghost.cap:\n      from: installed\n      global: true\n",
   }, configs: { x: { path: "configs/x/oas-config.yaml", default: true } } });
@@ -203,7 +211,9 @@ test("oas init --package: previews, validates, snapshots with provenance; defaul
   const r5 = cli(["init", "--package", badPkg, "--dir", ws4, "--no-tmux-mouse"]);
   assert.equal(r5.status, 1);
   assert.match(r5.stderr, /failed validation/);
-  assert.equal(existsSync(join(ws4, "oas-config.yaml")), false);
+  assert.deepEqual(readdirSync(ws4), [], "a refused template must leave no lock, store, or anchor");
+
+  rmSync(base, { recursive: true, force: true });
 });
 
 // ---------- adopter sovereignty ----------
