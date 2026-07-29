@@ -56,12 +56,15 @@ through it would delete or rewrite outer-scope state the run never owned. Same
 containment instinct as the kernel's [hoisted-path guards](/lessons/hoisted-resource-fallbacks-anchor-at-declaring-dir.md),
 applied to a CLI-owned tree.
 
-# Measured cpSync flags (node 22)
+# cpSync measurements are not enough for hostile trees
 
 `cpSync(from, to, { recursive: true, dereference: false, verbatimSymlinks: true,
 preserveTimestamps: true })` preserves mode bits (0755 survives), copies
 symlinks as symlinks including at the top level, and keeps relative link targets
-verbatim. Verified before relying on it rather than assumed.
+verbatim on readable trees. That happy-path measurement is not enough for
+recovery code: [cpSync can abort the process on unreadable directories](/lessons/cpsync-aborts-on-unreadable-dirs.md),
+so snapshot code that must survive hostile trees needs a hand-walked copy path
+whose failures remain catchable.
 
 # A restore test proves nothing until a mutant kills it
 

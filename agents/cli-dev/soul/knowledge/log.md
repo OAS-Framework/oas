@@ -1,6 +1,8 @@
 # Knowledge Log
 
 ## 2026-07-29
+* **Creation**: [cpsync-aborts-on-unreadable-dirs](/lessons/cpsync-aborts-on-unreadable-dirs.md) records that Node 22 cpSync can abort rather than throw on unreadable directories, so recovery code must probe hostile input and hand-walk copies when failures must remain catchable.
+* **Update**: [run-level-rollback-journal-craft](/lessons/run-level-rollback-journal-craft.md) replaces the earlier happy-path cpSync flag note with a link to the unreadable-directory abort lesson.
 * **Creation**: [run-level-rollback-journal-craft](/lessons/run-level-rollback-journal-craft.md) records the CLI outer rollback journal lessons for off-scope backups, incomplete rollback retention, absence restoration, ancestor-pruned anchors, symlink boundaries, cpSync flags, and mutation-tested restore assertions.
 * **Update**: [frozen-revised-v2-engine-seam-answers](/references/frozen-revised-v2-engine-seam-answers.md) links the CLI-owned run-level transaction seam to the rollback journal implementation gotchas.
 * **Creation**: [transitional-lock-tells-are-presence-not-truthiness](/references/transitional-lock-tells-are-presence-not-truthiness.md) records the binding pin that revised-v2 transitional lock tells are own-property presence rather than truthiness, and that lock maps need null-prototype access for hostile package ids.
