@@ -237,6 +237,18 @@ test("a valueless --dir is refused by the roster commands too, before any scaffo
 
 /** Every shape the strict reader must refuse, with the command surfaces that
  * must refuse it identically. Kept as data so a new refusal is one row. */
+/** A structurally VALID revised-v2 lock, with the given per-row overrides
+ * merged in. Used to isolate exactly one shape violation per fixture row. */
+function shaped({ packages = {}, capabilities = {} } = {}) {
+  const pkg = { source: "path:/x", path: ".", version: "1.0.0", commit: "local", integrity: `sha256-${"0".repeat(64)}`, dependencies: [] };
+  const cap = { version: "1.0.0", package: "a.p", path: "capabilities/a", integrity: `sha256-${"1".repeat(64)}`, trusted: false };
+  return {
+    lockfileVersion: 2,
+    packages: { "a.p": { ...pkg, ...(packages["a.p"] || {}) } },
+    capabilities: { "a.cap": { ...cap, ...(capabilities["a.cap"] || {}) } },
+  };
+}
+
 const REFUSED_LOCKS = [
   ["malformed JSON", "{ not json"],
   ["a non-object root", JSON.stringify([1, 2, 3])],
@@ -248,6 +260,16 @@ const REFUSED_LOCKS = [
   ["a v1 document carrying a packages map", JSON.stringify({ lockfileVersion: 1, packages: {}, capabilities: {} })],
   ["a malformed v1 entry", JSON.stringify({ lockfileVersion: 1, capabilities: { "a.cap": { source: "marketplace:a.cap@1", version: 1 } } })],
   ["an unknown lockfileVersion", JSON.stringify({ lockfileVersion: 99, packages: {}, capabilities: {} })],
+  // Final rows are closed shapes: an unknown key is a lock from a FUTURE or
+  // forked writer, and interpreting the keys we happen to recognise would
+  // silently drop whatever the rest meant.
+  ["a package row with an unknown key", JSON.stringify(shaped({ packages: { "a.p": { surprise: 1 } } }))],
+  ["a capability row with an unknown key", JSON.stringify(shaped({ capabilities: { "a.cap": { surprise: 1 } } }))],
+  // The `package` back-reference is the single provider truth: it must resolve
+  // inside the SAME packages map, or the capability has no provenance at all.
+  ["a capability row naming a provider that is not locked", JSON.stringify(shaped({ capabilities: { "a.cap": { package: "nope" } } }))],
+  // Raw JSON must never reach a real prototype through a map key.
+  ["a packages map with a __proto__ key", '{"lockfileVersion":2,"packages":{"__proto__":{}},"capabilities":{}}'],
 ];
 
 test("a lock the reader refuses is never served as usable-but-empty: list, doctor, update, remove and trust all fail closed", () => {
@@ -257,7 +279,9 @@ test("a lock the reader refuses is never served as usable-but-empty: list, docto
     write(join(s, OAS_LOCK_FILE), body);
     const before = snapshot(s);
 
-    for (const argv of [["list"], ["update", "x.p"], ["remove", "x.p"], ["trust", "x.a"]]) {
+    // Read paths AND write paths: a lock the central parser refuses must stop
+    // acquisition too, or the writer would serialize a scope it never read.
+    for (const argv of [["list"], ["update", "x.p"], ["remove", "x.p"], ["trust", "x.a"], ["install"], ["install", join(base, "src")]]) {
       const r = cli([...argv, "--dir", s, "--json"], { cwd: s });
       assert.notEqual(r.status, 0, `${argv[0]} on ${label} exited 0`);
       const err = failEnvelope(r);
@@ -383,5 +407,224 @@ test("the Desktop version probe is unchanged: `oas version --json` still answers
   const doc = JSON.parse(r.stdout);
   assert.equal(r.stdout.trim(), JSON.stringify(doc), "exactly one JSON document");
   assert.match(doc.version, /^\d+\.\d+\.\d+/);
+  rmSync(base, { recursive: true, force: true });
+});
+
+// ---------- the runtime boundary a dispatched command sees ----------
+
+test("a dispatched command receives its capability identity and EFFECTIVE settings, not the raw config", () => {
+  const base = temp();
+  const src = pkgSource(join(base, "src"), "s.p", {
+    "capabilities/c": {
+      capability: "s.cap", command: "svc", commands: { env: "env.mjs" },
+      _files: { "env.mjs": "console.log(JSON.stringify({ cap: process.env.OAS_CAPABILITY, settings: process.env.OAS_SETTINGS, team: process.env.OAS_TEAM_NAME }));\n" },
+    },
+  });
+  // Two scopes declare the SAME capability with different settings: the value
+  // handed to the child must come from the scope it runs in, not from the
+  // manifest and not from whatever config happens to be nearest the cwd.
+  const mk = (name, level) => scope(base, name, `name: ${name}\nteam:\n  name: crew\ncapabilities:\n  additive:\n    s.cap:\n      from: installed\n      global: true\n      settings:\n        level: ${level}\n`);
+  for (const [name, level] of [["a", "loud"], ["b", "quiet"]]) {
+    const dir = mk(name, level);
+    assert.equal(cli(["install", src, "--dir", dir]).status, 0);
+    assert.equal(cli(["trust", "s.cap", "--dir", dir]).status, 0);
+    const r = cli(["svc", "env", "--dir", dir], { cwd: dir });
+    assert.equal(r.status, 0, r.stderr);
+    const seen = JSON.parse(r.stdout.trim().split("\n").at(-1));
+    assert.equal(seen.cap, "s.cap", "OAS_CAPABILITY names the dispatching capability");
+    assert.deepEqual(JSON.parse(seen.settings), { level }, `${name}: settings came from the wrong scope`);
+    assert.equal(seen.team, "crew", "the team context travels with the dispatch");
+  }
+  rmSync(base, { recursive: true, force: true });
+});
+
+// ---------- artifact integrity is the trust anchor ----------
+
+test("a drifted capability artifact is DIAGNOSED by doctor and list, and REPAIRED by a bare restore", () => {
+  const base = temp();
+  const src = fixture(base);
+  const s = scope(base);
+  assert.equal(cli(["install", src, "--dir", s]).status, 0);
+  assert.equal(cli(["trust", "x.exec", "--dir", s]).status, 0);
+  const locked = lockOf(s).capabilities["x.exec"].integrity;
+
+  // Tamper INSIDE the materialized artifact — the runtime closure, not the
+  // manifest — so only a whole-artifact hash can see it.
+  const go = join(artifact(s, "x.exec"), "bin", "go.mjs");
+  write(go, "// tampered\n");
+
+  const listed = okEnvelope(cli(["list", "--dir", s, "--json"], { cwd: s })).capabilities.find((c) => c.capability === "x.exec");
+  assert.equal(listed.status, "drifted");
+  assert.equal(listed.code, "integrity-drift");
+  assert.notEqual(listed.installedIntegrity, locked, "the drifted hash is reported, not the locked one");
+
+  const doc = JSON.parse(cli(["doctor", s, "--json"], { cwd: s }).stdout);
+  assert.ok(JSON.stringify(doc).includes("integrity-drift"), "doctor names the same fault");
+
+  // Trust must not survive a drifted artifact: dispatch is blocked even though
+  // the lock still says trusted.
+  assert.equal(lockOf(s).capabilities["x.exec"].trusted, true, "the lock flag itself is untouched");
+  const blocked = cli(["demo", "go", "--dir", s, "--json"], { cwd: s });
+  assert.notEqual(blocked.status, 0, "a drifted artifact still dispatched");
+
+  // A bare restore re-materializes it back to the locked bytes.
+  assert.equal(cli(["install", "--no-requirements", "--dir", s], { cwd: s }).status, 0);
+  assert.equal(readFileSync(go, "utf8"), "//\n", "restore did not repair the artifact");
+  const repaired = okEnvelope(cli(["list", "--dir", s, "--json"], { cwd: s })).capabilities.find((c) => c.capability === "x.exec");
+  assert.equal(repaired.installedIntegrity, locked);
+  assert.notEqual(repaired.status, "drifted");
+  rmSync(base, { recursive: true, force: true });
+});
+
+// ---------- the cutover gate ----------
+
+test("after conversion the scope holds ZERO v1 locks and no package store anywhere", () => {
+  const base = temp();
+  const src = fixture(base);
+  const s = scope(base);
+  // Start from a real 0.18 scope: a v1 capability lock whose source is a tree
+  // that DOES export a distribution package, which is what makes it convertible.
+  write(join(s, OAS_LOCK_FILE), JSON.stringify({
+    lockfileVersion: 1,
+    capabilities: { "x.plain": { source: `path:${src}`, version: "1.0.0", commit: "local", integrity: `sha256-${"0".repeat(64)}`, trustedExecutables: false } },
+  }, null, 2));
+  assert.equal(lockOf(s).lockfileVersion, 1, "the fixture must actually start at v1");
+
+  const r = cli(["migrate", "--dir", s, "--json"], { cwd: s });
+  assert.equal(r.status, 0, r.stdout);
+  const lock = lockOf(s);
+  assert.equal(lock.lockfileVersion, 2);
+  assert.ok(lock.packages && lock.capabilities, "revised v2 carries BOTH required top-level maps");
+  // The cutover gate, stated as an invariant over the whole tree.
+  const files = Object.keys(snapshot(s));
+  assert.equal(files.filter((f) => /(^|\/)\.agents\/packages(\/|$)/.test(f)).length, 0, "a package store was materialized");
+  assert.deepEqual(JSON.parse(cli(["doctor", s, "--json"], { cwd: s }).stdout).legacyLockFiles, [],
+    "doctor still sees a v1 lock after the cutover");
+  // And installing a real package afterwards keeps the shape.
+  assert.equal(cli(["install", src, "--dir", s]).status, 0);
+  assert.equal(lockOf(s).lockfileVersion, 2);
+  assert.equal(Object.keys(snapshot(s)).filter((f) => f.includes(".agents/packages/")).length, 0);
+  rmSync(base, { recursive: true, force: true });
+});
+
+// ---------- retired flags reject before they can scaffold ----------
+
+test("retired spawn flags are refused BEFORE any instance home is scaffolded", () => {
+  const base = temp();
+  const s = gitify(scope(base, "repo", "name: repo\n"));
+  const before = snapshot(s);
+  for (const argv of [["spawn", "someone", "--instance", "x"], ["spawn", "someone", "--ephemeral"]]) {
+    const r = cli([...argv, "--dir", s, "--json"], { cwd: s });
+    assert.notEqual(r.status, 0, `${argv.join(" ")} exited 0`);
+    assert.equal(failEnvelope(r, "E_BAD_ARGS").code, "E_BAD_ARGS");
+    assert.deepEqual(snapshot(s), before, `${argv.join(" ")} scaffolded before refusing`);
+  }
+  rmSync(base, { recursive: true, force: true });
+});
+
+// ---------- Git sources: payload root, and the standalone fallback ----------
+
+/** A git repository at `dir`, committed. Returns the `file://` URL — the only
+ * git spelling that works without a network, and the one that lets these cases
+ * exercise the real fetch/probe path instead of the local exact-directory one
+ * (a `path:` source is always the package root and takes no "#<path>"). */
+function gitRepo(dir) {
+  gitify(dir);
+  return `file://${dir}`;
+}
+
+test("a package rooted in a payload SUBDIRECTORY: every command agrees, and no row carries depsIntegrity", () => {
+  const base = temp();
+  const repo = join(base, "repo");
+  pkgSource(join(repo, "pkgs", "x"), "g.p", {
+    "capabilities/c": { capability: "g.cap", commands: { go: "bin/go.mjs" }, _files: { "bin/go.mjs": "//\n" } },
+  });
+  const url = gitRepo(repo);
+  const s = scope(base);
+
+  const r = cli(["install", `${url}#pkgs/x`, "--dir", s, "--json"]);
+  assert.equal(r.status, 0, r.stderr);
+  const lock = lockOf(s);
+  const pkg = lock.packages["g.p"];
+  assert.equal(pkg.path, "pkgs/x", "the lock records the payload root, not the repository root");
+  assert.match(pkg.commit, /^[0-9a-f]{40}$/, "a git package pins an exact commit");
+  // The package row locks the TRANSPORT only: no capability list, no per-package
+  // trust set, and no separate dependency digest.
+  assert.deepEqual(Object.keys(pkg).sort(), ["commit", "dependencies", "integrity", "path", "source", "version"]);
+  assert.equal(JSON.stringify(lock).includes("depsIntegrity"), false, "depsIntegrity is gone from the format");
+  // The capability row's `package` back-reference is the single provider truth.
+  assert.equal(lock.capabilities["g.cap"].package, "g.p");
+  assert.equal(lock.capabilities["g.cap"].path, "capabilities/c");
+
+  // Every reader agrees with the lock, and trust binds to the ARTIFACT.
+  const listed = okEnvelope(cli(["list", "--dir", s, "--json"], { cwd: s })).capabilities.find((c) => c.capability === "g.cap");
+  assert.equal(listed.package, "g.p");
+  assert.equal(listed.integrity, lock.capabilities["g.cap"].integrity);
+  assert.equal(listed.status, "untrusted", "an executable surface starts untrusted");
+  // `approvedIntegrity` is keyed by capability: approval is per capability
+  // artifact, and a bulk approval reports each one it bound to.
+  assert.deepEqual(okEnvelope(cli(["trust", "g.cap", "--dir", s, "--json"], { cwd: s })).approvedIntegrity,
+    { "g.cap": listed.integrity });
+
+  // And a bare restore of the payload-rooted package is exact.
+  const after = snapshot(join(s, ".agents"));
+  assert.equal(cli(["install", "--no-requirements", "--dir", s], { cwd: s }).status, 0);
+  assert.deepEqual(snapshot(join(s, ".agents")), after, "restore rewrote a byte of the materialized closure");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("the Git package probe precedes the standalone route: it falls back only when there is NO package manifest", () => {
+  const base = temp();
+
+  // (a) No package manifest anywhere, but a capability root: the CLI falls back
+  // to the standalone route and locks it the v1 way, transactionally.
+  const plainRepo = join(base, "plain");
+  write(join(plainRepo, "oas.json"), JSON.stringify({ capability: "s.cap", version: "1.0.0", description: "standalone" }, null, 2));
+  const a = scope(base, "a");
+  assert.equal(cli(["install", gitRepo(plainRepo), "--dir", a]).status, 0);
+  const v1 = lockOf(a);
+  assert.equal(v1.lockfileVersion, 1);
+  assert.equal(v1.capabilities["s.cap"].trustedExecutables, false);
+  assert.equal(v1.packages, undefined, "the standalone route never invents a packages map");
+
+  // (b) Neither: the failure names BOTH probes, so the operator can tell which
+  // shape the source was expected to have.
+  const emptyRepo = join(base, "empty");
+  write(join(emptyRepo, "README.md"), "nothing here\n");
+  const b = scope(base, "b");
+  const none = cli(["install", gitRepo(emptyRepo), "--dir", b, "--json"]);
+  assert.notEqual(none.status, 0);
+  const err = failEnvelope(none);
+  assert.match(err.message, /no oas-package\.json at package path "oas-package"/);
+  assert.match(err.message, /no oas\.json at its root/);
+  assert.equal(existsSync(join(b, OAS_LOCK_FILE)), false, "a refused probe left a lock behind");
+
+  // (c) A BROKEN package manifest is a package error, never a silent demotion
+  // to the standalone route — even when a usable oas.json sits at the root.
+  const brokenRepo = join(base, "broken");
+  write(join(brokenRepo, "oas-package", "oas-package.json"), "{ not json");
+  write(join(brokenRepo, "oas.json"), JSON.stringify({ capability: "decoy.cap", version: "1.0.0", description: "decoy" }, null, 2));
+  const c = scope(base, "c");
+  const broken = cli(["install", gitRepo(brokenRepo), "--dir", c, "--json"]);
+  assert.notEqual(broken.status, 0, "a broken package manifest was silently demoted to the standalone route");
+  assert.doesNotMatch(JSON.stringify(failEnvelope(broken)), /decoy\.cap/, "the decoy capability must never be reached");
+  assert.equal(existsSync(join(c, OAS_LOCK_FILE)), false, "a failed package probe left a lock behind");
+
+  // (d) A repository that DOES carry a package at its root, but nothing at the
+  // default package path, must not downgrade to the standalone route either —
+  // it is told exactly how to select the root instead.
+  const rootPkgRepo = join(base, "rootpkg");
+  pkgSource(rootPkgRepo, "r.p", { "capabilities/c": { capability: "r.cap" } });
+  write(join(rootPkgRepo, "oas.json"), JSON.stringify({ capability: "decoy2.cap", version: "1.0.0", description: "decoy" }, null, 2));
+  const d = scope(base, "d");
+  const rooted = cli(["install", gitRepo(rootPkgRepo), "--dir", d, "--json"]);
+  assert.notEqual(rooted.status, 0, "a root package was skipped in favour of the standalone route");
+  const rootedErr = failEnvelope(rooted, "invalid-package-manifest");
+  assert.match(rootedErr.message, /oas-package\.json at the repository ROOT/);
+  assert.match(rootedErr.message, /#\./, "the message names the exact spelling that selects the root");
+  assert.equal(existsSync(join(d, OAS_LOCK_FILE)), false);
+  // And that spelling actually works.
+  assert.equal(cli(["install", `${gitRepo(rootPkgRepo)}#.`, "--dir", d]).status, 0);
+  assert.equal(lockOf(d).packages["r.p"].path, ".");
   rmSync(base, { recursive: true, force: true });
 });
