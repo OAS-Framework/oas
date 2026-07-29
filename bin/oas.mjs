@@ -1200,16 +1200,23 @@ function dependencyClosureProviders(rootId, dir, staged = []) {
   return { capabilities };
 }
 
-/** oas init --package <source> [--config <name>]: acquire a package and,
- * optionally, adopt one of its config TEMPLATES as this scope's local config.
+/** oas init --package <source> [--config <name>]: acquire a package AND adopt
+ * one of its config templates as this scope's local config.
  *
- * The whole guided adoption runs inside the engine's PRE-COMMIT GATE: the
- * template is selected, decoded and validated against the fully projected
- * closure while the scope is still completely untouched, so a decline, an
- * ambiguity or an invalid template mutates nothing at all and needs no
- * rollback. Only after the engine commits do the config, the adopted base and
- * its metadata get written — under the outer run journal, so a failure there
- * restores every pre-existing byte.
+ * This command is adoption, not an install alias: `oas install <package>`
+ * installs capabilities and applies no template, while this one always adopts
+ * exactly one — the named template, else the single marked default, else the
+ * only one. Several unmarked templates are E_TEMPLATE_AMBIGUOUS and a package
+ * with none is E_NO_TEMPLATES; both refuse inside the pre-commit gate, so the
+ * scope is never touched.
+ *
+ * Transaction shape: the outer journal opens BEFORE acquisition, so its
+ * snapshot is the pre-command state. A gate refusal or acquire failure rolls it
+ * back (the engine is zero-mutation there, so this mainly closes the backup); a
+ * failure while writing the adoption files rolls back the lock, the capability
+ * store, the ignore file, the config and the adopted base together — the
+ * newly acquired state disappears and every pre-existing byte returns.
+ * finalize() runs only after every adoption write has succeeded.
  *
  * JSON mode: one compact envelope. CLI codes E_TEMPLATE_INVALID /
  * E_TEMPLATE_AMBIGUOUS / E_TEMPLATE_NOT_FOUND / E_NO_TEMPLATES; engine codes
@@ -1220,13 +1227,14 @@ function initPackage(src, dir, file) {
   const configFlag = flag("config");
   if (configFlag === true) bail("E_USAGE", "--config needs a template name");
 
-  // Decided inside the gate, consumed after the commit.
   let chosen = null;      // the selected+validated template descriptor
   let rootRecord = null;  // the acquired root package row
   let projected = [];     // projected capability rows
 
-  /** The pre-commit gate: everything that can refuse must refuse HERE, while
-   * the scope is still untouched. */
+  /** The pre-commit gate. Everything that can refuse refuses HERE, while the
+   * scope is still untouched. It THROWS rather than exiting: the process-exit
+   * path would strand the journal's backup, and the engine propagates a gate
+   * throw unchanged with nothing mutated. */
   const assertCommittable = (preview) => {
     rootRecord = preview.packages.find((p) => p.package === preview.root) || null;
     projected = preview.capabilities || [];
@@ -1236,55 +1244,44 @@ function initPackage(src, dir, file) {
     const executable = projected.filter((c) => c.executableSurface?.commands?.length || c.executableSurface?.hooks?.length);
     if (executable.length) note(`  executable surfaces needing separate approval: ${executable.map((c) => c.capability).join(", ")} (\`oas trust <id>\`)`);
 
-    if (configFlag === undefined) return; // plain acquisition: templates are reported, never applied
-    chosen = selectConfigTemplate(templates, configFlag, preview.root, bail);
+    chosen = selectConfigTemplate(templates, configFlag, preview.root); // throws typed codes
     const errors = validateConfigTemplate(chosen, preview.root, {
       dependencyProviders: dependencyClosureProviders(preview.root, dir, projected).capabilities,
     });
-    if (errors.length) bail("E_TEMPLATE_INVALID", `config template "${chosen.template}" of package ${preview.root} failed validation:\n  - ${errors.join("\n  - ")}`);
+    if (errors.length) {
+      const e = new Error(`config template "${chosen.template}" of package ${preview.root} failed validation:\n  - ${errors.join("\n  - ")}`);
+      e.code = "E_TEMPLATE_INVALID";
+      throw e;
+    }
     note(`Config template "${chosen.template}"${chosen.description ? `: ${chosen.description}` : ""} — validated (${chosen.contentIntegrity})`);
     note(`  it becomes YOUR local ${shortPath(file)}: every copied setting is editable, and package updates never rewrite it.`);
   };
 
+  // Opened BEFORE acquisition: a snapshot taken afterwards would record the new
+  // lock, artifacts and ignore bytes as the "pre-existing" state and could
+  // never undo them.
+  const journal = beginRunJournal(dir);
+  /** Undo the run, then report. `code` is the engine's verbatim code for
+   * acquisition failures and a stable CLI code for our own write failures — a
+   * raw errno like ENOTDIR is not a contract automation can branch on. */
+  const abort = (e, code) => {
+    const report = journal.rollback();
+    const detail = code === "E_ADOPT_FAILED" ? `adopting the config template failed after the package was installed: ${e.message}` : e.message;
+    bail(code || e.code || "E_INIT_FAILED", report.complete ? detail : `${detail} — ${report.summary}`);
+  };
+
   let acq;
   try { acq = acquirePackage(dir, src, { assertCommittable }); }
-  catch (e) { bail(e.code || "E_ACQUIRE_FAILED", e.message); }
+  catch (e) { abort(e); return; }
 
   note(`Acquired + locked: ${acq.installed.map((p) => `${p.package}@${p.version}`).join(", ")} → ${shortPath(acq.lockFile)}`);
   const capabilities = acq.capabilities.map((c) => c.capability);
 
-  if (!chosen) {
-    // Plain acquisition. Available templates are an optional follow-up, never
-    // an applied policy.
-    const offered = (acq.configTemplates || []).filter((t) => t.package === acq.root);
-    if (offered.length) {
-      note(`NOTE: package ${acq.root} exports config template${offered.length > 1 ? "s" : ""} (${offered.map((t) => t.template).join(", ")}) — adopt one with \`oas init --package ${src} --config <name>\` at a scope with no oas-config.yaml.`);
-    }
-    if (JSON_MODE) {
-      jsonOk({
-        package: acq.root, version: rootRecord?.version || null, commit: rootRecord?.commit || null,
-        template: null, adopted: false, file: null, capabilities,
-        availableTemplates: offered.map((t) => ({ template: t.template, default: !!t.default, description: t.description || null })),
-        lockFile: acq.lockFile, lockedPackages: acq.installed.map((p) => p.package),
-      });
-      return;
-    }
-    offerTmuxMouseScrolling();
-    return;
-  }
-
-  // The engine committed; the config-side writes are ours, and must be undoable
-  // as one unit with what the engine already did.
-  const journal = beginRunJournal(dir);
   let adoption;
   try {
     adoption = writeAdoptedTemplate(dir, file, { package: acq.root, template: chosen, root: rootRecord });
     journal.finalize();
-  } catch (e) {
-    const report = journal.rollback();
-    const suffix = report.complete ? "" : ` — ${report.summary}`;
-    bail(e.code || "E_ADOPT_FAILED", `${e.message}${suffix}`);
-  }
+  } catch (e) { abort(e, "E_ADOPT_FAILED"); return; }
 
   note(`Created ${shortPath(file)} (${levelOf(dir)} level) from config template ${acq.root}:${chosen.template}`);
   note(`Recorded the adopted base at ${shortPath(adoption.baseFile)} — commit it; \`oas config diff\` and \`oas config sync\` compare against it.`);

@@ -545,6 +545,107 @@ test("a plan region binds to the exact three texts it was computed from", () => 
   assert.equal(a.planDigest, planConfigMerge("a: 1\n", "a: local\n", "a: upstream\n").planDigest);
 });
 
+// ---------- guided template adoption transaction ----------
+
+/** A materialization-era package: one capability root plus one config template. */
+function materializedPackage(dir, { id = "example.engineering", version = "1.0.0", capability = "example.review", body = "hi", templates } = {}) {
+  write(join(dir, "capabilities/example-review/oas.json"), JSON.stringify({ capability, version, description: "Review capability." }, null, 2));
+  write(join(dir, "capabilities/example-review/skills/review/SKILL.md"), `# review\n${body}\n`);
+  write(join(dir, "config-templates/default/oas-config.yaml"), "# adopt me\nname: workspace\n\ncapabilities:\n  additive:\n    example.review: {}\n");
+  write(join(dir, "oas-package.json"), JSON.stringify({
+    package: id, version, description: "Engineering package.", compatibility: { oas: ">=0.19.0" },
+    capabilities: ["capabilities/example-review"],
+    configTemplates: templates ?? { default: { path: "config-templates/default/oas-config.yaml", description: "Recommended setup", default: true } },
+  }, null, 2));
+  return dir;
+}
+
+test("init --package is ADOPTION, not an install alias: default template selection, and refusals mutate nothing", () => {
+  const pkg = materializedPackage(temp());
+
+  // No --config still adopts: the single marked default.
+  const scope = temp();
+  const ok = cli(["init", "--package", pkg, "--dir", scope, "--json"]);
+  assert.equal(ok.status, 0, ok.stderr);
+  const okPayload = JSON.parse(ok.stdout).result;
+  assert.equal(okPayload.adopted, true);
+  assert.equal(okPayload.template, "default");
+  assert.equal(existsSync(join(scope, "oas-config.yaml")), true);
+  assert.equal(existsSync(join(scope, ".agents/config-templates/adopted/example.engineering/default/adoption.json")), true);
+
+  // Several unmarked templates: ambiguous, and the scope stays untouched
+  // because the refusal happens inside the pre-commit gate.
+  const ambiguous = materializedPackage(temp(), {
+    templates: { a: { path: "config-templates/default/oas-config.yaml" }, b: { path: "config-templates/default/oas-config.yaml" } },
+  });
+  const scope2 = temp();
+  const amb = cli(["init", "--package", ambiguous, "--dir", scope2, "--json"]);
+  assert.equal(amb.status, 1);
+  assert.equal(JSON.parse(amb.stdout).error.code, "E_TEMPLATE_AMBIGUOUS");
+  assert.deepEqual(readdirSync(scope2), [], "an ambiguous refusal must not create a lock, a store, or an anchor");
+
+  // A named template that does not exist, and a package with no templates.
+  const scope3 = temp();
+  const missing = cli(["init", "--package", pkg, "--config", "nope", "--dir", scope3, "--json"]);
+  assert.equal(JSON.parse(missing.stdout).error.code, "E_TEMPLATE_NOT_FOUND");
+  assert.deepEqual(readdirSync(scope3), []);
+
+  const noTemplates = materializedPackage(temp(), { templates: {} });
+  const scope4 = temp();
+  const none = cli(["init", "--package", noTemplates, "--dir", scope4, "--json"]);
+  assert.equal(JSON.parse(none.stdout).error.code, "E_NO_TEMPLATES");
+  assert.deepEqual(readdirSync(scope4), []);
+
+  for (const d of [pkg, scope, ambiguous, scope2, scope3, noTemplates, scope4]) rmSync(d, { recursive: true, force: true });
+});
+
+test("adoption failure AFTER the engine commits rolls the whole run back: pre-existing same-name capability, lock, ignore and base return", () => {
+  const scope = temp();
+  execFileSync("git", ["init", "-q", scope]); // Git-backed, so the ignore file is part of the transaction
+  const pkg = materializedPackage(temp(), { version: "1.0.0", body: "ORIGINAL BYTES" });
+
+  // Pre-existing state: the capability is already installed (via install, which
+  // writes no config), so the later init --package touches the SAME capability.
+  const seeded = cli(["install", pkg, "--dir", scope]);
+  assert.equal(seeded.status, 0, seeded.stderr);
+  const capDir = join(scope, ".agents/capabilities/installed/example.review");
+  const skill = join(capDir, "skills/review/SKILL.md");
+
+  // Drift the installed artifact. Re-acquiring the same locked package then
+  // REPROJECTS it, which is what makes the engine actually commit a replacement
+  // of a pre-existing same-name capability before our adoption write runs.
+  // Without this the run would be refused at integrity-drift and never reach
+  // the post-commit path this test exists to cover.
+  writeFileSync(skill, "# review\nDRIFTED ON DISK\n");
+  const before = {
+    skill: readFileSync(skill),
+    provenance: readFileSync(join(capDir, ".oas-installation.json")),
+    lock: readFileSync(join(scope, "oas-lock.json")),
+    ignore: readFileSync(join(scope, ".agents/capabilities/.gitignore")),
+  };
+
+  // Injected post-engine failure: the adopted-base directory path is occupied
+  // by a FILE, so the adoption write fails only after the engine committed.
+  write(join(scope, ".agents/config-templates"), "not a directory\n");
+
+  const failed = cli(["init", "--package", pkg, "--dir", scope, "--json"]);
+  assert.equal(failed.status, 1, "the run must fail");
+  const err = JSON.parse(failed.stdout).error;
+  assert.equal(err.code, "E_ADOPT_FAILED", "a CLI-owned write failure needs a stable code, not a raw errno");
+  assert.match(err.message, /after the package was installed/);
+
+  // Every pre-command byte is back — including the drifted artifact, because
+  // rollback restores the state the command STARTED from, not an idealised one.
+  assert.deepEqual(readFileSync(skill), before.skill, "the pre-existing same-name capability artifact must return byte-identically");
+  assert.deepEqual(readFileSync(join(capDir, ".oas-installation.json")), before.provenance, "provenance must return byte-identically");
+  assert.deepEqual(readFileSync(join(scope, "oas-lock.json")), before.lock, "the pre-command lock must return byte-identically");
+  assert.deepEqual(readFileSync(join(scope, ".agents/capabilities/.gitignore")), before.ignore, "the ignore bytes must return");
+  assert.equal(existsSync(join(scope, "oas-config.yaml")), false, "no config may survive a failed adoption");
+  assert.equal(existsSync(join(scope, ".agents/config-templates/adopted")), false, "no adopted base may survive a failed adoption");
+
+  for (const d of [scope, pkg]) rmSync(d, { recursive: true, force: true });
+});
+
 // ---------- run-level rollback journal (CLI-private) ----------
 //
 // The run-level guarantee — a later failure rolls back only THIS run's changes
