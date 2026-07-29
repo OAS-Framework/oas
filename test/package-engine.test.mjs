@@ -16,7 +16,7 @@ import {
   capabilityArtifactIntegrity, capabilityManifest, capabilityManifests, capabilityTrust,
   copyTreeSafe, ensureInstalledGitignore, installedCapabilityDir, listInstalledPackages,
   loadPackageManifestAt, materializeCapabilityDeps, migrateLegacyLock, normalizePackagePath,
-  packageIntegrity, parseLockFileStrict, parsePackageSource, platformVariantLockPackages,
+  isCanonicalTemplatePath, packageIntegrity, parseLockFileStrict, parsePackageSource, platformVariantLockPackages,
   readLockedConfigTemplates, readPackageLocks, removePackage, resolveOasConfig, restorePackages,
   updatePackage, validateCapabilityLockEntry, validateLockEntry, writeCapabilityLock,
   writeCapabilityLockEntry, writePackageLock,
@@ -167,8 +167,8 @@ test('legacy "." capability roots are discriminated by configTemplates, NEVER by
   // Both spellings at once is invalid.
   const both = join(t, "both");
   write(join(both, "capabilities/a/oas.json"), JSON.stringify({ capability: "x.b", version: "1.0.0", description: "d" }));
-  write(join(both, "c/oas-config.yaml"), "name: x\n");
-  write(join(both, "oas-package.json"), JSON.stringify({ package: "x.both", version: "1.0.0", description: "d", compatibility: { oas: ">=0.1.0" }, capabilities: ["capabilities/a"], configs: { d: { path: "c/oas-config.yaml" } }, configTemplates: { d: { path: "c/oas-config.yaml" } } }));
+  write(join(both, "config-templates/oas-config.yaml"), "name: x\n");
+  write(join(both, "oas-package.json"), JSON.stringify({ package: "x.both", version: "1.0.0", description: "d", compatibility: { oas: ">=0.1.0" }, capabilities: ["capabilities/a"], configs: { d: { path: "config-templates/oas-config.yaml" } }, configTemplates: { d: { path: "config-templates/oas-config.yaml" } } }));
   throwsCode(() => loadPackageManifestAt(both), "invalid-package-manifest", "both spellings");
 });
 
@@ -203,8 +203,8 @@ test("loadPackageManifestAt: identity, unknown keys, missing paths, duplicate ca
   // At most one default template.
   const multi = join(t, "multi");
   write(join(multi, "capabilities/a/oas.json"), JSON.stringify({ capability: "x.a", version: "1.0.0", description: "d" }));
-  write(join(multi, "c/a.yaml"), "a: 1\n"); write(join(multi, "c/b.yaml"), "b: 1\n");
-  write(join(multi, "oas-package.json"), JSON.stringify({ package: "x.multi", version: "1.0.0", description: "d", compatibility: { oas: ">=0.1.0" }, capabilities: ["capabilities/a"], configTemplates: { a: { path: "c/a.yaml", default: true }, b: { path: "c/b.yaml", default: true } } }));
+  write(join(multi, "config-templates/a.yaml"), "a: 1\n"); write(join(multi, "config-templates/b.yaml"), "b: 1\n");
+  write(join(multi, "oas-package.json"), JSON.stringify({ package: "x.multi", version: "1.0.0", description: "d", compatibility: { oas: ">=0.1.0" }, capabilities: ["capabilities/a"], configTemplates: { a: { path: "config-templates/a.yaml", default: true }, b: { path: "config-templates/b.yaml", default: true } } }));
   throwsCode(() => loadPackageManifestAt(multi), "invalid-package-manifest", "two defaults");
 });
 
@@ -532,6 +532,229 @@ test("acquirePackage: a locked source never advances on acquire — integrity an
   write(join(src, "capabilities/a/extra.md"), "drifted\n");
   throwsCode(() => acquirePackage(s, src), "integrity-drift", "changed source on re-acquire");
   assert.equal(readFileSync(join(s, OAS_LOCK_FILE), "utf8"), before, "lock unchanged");
+});
+
+test("an injected failure between the two renames restores the PRE-EXISTING artifact byte for byte", () => {
+  const t = temp();
+  const s = scope(t);
+  // A scope that already has x.a materialized, with recognisable bytes.
+  const v1 = pkgSource(join(t, "v1"), { package: "x.p" }, { "capabilities/a": { capability: "x.a" } });
+  write(join(v1, "capabilities/a/marker.txt"), "ORIGINAL\n");
+  acquirePackage(s, v1);
+  const dir = artifact(s, "x.a");
+  const beforeTree = treeFingerprint(dir);
+  const beforeLock = readFileSync(join(s, OAS_LOCK_FILE), "utf8");
+
+  // Re-acquire a DIFFERENT payload and fail INSIDE the swap boundary: the
+  // pre-commit gate makes the capability store read-only, so the very first
+  // rename of the swap loop throws with the transaction already under way.
+  const v2 = pkgSource(join(t, "v2"), { package: "x.p" }, { "capabilities/a": { capability: "x.a" } });
+  write(join(v2, "capabilities/a/marker.txt"), "REPLACEMENT\n");
+  const store = join(s, ".agents", "capabilities", "installed");
+  let failed;
+  try {
+    acquirePackage(s, v2, { replace: true, assertCommittable: () => { chmodSync(store, 0o555); } });
+  } catch (e) { failed = e; } finally { chmodSync(store, 0o755); }
+  assert.ok(failed, "the injected failure did not fire");
+
+  assert.deepEqual(treeFingerprint(dir), beforeTree, "the pre-existing artifact was not restored byte for byte");
+  assert.equal(readFileSync(join(dir, "marker.txt"), "utf8"), "ORIGINAL\n");
+  assert.equal(readFileSync(join(s, OAS_LOCK_FILE), "utf8"), beforeLock, "the lock changed");
+});
+
+test("a dropped export retires INSIDE the update transaction — a failure keeps artifact and lock together", () => {
+  const t = temp();
+  const s = scope(t);
+  const src = join(t, "src");
+  pkgSource(src, { package: "x.p" }, { "capabilities/a": { capability: "x.a" }, "capabilities/b": { capability: "x.b" } });
+  acquirePackage(s, src);
+  assert.ok(existsSync(artifact(s, "x.b")));
+  const beforeLock = readFileSync(join(s, OAS_LOCK_FILE), "utf8");
+  const beforeB = treeFingerprint(artifact(s, "x.b"));
+
+  // The package stops exporting x.b.
+  write(join(src, "oas-package.json"), JSON.stringify({
+    package: "x.p", version: "2.0.0", description: "p", compatibility: { oas: ">=0.1.0" }, capabilities: ["capabilities/a"],
+  }, null, 2));
+  rmSync(join(src, "capabilities/b"), { recursive: true, force: true });
+
+  // (a) a failure at the commit boundary leaves BOTH the lock row and the
+  // artifact of the dropped export exactly as they were.
+  assert.throws(() => acquirePackage(s, src, {
+    replace: true,
+    assertCommittable: () => { const e = new Error("injected"); e.code = "injected"; throw e; },
+  }));
+  assert.equal(readFileSync(join(s, OAS_LOCK_FILE), "utf8"), beforeLock, "the lock advanced despite the failure");
+  assert.deepEqual(treeFingerprint(artifact(s, "x.b")), beforeB, "the dropped export's artifact was lost on a FAILED update");
+
+  // (b) on success the row and the artifact go together.
+  const r = updatePackage(s, "x.p");
+  assert.deepEqual(r.removedCapabilities, ["x.b"]);
+  assert.deepEqual(r.retiredArtifacts, ["x.b"]);
+  assert.equal(existsSync(artifact(s, "x.b")), false, "a dropped export's artifact survived the update");
+  assert.equal(Object.hasOwn(lockOf(s).capabilities, "x.b"), false, "a dropped export's lock row survived");
+  assert.ok(existsSync(artifact(s, "x.a")), "the surviving export was retired too");
+  assert.ok(Object.hasOwn(lockOf(s).capabilities, "x.a"));
+});
+
+test("staged bytes are ignored BEFORE they exist — git never sees the staging tree", () => {
+  const t = temp();
+  const s = scope(t);
+  gitify(s);
+  const src = pkgSource(join(t, "src"), { package: "x.p" }, { "capabilities/a": { capability: "x.a" } });
+  // -uall matters: plain porcelain COLLAPSES an untracked directory to
+  // ".agents/", which would hide every staged path and make this test pass for
+  // the wrong reason.
+  const porcelain = () => execFileSync("git", ["-C", s, "status", "--porcelain", "-uall"], { encoding: "utf8" });
+
+  // The pre-commit gate runs with staging fully populated — fetched, projected
+  // and validated. Every one of those bytes lives under installed/, inside the
+  // work tree. If the ignore only lands at commit time, git sees them here.
+  let duringGate;
+  acquirePackage(s, src, { assertCommittable: () => { duringGate = porcelain(); } });
+  assert.ok(duringGate !== undefined, "the gate never ran");
+  assert.doesNotMatch(duringGate, /\.staging/, `staging was visible to git:\n${duringGate}`);
+  assert.doesNotMatch(duringGate, /capabilities\/installed\//, `materialized artifacts were visible to git:\n${duringGate}`);
+  // The ignore itself is the only thing that shows up, and it is meant to be
+  // committed.
+  // The ignore file itself is the only generated thing git may see: it is meant
+  // to be committed.
+  const after = porcelain();
+  assert.match(after, /\.agents\/capabilities\/\.gitignore/);
+  assert.doesNotMatch(after, /capabilities\/installed\//, `materialized artifacts are committable:\n${after}`);
+});
+
+test("a refused acquisition leaves no ignore file and no anchor it created", () => {
+  const t = temp();
+  const s = scope(t);
+  gitify(s);
+  const before = treeFingerprint(s);
+  assert.equal(existsSync(join(s, ".agents")), false, "the fixture must start with no store");
+
+  const src = pkgSource(join(t, "src"), { package: "x.p" }, { "capabilities/a": { capability: "x.a" } });
+  throwsCode(() => acquirePackage(s, src, {
+    assertCommittable: () => { const e = new Error("refused"); e.code = "refused"; throw e; },
+  }), "refused", "refused at the gate");
+
+  // The ignore was written before staging opened, so it — and the anchors that
+  // writing it created — must come back out.
+  assert.deepEqual(treeFingerprint(s), before, "a refused acquisition left state behind");
+  assert.equal(existsSync(join(s, ".agents")), false, "an anchor created by the ignore preflight survived");
+  assert.doesNotMatch(execFileSync("git", ["-C", s, "status", "--porcelain", "-uall"], { encoding: "utf8" }), /\.agents/);
+});
+
+test("a scope that ALREADY ignores installed/ keeps its exact bytes through a refusal", () => {
+  const t = temp();
+  const s = scope(t);
+  gitify(s);
+  // A hand-written ignore with its own unrelated content and no trailing rule
+  // ordering OAS would choose.
+  const file = join(s, ".agents", "capabilities", ".gitignore");
+  const original = "# ours\nscratch/\ninstalled/\n";
+  write(file, original);
+  const src = pkgSource(join(t, "src"), { package: "x.p" }, { "capabilities/a": { capability: "x.a" } });
+
+  throwsCode(() => acquirePackage(s, src, {
+    assertCommittable: () => { const e = new Error("refused"); e.code = "refused"; throw e; },
+  }), "refused", "refused at the gate");
+  assert.equal(readFileSync(file, "utf8"), original, "an existing ignore was rewritten");
+
+  // And a SUCCESSFUL run leaves it alone too — the rule is already there.
+  acquirePackage(s, src);
+  assert.equal(readFileSync(file, "utf8"), original, "a successful run rewrote an ignore that already covered installed/");
+});
+
+test("the CANONICAL template location is enforced, and the deprecated spelling stays exempt", () => {
+  const t = temp();
+  const mk = (name, templates, key = "configTemplates") => {
+    const d = join(t, name);
+    pkgSource(d, { package: `x.${name}` }, { "capabilities/a": { capability: `x.${name}cap` } });
+    for (const tpl of Object.values(templates)) write(join(d, tpl.path), "name: x\n");
+    const m = JSON.parse(readFileSync(join(d, "oas-package.json"), "utf8"));
+    delete m.configTemplates;
+    m[key] = templates;
+    write(join(d, "oas-package.json"), JSON.stringify(m, null, 2));
+    return d;
+  };
+
+  // Canonical: accepted.
+  const ok = mk("okpkg", { default: { path: "config-templates/default/oas-config.yaml", default: true } });
+  assert.equal(loadPackageManifestAt(ok)._configTemplates.default.path, "config-templates/default/oas-config.yaml");
+
+  // Outside the canonical prefix, and near-misses that only look like it.
+  for (const path of [
+    "c/d.yaml",
+    "oas-config.yaml",
+    "capabilities/a/oas-config.yaml",   // a file a capability root already owns
+    "config-templates",                 // the root itself, no file
+    "config-templates/",                // empty remainder
+    "config-templatesx/d.yaml",         // prefix look-alike
+    "./config-templates/d.yaml",
+    "config-templates/./d.yaml",
+    "config-templates/../d.yaml",
+  ]) {
+    const d = join(t, `bad-${path.replace(/\W+/g, "_")}`);
+    pkgSource(d, { package: "x.bad" }, { "capabilities/a": { capability: "x.badcap" } });
+    write(join(d, "config-templates/default/oas-config.yaml"), "name: x\n");
+    const m = JSON.parse(readFileSync(join(d, "oas-package.json"), "utf8"));
+    m.configTemplates = { default: { path } };
+    write(join(d, "oas-package.json"), JSON.stringify(m, null, 2));
+    throwsCode(() => loadPackageManifestAt(d), "invalid-package-manifest", `non-canonical template path ${JSON.stringify(path)}`);
+  }
+
+  // The DEPRECATED spelling keeps read compatibility: published 0.19 tags are
+  // immutable and cannot be re-cut to satisfy a rule added after they shipped.
+  const legacy = mk("legacypkg", { default: { path: "configs/default/oas-config.yaml", default: true } }, "configs");
+  const lm = loadPackageManifestAt(legacy);
+  assert.equal(lm._configTemplates.default.path, "configs/default/oas-config.yaml");
+  assert.equal(lm._legacySpelling, true);
+});
+
+test("schema and runtime agree on the canonical template path — no drift between the two rules", () => {
+  const schema = JSON.parse(readFileSync(resolve(new URL("../docs/oas-package.schema.json", import.meta.url).pathname), "utf8"));
+  const pattern = new RegExp(schema.properties.configTemplates.additionalProperties.properties.path.pattern);
+  // Both rules are hand-written in different languages; the only thing keeping
+  // them honest is checking them against the same inputs.
+  const cases = [
+    ["config-templates/default/oas-config.yaml", true],
+    ["config-templates/a.yaml", true],
+    ["config-templates/nested/deep/a.yaml", true],
+    ["c/d.yaml", false],
+    ["oas-config.yaml", false],
+    ["config-templates", false],
+    ["config-templates/", false],
+    ["config-templatesx/d.yaml", false],
+    ["./config-templates/d.yaml", false],
+    ["config-templates/../d.yaml", false],
+    ["config-templates/./d.yaml", false],
+    ["config-templates/a\\b.yaml", false],
+    ["/config-templates/d.yaml", false],
+  ];
+  for (const [path, want] of cases) {
+    assert.equal(isCanonicalTemplatePath(path), want, `runtime disagrees on ${JSON.stringify(path)}`);
+    assert.equal(pattern.test(path), want, `schema disagrees on ${JSON.stringify(path)}`);
+  }
+});
+
+test("installedCapabilityDir is a containment PROOF, not a join — the last line of defence holds on its own", () => {
+  const t = temp();
+  const s = scope(t);
+  const root = join(s, ".agents", "capabilities", "installed");
+  // The reader and manifest validation already refuse these upstream, so this
+  // guard is unreachable through the CLI by design. It exists for direct kernel
+  // callers — including future ones — and is pinned where it IS reachable.
+  for (const id of ["..", ".", "../evil", "a/../../evil", "sub/child", "sub\\child", "/etc/passwd", "~/evil", "%2e%2e%2fevil", "x@1.0.0", "__proto__", "UPPER.case", "-lead", "", null, undefined, 7]) {
+    let e;
+    try { installedCapabilityDir(s, id); } catch (err) { e = err; }
+    assert.ok(e, `installedCapabilityDir accepted ${JSON.stringify(id)}`);
+    assert.equal(e.code, "path-escape", `${JSON.stringify(id)}: ${e.message}`);
+    assert.match(e.message, /capability artifact path refused/);
+  }
+  // Valid ids resolve to an immediate child, and nothing else.
+  for (const id of ["oas.okf", "x.constructor", "a", "a-b_c.d"]) {
+    assert.equal(installedCapabilityDir(s, id), join(root, id));
+    assert.equal(dirname(resolve(installedCapabilityDir(s, id))), resolve(root));
+  }
 });
 
 test("acquirePackage: a path mismatch names the route that can actually resolve it — update for catalog, remove+reinstall for git", () => {
@@ -1000,9 +1223,9 @@ test("removePackage: refuses while a dependent package or a config reference exi
 
 test("readLockedConfigTemplates: exact locked bytes, no persisted package root, typed unknown template", () => {
   const t = temp();
-  const src = pkgSource(join(t, "src"), { package: "x.p", configTemplates: { default: { path: "c/default.yaml", default: true, description: "recommended" }, minimal: { path: "c/minimal.yaml" } } }, { "capabilities/a": { capability: "x.a" } });
-  write(join(src, "c/default.yaml"), "name: full\n");
-  write(join(src, "c/minimal.yaml"), "name: minimal\n");
+  const src = pkgSource(join(t, "src"), { package: "x.p", configTemplates: { default: { path: "config-templates/default.yaml", default: true, description: "recommended" }, minimal: { path: "config-templates/minimal.yaml" } } }, { "capabilities/a": { capability: "x.a" } });
+  write(join(src, "config-templates/default.yaml"), "name: full\n");
+  write(join(src, "config-templates/minimal.yaml"), "name: minimal\n");
   const s = scope(t);
   const acq = acquirePackage(s, src);
 
@@ -1028,9 +1251,9 @@ test("readLockedConfigTemplates: exact locked bytes, no persisted package root, 
 test("both template readers produce ONE descriptor shape — legacySpelling sits on every item, canonical and legacy alike", () => {
   const t = temp();
   // Canonical spelling.
-  const modern = pkgSource(join(t, "modern"), { package: "x.modern", configTemplates: { default: { path: "c/d.yaml", default: true, description: "recommended" }, minimal: { path: "c/m.yaml" } } }, { "capabilities/a": { capability: "x.a" } });
-  write(join(modern, "c/d.yaml"), "name: full\n");
-  write(join(modern, "c/m.yaml"), "name: minimal\n");
+  const modern = pkgSource(join(t, "modern"), { package: "x.modern", configTemplates: { default: { path: "config-templates/d.yaml", default: true, description: "recommended" }, minimal: { path: "config-templates/m.yaml" } } }, { "capabilities/a": { capability: "x.a" } });
+  write(join(modern, "config-templates/d.yaml"), "name: full\n");
+  write(join(modern, "config-templates/m.yaml"), "name: minimal\n");
   const s = scope(t);
   const acq = acquirePackage(s, modern);
   const locked = readLockedConfigTemplates(s, "x.modern");
@@ -1066,12 +1289,12 @@ test("both template readers produce ONE descriptor shape — legacySpelling sits
 
 test("contentIntegrity digests the EXACT file bytes, and undecodable template bytes fail closed", () => {
   const t = temp();
-  const src = pkgSource(join(t, "src"), { package: "x.p", configTemplates: { default: { path: "c/d.yaml", default: true } } }, { "capabilities/a": { capability: "x.a" } });
+  const src = pkgSource(join(t, "src"), { package: "x.p", configTemplates: { default: { path: "config-templates/d.yaml", default: true } } }, { "capabilities/a": { capability: "x.a" } });
   // Bytes chosen so a lossy read would differ from the file: a lone CR, a BOM,
   // a NUL and a multi-byte character all survive an exact-byte digest.
   const bytes = Buffer.from([0xef, 0xbb, 0xbf, 0x6e, 0x61, 0x6d, 0x65, 0x3a, 0x20, 0xc3, 0xa9, 0x00, 0x0d, 0x0a]);
-  write(join(src, "c/d.yaml"), "");
-  writeFileSync(join(src, "c/d.yaml"), bytes);
+  write(join(src, "config-templates/d.yaml"), "");
+  writeFileSync(join(src, "config-templates/d.yaml"), bytes);
   const expected = `sha256-${createHash("sha256").update(bytes).digest("hex")}`;
   const s = scope(t);
   const acq = acquirePackage(s, src);
@@ -1083,9 +1306,9 @@ test("contentIntegrity digests the EXACT file bytes, and undecodable template by
 
   // Invalid UTF-8 is a malformed package, never silently repaired to U+FFFD —
   // a replacement-character digest is one nothing can reproduce from the file.
-  const bad = pkgSource(join(t, "bad"), { package: "x.bad", configTemplates: { default: { path: "c/d.yaml" } } }, { "capabilities/a": { capability: "x.badcap" } });
-  write(join(bad, "c/d.yaml"), "");
-  writeFileSync(join(bad, "c/d.yaml"), Buffer.from([0x6e, 0x3a, 0x20, 0xff, 0xfe, 0x0a]));
+  const bad = pkgSource(join(t, "bad"), { package: "x.bad", configTemplates: { default: { path: "config-templates/d.yaml" } } }, { "capabilities/a": { capability: "x.badcap" } });
+  write(join(bad, "config-templates/d.yaml"), "");
+  writeFileSync(join(bad, "config-templates/d.yaml"), Buffer.from([0x6e, 0x3a, 0x20, 0xff, 0xfe, 0x0a]));
   const s2 = scope(t, "scope2");
   const e = throwsCode(() => acquirePackage(s2, bad), "invalid-package-manifest", "invalid UTF-8 template");
   assert.match(e.message, /UTF-8/);
@@ -1161,11 +1384,11 @@ test("a failed transaction leaves store, lock and ignore bytes byte-identical", 
 test("assertCommittable sees the COMPLETE staged plan — template bytes included — and a throw mutates nothing", () => {
   const t = temp();
   const dep = pkgSource(join(t, "dep"), { package: "x.dep" }, { "capabilities/d": { capability: "x.d" } });
-  const src = pkgSource(join(t, "src"), { package: "x.p", dependencies: [dep], configTemplates: { default: { path: "c/d.yaml", default: true, description: "recommended" } } }, {
+  const src = pkgSource(join(t, "src"), { package: "x.p", dependencies: [dep], configTemplates: { default: { path: "config-templates/d.yaml", default: true, description: "recommended" } } }, {
     "capabilities/a": { capability: "x.a", version: "2.1.0", commands: { go: "bin/go.mjs run" } },
   });
   write(join(src, "capabilities/a/bin/go.mjs"), "//\n");
-  write(join(src, "c/d.yaml"), "name: adopted\n");
+  write(join(src, "config-templates/d.yaml"), "name: adopted\n");
   const s = scope(t);
   gitify(s);
 
@@ -1281,14 +1504,14 @@ test("anchor pruning removes only what the operation created — pre-existing em
 
 test("assertCommittable exposes the declared fundamental layer, so a template binding the root package's OWN capability validates pre-commit", () => {
   const t = temp();
-  const src = pkgSource(join(t, "src"), { package: "x.p", configTemplates: { default: { path: "c/d.yaml", default: true } } }, {
+  const src = pkgSource(join(t, "src"), { package: "x.p", configTemplates: { default: { path: "config-templates/d.yaml", default: true } } }, {
     "capabilities/k": { capability: "x.knowledge", layer: "knowledge" },
     "capabilities/plain": { capability: "x.plain" },
   });
   // The template binds a fundamental slot to a capability THIS package supplies.
   // Pre-commit it is not materialized, not locked and not discoverable, so the
   // preview is the only place the binding can be checked.
-  write(join(src, "c/d.yaml"), "name: demo\ncapabilities:\n  layers:\n    knowledge:\n      capability: x.knowledge\n");
+  write(join(src, "config-templates/d.yaml"), "name: demo\ncapabilities:\n  layers:\n    knowledge:\n      capability: x.knowledge\n");
   const s = scope(t);
   gitify(s);
   const before = treeFingerprint(s);
@@ -1312,10 +1535,10 @@ test("assertCommittable exposes the declared fundamental layer, so a template bi
   assert.ok(existsSync(artifact(s, "x.knowledge")), "a correct binding commits");
 
   // A WRONG binding is caught by the same gate, and costs nothing to refuse.
-  const bad = pkgSource(join(t, "bad"), { package: "x.bad", configTemplates: { default: { path: "c/d.yaml", default: true } } }, {
+  const bad = pkgSource(join(t, "bad"), { package: "x.bad", configTemplates: { default: { path: "config-templates/d.yaml", default: true } } }, {
     "capabilities/k": { capability: "x.mis", layer: "tasks" },
   });
-  write(join(bad, "c/d.yaml"), "name: demo\ncapabilities:\n  layers:\n    knowledge:\n      capability: x.mis\n");
+  write(join(bad, "config-templates/d.yaml"), "name: demo\ncapabilities:\n  layers:\n    knowledge:\n      capability: x.mis\n");
   const s2 = scope(t, "scope2");
   gitify(s2);
   const before2 = treeFingerprint(s2);
@@ -1324,8 +1547,8 @@ test("assertCommittable exposes the declared fundamental layer, so a template bi
 
   // ...and a binding to a capability nothing in the closure supplies.
   const s3 = scope(t, "scope3");
-  const orphan = pkgSource(join(t, "orphan"), { package: "x.orphan", configTemplates: { default: { path: "c/d.yaml" } } }, { "capabilities/k": { capability: "x.here", layer: "knowledge" } });
-  write(join(orphan, "c/d.yaml"), "name: demo\ncapabilities:\n  layers:\n    knowledge:\n      capability: x.elsewhere\n");
+  const orphan = pkgSource(join(t, "orphan"), { package: "x.orphan", configTemplates: { default: { path: "config-templates/d.yaml" } } }, { "capabilities/k": { capability: "x.here", layer: "knowledge" } });
+  write(join(orphan, "config-templates/d.yaml"), "name: demo\ncapabilities:\n  layers:\n    knowledge:\n      capability: x.elsewhere\n");
   assert.throws(() => acquirePackage(s3, orphan, { assertCommittable: validate }), /binds knowledge to unknown capability x\.elsewhere/);
   assert.equal(existsSync(join(s3, ".agents")), false);
   // The successful scope is unaffected by the two refusals beside it.

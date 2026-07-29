@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, symlinkSync, writeFileSync, chmodSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, renameSync, rmSync, symlinkSync, writeFileSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { resolveOasConfig, capabilityIntegrity, capabilityArtifactIntegrity, acquirePackage, loadPackageManifestAt, parsePackageSource, readPackageLocks } from "../lib/core.mjs";
@@ -2950,4 +2950,218 @@ test("oas help never depends on deployment state: a lock the kernel refuses stil
     assert.match(r.stdout, /oas init/);
   }
   rmSync(scope, { recursive: true, force: true });
+});
+
+// ---------- B2: adopted paths and backups never follow a symlink ----------
+
+/** An adopted scope: package installed, template adopted, one local edit so a
+ * later sync has real work to do. */
+function adoptedScope(base, body = TEMPLATE_V1) {
+  // The scope gets its OWN temp root: a scope nested inside the package's base
+  // would be copied into itself during acquisition.
+  const pkg = materializedPackage(base);
+  write(join(pkg, "config-templates/default/oas-config.yaml"), body);
+  const scope = temp();
+  const run = cli(["init", "--package", pkg, "--dir", scope]);
+  assert.equal(run.status, 0, run.stderr);
+  return { pkg, scope, file: join(scope, "oas-config.yaml") };
+}
+
+test("a symlink anywhere on the adopted path refuses the write — contained or escaping, bytes outside untouched", () => {
+  const ADOPTED = join(".agents", "config-templates", "adopted");
+  // Every component this code is responsible for, at both link destinations.
+  // A CONTAINED link is refused too: staying inside the scope today does not
+  // make it a redirection OAS sanctioned.
+  const PKG = "example.engineering"; // the fixture package's real identity
+  // Which guard fires depends on where the link sits, and both are fail-closed:
+  //   - at the ADOPTED ROOT the scan follows the link and finds the base, so the
+  //     read succeeds and the WRITE-time parent check is what refuses;
+  //   - at the package or template level the scan sees a symlink DIRENT and
+  //     skips it, so the run stops earlier with "nothing adopted".
+  // The diagnostic differs; the invariant does not — nothing is ever written
+  // through the link.
+  const components = [
+    [ADOPTED, "E_ADOPTED_PATH_UNSAFE"],
+    [join(ADOPTED, PKG), "E_NO_ADOPTED_BASE"],
+    [join(ADOPTED, PKG, "default"), "E_NO_ADOPTED_BASE"],
+  ];
+  for (const [component, expected] of components) {
+    for (const escaping of [true, false]) {
+      const base = temp();
+      const { pkg, scope, file } = adoptedScope(base);
+      republish(pkg, `${TEMPLATE_V1}\n# upstream addition\n`, "1.1.0");
+      // `update`, not `install`: a locked source never advances on acquire.
+      const up = cli(["update", "example.engineering", "--dir", scope]);
+      assert.equal(up.status, 0, up.stdout + up.stderr);
+
+      // MOVE the real subtree behind a link rather than replacing it with an
+      // empty one: the read must still succeed, so it is the WRITE that has to
+      // refuse. An empty decoy would merely reproduce "no adopted base".
+      // `outside` gets its own root — anything under the package base would
+      // mutate the payload and drift its integrity.
+      const outside = temp();
+      const at = join(scope, component);
+      const target = escaping ? join(outside, "elsewhere") : join(scope, "inside");
+      mkdirSync(dirname(target), { recursive: true });
+      renameSync(at, target);
+      const decoy = join(target, "canary.txt");
+      writeFileSync(decoy, "untouched\n");
+      symlinkSync(target, at);
+
+      const before = readFileSync(file, "utf8");
+      const r = cli(["config", "sync", "--dir", scope, "--json"]);
+      const label = `${component} (${escaping ? "escaping" : "contained"})`;
+      assert.notEqual(r.status, 0, `${label}: the write was allowed`);
+      const err = JSON.parse(r.stdout).error;
+      assert.equal(err.code, expected, `${label}: ${err.message}`);
+      if (expected === "E_ADOPTED_PATH_UNSAFE") assert.match(err.message, /passes through a symlink/);
+
+      // Nothing was written through the link, and the config is as it was.
+      assert.equal(readFileSync(decoy, "utf8"), "untouched\n", `${label}: wrote through the link`);
+      assert.equal(readFileSync(file, "utf8"), before, `${label}: the config changed`);
+      for (const d of [base, scope, outside]) rmSync(d, { recursive: true, force: true });
+    }
+  }
+});
+
+test("a pre-planted oas-config.yaml.bak symlink is REPLACED, never written through", () => {
+  const base = temp();
+  const { pkg, scope, file } = adoptedScope(base);
+  republish(pkg, `${TEMPLATE_V1}\n# upstream addition\n`, "1.1.0");
+  assert.equal(cli(["update", "example.engineering", "--dir", scope]).status, 0);
+
+  // The backup path is FIXED and predictable, which is exactly what makes it
+  // worth planting: copyFileSync would open it for write and follow it.
+  const outside = temp(); // NOT under the package base: writing there drifts its payload
+  const victim = join(outside, "victim.txt");
+  writeFileSync(victim, "precious\n");
+  const backup = `${file}.bak`;
+  symlinkSync(victim, backup);
+
+  const r = cli(["config", "sync", "--dir", scope, "--json"]);
+  assert.equal(r.status, 0, r.stdout);
+  assert.equal(readFileSync(victim, "utf8"), "precious\n", "the backup was written THROUGH the symlink");
+  assert.equal(lstatSync(backup).isSymbolicLink(), false, "the link survived instead of being replaced");
+  assert.match(readFileSync(backup, "utf8"), /name: workspace/, "the replacement is the real previous config");
+  for (const d of [base, scope, outside]) rmSync(d, { recursive: true, force: true });
+});
+
+test("the recoverable backup is run state: a failed sync restores its prior absence", () => {
+  const base = temp();
+  const { pkg, scope, file } = adoptedScope(base);
+  republish(pkg, `${TEMPLATE_V1}\n# upstream addition\n`, "1.1.0");
+  assert.equal(cli(["update", "example.engineering", "--dir", scope]).status, 0);
+  const backup = `${file}.bak`;
+  assert.equal(existsSync(backup), false, "the fixture must start with no backup");
+
+  // The failure has to land AFTER the backup and the config are written, or the
+  // rollback never gets a chance to prove anything. Write order is
+  // backup → config → adopted base, so a read-only template DIRECTORY leaves
+  // the base readable (the plan still resolves) and stops the last write.
+  const templateDir = join(scope, ".agents", "config-templates", "adopted", "example.engineering", "default");
+  const before = readFileSync(file, "utf8");
+  const baseBefore = readFileSync(join(templateDir, "oas-config.yaml"), "utf8");
+  chmodSync(templateDir, 0o555);
+  try {
+    const r = cli(["config", "sync", "--dir", scope, "--json"]);
+    assert.notEqual(r.status, 0, r.stdout);
+    assert.equal(readFileSync(file, "utf8"), before, "the config was not rolled back");
+    assert.equal(readFileSync(join(templateDir, "oas-config.yaml"), "utf8"), baseBefore, "the adopted base changed");
+    // The backup is this run's state: rollback must restore its prior ABSENCE,
+    // not leave a file the operator never had.
+    assert.equal(existsSync(backup), false, "the failed run left its backup behind");
+  } finally { chmodSync(templateDir, 0o755); }
+  for (const d of [base, scope]) rmSync(d, { recursive: true, force: true });
+});
+
+// ---------- B3: a first adopt must not erase handcrafted config ----------
+
+const HANDCRAFTED = `# our workspace — hand written, never generated
+name: acme
+team:
+  name: platform
+
+capabilities:
+  additive:
+    acme.internal:
+      global: true
+`;
+
+test("first adopt over a handcrafted config REFUSES noninteractively and changes nothing", () => {
+  const base = temp();
+  const pkg = materializedPackage(base);
+  write(join(pkg, "config-templates/default/oas-config.yaml"), TEMPLATE_V1);
+  const scope = temp();
+  // A config nobody generated: written by hand, never adopted from anything.
+  const file = join(scope, "oas-config.yaml");
+  writeFileSync(file, HANDCRAFTED);
+  const inst = cli(["install", pkg, "--dir", scope]);
+  assert.equal(inst.status, 0, inst.stdout + inst.stderr);
+  const before = readFileSync(file, "utf8");
+
+  // There is NO common ancestor here. Treating the local file as the base would
+  // classify every one of its lines as upstream-only and replace the lot.
+  const r = cli(["config", "adopt", "example.engineering", "--dir", scope, "--json"]);
+  assert.notEqual(r.status, 0, `adopt replaced a handcrafted config:\n${r.stdout}`);
+  const err = JSON.parse(r.stdout).error;
+  assert.equal(err.code, "E_SYNC_AMBIGUOUS", err.message);
+  assert.match(err.message, /--accept/, "the refusal names the way to resolve it");
+  assert.equal(readFileSync(file, "utf8"), before, "the handcrafted config was modified");
+  assert.equal(existsSync(`${file}.bak`), false, "a refused adopt left a backup behind");
+
+  // The refusal IS the guided preview on this path: `oas config diff` needs an
+  // adopted base to compare against and has none yet, so the conflict list has
+  // to travel with the refusal or the operator is told "no" with no way in.
+  assert.match(err.message, /conflict\(s\) need an explicit choice \(/);
+  const named = /\(([^)]*)\) — pass --accept/.exec(err.message);
+  assert.ok(named && named[1].split(", ").filter(Boolean).length, `no conflict ids to act on: ${err.message}`);
+
+  // And the report-only command still refuses rather than inventing a base.
+  const diff = cli(["config", "diff", "--config", "default", "--dir", scope, "--json"]);
+  assert.notEqual(diff.status, 0);
+  assert.equal(JSON.parse(diff.stdout).error.code, "E_NO_ADOPTED_BASE");
+  assert.equal(readFileSync(file, "utf8"), before, "a report-only command wrote");
+  for (const d of [base, scope]) rmSync(d, { recursive: true, force: true });
+});
+
+test("first adopt lands once every conflict is decided, and --reset --yes replaces after a preview and a backup", () => {
+  const base = temp();
+  const pkg = materializedPackage(base);
+  write(join(pkg, "config-templates/default/oas-config.yaml"), TEMPLATE_V1);
+
+  // (a) explicit decisions: adopt applies exactly what was chosen.
+  const chosen = temp();
+  writeFileSync(join(chosen, "oas-config.yaml"), HANDCRAFTED);
+  assert.equal(cli(["install", pkg, "--dir", chosen]).status, 0);
+  // No adopted base yet, so the conflict ids come from the adopt refusal — the
+  // only place that knows them before a base exists.
+  const refusal = JSON.parse(cli(["config", "adopt", "example.engineering", "--dir", chosen, "--json"]).stdout).error;
+  assert.equal(refusal.code, "E_SYNC_AMBIGUOUS", refusal.message);
+  const conflicts = /\(([^)]*)\) — pass --accept/.exec(refusal.message)[1].split(", ").filter(Boolean);
+  assert.ok(conflicts.length, "the fixture must actually conflict");
+  const accepts = conflicts.flatMap((id) => ["--accept", `${id}=local`]);
+  const kept = cli(["config", "adopt", "example.engineering", ...accepts, "--dir", chosen, "--json"]);
+  assert.equal(kept.status, 0, kept.stdout);
+  assert.match(readFileSync(join(chosen, "oas-config.yaml"), "utf8"), /^name: acme$/m, "an explicit keep-local lost the local value");
+
+  // (b) taking the package side is equally available — it just has to be ASKED
+  // for, region by region, and it leaves the previous bytes recoverable.
+  // (`config sync --reset` is not the escape hatch here: like `diff`, it
+  // presupposes an adopted base, and this scope has never adopted anything.)
+  const taken = temp();
+  writeFileSync(join(taken, "oas-config.yaml"), HANDCRAFTED);
+  assert.equal(cli(["install", pkg, "--dir", taken]).status, 0);
+  const file = join(taken, "oas-config.yaml");
+  const noBase = cli(["config", "sync", "--reset", "--yes", "--dir", taken, "--json"]);
+  assert.notEqual(noBase.status, 0, "reset ran without an adopted base");
+  assert.equal(JSON.parse(noBase.stdout).error.code, "E_NO_ADOPTED_BASE");
+  assert.equal(readFileSync(file, "utf8"), HANDCRAFTED, "a refused reset still wrote");
+
+  const takeAll = conflicts.flatMap((id) => ["--accept", `${id}=package`]);
+  const replaced = cli(["config", "adopt", "example.engineering", ...takeAll, "--dir", taken, "--json"]);
+  assert.equal(replaced.status, 0, replaced.stdout);
+  const after = readFileSync(file, "utf8");
+  assert.match(after, /name: workspace/, "the package side was not applied where it was chosen");
+  assert.equal(readFileSync(`${file}.bak`, "utf8"), HANDCRAFTED, "the handcrafted config is not recoverable");
+  for (const d of [base, chosen, taken]) rmSync(d, { recursive: true, force: true });
 });

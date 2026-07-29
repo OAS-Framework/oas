@@ -11,6 +11,12 @@ read what the current task needs, not everything.
 # Sections
 
 ## Decisions
+* [decisions/capability-id-grammar-and-containment-proof.md](decisions/capability-id-grammar-and-containment-proof.md) - Revised-v2 capability ids get one strict directory-name grammar in the lock reader and package-manifest validation, with installedCapabilityDir retaining a redundant containment proof as defense in depth.
+* [decisions/provider-rows-resolve-at-their-own-lock-level.md](decisions/provider-rows-resolve-at-their-own-lock-level.md) - Merged lock maps resolve packages and capabilities independently, so provider package lookup for a capability row must use the row's own lock file instead of the closest package identity.
+* [decisions/ignore-must-precede-staging-not-the-commit.md](decisions/ignore-must-precede-staging-not-the-commit.md) - Staging lives under installed/, so fetched and materialized bytes must be ignored before the operation runs rather than only when the transaction commits.
+* [decisions/artifact-retirement-belongs-inside-the-commit.md](decisions/artifact-retirement-belongs-inside-the-commit.md) - updatePackage deleted dropped-export artifacts after the lock commit, leaving a lock/store disagreement window and rollback with no route back.
+* [decisions/no-adopted-base-means-empty-base-not-local.md](decisions/no-adopted-base-means-empty-base-not-local.md) - Using the local config as the three-way base makes handcrafted lines look upstream-only, so a first adopt must use an empty base and surface overlap as conflicts.
+* [decisions/adopted-writes-never-follow-a-symlink.md](decisions/adopted-writes-never-follow-a-symlink.md) - Every existing component from scope to adopted template dir is checked immediately before each write, fixed .bak paths are replaced instead of written through, and backups are journalled run state.
 * [decisions/package-runtime-boundary-structured-cli.md](decisions/package-runtime-boundary-structured-cli.md) - Official packages reach the kernel only through existing oas CLI commands (capability-defined agents via oas spawn, OAS_SETTINGS on dispatch, OAS_CLI_BIN execution), versioned by compatibility floor + pinned consumer fixture; one-for-one public wrappers were maintainer-rejected.
 
 * [decisions/spawn-lineage-explicit-only.md](decisions/spawn-lineage-explicit-only.md) - parentInstance now comes only from an explicit relation/--parent inside the target deployment or the attached-mode owner binding; env vars are never consulted, and cross-deployment spawns stay operator-origin.

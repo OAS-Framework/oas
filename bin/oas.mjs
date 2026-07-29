@@ -36,7 +36,7 @@ import {
 import {
   aggregateMissingRequirements, beginRunJournal, discoverMigrationScopes, discoverWorkspaceScopes,
   adoptedTemplateDir, applyConfigMerge, lockedPackageCapabilities, planConfigMerge, readAdoptedTemplate, requirementInstallPlan,
-  writeFileAtomic,
+  assertNoSymlinkedParents, copyFileAtomic, writeFileAtomic,
   runRequirementInstall, selectConfigTemplate, validateConfigTemplate, writeAdoptedTemplate,
 } from "../lib/packages.mjs";
 
@@ -175,6 +175,11 @@ function officialMigrationState(legacyLocks, { teamScope, ctx }) {
  * Order matters: a missing artifact cannot be hashed, drifted bytes make an
  * approval meaningless (so trust is not ALSO reported), and provenance is only
  * worth reading once the bytes are the locked ones. */
+/** The lock rows AT one level. Never the merged maps: those resolve each
+ * identity independently, so an outer scope's capability can be paired with a
+ * nearer scope's package of the same id — a provider that never exported it. */
+const levelRows = (locks, level) => locks.levels.find((l) => l.level === level) || { packages: Object.create(null), capabilities: Object.create(null) };
+
 function capabilityHealth(level, cap, capRow, pkgRow) {
   const dir = installedCapabilityDir(level, cap.id);
   if (!cap.installed) return { status: "missing", code: "missing-capability-artifact", dir, detail: `capability ${cap.id} is locked but not materialized — run \`oas install\` to re-materialize it` };
@@ -1119,7 +1124,9 @@ function trust() {
   // Package-backed approval path (per-capability, or explicit bulk on a package id).
   let pkgs, locks;
   try { pkgs = listInstalledPackages(dir); locks = readPackageLocks(dir); } catch (e) { cmdFail(e.code || "invalid-lock", e.message || e); return; }
-  const backing = all ? pkgs.find((p) => p.package === id) : pkgs.find((p) => p.capabilities.some((c) => c.id === id));
+  // findLast: the listing runs outermost → innermost, and an identity resolves
+  // to the CLOSEST scope that locks it — the same rule the merged lock maps use.
+  const backing = all ? pkgs.findLast((p) => p.package === id) : pkgs.findLast((p) => p.capabilities.some((c) => c.id === id));
   if (backing) {
     if (all) {
       // Contract-required pre-approval review of the FULL executable surface:
@@ -1136,9 +1143,10 @@ function trust() {
     // integrity, but integrity alone cannot see a `.oas-installation.json` that
     // claims a different origin than the lock — and approving a capability whose
     // own provenance is disputed is exactly the thing trust must not do.
+    const trustRows = levelRows(locks, backing.level);
     const disputed = backing.capabilities
       .filter((c) => all || c.id === id)
-      .map((c) => capabilityHealth(backing.level, c, locks.capabilities[c.id], locks.packages[backing.package]))
+      .map((c) => capabilityHealth(backing.level, c, trustRows.capabilities[c.id], trustRows.packages[backing.package]))
       .filter((h) => h.status !== "ok" && h.status !== "untrusted");
     if (disputed.length) { cmdFail(disputed[0].code || "invalid-lock", `refusing to trust: ${disputed.map((h) => h.detail).join("; ")}`); return; }
     let r;
@@ -1465,10 +1473,16 @@ function configCmd() {
   try { chosen = selectConfigTemplate(locked.templates, wanted, packageId); }
   catch (e) { bail(e.code || "E_TEMPLATE_AMBIGUOUS", e.message); }
 
-  // Switching base rebases the ONE local config against the new template; the
-  // base for comparison is then the currently adopted one when there is one, or
-  // the local file itself on first adoption (everything reads as a local edit).
-  const baseText = adopted ? adopted.baseText : localText;
+  // Switching base rebases the ONE local config against the new template.
+  //
+  // With no adopted base there is NO common ancestor, and pretending the local
+  // file is one is the dangerous answer: a three-way merge whose base equals
+  // local classifies every difference as upstream-only, so a first adopt would
+  // silently replace a handcrafted config wholesale — no conflicts, no consent,
+  // no preview of what was lost. An EMPTY base states the truth instead: every
+  // existing local byte is local work, and anything the template also wants to
+  // put there is a conflict the operator must resolve explicitly.
+  const baseText = adopted ? adopted.baseText : "";
   const plan = planConfigMerge(baseText, localText, chosen.content);
 
   const describe = (r) => ({
@@ -1527,7 +1541,11 @@ function configCmd() {
     }
     const journal = openJournal(dir, bail);
     try {
-      if (existsSync(file)) copyFileSync(file, backupFile);
+      // NEVER copyFileSync onto a fixed backup path: it opens the destination
+      // for write and therefore FOLLOWS it, so a pre-planted
+      // `oas-config.yaml.bak` symlink would redirect this copy onto whatever it
+      // points at. The atomic form replaces the entry itself.
+      if (existsSync(file)) copyFileAtomic(file, backupFile);
       writeFileAtomic(file, chosen.content);
       recordAdoption(dir, file, packageId, chosen, locked, adopted);
       journal.finalize();
@@ -1583,7 +1601,7 @@ function configCmd() {
   try {
     // Back up only when bytes actually change — a backup identical to the file
     // it shadows is noise the adopter has to reason about later.
-    if (changed) copyFileSync(file, backupFile);
+    if (changed) copyFileAtomic(file, backupFile);
     if (changed) writeFileAtomic(file, merged.text);
     recordAdoption(dir, file, packageId, chosen, locked, adopted);
     journal.finalize();
@@ -1671,8 +1689,9 @@ function listCmd() {
   // pins. Trust is per capability — there is no package-level approval to list.
   const capabilities = [];
   for (const p of pkgs) {
+    const rows = levelRows(locks, p.level);
     for (const c of p.capabilities) {
-      const h = capabilityHealth(p.level, c, locks.capabilities[c.id], locks.packages[p.package]);
+      const h = capabilityHealth(p.level, c, rows.capabilities[c.id], rows.packages[p.package]);
       capabilities.push({
         capability: c.id, version: c.version || null, package: p.package, level: p.level,
         path: c.path || null, dir: h.dir, integrity: c.integrity || null,

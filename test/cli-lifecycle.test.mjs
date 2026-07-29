@@ -701,3 +701,179 @@ test("an upstream package-root move: restore stays exact, a git selection is sti
   assert.doesNotMatch(catErr.message, /oas remove/);
   rmSync(base, { recursive: true, force: true });
 });
+
+// ---------- B1: a capability id is a directory name, never a path ----------
+
+/** Ids that must never reach a filesystem join. Each is a spelling an attacker
+ * (or a careless publisher) could put in a lock or a package manifest. */
+const HOSTILE_CAPABILITY_IDS = [
+  "..",
+  ".",
+  "../evil",
+  "../../evil",
+  "a/../../evil",
+  "sub/child",
+  "sub\\child",
+  "/etc/passwd",
+  "~/evil",
+  "%2e%2e%2fevil",
+  "..%2fevil",
+  "x@1.0.0",
+  // Refused by grammar: a leading underscore is outside [a-z0-9], and this is
+  // the one prototype name that can reach a real Object.prototype.
+  "__proto__",
+  "UPPER.case",
+  "-leading-dash",
+  "",
+];
+
+test("a hostile capability id in a raw lock is refused by the READER — every command fails closed, bytes untouched", () => {
+  const base = temp();
+  for (const [i, id] of HOSTILE_CAPABILITY_IDS.entries()) {
+    const s = scope(base, `raw-${i}`);
+    // Hand-written lock: the key never passed through any writer.
+    write(join(s, OAS_LOCK_FILE), `{
+      "lockfileVersion": 2,
+      "packages": { "a.p": { "source": "path:/x", "path": ".", "version": "1.0.0", "commit": "local", "integrity": "sha256-${"0".repeat(64)}", "dependencies": [] } },
+      "capabilities": { ${JSON.stringify(id)}: { "version": "1.0.0", "package": "a.p", "path": "capabilities/a", "integrity": "sha256-${"1".repeat(64)}", "trusted": false } }
+    }`);
+    const before = snapshot(s);
+
+    for (const argv of [["list"], ["install"], ["update", "a.p"], ["remove", "a.p"], ["trust", "a.p"], ["migrate"]]) {
+      const r = cli([...argv, "--dir", s, "--json"], { cwd: s });
+      assert.notEqual(r.status, 0, `${argv[0]} accepted capability id ${JSON.stringify(id)}`);
+      assert.equal(failEnvelope(r).code, "invalid-lock", `${argv[0]} on ${JSON.stringify(id)} was not a typed lock refusal`);
+    }
+    // Doctor diagnoses rather than dying. Which of the two typed shapes it uses
+    // depends on how early the refusal fires — resolution raises before the
+    // package report is even computed — but the CODE is the same either way,
+    // and no capability row is ever rendered.
+    const doc = JSON.parse(cli(["doctor", s, "--json"], { cwd: s }).stdout);
+    assert.equal(doc.error?.code || doc.lockError?.code, "invalid-lock", `doctor did not diagnose ${JSON.stringify(id)}: ${JSON.stringify(doc).slice(0, 200)}`);
+    assert.deepEqual(doc.capabilities || [], [], "a refused lock rendered capability rows");
+
+    assert.deepEqual(snapshot(s), before, `a refused id mutated the scope: ${JSON.stringify(id)}`);
+    // Nothing was ever created outside the scope either.
+    assert.equal(existsSync(join(base, "evil")), false, `${JSON.stringify(id)} escaped the scope`);
+    assert.equal(existsSync(join(s, "..", "evil")), false);
+  }
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("prototype-shaped ids that DO satisfy the grammar are ordinary data, and forge nothing", () => {
+  const base = temp();
+  // Namespaced prototype-shaped identities are valid — lowercase, no path
+  // characters — and they must stay valid: refusing them would be grammar
+  // theatre. What makes them safe is that every returned map is null-prototype,
+  // so they are keys and never inherited properties. (`__proto__` itself is
+  // refused, but only because a leading underscore is outside the grammar's
+  // first character class.)
+  const s = scope(base);
+  const ids = ["x.constructor", "x.prototype", "x.__proto__"];
+  const src = pkgSource(join(base, "src"), "p.p", {
+    "capabilities/c": { capability: ids[0] },
+    "capabilities/p": { capability: ids[1] },
+    "capabilities/u": { capability: ids[2] },
+  });
+  const r = cli(["install", src, "--dir", s, "--json"]);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const lock = lockOf(s);
+  assert.deepEqual(Object.keys(lock.capabilities).sort(), [...ids].sort());
+
+  const listed = okEnvelope(cli(["list", "--dir", s, "--json"], { cwd: s })).capabilities;
+  assert.deepEqual(listed.map((c) => c.capability).sort(), [...ids].sort());
+  // Each resolved to its OWN row, not to something inherited: the provider and
+  // the artifact path are the real ones, and both artifacts exist side by side.
+  for (const c of listed) {
+    assert.equal(c.package, "p.p", `${c.capability} lost its provider`);
+    assert.equal(existsSync(join(artifact(s, c.capability), "oas.json")), true, `${c.capability} was not materialized`);
+  }
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("a package exporting a hostile capability id cannot be acquired — nothing is materialized", () => {
+  const base = temp();
+  // The manifest reader is looser for LEGACY standalone capabilities (they are
+  // named by basename, never by the id), so these ids reach package validation
+  // and must be refused there, before any artifact directory is created.
+  // Two refusal families, both before any artifact directory exists:
+  //   - ids carrying "." / "@" / "/" satisfy the loose LEGACY namespacing rule
+  //     and reach package validation, which refuses them as manifest faults;
+  //   - bare ids such as "__proto__" are refused even earlier, by that same
+  //     legacy namespacing rule, and surface as a source fault.
+  // The invariant under test is the same: refused, typed, nothing materialized.
+  const MANIFEST_FAULTS = ["../evil", "sub/child", "/etc/passwd", "x@1.0.0"];
+  for (const [i, id] of [...MANIFEST_FAULTS, "__proto__", "constructor"].entries()) {
+    const src = join(base, `src-${i}`);
+    write(join(src, "capabilities/a/oas.json"), JSON.stringify({ capability: id, version: "1.0.0", description: "hostile" }, null, 2));
+    write(join(src, "oas-package.json"), JSON.stringify({
+      package: "h.p", version: "1.0.0", description: "hostile", compatibility: { oas: ">=0.1.0" }, capabilities: ["capabilities/a"],
+    }, null, 2));
+    const s = scope(base, `acq-${i}`);
+    const before = snapshot(s);
+    const r = cli(["install", src, "--dir", s, "--json"]);
+    assert.notEqual(r.status, 0, `install accepted exported id ${JSON.stringify(id)}`);
+    const code = failEnvelope(r).code;
+    assert.equal(code, MANIFEST_FAULTS.includes(id) ? "invalid-package-manifest" : "invalid-source",
+      `${JSON.stringify(id)} was refused with an unexpected code`);
+    assert.deepEqual(snapshot(s), before, `a refused export mutated the scope: ${JSON.stringify(id)}`);
+    assert.equal(existsSync(join(s, OAS_LOCK_FILE)), false, "a refused acquisition wrote a lock");
+    assert.equal(existsSync(join(base, "evil")), false);
+  }
+  rmSync(base, { recursive: true, force: true });
+});
+
+// ---------- I4: a capability's provider is resolved at ITS OWN level ----------
+
+test("nested scopes locking the same package id at different versions keep their own provenance", () => {
+  const base = temp();
+  // The same package IDENTITY at two versions, exporting DISJOINT capabilities.
+  // The merged lock view resolves each identity independently — closest wins —
+  // so the inner x.p@2 row is what `locks.packages["x.p"]` returns even for the
+  // outer scope's x.b. Provenance must not come from there.
+  const outerSrc = pkgSource(join(base, "outer-src"), "x.p", { "capabilities/b": { capability: "x.b" } }, { version: "1.0.0" });
+  write(join(outerSrc, "oas-package.json"), JSON.stringify({
+    package: "x.p", version: "1.0.0", description: "outer", compatibility: { oas: ">=0.1.0" }, capabilities: ["capabilities/b"],
+  }, null, 2));
+  const innerSrc = pkgSource(join(base, "inner-src"), "x.p", { "capabilities/a": { capability: "x.a", commands: { go: "go.mjs" }, _files: { "go.mjs": "//\n" } } });
+  write(join(innerSrc, "oas-package.json"), JSON.stringify({
+    package: "x.p", version: "2.0.0", description: "inner", compatibility: { oas: ">=0.1.0" }, capabilities: ["capabilities/a"],
+  }, null, 2));
+
+  const outer = scope(base, "outer");
+  const inner = join(outer, "inner");
+  write(join(inner, "oas-config.yaml"), "name: inner\n");
+  assert.equal(cli(["install", outerSrc, "--dir", outer]).status, 0);
+  assert.equal(cli(["install", innerSrc, "--dir", inner]).status, 0);
+  assert.equal(lockOf(outer).packages["x.p"].version, "1.0.0");
+  assert.equal(lockOf(inner).packages["x.p"].version, "2.0.0");
+
+  // From the inner scope BOTH capabilities are visible, and each must report
+  // the version of the package that actually exported it.
+  const envelope2 = okEnvelope(cli(["list", "--dir", inner, "--json"], { cwd: inner }));
+  const listed = envelope2.capabilities;
+  const byId = Object.fromEntries(listed.map((c) => [c.capability, c]));
+  assert.ok(byId["x.a"] && byId["x.b"], `both capabilities must be visible: ${listed.map((c) => c.capability).join(", ")}`);
+  // Each capability is attributed to the scope that actually locked it — the
+  // outer one must not be re-homed onto the nearer package of the same id.
+  assert.equal(byId["x.b"].level, outer, "the outer capability was attributed to the inner scope");
+  assert.equal(byId["x.a"].level, inner);
+  // Both package rows survive, each at its own version and level.
+  const providers = envelope2.packages.filter((p) => p.package === "x.p")
+    .map((p) => [p.level, p.version]).sort();
+  assert.deepEqual(providers, [[inner, "2.0.0"], [outer, "1.0.0"]].sort(),
+    `both provider rows must survive: ${JSON.stringify(envelope2.packages)}`);
+  // Neither is reported as damaged: same-level provenance agrees for both.
+  for (const c of listed) assert.notEqual(c.status, "provenance-mismatch", `${c.capability}: ${c.detail}`);
+
+  // Trusting the package from the inner scope writes ONLY inner rows: the outer
+  // lock is not this command's to rewrite.
+  const outerBefore = readFileSync(join(outer, OAS_LOCK_FILE), "utf8");
+  const t = cli(["trust", "x.p", "--all-capabilities", "--dir", inner, "--json"], { cwd: inner });
+  assert.equal(t.status, 0, t.stdout);
+  assert.deepEqual(okEnvelope(t).approved, ["x.a"], "a bulk approval crossed a lock level");
+  assert.equal(readFileSync(join(outer, OAS_LOCK_FILE), "utf8"), outerBefore, "the outer lock was rewritten");
+  assert.equal(lockOf(inner).capabilities["x.a"].trusted, true);
+  assert.equal(lockOf(outer).capabilities["x.b"].trusted, false, "an outer capability was silently trusted");
+  rmSync(base, { recursive: true, force: true });
+});
