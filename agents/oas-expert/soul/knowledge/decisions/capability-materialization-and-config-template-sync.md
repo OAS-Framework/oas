@@ -228,9 +228,15 @@ remain unchanged and executable trust is never broadened.
 
 The earlier transitional v2 package-root shape and
 `.agents/packages/installed/` store receive no product migration path, dual
-reader, or offline projection. If encountered by the revised release they fail
-clearly as unsupported/invalid rather than being guessed or silently converted;
-pre-adoption local deployments may be recreated manually. Immutable package
+reader, or offline projection. Revised v2 requires top-level `packages` and
+`capabilities`; package rows contain package provenance/dependencies only, while
+capability path/version/integrity/trust live in the capability map. A nonempty
+v2 lock missing that map or carrying transitional package-row `capabilities`,
+`trustedCapabilities`, or `depsIntegrity` fields is rejected centrally with the
+typed `invalid-lock` code and an actionable unsupported-transitional-v2 message,
+before discovery or mutation. An empty packages-only lock may normalize as an
+empty revised-v2 lock because it carries no state. Pre-adoption local
+deployments may be recreated manually. Immutable package
 manifests using `configs` or a `.` capability root remain read-compatible only
 for acquiring their capabilities into the revised v2 shape.
 
