@@ -64,6 +64,8 @@ Before a multi-step init/adopt, snapshot the exact state the run may affect:
 config, adopted base and metadata, lock, capability-store state, and the
 capability `.gitignore`. On any later failure, restore bytes and artifacts
 exactly. The pre-existing same-name capability blocker regression belongs here.
+Implementation gotchas for this CLI-private journal are captured in
+[run-level rollback journal craft](/lessons/run-level-rollback-journal-craft.md).
 
 # 6. Gitignore ownership
 

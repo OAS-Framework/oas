@@ -32,6 +32,7 @@ read what the current task needs, not everything.
 * [architecture/spawn-relations-lineage-fields.md](architecture/spawn-relations-lineage-fields.md) - final child/sibling/parent/unrelated semantics, sparse lineage fields, attached-owner binding, ambiguity validation, and retirement splice behavior.
 
 ## Lessons
+* [lessons/run-level-rollback-journal-craft.md](lessons/run-level-rollback-journal-craft.md) - Non-obvious constraints found building the CLI-private outer rollback journal — where the backup may live, why an incomplete rollback must not clean up, how anchor pruning falls out of ancestor bookkeeping, and why a restore test needs a mutant to prove it measures anything.
 * [lessons/byte-preserving-three-way-config-merge.md](lessons/byte-preserving-three-way-config-merge.md) - Three-way config template sync cannot round-trip YAML through a parser; the merge is a diff3 over exactly-terminated lines whose output is built from the local line array, and two invariants make byte preservation testable.
 * [lessons/dry-run-exit-status-contract.md](lessons/dry-run-exit-status-contract.md) - A dry run that reports a held or otherwise blocked state must exit nonzero when apply would exit nonzero, or automation can read "planned" as "ready".
 * [lessons/residue-collision-during-batched-migration.md](lessons/residue-collision-during-batched-migration.md) - When multiple legacy capabilities convert to one package, deleting only the current residue before acquiring collides with sibling entries the package also exports.

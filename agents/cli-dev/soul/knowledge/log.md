@@ -1,6 +1,8 @@
 # Knowledge Log
 
 ## 2026-07-29
+* **Creation**: [run-level-rollback-journal-craft](/lessons/run-level-rollback-journal-craft.md) records the CLI outer rollback journal lessons for off-scope backups, incomplete rollback retention, absence restoration, ancestor-pruned anchors, symlink boundaries, cpSync flags, and mutation-tested restore assertions.
+* **Update**: [frozen-revised-v2-engine-seam-answers](/references/frozen-revised-v2-engine-seam-answers.md) links the CLI-owned run-level transaction seam to the rollback journal implementation gotchas.
 * **Creation**: [transitional-lock-tells-are-presence-not-truthiness](/references/transitional-lock-tells-are-presence-not-truthiness.md) records the binding pin that revised-v2 transitional lock tells are own-property presence rather than truthiness, and that lock maps need null-prototype access for hostile package ids.
 * **Creation**: [revised-v2-lock-discriminator-cli-coverage](/references/revised-v2-lock-discriminator-cli-coverage.md) records the exact transitional package-root-v2 rejection predicate, row fields that are not tells, lock-only scope visibility, and CLI coverage obligations.
 * **Creation**: [frozen-revised-v2-engine-seam-answers](/references/frozen-revised-v2-engine-seam-answers.md) records the coordinator-frozen revised-v2 CLI/config-template seam contracts for the locked template reader, digest spelling, acquire return, template listing, CLI-owned run-level transaction, `.gitignore` compensation, typed error pass-through, and final lock discriminator.
