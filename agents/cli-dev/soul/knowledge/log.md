@@ -1,5 +1,9 @@
 # Knowledge Log
 
+## 2026-07-29
+* **Creation**: [byte-preserving-three-way-config-merge](/lessons/byte-preserving-three-way-config-merge.md) records why config-template sync must merge line ranges from the local file instead of reserializing YAML, including adjacency-conflict behavior and the no-op/template-reconstruction invariants.
+* **Creation**: [config-template-cli-transaction-map](/playbooks/config-template-cli-transaction-map.md) records the CLI-owned artifacts, transaction order, rollback boundaries, and frozen engine-seam questions for config-template adoption, diff, sync, reset, adopt, and fresh classic init.
+
 ## 2026-07-28
 * **Creation**: [hoisted-resource-fallbacks-anchor-at-declaring-dir](/lessons/hoisted-resource-fallbacks-anchor-at-declaring-dir.md) records that marketplace hoisted-resource fallbacks must anchor manifest-relative paths at the declaring capability's canonical marketplace directory, verify marketplace source/version identity, and still walk hoisted trees for containment.
 * **Update**: [marketplace-trust-and-hoisted-paths](/lessons/marketplace-trust-and-hoisted-paths.md) supersedes the older PKG_ROOT-anchored fallback wording with the lock-provenance and declaring-directory anchor rule.
