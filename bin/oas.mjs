@@ -13,7 +13,7 @@
  * The kernel resolves per-key closest-wins from wherever agents actually run,
  * so binding at a level scopes the capability to everything under it.
  */
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { execFileSync, spawnSync } from "node:child_process";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
@@ -35,7 +35,8 @@ import {
 } from "../lib/core.mjs";
 import {
   aggregateMissingRequirements, beginRunJournal, diffConfigTexts, discoverMigrationScopes, discoverWorkspaceScopes,
-  applyConfigMerge, lockedPackageCapabilities, planConfigMerge, readAdoptedTemplate, requirementInstallPlan,
+  adoptedTemplateDir, applyConfigMerge, lockedPackageCapabilities, planConfigMerge, readAdoptedTemplate, requirementInstallPlan,
+  writeFileAtomic,
   runRequirementInstall, selectConfigTemplate, validateConfigTemplate, writeAdoptedTemplate,
 } from "../lib/packages.mjs";
 
@@ -1405,7 +1406,146 @@ function configCmd() {
     return;
   }
 
-  bail("E_NOT_IMPLEMENTED", `oas config ${sub} is not wired yet in this commit`);
+  // ---- sync / reset / adopt: everything below MUTATES, so plan first ----
+
+  const decisions = {};
+  for (const spec of flagAll("accept")) {
+    const m = /^([^=]+)=(local|package)$/.exec(spec);
+    if (!m) bail("E_USAGE", `--accept takes <regionId>=<local|package>, got "${spec}"`);
+    decisions[m[1]] = m[2];
+  }
+  const assumeYes = args.includes("--yes");
+  const isReset = args.includes("--reset");
+
+  // The recoverable backup survives a SUCCESSFUL run: the run journal is for
+  // undoing failures, this is for the adopter who changes their mind.
+  const backupFile = `${file}.bak`;
+
+  if (isReset) {
+    // Reset previews everything it will destroy, then demands explicit consent.
+    const lost = plan.regions.filter((r) => r.kind === "local" || r.kind === "conflict");
+    if (JSON_MODE || !process.stdin.isTTY) {
+      if (!assumeYes) {
+        bail("E_RESET_NOT_CONFIRMED", `oas config sync --reset would discard ${lost.length} local change region(s) in ${shortPath(file)} and replace it with ${packageId}:${chosen.template} verbatim — pass --yes to accept that noninteractively`);
+      }
+    } else if (!assumeYes) {
+      console.log(`This DISCARDS ${lost.length} local change region(s) in ${shortPath(file)}:\n`);
+      for (const r of lost) renderMergeRegion(r);
+      const answer = promptLine(`Type the word "discard" to replace it with ${packageId}:${chosen.template}: `);
+      if (answer.trim() !== "discard") bail("E_RESET_NOT_CONFIRMED", "reset cancelled — nothing was changed");
+    }
+    const journal = openJournal(dir, bail);
+    try {
+      if (existsSync(file)) copyFileSync(file, backupFile);
+      writeFileAtomic(file, chosen.content);
+      recordAdoption(dir, file, packageId, chosen, locked, adopted);
+      journal.finalize();
+    } catch (e) { abortRun(journal, e, bail); return; }
+    if (JSON_MODE) { jsonOk({ action: "reset", package: packageId, template: chosen.template, file, backup: backupFile, discardedRegions: lost.length, contentIntegrity: chosen.contentIntegrity }); return; }
+    console.log(`Reset ${shortPath(file)} to ${packageId}:${chosen.template} verbatim. Previous contents saved at ${shortPath(backupFile)}.`);
+    return;
+  }
+
+  // sync / adopt share the three-way apply.
+  const unresolved = plan.conflicts.filter((id) => !Object.hasOwn(decisions, id));
+  if (unresolved.length) {
+    if (JSON_MODE || !process.stdin.isTTY) {
+      bail("E_SYNC_AMBIGUOUS", `${unresolved.length} conflict(s) need an explicit choice (${unresolved.join(", ")}) — pass --accept <id>=<local|package> for each; this command will never choose for you`);
+    }
+    for (const id of unresolved) {
+      const region = plan.regions.find((r) => r.id === id);
+      renderMergeRegion(region);
+      const answer = promptLine(`[${id}] keep (l)ocal or take (p)ackage? `).trim().toLowerCase();
+      if (answer === "l" || answer === "local") decisions[id] = "local";
+      else if (answer === "p" || answer === "package") decisions[id] = "package";
+      else bail("E_SYNC_AMBIGUOUS", `no choice made for ${id} — nothing was changed`);
+    }
+  }
+
+  let merged;
+  try { merged = applyConfigMerge(localText, plan, decisions); }
+  catch (e) { bail(e.code || "E_SYNC_FAILED", e.message); return; }
+
+  // Advancing the recorded base is the POINT of a sync, not a side effect of
+  // changing bytes. Deciding "keep local" on every conflict changes nothing on
+  // disk, but the decision must still be recorded — otherwise the base stays
+  // behind and the identical conflict is re-presented on every future sync,
+  // forever. So "nothing to do" means nothing applied AND the base already at
+  // this exact template.
+  const baseIsCurrent = adopted?.package === packageId
+    && adopted?.template === chosen.template
+    && adopted?.baseText === chosen.content;
+  if (!merged.applied.length && baseIsCurrent) {
+    if (JSON_MODE) { jsonOk({ action: sub, package: packageId, template: chosen.template, file, changed: false, baseAdvanced: false, applied: [], backup: null }); return; }
+    console.log(`Nothing to do: ${shortPath(file)} and the recorded base are already at ${packageId}:${chosen.template}.`);
+    return;
+  }
+
+  if (!JSON_MODE) {
+    console.log(`Plan for ${shortPath(file)} vs ${packageId}:${chosen.template}:`);
+    for (const a of merged.applied) console.log(`  [${a.id}] ${a.kind} → ${a.choice}`);
+    console.log("");
+  }
+
+  const changed = merged.text !== localText;
+  const journal = openJournal(dir, bail);
+  try {
+    // Back up only when bytes actually change — a backup identical to the file
+    // it shadows is noise the adopter has to reason about later.
+    if (changed) copyFileSync(file, backupFile);
+    if (changed) writeFileAtomic(file, merged.text);
+    recordAdoption(dir, file, packageId, chosen, locked, adopted);
+    journal.finalize();
+  } catch (e) { abortRun(journal, e, bail); return; }
+
+  if (JSON_MODE) {
+    jsonOk({
+      action: sub, package: packageId, template: chosen.template, file, changed,
+      baseAdvanced: true, applied: merged.applied, backup: changed ? backupFile : null,
+      adoptedBase: join(adoptedTemplateDir(dir, packageId, chosen.template), "oas-config.yaml"),
+      contentIntegrity: chosen.contentIntegrity,
+    });
+    return;
+  }
+  if (changed) console.log(`Applied ${merged.applied.length} change region(s) to ${shortPath(file)}; previous contents saved at ${shortPath(backupFile)}.`);
+  else console.log(`No bytes changed in ${shortPath(file)} — you kept every local choice.`);
+  console.log(`Adopted base advanced to ${packageId}:${chosen.template}, so these decisions will not be asked again. Local edits outside the applied regions are untouched.`);
+}
+
+/** Open the run journal with the command's one-envelope guarantee intact. */
+function openJournal(dir, bail) {
+  try { return beginRunJournal(dir); }
+  catch (e) { bail(e.code || "E_JOURNAL_FAILED", e.message); throw e; }
+}
+
+/** Undo a failed config mutation and report truthfully. */
+function abortRun(journal, e, bail) {
+  const report = journal.rollback();
+  bail(e.code || "E_CONFIG_WRITE_FAILED", report.complete ? e.message : `${e.message} — ${report.summary}`);
+}
+
+/** Write the adopted base + metadata for the template just synced against, and
+ * retire any previously adopted base so exactly one survives. */
+function recordAdoption(dir, file, packageId, chosen, locked, previous) {
+  const written = writeAdoptedTemplate(dir, file, {
+    package: packageId, template: chosen,
+    root: { source: locked.source, version: locked.version, commit: locked.commit, path: locked.path },
+  }, { writeConfig: false });
+  if (previous && (previous.package !== packageId || previous.template !== chosen.template)) {
+    rmSync(previous.dir, { recursive: true, force: true });
+    const parent = dirname(previous.dir);
+    try { if (!readdirSync(parent).length) rmSync(parent, { recursive: true, force: true }); } catch { /* sibling templates remain */ }
+  }
+  return written;
+}
+
+/** Read one line from the terminal (human confirmation paths only). */
+function promptLine(question) {
+  process.stdout.write(question);
+  const buf = Buffer.alloc(1024);
+  let read = 0;
+  try { read = readSync(0, buf, 0, buf.length, null); } catch { return ""; }
+  return buf.subarray(0, read).toString("utf8").replace(/\n.*$/s, "");
 }
 
 /** One merge region, rendered for a human deciding what to do about it. */

@@ -683,6 +683,166 @@ test("adoption failure AFTER the engine commits rolls the whole run back: pre-ex
   for (const d of [scope, pkg]) rmSync(d, { recursive: true, force: true });
 });
 
+// ---------- oas config sync / --reset / adopt ----------
+
+/** Publish a new template body (and version) for an already-installed fixture. */
+function republish(pkgDir, body, version) {
+  write(join(pkgDir, "config-templates/default/oas-config.yaml"), body);
+  const manifest = JSON.parse(readFileSync(join(pkgDir, "oas-package.json"), "utf8"));
+  manifest.version = version;
+  write(join(pkgDir, "oas-package.json"), JSON.stringify(manifest, null, 2));
+}
+
+const TEMPLATE_V1 = "# template header — do not lose me\nname: workspace\n\ncapabilities:\n  additive:\n    example.review: {}\n";
+
+test("config sync applies upstream-only changes and leaves every other local byte identical", () => {
+  const pkg = materializedPackage(temp());
+  write(join(pkg, "config-templates/default/oas-config.yaml"), TEMPLATE_V1);
+  const scope = temp();
+  const initRun = cli(["init", "--package", pkg, "--dir", scope]);
+  assert.equal(initRun.status, 0, `init: ${initRun.stderr}`);
+
+  // Hand edit near the TOP, with deliberate spacing and a trailing comment.
+  const file = join(scope, "oas-config.yaml");
+  const local = TEMPLATE_V1.replace("name: workspace", "name: acme     # our name, keep it exactly");
+  writeFileSync(file, local);
+
+  // Upstream changes a region genuinely far from the local edit — three
+  // unchanged lines apart. Anything closer would ENTANGLE with it into one
+  // conflict, which is correct behaviour but not what this case is about.
+  republish(pkg, `${TEMPLATE_V1}    example.audit: {}\n`, "1.1.0");
+  const upd = cli(["update", "example.engineering", "--dir", scope]);
+  assert.equal(upd.status, 0, `update: ${upd.stderr}`);
+
+  const r = cli(["config", "sync", "--dir", scope, "--json"]);
+  assert.equal(r.status, 0, r.stderr);
+  const payload = JSON.parse(r.stdout).result;
+  assert.equal(payload.changed, true);
+  assert.equal(payload.baseAdvanced, true);
+  assert.deepEqual(payload.applied.map((a) => a.kind), ["upstream"]);
+
+  const after = readFileSync(file, "utf8");
+  assert.match(after, /example\.audit: \{\}/, "the upstream addition must land");
+  assert.match(after, /name: acme {5}# our name, keep it exactly/, "the local edit and its exact spacing must survive");
+  assert.match(after, /^# template header — do not lose me$/m, "an untouched comment must survive verbatim");
+  // Everything except the applied region is byte-identical to what we wrote.
+  assert.equal(after, `${local}    example.audit: {}\n`);
+  assert.equal(readFileSync(payload.backup, "utf8"), local, "the backup holds the pre-sync bytes");
+
+  for (const d of [pkg, scope]) rmSync(d, { recursive: true, force: true });
+});
+
+test("config sync refuses noninteractive ambiguity, honours local/package choices, and records them so they are not re-asked", () => {
+  const pkg = materializedPackage(temp());
+  write(join(pkg, "config-templates/default/oas-config.yaml"), TEMPLATE_V1);
+  const scope = temp();
+  assert.equal(cli(["init", "--package", pkg, "--dir", scope]).status, 0);
+  const file = join(scope, "oas-config.yaml");
+  const local = TEMPLATE_V1.replace("    example.review: {}", "    example.review: { global: true }");
+  writeFileSync(file, local);
+
+  // Upstream touches the SAME line: a genuine conflict.
+  republish(pkg, TEMPLATE_V1.replace("    example.review: {}", "    example.review: { agent-types: { dev: true } }"), "1.1.0");
+  assert.equal(cli(["update", "example.engineering", "--dir", scope]).status, 0);
+
+  // Noninteractive with no decision: fail closed, change nothing.
+  const refused = cli(["config", "sync", "--dir", scope, "--json"]);
+  assert.equal(refused.status, 1);
+  assert.equal(JSON.parse(refused.stdout).error.code, "E_SYNC_AMBIGUOUS");
+  assert.equal(readFileSync(file, "utf8"), local, "a refused sync must not touch a byte");
+
+  // An explicit package choice applies it.
+  const taken = cli(["config", "sync", "--accept", "h1=package", "--dir", scope, "--json"]);
+  assert.equal(taken.status, 0, taken.stderr);
+  assert.match(readFileSync(file, "utf8"), /agent-types: \{ dev: true \}/);
+
+  // The decision was recorded: syncing again has nothing to ask or do.
+  const again = cli(["config", "sync", "--dir", scope, "--json"]);
+  assert.equal(again.status, 0, again.stderr);
+  assert.equal(JSON.parse(again.stdout).result.changed, false);
+
+  for (const d of [pkg, scope]) rmSync(d, { recursive: true, force: true });
+});
+
+test("keeping local on every conflict still advances the base, so the same conflict is never re-presented", () => {
+  const pkg = materializedPackage(temp());
+  write(join(pkg, "config-templates/default/oas-config.yaml"), TEMPLATE_V1);
+  const scope = temp();
+  assert.equal(cli(["init", "--package", pkg, "--dir", scope]).status, 0);
+  const file = join(scope, "oas-config.yaml");
+  const local = TEMPLATE_V1.replace("    example.review: {}", "    example.review: { global: true }");
+  writeFileSync(file, local);
+  republish(pkg, TEMPLATE_V1.replace("    example.review: {}", "    example.review: { global: false }"), "1.1.0");
+  assert.equal(cli(["update", "example.engineering", "--dir", scope]).status, 0);
+
+  const kept = cli(["config", "sync", "--accept", "h1=local", "--dir", scope, "--json"]);
+  assert.equal(kept.status, 0, kept.stderr);
+  const payload = JSON.parse(kept.stdout).result;
+  assert.equal(payload.changed, false, "keeping local changes no bytes");
+  assert.equal(payload.baseAdvanced, true, "but the decision must still be recorded");
+  assert.equal(readFileSync(file, "utf8"), local);
+
+  // Without base advancement this would raise the identical conflict forever.
+  const second = cli(["config", "sync", "--dir", scope, "--json"]);
+  assert.equal(second.status, 0, "the resolved conflict must not come back");
+  assert.equal(JSON.parse(second.stdout).result.changed, false);
+
+  for (const d of [pkg, scope]) rmSync(d, { recursive: true, force: true });
+});
+
+test("config sync --reset previews the loss, demands explicit acceptance, and keeps a recoverable backup", () => {
+  const pkg = materializedPackage(temp());
+  write(join(pkg, "config-templates/default/oas-config.yaml"), TEMPLATE_V1);
+  const scope = temp();
+  assert.equal(cli(["init", "--package", pkg, "--dir", scope]).status, 0);
+  const file = join(scope, "oas-config.yaml");
+  const local = `${TEMPLATE_V1}\n# months of local policy\nagent-types:\n  dev: {}\n`;
+  writeFileSync(file, local);
+
+  // Noninteractive without acceptance: refuse, change nothing.
+  const refused = cli(["config", "sync", "--reset", "--dir", scope, "--json"]);
+  assert.equal(refused.status, 1);
+  assert.equal(JSON.parse(refused.stdout).error.code, "E_RESET_NOT_CONFIRMED");
+  assert.equal(readFileSync(file, "utf8"), local, "a refused reset must not touch a byte");
+
+  const done = cli(["config", "sync", "--reset", "--yes", "--dir", scope, "--json"]);
+  assert.equal(done.status, 0, done.stderr);
+  const payload = JSON.parse(done.stdout).result;
+  assert.equal(payload.action, "reset");
+  assert.ok(payload.discardedRegions >= 1);
+  assert.equal(readFileSync(file, "utf8"), TEMPLATE_V1, "reset replaces the config with the template verbatim");
+  assert.equal(readFileSync(payload.backup, "utf8"), local, "the discarded local policy must be recoverable");
+
+  for (const d of [pkg, scope]) rmSync(d, { recursive: true, force: true });
+});
+
+test("config adopt switches base: exactly one survives on success, and a failure leaves everything unchanged", () => {
+  const first = materializedPackage(temp(), { id: "first.pkg", capability: "first.cap" });
+  write(join(first, "config-templates/default/oas-config.yaml"), "# first\nname: workspace\n");
+  const second = materializedPackage(temp(), { id: "second.pkg", capability: "second.cap" });
+  write(join(second, "config-templates/default/oas-config.yaml"), "# second\nname: workspace\nsettings:\n  x: 1\n");
+
+  const scope = temp();
+  assert.equal(cli(["init", "--package", first, "--dir", scope]).status, 0);
+  assert.equal(cli(["install", second, "--dir", scope]).status, 0);
+  const adoptedRoot = join(scope, ".agents/config-templates/adopted");
+  assert.deepEqual(readdirSync(adoptedRoot), ["first.pkg"]);
+
+  const r = cli(["config", "adopt", "second.pkg", "--dir", scope, "--json"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(readdirSync(adoptedRoot), ["second.pkg"], "exactly one adopted base may survive a switch");
+  assert.match(readFileSync(join(scope, "oas-config.yaml"), "utf8"), /settings:/);
+
+  // A failed switch changes nothing: the package is not installed here.
+  const before = readFileSync(join(scope, "oas-config.yaml"), "utf8");
+  const failed = cli(["config", "adopt", "absent.pkg", "--dir", scope, "--json"]);
+  assert.equal(failed.status, 1);
+  assert.deepEqual(readdirSync(adoptedRoot), ["second.pkg"], "a failed switch must leave the prior base in place");
+  assert.equal(readFileSync(join(scope, "oas-config.yaml"), "utf8"), before);
+
+  for (const d of [first, second, scope]) rmSync(d, { recursive: true, force: true });
+});
+
 // ---------- run-level rollback journal (CLI-private) ----------
 //
 // The run-level guarantee — a later failure rolls back only THIS run's changes
