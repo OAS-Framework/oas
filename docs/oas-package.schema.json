@@ -66,10 +66,10 @@
         ],
         "properties": {
           "path": {
-            "description": "Package-relative path to the template's oas-config.yaml (conventionally under config-templates/).",
+            "description": "Package-relative path to the template's oas-config.yaml. CANONICAL LOCATION: it must live under config-templates/ with a nonempty contained file path (e.g. config-templates/default/oas-config.yaml). The deprecated `configs` spelling is exempt so already-published 0.19 tags stay readable. Runtime validation enforces the same rule — see isCanonicalTemplatePath in lib/core.mjs.",
             "type": "string",
             "minLength": 1,
-            "pattern": "^[^/].*$",
+            "pattern": "^config-templates/(?!\\.\\.?(/|$))[^/\\\\][^\\\\]*$",
             "not": {
               "pattern": "(^|/)\\.\\.(/|$)"
             }
