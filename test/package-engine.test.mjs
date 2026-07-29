@@ -534,6 +534,69 @@ test("acquirePackage: a locked source never advances on acquire — integrity an
   assert.equal(readFileSync(join(s, OAS_LOCK_FILE), "utf8"), before, "lock unchanged");
 });
 
+test("an injected failure between the two renames restores the PRE-EXISTING artifact byte for byte", () => {
+  const t = temp();
+  const s = scope(t);
+  // A scope that already has x.a materialized, with recognisable bytes.
+  const v1 = pkgSource(join(t, "v1"), { package: "x.p" }, { "capabilities/a": { capability: "x.a" } });
+  write(join(v1, "capabilities/a/marker.txt"), "ORIGINAL\n");
+  acquirePackage(s, v1);
+  const dir = artifact(s, "x.a");
+  const beforeTree = treeFingerprint(dir);
+  const beforeLock = readFileSync(join(s, OAS_LOCK_FILE), "utf8");
+
+  // Re-acquire a DIFFERENT payload and fail INSIDE the swap boundary: the
+  // pre-commit gate makes the capability store read-only, so the very first
+  // rename of the swap loop throws with the transaction already under way.
+  const v2 = pkgSource(join(t, "v2"), { package: "x.p" }, { "capabilities/a": { capability: "x.a" } });
+  write(join(v2, "capabilities/a/marker.txt"), "REPLACEMENT\n");
+  const store = join(s, ".agents", "capabilities", "installed");
+  let failed;
+  try {
+    acquirePackage(s, v2, { replace: true, assertCommittable: () => { chmodSync(store, 0o555); } });
+  } catch (e) { failed = e; } finally { chmodSync(store, 0o755); }
+  assert.ok(failed, "the injected failure did not fire");
+
+  assert.deepEqual(treeFingerprint(dir), beforeTree, "the pre-existing artifact was not restored byte for byte");
+  assert.equal(readFileSync(join(dir, "marker.txt"), "utf8"), "ORIGINAL\n");
+  assert.equal(readFileSync(join(s, OAS_LOCK_FILE), "utf8"), beforeLock, "the lock changed");
+});
+
+test("a dropped export retires INSIDE the update transaction — a failure keeps artifact and lock together", () => {
+  const t = temp();
+  const s = scope(t);
+  const src = join(t, "src");
+  pkgSource(src, { package: "x.p" }, { "capabilities/a": { capability: "x.a" }, "capabilities/b": { capability: "x.b" } });
+  acquirePackage(s, src);
+  assert.ok(existsSync(artifact(s, "x.b")));
+  const beforeLock = readFileSync(join(s, OAS_LOCK_FILE), "utf8");
+  const beforeB = treeFingerprint(artifact(s, "x.b"));
+
+  // The package stops exporting x.b.
+  write(join(src, "oas-package.json"), JSON.stringify({
+    package: "x.p", version: "2.0.0", description: "p", compatibility: { oas: ">=0.1.0" }, capabilities: ["capabilities/a"],
+  }, null, 2));
+  rmSync(join(src, "capabilities/b"), { recursive: true, force: true });
+
+  // (a) a failure at the commit boundary leaves BOTH the lock row and the
+  // artifact of the dropped export exactly as they were.
+  assert.throws(() => acquirePackage(s, src, {
+    replace: true,
+    assertCommittable: () => { const e = new Error("injected"); e.code = "injected"; throw e; },
+  }));
+  assert.equal(readFileSync(join(s, OAS_LOCK_FILE), "utf8"), beforeLock, "the lock advanced despite the failure");
+  assert.deepEqual(treeFingerprint(artifact(s, "x.b")), beforeB, "the dropped export's artifact was lost on a FAILED update");
+
+  // (b) on success the row and the artifact go together.
+  const r = updatePackage(s, "x.p");
+  assert.deepEqual(r.removedCapabilities, ["x.b"]);
+  assert.deepEqual(r.retiredArtifacts, ["x.b"]);
+  assert.equal(existsSync(artifact(s, "x.b")), false, "a dropped export's artifact survived the update");
+  assert.equal(Object.hasOwn(lockOf(s).capabilities, "x.b"), false, "a dropped export's lock row survived");
+  assert.ok(existsSync(artifact(s, "x.a")), "the surviving export was retired too");
+  assert.ok(Object.hasOwn(lockOf(s).capabilities, "x.a"));
+});
+
 test("installedCapabilityDir is a containment PROOF, not a join — the last line of defence holds on its own", () => {
   const t = temp();
   const s = scope(t);
