@@ -1,6 +1,7 @@
 # Knowledge Log
 
 ## 2026-07-29
+* **Creation**: [donor-2a82f0f-selective-port-ledger](/references/donor-2a82f0f-selective-port-ledger.md) records which frozen donor test ideas were ported into the capability-materialization CLI lane, which assertions were rejected as superseded, and the JSON requirement-field parity change the port forced.
 * **Update**: [package-payload-root-contract](/decisions/package-payload-root-contract.md) records that acquire-time path-mismatch diagnostics branch on the locked source kind: catalog locks can recommend update, Git locks must say remove-and-install with the intended fragment, and local path mismatches are unreachable.
 * **Creation**: [diagnostic-remedies-are-contracts](/lessons/diagnostic-remedies-are-contracts.md) records that diagnostics naming a repair path are behavior contracts and need branch-specific positive and negative assertions.
 * **Update**: [package-payload-root-contract](/decisions/package-payload-root-contract.md) merges the package-root-move note: Git root moves stay sticky and fail update until remove+install with the new fragment, while catalog root moves are adopted and reported as `pathChanged`; restore remains pinned to the locked commit/path.
