@@ -1,6 +1,7 @@
 # Knowledge Log
 
 ## 2026-07-29
+* **Creation**: [integrity-alone-cannot-see-disputed-origin](/lessons/integrity-alone-cannot-see-disputed-origin.md) records that repaired integrity cannot prove provenance agreement, so `oas trust` checks capability health and refuses lock/provenance disagreement before approval.
 * **Creation**: [catalog-first-classic-init-costs](/lessons/catalog-first-classic-init-costs.md) records that catalog-routed classic init is networked package acquisition, does not auto-trust executables, and must re-check layer agreement against the materialized manifest inside the rollback transaction.
 * **Creation**: [classic-init-own-scope-capability-store](/lessons/classic-init-own-scope-capability-store.md) records why classic init reads the target scope's installed/owned capability stores directly before config-chain discovery.
 * **Update**: [init-acquires-before-config-exists](/lessons/init-acquires-before-config-exists.md) links the narrower mid-init acquisition-result lesson to the broader own-scope capability-store blind spot.
