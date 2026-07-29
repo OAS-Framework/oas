@@ -534,6 +534,27 @@ test("acquirePackage: a locked source never advances on acquire — integrity an
   assert.equal(readFileSync(join(s, OAS_LOCK_FILE), "utf8"), before, "lock unchanged");
 });
 
+test("installedCapabilityDir is a containment PROOF, not a join — the last line of defence holds on its own", () => {
+  const t = temp();
+  const s = scope(t);
+  const root = join(s, ".agents", "capabilities", "installed");
+  // The reader and manifest validation already refuse these upstream, so this
+  // guard is unreachable through the CLI by design. It exists for direct kernel
+  // callers — including future ones — and is pinned where it IS reachable.
+  for (const id of ["..", ".", "../evil", "a/../../evil", "sub/child", "sub\\child", "/etc/passwd", "~/evil", "%2e%2e%2fevil", "x@1.0.0", "__proto__", "UPPER.case", "-lead", "", null, undefined, 7]) {
+    let e;
+    try { installedCapabilityDir(s, id); } catch (err) { e = err; }
+    assert.ok(e, `installedCapabilityDir accepted ${JSON.stringify(id)}`);
+    assert.equal(e.code, "path-escape", `${JSON.stringify(id)}: ${e.message}`);
+    assert.match(e.message, /capability artifact path refused/);
+  }
+  // Valid ids resolve to an immediate child, and nothing else.
+  for (const id of ["oas.okf", "x.constructor", "a", "a-b_c.d"]) {
+    assert.equal(installedCapabilityDir(s, id), join(root, id));
+    assert.equal(dirname(resolve(installedCapabilityDir(s, id))), resolve(root));
+  }
+});
+
 test("acquirePackage: a path mismatch names the route that can actually resolve it — update for catalog, remove+reinstall for git", () => {
   const t = temp();
   const repoRoot = join(t, "repo");
