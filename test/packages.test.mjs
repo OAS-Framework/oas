@@ -2858,3 +2858,49 @@ test("a capability whose .oas-installation.json disagrees with the lock is DIAGN
 
   for (const d of [pkg, scope]) rmSync(d, { recursive: true, force: true });
 });
+
+test("remove and update speak capability provenance: no phantom package directory, retired artifacts named", () => {
+  const pkg = executablePackage(temp());
+  const scope = temp();
+  assert.equal(cli(["install", pkg, "--dir", scope]).status, 0);
+  const artifact = join(scope, ".agents/capabilities/installed/exec.cap");
+  assert.ok(existsSync(artifact));
+
+  const human = cli(["remove", "exec.pkg", "--dir", scope]);
+  assert.equal(human.status, 0, human.stderr);
+  // A package is transport: there is no package directory to name, and what
+  // actually leaves the disk is its materialized capability artifacts.
+  assert.doesNotMatch(human.stdout, /undefined/, "no stale package-directory field");
+  assert.match(human.stdout, /capabilities de-materialized: exec\.cap/);
+  assert.equal(existsSync(artifact), false);
+  assert.equal(JSON.parse(readFileSync(join(scope, "oas-lock.json"), "utf8")).capabilities["exec.cap"], undefined);
+
+  // The JSON envelope carries the same capability list, not a package path.
+  const scope2 = temp();
+  assert.equal(cli(["install", pkg, "--dir", scope2]).status, 0);
+  const r = cli(["remove", "exec.pkg", "--dir", scope2, "--json"]);
+  assert.equal(r.status, 0, r.stderr);
+  const payload = JSON.parse(r.stdout).result;
+  assert.equal(payload.package, "exec.pkg");
+  assert.deepEqual(payload.capabilities, ["exec.cap"]);
+  assert.equal(Object.hasOwn(payload, "dir"), false, "there is no package root to report");
+
+  for (const d of [pkg, scope, scope2]) rmSync(d, { recursive: true, force: true });
+});
+
+test("oas help never depends on deployment state: a lock the kernel refuses still prints usage", () => {
+  const scope = temp();
+  // The superseded transitional-v2 shape: the kernel refuses to interpret it.
+  write(join(scope, "oas-lock.json"), JSON.stringify({ lockfileVersion: 2, packages: { "a.b": { source: "path:/x", path: ".", version: "1.0.0", integrity: "sha256-" + "0".repeat(64) } } }, null, 2));
+  write(join(scope, "oas-config.yaml"), "name: broken\n");
+  // Any ordinary command fails closed on it — that is the contract.
+  assert.notEqual(cli(["list", "--dir", scope], { cwd: scope }).status, 0);
+  // Usage must NOT: help is exactly what you reach for when a scope is broken.
+  for (const argv of [["help"], ["--help"], ["-h"]]) {
+    const r = cli(argv, { cwd: scope });
+    assert.equal(r.status, 0, `${argv[0]}: ${r.stderr}`);
+    assert.match(r.stdout, /oas — Open Agent Specialization/);
+    assert.match(r.stdout, /oas init/);
+  }
+  rmSync(scope, { recursive: true, force: true });
+});

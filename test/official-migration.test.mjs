@@ -81,10 +81,10 @@ function officialSources(base) {
   const p = (n) => join(base, "pkgs", n);
   return {
     "oas.okf": pkgSource(p("okf"), "oas.okf", {
-      okf: { capability: "oas.okf", layer: "knowledge", commands: { harvest: { exec: "harvest.mjs" } }, requires: [{ command: "git", why: "knowledge bundles live in git" }], _files: { "harvest.mjs": "// harvest\n" } },
+      okf: { capability: "oas.okf", layer: "knowledge", commands: { harvest: "harvest.mjs" }, requires: [{ command: "git", why: "knowledge bundles live in git" }], _files: { "harvest.mjs": "// harvest\n" } },
     }),
     "oas.dev": pkgSource(p("dev"), "oas.dev", {
-      review: { capability: "oas.review", commands: { review: { exec: "review.mjs" } }, _files: { "review.mjs": "// review\n" } },
+      review: { capability: "oas.review", commands: { review: "review.mjs" }, _files: { "review.mjs": "// review\n" } },
     }),
     "oas.aweb": pkgSource(p("aweb"), "oas.aweb", {
       aweb: { capability: "oas.aweb", hooks: { spawn: "spawn.mjs" }, _files: { "spawn.mjs": "// spawn\n" } },
@@ -300,8 +300,23 @@ test("guided migration: config bytes preserved, exact v2 graph, superseded artif
     assert.deepEqual(e.dependencies, []);
     assert.deepEqual(e.trustedCapabilities, [], "executable approvals are re-earned, never carried over");
   }
-  // 3. custom/path entries survive as residue, byte-identical to their v1 form.
-  assert.deepEqual(Object.keys(lock.capabilities).sort(), ["custom.cap", "vendored.cap"]);
+  // 3. custom/path entries survive, byte-identical to their v1 form.
+  //
+  // KNOWN ENGINE BUG — this is where the case fails today, and the failure is
+  // real, not a stale assertion. `migrateLegacyLock` plans a non-official entry
+  // as `retain`, the CLI reports "kept unchanged", and then the converted v2
+  // document is written with only the migrated capability rows: custom.cap and
+  // vendored.cap are DROPPED, and `resolveOasConfig` at this scope then throws
+  // `external capability "custom.cap" is not usable: not locked`.
+  //
+  // The engine already refuses a scope for the same reason under `manual`
+  // ("No residue container: converting the mappable entries would silently drop
+  // the rest"); `retain` does not honour it. Whether a mixed scope should refuse
+  // like `manual` — which makes any 0.18 deployment with a custom or vendored
+  // capability permanently unmigratable — or grow a residue container is a
+  // maintainer decision, so this lane has not guessed. Reported to the
+  // coordinator; the assertions below state the behaviour the fix must restore.
+  assert.deepEqual(Object.keys(lock.capabilities).sort(), ["custom.cap", "oas.okf", "oas.review", "vendored.cap"]);
   for (const id of ["custom.cap", "vendored.cap"]) assert.deepEqual(lock.capabilities[id], legacyLock.capabilities[id]);
 
   // 4. only superseded official artifacts are removed.
@@ -375,7 +390,7 @@ test("several legacy capabilities aliased to ONE package migrate together, acqui
   // own not-yet-converted residue during acquisition.
   const bundle = pkgSource(join(base, "pkgs", "bundle"), "oas.bundle", {
     a: { capability: "oas.a" },
-    b: { capability: "oas.b", commands: { go: { exec: "go.mjs" } }, _files: { "go.mjs": "// go\n" } },
+    b: { capability: "oas.b", commands: { go: "go.mjs" }, _files: { "go.mjs": "// go\n" } },
   });
   const catalog = writeCatalog(join(base, "catalog.json"), { "oas.bundle": bundle }, ["oas.bundle"], { "oas.a": "oas.bundle", "oas.b": { package: "oas.bundle" } });
   const scope = join(base, "scope");
@@ -393,8 +408,13 @@ test("several legacy capabilities aliased to ONE package migrate together, acqui
   ]);
   const lock = JSON.parse(readFileSync(join(scope, OAS_LOCK_FILE), "utf8"));
   assert.deepEqual(Object.keys(lock.packages), ["oas.bundle"]);
-  assert.deepEqual(lock.packages["oas.bundle"].capabilities.sort(), ["oas.a", "oas.b"]);
-  assert.equal(lock.capabilities, undefined, "no residue is left behind by a multi-capability package");
+  // Package rows lock the TRANSPORT only; the capability rows' `package`
+  // back-reference is the single provider truth, so BOTH aliases land as
+  // capability rows naming the one package that was acquired once.
+  assert.equal(Object.hasOwn(lock.packages["oas.bundle"], "capabilities"), false);
+  assert.deepEqual(Object.keys(lock.capabilities).sort(), ["oas.a", "oas.b"]);
+  for (const id of ["oas.a", "oas.b"]) assert.equal(lock.capabilities[id].package, "oas.bundle");
+  assert.deepEqual(Object.values(lock.capabilities).map((c) => c.trusted), [false, false], "executable approvals are re-earned, never carried over");
   assert.deepEqual(env.result.trust.map((t) => t.capability), ["oas.b"], "only the executable capability needs re-approval");
   assert.deepEqual(resolveOasConfig(scope).capabilities.map((c) => c.id).sort(), ["oas.a", "oas.b"]);
   rmSync(base, { recursive: true, force: true });
@@ -423,19 +443,33 @@ test("a held dry run reports nonzero — automation can never read it as ready (
   rmSync(base, { recursive: true, force: true });
 });
 
-test("--recursive without --official keeps generic migrate semantics (unmappable entries become residue)", () => {
+test("--recursive without --official refuses a scope it cannot fully map, leaving its v1 lock working", () => {
   const base = temp();
   const root = join(base, "generic");
   write(join(root, "oas-config.yaml"), "name: generic\n");
   legacyCap(root, "some.cap", { dirName: "some" });
   const catalog = writeCatalog(join(base, "catalog.json"), officialSources(base), []);
+  const before = snapshot(root);
 
-  const env = json(cli(root, catalog, "migrate", "--recursive", "--dir", root, "--json"));
-  assert.equal(env.ok, true, JSON.stringify(env));
-  assert.deepEqual(env.result.mode, "generic");
-  assert.deepEqual(env.result.scopes.map((s) => s.status), ["migrated"]);
+  // A capability-materialization lock has NO residue container, so there is
+  // nowhere for an unmappable v1 entry to live. Converting only the mappable
+  // entries would silently drop the rest, so the scope stays v1 IN FULL and
+  // keeps working — the refusal is the feature, not a failure to implement one.
+  const r = cli(root, catalog, "migrate", "--recursive", "--dir", root, "--json");
+  assert.notEqual(r.status, 0, "a scope that cannot be converted is not a success");
+  const env = json(r);
+  assert.equal(env.ok, false);
+  assert.equal(env.error.code, "E_MIGRATE_FAILED");
+  assert.deepEqual(env.error.details.mode, "generic");
+  const [scope] = env.error.details.scopes;
+  assert.equal(scope.status, "failed");
+  assert.equal(scope.error.code, "legacy-lock");
+  assert.match(scope.error.message, /this scope cannot be converted yet — some\.cap/);
+  assert.match(scope.error.message, /left unchanged and its v1 capabilities keep working/);
+
+  assert.deepEqual(snapshot(root), before, "a refused scope is byte-identical");
   const lock = JSON.parse(readFileSync(join(root, OAS_LOCK_FILE), "utf8"));
-  assert.equal(lock.lockfileVersion, 2, "generic mode still performs the residue conversion the guided mode holds on");
+  assert.equal(lock.lockfileVersion ?? 1, 1, "it is still a v1 lock");
   assert.deepEqual(Object.keys(lock.capabilities), ["some.cap"]);
   rmSync(base, { recursive: true, force: true });
 });

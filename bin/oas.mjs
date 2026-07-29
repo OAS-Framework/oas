@@ -42,6 +42,7 @@ import {
 
 const args = process.argv.slice(2);
 const cmd = args[0];
+const HELP_WORDS = new Set(["help", "--help", "-h"]);
 const flag = (name) => {
   const i = args.indexOf(`--${name}`);
   return i >= 0 ? (args[i + 1] && !args[i + 1].startsWith("--") ? args[i + 1] : true) : undefined;
@@ -1735,7 +1736,12 @@ function removeCmd() {
   let r;
   try { r = removePackage(dir, id); } catch (e) { cmdFail(e.code || "remove-blocked", e.message || e); return; }
   if (JSON_MODE) { jsonOk(r); return; }
-  console.log(`Removed package ${r.package} (${shortPath(r.dir)}) and its entry in ${shortPath(r.lockFile)}.`);
+  // There is no package directory to name — a package is transport, and what
+  // actually leaves the disk is its materialized capability artifacts.
+  console.log(`Removed package ${r.package} from ${shortPath(r.lockFile)}.`);
+  console.log(r.capabilities.length
+    ? `  capabilities de-materialized: ${r.capabilities.join(", ")}`
+    : "  it supplied no capabilities at this scope.");
 }
 
 /** The team boundary a guided migration walks, when the scope declares one.
@@ -2044,18 +2050,27 @@ function init() {
     let text;
     try { text = loadTemplateConfig(template, dir); }
     catch (e) { bail(e.code || "E_TEMPLATE_SOURCE", e.message); return; }
-    writeFileSync(file, text);
-    note(`Created ${shortPath(file)} (${levelOf(dir)} level) from template ${template}`);
-    restore(dir);
-    if (JSON_MODE) {
-      // A seeded config that cannot resolve is reported through the envelope,
-      // never as an uncaught stack: it is the one thing a JSON caller must see.
-      let activated;
-      try { activated = resolveOasConfig(dir).capabilities.map((c) => ({ capability: c.id, layer: c.layer || null })); }
-      catch (e) { bail(e.code || "E_CONFIG_UNRESOLVABLE", `${shortPath(file)} was created from template ${template} but does not resolve: ${e.message}`); return; }
-      jsonOk({ file, level: levelOf(dir), raw, adopted: false, template, acquired: [], activated, requirements: [] });
+    // Seeding is a transaction too. A template can carry keys this kernel
+    // refuses, or lock entries that will not restore; either way the config this
+    // run wrote must not be left behind for the next command to trip over, and
+    // the failure must be a typed error rather than an uncaught stack.
+    let journal;
+    try { journal = beginRunJournal(dir); }
+    catch (e) { bail(e.code || "E_JOURNAL_FAILED", e.message); return; }
+    let activated;
+    try {
+      writeFileSync(file, text);
+      note(`Created ${shortPath(file)} (${levelOf(dir)} level) from template ${template}`);
+      restore(dir);
+      activated = resolveOasConfig(dir).capabilities.map((c) => ({ capability: c.id, layer: c.layer || null }));
+      journal.finalize();
+    } catch (e) {
+      const report = journal.rollback();
+      const detail = `${shortPath(file)} could not be seeded from template ${template}: ${e.message}`;
+      bail(e.code || "E_TEMPLATE_UNUSABLE", report.complete ? detail : `${detail} — ${report.summary}`);
       return;
     }
+    if (JSON_MODE) { jsonOk({ file, level: levelOf(dir), raw, adopted: false, template, acquired: [], activated, requirements: [] }); return; }
     offerTmuxMouseScrolling();
     return;
   }
@@ -2768,10 +2783,14 @@ else if (cmd === "version" || cmd === "--version" || cmd === "-v") versionCmd();
 else if (cmd === "spawn") { try { spawnCmd(); } catch (e) { if (JSON_MODE) jsonFail("E_SPAWN_FAILED", e.message || e); throw e; } }
 else if (cmd === "retire") retireCmd();
 else if (cmd === "create") createCmd();
-else if (cmd && !cmd.startsWith("--") && capabilityCommand()) { /* dispatched */ }
+// `!HELP_WORDS.has(cmd)`: usage NEVER depends on deployment state. `help` is a
+// word, so without this it reaches the capability dispatch, which resolves the
+// config chain and reads every lock in it — and a scope whose lock the kernel
+// refuses could then not print its own usage, which is exactly when you need it.
+else if (cmd && !cmd.startsWith("--") && !HELP_WORDS.has(cmd) && capabilityCommand()) { /* dispatched */ }
 // No matching kernel command or capability namespace: in --json mode the help
 // text must NOT contaminate stdout — still one envelope object, nonzero exit.
-else if (cmd && !cmd.startsWith("--") && JSON_MODE) jsonFail("E_UNKNOWN_COMMAND", `unknown command "${cmd}" — no kernel subcommand or active capability namespace matches`);
+else if (cmd && !cmd.startsWith("--") && !HELP_WORDS.has(cmd) && JSON_MODE) jsonFail("E_UNKNOWN_COMMAND", `unknown command "${cmd}" — no kernel subcommand or active capability namespace matches`);
 else {
   console.log(`oas — Open Agent Specialization
 
@@ -2883,5 +2902,5 @@ Usage:
                                             capability is active (e.g. oas okf harvest)
 
 Layers: ${LAYERS.join(", ")}. Level detection: ~ → laptop, .git → repo, else workspace.`);
-  process.exit(cmd && !["help", "--help", "-h"].includes(cmd) ? 1 : 0);
+  process.exit(cmd && !HELP_WORDS.has(cmd) ? 1 : 0);
 }
