@@ -1,5 +1,14 @@
 # Knowledge Log
 
+## 2026-07-29
+* **Creation**: added [Compose atomic engine operations with an outer command rollback journal](/lessons/compose-atomic-engine-operations-with-an-outer-command-journal.md) from `compose-atomic-engine-operations-with-an-outer-command-journal.md`.
+* **Creation**: added [Config synchronization must preserve untouched local bytes](/lessons/config-sync-must-preserve-untouched-bytes.md) from `config-sync-must-preserve-untouched-bytes.md`.
+* **Creation**: added [Hashed generated provenance must be replayable across tool upgrades](/lessons/hashed-generated-provenance-must-be-replayable.md) from `hashed-generated-provenance-must-be-replayable.md`.
+* **Creation**: added [Legacy resource spelling is not a safe package-format discriminator](/lessons/legacy-format-spelling-is-not-a-safe-compatibility-discriminator.md) from `legacy-format-spelling-is-not-a-safe-compatibility-discriminator.md`.
+* **Creation**: added [Node recursive cpSync can bypass JavaScript cleanup on unreadable trees](/lessons/node-recursive-cpsync-can-bypass-javascript-cleanup.md) from `node-recursive-cpsync-can-bypass-javascript-cleanup.md`.
+* **Creation**: added [Replace unadopted transitional formats in place instead of versioning compatibility](/lessons/replace-unadopted-transitional-formats-in-place.md) from `replace-unadopted-transitional-formats-in-place.md`.
+* **Creation**: added [Transient packages require an exact resource-reader seam for config consumers](/lessons/transient-packages-require-resource-reader-seam.md) from `transient-packages-require-resource-reader-seam.md`.
+
 ## 2026-07-26
 * **Creation**: added [Desktop spawn-modal race — roster appearance ≠ terminal readiness](/lessons/desktop-spawn-modal-tmux-race.md) from `spawn-modal-tmux-race-diagnosis.md`.
 * **Creation**: added [`--relation parent` re-points only the anchor's lineage](/lessons/relation-parent-repoints-only-anchor.md) from `relation-parent-repoints-only-anchor.md`.
