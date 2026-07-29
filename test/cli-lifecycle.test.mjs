@@ -1,0 +1,387 @@
+// CLI lifecycle surface over capability materialization.
+//
+// These cases were removed from test/package-engine.test.mjs when the engine
+// suite was narrowed to the engine API. They drive the CLI, so they live here.
+// They are TRANSLATED, not copied: the package store and the residue subsystem
+// are gone, so assertions about `.agents/packages/`, package-row capability
+// lists, `depsIntegrity` and migration residue are restated against flat
+// capability artifacts, capability-row provenance and the all-or-nothing
+// migration contract.
+//
+// What this file is for, in one line each:
+//   - the agent-callable JSON boundary: exactly one stdout envelope, always;
+//   - fail-closed lock diagnosis: a lock the reader refuses is never served as
+//     usable-but-empty, on any command;
+//   - canonical dispatch: the CLI a capability command runs is the one that
+//     dispatched it, never whatever PATH happens to resolve.
+import test from "node:test";
+import assert from "node:assert/strict";
+import { execFileSync, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, relative, resolve } from "node:path";
+import { OAS_LOCK_FILE, capabilityIntegrity, installedCapabilitiesDir, writeCapabilityLock } from "../lib/core.mjs";
+
+const CLI = resolve(new URL("../bin/oas.mjs", import.meta.url).pathname);
+const temp = () => mkdtempSync(join(tmpdir(), "oas-cli-lifecycle-"));
+function write(path, content) { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, content); }
+
+function gitify(dir) {
+  execFileSync("git", ["init", "-q", dir]);
+  execFileSync("git", ["-C", dir, "config", "user.email", "t@example.invalid"]);
+  execFileSync("git", ["-C", dir, "config", "user.name", "T"]);
+  execFileSync("git", ["-C", dir, "add", "-A"]);
+  execFileSync("git", ["-C", dir, "commit", "-qm", "init", "--allow-empty"]);
+  return dir;
+}
+
+/** Run the CLI. `catalog` binds a fixture catalog; `null` binds an EMPTY one so
+ * no case can silently reach the real one — or the network. */
+const HERMETIC_HOME = mkdtempSync(join(tmpdir(), "oas-cli-lifecycle-home-"));
+function cli(argv, { catalog, cwd, env: extra } = {}) {
+  // Hermetic environment. Two distinct leaks have to be closed, and neither is
+  // hypothetical — both were observed:
+  //   - HOME: the config/lock walk climbs to `/` and unions the laptop level,
+  //     so a developer's own ~/oas-config.yaml or ~/oas-lock.json would decide
+  //     what a test sees.
+  //   - OAS_HOME / PI_AGENT_HOME (and every other OAS_*/PI_* variable): when
+  //     the suite runs inside an OAS instance, the command dispatcher finds
+  //     that instance's `instance.json` and re-points its whole context at the
+  //     REAL repository instead of the fixture scope.
+  const env = {};
+  for (const [k, v] of Object.entries(process.env)) if (!/^(OAS|PI)_/.test(k)) env[k] = v;
+  Object.assign(env, { HOME: HERMETIC_HOME, OAS_HOME_DIR: join(HERMETIC_HOME, ".oas") }, extra);
+  if (catalog) env.OAS_PACKAGE_CATALOG = catalog;
+  else delete env.OAS_PACKAGE_CATALOG;
+  return spawnSync(process.execPath, [CLI, ...argv], { cwd: cwd || tmpdir(), env, encoding: "utf8" });
+}
+
+/** Assert stdout is EXACTLY one schema-v1 envelope and return it. This is the
+ * agent-callable contract: a second document, or a stray log line, breaks every
+ * machine consumer. */
+function envelope(r) {
+  const doc = JSON.parse(r.stdout);
+  assert.equal(r.stdout.trim(), JSON.stringify(doc), "stdout is exactly one JSON document");
+  assert.equal(doc.schemaVersion, 1);
+  return doc;
+}
+const okEnvelope = (r) => { const d = envelope(r); assert.equal(d.ok, true, JSON.stringify(d)); return d.result; };
+const failEnvelope = (r, code) => {
+  const d = envelope(r);
+  assert.equal(d.ok, false, JSON.stringify(d));
+  if (code) assert.equal(d.error.code, code, d.error.message);
+  return d.error;
+};
+
+/** Content hash of every file under a tree — the byte-identical oracle. */
+function snapshot(dir) {
+  const out = {};
+  const walk = (d) => {
+    for (const e of readdirSync(d, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      const p = join(d, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (e.isFile()) out[relative(dir, p)] = createHash("sha256").update(readFileSync(p)).digest("hex");
+    }
+  };
+  if (existsSync(dir)) walk(dir);
+  return out;
+}
+
+/** A package source exporting the given capabilities. `commands` values are
+ * "<script> [args…]" STRINGS — the object form stringifies to [object Object]
+ * and fails the engine's self-containment check. */
+function pkgSource(dir, pkgId, capabilities, extra = {}) {
+  const rels = [];
+  for (const [rel, cm] of Object.entries(capabilities)) {
+    rels.push(rel);
+    for (const [file, body] of Object.entries(cm._files || {})) write(join(dir, rel, file), body);
+    const { _files, ...manifest } = cm;
+    write(join(dir, rel, "oas.json"), JSON.stringify({ version: "1.0.0", description: "cap", ...manifest }, null, 2));
+  }
+  write(join(dir, "oas-package.json"), JSON.stringify({
+    package: pkgId, version: "1.0.0", description: `package ${pkgId}`,
+    compatibility: { oas: ">=0.1.0" }, capabilities: rels, ...extra,
+  }, null, 2));
+  return dir;
+}
+
+/** The everyday fixture: one package, one plain capability, one executable. */
+function fixture(base) {
+  return pkgSource(join(base, "src"), "x.p", {
+    "capabilities/plain": { capability: "x.plain" },
+    "capabilities/exec": { capability: "x.exec", commands: { go: "bin/go.mjs run" }, hooks: { spawn: "bin/hook.mjs" }, _files: { "bin/go.mjs": "//\n", "bin/hook.mjs": "//\n" } },
+  });
+}
+
+const lockOf = (dir) => JSON.parse(readFileSync(join(dir, OAS_LOCK_FILE), "utf8"));
+const artifact = (dir, id) => join(dir, ".agents", "capabilities", "installed", id);
+
+/** A scope with a config, so the config chain reaches it. */
+function scope(base, name = "scope", config = "name: t\n") {
+  const dir = join(base, name);
+  write(join(dir, "oas-config.yaml"), config);
+  return dir;
+}
+
+// ---------- the agent-callable JSON boundary ----------
+
+test("install JSON branches: package success, already-present restore, and a typed failure all emit ONE envelope", () => {
+  const base = temp();
+  const src = fixture(base);
+  const s = scope(base);
+
+  // (a) success: the capability rows are the payload, not a package-shaped summary.
+  const first = cli(["install", src, "--dir", s, "--json"]);
+  assert.equal(first.status, 0, first.stderr);
+  const installed = okEnvelope(first);
+  assert.equal(installed.root, "x.p");
+  assert.deepEqual(installed.capabilities.map((c) => c.capability).sort(), ["x.exec", "x.plain"]);
+  assert.ok(installed.capabilities.every((c) => c.trusted === false), "acquisition trusts nothing");
+
+  // (b) bare restore of an intact scope: everything present, nothing re-fetched.
+  const restore = cli(["install", "--no-requirements", "--dir", s, "--json"], { cwd: s });
+  assert.equal(restore.status, 0, restore.stdout);
+  const rows = okEnvelope(restore).scopes.flatMap((x) => x.artifacts);
+  const pkgRows = rows.filter((a) => a.id === "x.p");
+  assert.ok(pkgRows.length, JSON.stringify(rows));
+  assert.ok(pkgRows.every((a) => a.status === "present"), JSON.stringify(pkgRows));
+
+  // (c) failure: a source that is not a package, typed and single-enveloped.
+  const bad = cli(["install", join(base, "nope"), "--dir", s, "--json"]);
+  assert.notEqual(bad.status, 0);
+  failEnvelope(bad);
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("bare restore JSON keeps its frozen failure envelope: unrestorable and retired carry their exact codes", () => {
+  const base = temp();
+  const s = scope(base);
+  // A locked package whose source no longer exists cannot be restored.
+  write(join(s, OAS_LOCK_FILE), JSON.stringify({
+    lockfileVersion: 2,
+    packages: { "x.p": { source: `path:${join(base, "gone")}`, path: ".", version: "1.0.0", commit: "local", integrity: `sha256-${"a".repeat(64)}`, dependencies: [] } },
+    capabilities: { "x.a": { version: "1.0.0", package: "x.p", path: "capabilities/a", integrity: `sha256-${"b".repeat(64)}`, trusted: false } },
+  }, null, 2));
+
+  const r = cli(["install", "--no-requirements", "--dir", s, "--json"], { cwd: s });
+  assert.notEqual(r.status, 0, r.stdout);
+  const err = failEnvelope(r, "E_RECONCILE_FAILED");
+  // The COMPLETE report travels under error.details — a failure is still a
+  // full report, not a bare message.
+  const failed = err.details.scopes.flatMap((x) => x.artifacts).filter((a) => a.status !== "present");
+  assert.ok(failed.length, JSON.stringify(err.details));
+  assert.ok(failed.every((a) => typeof a.reason === "string" && a.reason), JSON.stringify(failed));
+
+  // Human mode reports the same failure with a nonzero exit.
+  const human = cli(["install", "--no-requirements", "--dir", s], { cwd: s });
+  assert.notEqual(human.status, 0);
+  assert.match(human.stdout + human.stderr, /FAILED/);
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("bulk package trust shows the FULL executable surface before approving, on stderr, keeping stdout one object", () => {
+  const base = temp();
+  const src = fixture(base);
+  const s = scope(base);
+  assert.equal(cli(["install", src, "--dir", s]).status, 0);
+
+  const r = cli(["trust", "x.p", "--all-capabilities", "--dir", s, "--json"]);
+  assert.equal(r.status, 0, r.stderr);
+  const result = okEnvelope(r);
+  // The pre-approval review is a SIDE CHANNEL: it must not contaminate stdout.
+  assert.match(r.stderr, /full executable surface/i);
+  assert.match(r.stderr, /x\.exec: commands \[go\], hooks \[spawn\]/);
+  assert.match(r.stderr, /x\.plain: commands \[none\], hooks \[none\]/);
+
+  assert.deepEqual(result.approved, ["x.exec"]);
+  assert.deepEqual(result.skipped, ["x.plain"], "a capability with no executable surface needs no approval");
+  assert.deepEqual(result.executableSurface["x.exec"], { commands: ["go"], hooks: ["spawn"] });
+  assert.equal(lockOf(s).capabilities["x.exec"].trusted, true);
+  assert.equal(lockOf(s).capabilities["x.plain"].trusted, false, "approving a package never trusts a non-executable capability");
+
+  // A package identity that supplies nothing here is a typed refusal.
+  failEnvelope(cli(["trust", "nope.pkg", "--all-capabilities", "--dir", s, "--json"]), "unknown-capability");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("a valueless --dir is E_BAD_ARGS on every lifecycle command, in JSON and human mode, before any side effect", () => {
+  const base = temp();
+  const s = scope(base);
+  const before = snapshot(s);
+  // `doctor` is deliberately absent: it takes its context POSITIONALLY.
+  for (const argv of [["install"], ["list"], ["trust", "x.a"], ["remove", "x.p"], ["migrate"]]) {
+    const r = cli([...argv, "--dir", "--json"], { cwd: s });
+    assert.notEqual(r.status, 0, `${argv[0]} accepted a valueless --dir`);
+    // `--json` was consumed as the value of `--dir`, so this is NOT json mode:
+    // the contract is the exit code and the typed message, on stderr.
+    assert.match(r.stderr + r.stdout, /--dir/, `${argv[0]}: ${r.stderr}`);
+  }
+  assert.deepEqual(snapshot(s), before, "a usage error never touches the scope");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("a valueless --dir is refused by the roster commands too, before any scaffold", () => {
+  const base = temp();
+  const s = scope(base);
+  const before = snapshot(s);
+  for (const argv of [["status"], ["spawn", "someone"], ["retire", "someone"], ["create", "someone"]]) {
+    const r = cli([...argv, "--dir"], { cwd: s });
+    assert.notEqual(r.status, 0, `${argv[0]} accepted a valueless --dir`);
+  }
+  assert.deepEqual(snapshot(s), before, "no agent home, no branch, no config write");
+  rmSync(base, { recursive: true, force: true });
+});
+
+// ---------- fail-closed lock diagnosis ----------
+
+/** Every shape the strict reader must refuse, with the command surfaces that
+ * must refuse it identically. Kept as data so a new refusal is one row. */
+const REFUSED_LOCKS = [
+  ["malformed JSON", "{ not json"],
+  ["a non-object root", JSON.stringify([1, 2, 3])],
+  ["a v2 document with no packages map", JSON.stringify({ lockfileVersion: 2, capabilities: {} })],
+  ["the superseded transitional package-root v2 shape", JSON.stringify({
+    lockfileVersion: 2,
+    packages: { "a.b": { source: "path:/x", path: ".", version: "1.0.0", integrity: `sha256-${"0".repeat(64)}`, capabilities: ["a.cap"], trustedCapabilities: [] } },
+  })],
+  ["a v1 document carrying a packages map", JSON.stringify({ lockfileVersion: 1, packages: {}, capabilities: {} })],
+  ["a malformed v1 entry", JSON.stringify({ lockfileVersion: 1, capabilities: { "a.cap": { source: "marketplace:a.cap@1", version: 1 } } })],
+  ["an unknown lockfileVersion", JSON.stringify({ lockfileVersion: 99, packages: {}, capabilities: {} })],
+];
+
+test("a lock the reader refuses is never served as usable-but-empty: list, doctor, update, remove and trust all fail closed", () => {
+  const base = temp();
+  for (const [label, body] of REFUSED_LOCKS) {
+    const s = scope(base, `s-${label.replace(/\W+/g, "-")}`);
+    write(join(s, OAS_LOCK_FILE), body);
+    const before = snapshot(s);
+
+    for (const argv of [["list"], ["update", "x.p"], ["remove", "x.p"], ["trust", "x.a"]]) {
+      const r = cli([...argv, "--dir", s, "--json"], { cwd: s });
+      assert.notEqual(r.status, 0, `${argv[0]} on ${label} exited 0`);
+      const err = failEnvelope(r);
+      assert.ok(err.code, `${argv[0]} on ${label} produced an untyped failure`);
+      assert.notEqual(err.code, "E_UNKNOWN_COMMAND");
+    }
+    // Doctor DIAGNOSES rather than dying — it is the report you reach for — but
+    // it never renders the refused lock as data.
+    const doc = cli(["doctor", s, "--json"], { cwd: s });
+    const rendered = JSON.parse(doc.stdout);
+    const diagnosed = rendered.error?.code === "invalid-lock" || rendered.packages?.lockError?.code === "invalid-lock";
+    assert.ok(diagnosed, `${label}: doctor did not diagnose it — ${doc.stdout.slice(0, 300)}`);
+    assert.doesNotMatch(doc.stdout, /residue/i, `${label}: no residue view exists`);
+
+    assert.deepEqual(snapshot(s), before, `${label}: a refused read mutated the scope`);
+  }
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("migrate never rewrites a lock it does not understand, and says so with a typed code", () => {
+  const base = temp();
+  for (const [label, body] of REFUSED_LOCKS) {
+    const s = scope(base, `m-${label.replace(/\W+/g, "-")}`);
+    write(join(s, OAS_LOCK_FILE), body);
+    const before = readFileSync(join(s, OAS_LOCK_FILE), "utf8");
+    for (const argv of [["migrate", "--dry-run"], ["migrate"]]) {
+      const r = cli([...argv, "--dir", s, "--json"], { cwd: s });
+      assert.notEqual(r.status, 0, `${argv.join(" ")} on ${label} exited 0`);
+      failEnvelope(r);
+      assert.equal(readFileSync(join(s, OAS_LOCK_FILE), "utf8"), before, `${label}: ${argv.join(" ")} rewrote the lock`);
+    }
+  }
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("a retired capability keeps its typed code through install, restore and doctor — human mode nonzero too", () => {
+  const base = temp();
+  const s = scope(base);
+  // A v1 lock naming a retired capability: it can never be restored, and the
+  // user must be told to remove the entry rather than to reacquire it.
+  const retired = "oas.web"; // the only retired id the kernel knows
+  write(join(s, OAS_LOCK_FILE), JSON.stringify({ lockfileVersion: 1, capabilities: { [retired]: { source: `marketplace:${retired}@1.0.0`, version: "1.0.0", integrity: `sha256-${"a".repeat(64)}` } } }, null, 2));
+
+  const r = cli(["install", "--no-requirements", "--dir", s, "--json"], { cwd: s });
+  assert.notEqual(r.status, 0, r.stdout);
+  const err = failEnvelope(r, "E_RECONCILE_FAILED");
+  const rows = err.details.scopes.flatMap((x) => x.artifacts).filter((a) => a.id === retired);
+  assert.deepEqual(rows.map((a) => a.status), ["retired"], JSON.stringify(err.details));
+  assert.equal(rows[0].code, "retired-capability");
+
+  const human = cli(["install", "--no-requirements", "--dir", s], { cwd: s });
+  assert.notEqual(human.status, 0, "a retired lock is not a successful restore");
+  assert.match(human.stdout, /RETIRED/);
+
+  // Acquiring it fresh is refused with the same code, before any fetch.
+  failEnvelope(cli(["install", retired, "--dir", s, "--json"], { cwd: s }), "retired-capability");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("doctor reports a malformed v1 lock at a CONFIGLESS scope — human and JSON agree", () => {
+  const base = temp();
+  const ws = scope(base, "ws", "name: ws\nteam:\n  name: t\n");
+  // A lock-only scope: no oas-config.yaml, so the config chain never reaches it
+  // and only the raw lock walk can see it.
+  const member = join(ws, "member");
+  mkdirSync(member, { recursive: true });
+  write(join(member, OAS_LOCK_FILE), JSON.stringify({ lockfileVersion: 1, capabilities: { "a.cap": { source: "marketplace:a.cap@1", version: 1 } } }, null, 2));
+
+  // Doctor is the ONE consumer that catches the fail-closed read: it still
+  // reports, and it reports the fault as a single top-level `lockError` naming
+  // the offending file — never as partially parsed entries.
+  const dj = JSON.parse(cli(["doctor", member, "--json"], { cwd: ws }).stdout);
+  assert.equal(dj.lockError?.code, "invalid-lock", JSON.stringify(dj).slice(0, 300));
+  assert.equal(dj.lockError.file, join(member, OAS_LOCK_FILE));
+  assert.match(dj.lockError.message, /legacy entry "a\.cap" is malformed/);
+  assert.deepEqual(dj.packages, [], "a refused lock yields NO package rows");
+  assert.deepEqual(dj.capabilities, [], "and no capability rows");
+
+  const human = cli(["doctor", member], { cwd: ws });
+  assert.match(human.stdout, /ERROR: .*malformed.*\[invalid-lock\]/, "the human report names the same fault");
+  assert.match(human.stdout, /never auto-repaired/, "and says the lock is not repaired for you");
+  rmSync(base, { recursive: true, force: true });
+});
+
+// ---------- canonical dispatch ----------
+
+test("a capability command runs through the CLI that dispatched it: a hostile PATH cannot intercept it", () => {
+  const base = temp();
+  // A capability whose command prints the oas binary its own environment names.
+  const src = pkgSource(join(base, "src"), "x.cmd", {
+    "capabilities/c": {
+      capability: "x.cmd", command: "demo",
+      commands: { show: "show.mjs" },
+      _files: { "show.mjs": "console.log(JSON.stringify({ cli: process.env.OAS_CLI_BIN || null }));\n" },
+    },
+  });
+  const s = scope(base, "scope", "name: t\ncapabilities:\n  additive:\n    x.cmd:\n      from: installed\n      global: true\n");
+  assert.equal(cli(["install", src, "--dir", s]).status, 0);
+  assert.equal(cli(["trust", "x.cmd", "--dir", s]).status, 0);
+
+  // An impostor `oas` earlier on PATH than anything else.
+  const evil = join(base, "evil");
+  mkdirSync(evil, { recursive: true });
+  write(join(evil, "oas"), "#!/bin/sh\necho INTERCEPTED\nexit 0\n");
+  chmodSync(join(evil, "oas"), 0o755);
+
+  const r = cli(["demo", "show", "--dir", s], { cwd: s, env: { PATH: `${evil}:${process.env.PATH}` } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.doesNotMatch(r.stdout, /INTERCEPTED/, "the impostor on PATH must never be reached");
+  const seen = JSON.parse(r.stdout.trim().split("\n").at(-1));
+  assert.equal(seen.cli, CLI, "OAS_CLI_BIN names the dispatching CLI, by absolute path");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("the Desktop version probe is unchanged: `oas version --json` still answers without any deployment state", () => {
+  const base = temp();
+  const s = scope(base);
+  // Even a scope whose lock the kernel refuses must not break the probe — it is
+  // how the Desktop decides whether a kernel is usable at all.
+  write(join(s, OAS_LOCK_FILE), "{ not json");
+  const r = cli(["version", "--json"], { cwd: s });
+  assert.equal(r.status, 0, r.stderr);
+  const doc = JSON.parse(r.stdout);
+  assert.equal(r.stdout.trim(), JSON.stringify(doc), "exactly one JSON document");
+  assert.match(doc.version, /^\d+\.\d+\.\d+/);
+  rmSync(base, { recursive: true, force: true });
+});

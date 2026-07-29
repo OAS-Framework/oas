@@ -41,11 +41,26 @@ function gitify(dir) {
   return dir;
 }
 
+/** Hermetic child environment. The suite runs INSIDE an OAS instance in this
+ * fleet, so two leaks have to be closed or a case silently reads real state:
+ *   - HOME: the config/lock walk climbs to `/` and unions the laptop level, so
+ *     a developer's own ~/oas-config.yaml or ~/oas-lock.json would be seen.
+ *   - OAS_* / PI_*: `OAS_HOME`/`PI_AGENT_HOME` make the CLI adopt the ambient
+ *     instance's `instance.json` and re-point its context at the REAL repo. */
+const HERMETIC_HOME = mkdtempSync(join(tmpdir(), "oas-classic-init-home-"));
+function hermeticEnv() {
+  const env = {};
+  for (const [k, v] of Object.entries(process.env)) if (!/^(OAS|PI)_/.test(k)) env[k] = v;
+  env.HOME = HERMETIC_HOME;
+  env.OAS_HOME_DIR = join(HERMETIC_HOME, ".oas");
+  return env;
+}
+
 /** Run the CLI with a fixture catalog bound through OAS_PACKAGE_CATALOG.
  * Passing `null` binds an EMPTY catalog — the clean-room shape, where the
  * official route is unavailable and init must say so instead of guessing. */
 function cli(argv, { catalog, cwd } = {}) {
-  const env = { ...process.env };
+  const env = hermeticEnv();
   if (catalog) env.OAS_PACKAGE_CATALOG = catalog;
   else delete env.OAS_PACKAGE_CATALOG;
   return spawnSync(process.execPath, [CLI, ...argv], { cwd: cwd || tmpdir(), env, encoding: "utf8" });
