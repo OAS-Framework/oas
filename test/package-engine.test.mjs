@@ -806,6 +806,67 @@ test("trust binds to the capability ARTIFACT integrity: approval, drift invalida
   throwsCode(() => approveCapability(s2, "nope.cap"), "unknown-capability", "unknown target");
 });
 
+test("approval verifies PROVENANCE, not just integrity: a re-hashed .oas-installation.json cannot be trusted, and a bulk approval commits none", () => {
+  const t = temp();
+  const src = pkgSource(join(t, "src"), { package: "x.p" }, {
+    "capabilities/a": { capability: "x.exec", commands: { go: "bin/go.mjs run" } },
+    "capabilities/b": { capability: "x.other", commands: { go: "bin/go.mjs run" } },
+  });
+  write(join(src, "capabilities/a/bin/go.mjs"), "//\n");
+  write(join(src, "capabilities/b/bin/go.mjs"), "//\n");
+
+  /** Tamper with one artifact's provenance and REBIND its lock hash, so the
+   * integrity precondition is satisfied and only the origin disagrees — the
+   * state an integrity-only check is blind to. */
+  const forgeOrigin = (s, cid, patch) => {
+    const file = join(artifact(s, cid), CAPABILITY_INSTALLATION_FILE);
+    write(file, JSON.stringify({ ...JSON.parse(readFileSync(file, "utf8")), ...patch }, null, 2) + "\n");
+    const doc = lockOf(s);
+    doc.capabilities[cid].integrity = capabilityArtifactIntegrity(artifact(s, cid));
+    write(join(s, OAS_LOCK_FILE), JSON.stringify(doc, null, 2));
+    return doc;
+  };
+
+  // Single-capability approval.
+  const s = scope(t);
+  acquirePackage(s, src);
+  forgeOrigin(s, "x.exec", { package: "somebody.else" });
+  // The integrity precondition passes — prove it, so this case cannot silently
+  // degrade into re-testing integrity-drift.
+  assert.equal(capabilityArtifactIntegrity(artifact(s, "x.exec")), lockOf(s).capabilities["x.exec"].integrity);
+  const e = throwsCode(() => approveCapability(s, "x.exec"), "invalid-lock", "forged provenance");
+  assert.match(e.message, new RegExp(`${CAPABILITY_INSTALLATION_FILE.replace(".", "\\.")} "package"`));
+  assert.equal(lockOf(s).capabilities["x.exec"].trusted, false);
+
+  // Bulk package approval: one disputed origin refuses the WHOLE approval, so
+  // its healthy sibling is not trusted either.
+  const s2 = scope(t, "scope2");
+  acquirePackage(s2, src);
+  forgeOrigin(s2, "x.other", { commit: "0000000000000000000000000000000000000000" });
+  throwsCode(() => approveCapability(s2, "x.p", { allCapabilities: true }), "invalid-lock", "bulk with one forged origin");
+  const after = lockOf(s2).capabilities;
+  assert.equal(after["x.exec"].trusted, false, "a bulk approval that refuses commits NOTHING");
+  assert.equal(after["x.other"].trusted, false);
+
+  // A capability whose provider row is missing is refused BEFORE the provenance
+  // check — the strict lock parse guarantees the row exists, which is what lets
+  // the verification above dereference it unguarded.
+  const s3 = scope(t, "scope3");
+  acquirePackage(s3, src);
+  const doc = lockOf(s3);
+  delete doc.packages["x.p"];
+  write(join(s3, OAS_LOCK_FILE), JSON.stringify(doc, null, 2));
+  const orphan = throwsCode(() => approveCapability(s3, "x.exec"), "invalid-lock", "provider package not locked");
+  assert.match(orphan.message, /provider package "x\.p" is not locked in the same packages map/);
+  assert.equal(lockOf(s3).capabilities["x.exec"].trusted, false);
+
+  // Control: untouched provenance still approves.
+  const s4 = scope(t, "scope4");
+  acquirePackage(s4, src);
+  assert.deepEqual(approveCapability(s4, "x.p", { allCapabilities: true }).approved.sort(), ["x.exec", "x.other"]);
+  rmSync(t, { recursive: true, force: true });
+});
+
 test("trust queries RAISE on an invalid lock — a bad lock is never served as untrusted-but-fine", () => {
   const t = temp();
   const s = scope(t);
