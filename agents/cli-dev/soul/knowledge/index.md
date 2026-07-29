@@ -34,6 +34,7 @@ read what the current task needs, not everything.
 * [architecture/spawn-relations-lineage-fields.md](architecture/spawn-relations-lineage-fields.md) - final child/sibling/parent/unrelated semantics, sparse lineage fields, attached-owner binding, ambiguity validation, and retirement splice behavior.
 
 ## Lessons
+* [lessons/digest-file-bytes-not-decoded-strings.md](lessons/digest-file-bytes-not-decoded-strings.md) - Hashing a UTF-8-decoded string silently digests U+FFFD replacements and drops the BOM, producing a content digest that nothing can reproduce from the file it claims to describe.
 * [lessons/npm-prefix-in-worktree-instances.md](lessons/npm-prefix-in-worktree-instances.md) - A stray cd to instance home makes npm find the main checkout's package.json, so the quality gate silently validates the wrong tree.
 * [lessons/pre-commit-gate-beats-post-hoc-rollback.md](lessons/pre-commit-gate-beats-post-hoc-rollback.md) - Undoing a committed package update by re-acquiring the previous version silently fails when the source itself has moved on; the policy check belongs inside the staging transaction.
 * [lessons/dry-run-exit-status-contract.md](lessons/dry-run-exit-status-contract.md) - A dry run that reports a held or otherwise blocked state must exit nonzero when apply would exit nonzero, or automation can read "planned" as "ready".

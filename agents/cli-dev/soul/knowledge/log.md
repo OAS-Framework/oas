@@ -1,6 +1,7 @@
 # Knowledge Log
 
 ## 2026-07-29
+* **Creation**: [digest-file-bytes-not-decoded-strings](/lessons/digest-file-bytes-not-decoded-strings.md) records that config-template content integrity must hash file bytes while decoding text with fatal UTF-8 and BOM preservation.
 * **Creation**: [test-process-aborting-regressions](/playbooks/test-process-aborting-regressions.md) records the child-process fixture pattern for regressions whose failure mode aborts the Node test runner.
 * **Creation**: [legacy-capability-root-discriminator](/decisions/legacy-capability-root-discriminator.md) records that legacy `capabilities: ["."]` acceptance keys on absence of `configTemplates`, not presence of deprecated `configs`.
 * **Update**: [flat-single-capability-packages](/decisions/flat-single-capability-packages.md) supersedes broad new-package support for `capabilities: ["."]` with the compatibility-only discriminator.
