@@ -284,13 +284,16 @@ follow their reviewed source provenance. Materialized artifacts live in
 are re-materialized by bare `oas install` with integrity verification.
 
 Legacy `lockfileVersion: 1` locks (per-capability marketplace installs) remain
-readable and usable. `oas migrate` converts them directly into the revised v2
-lock, retaining any unmappable entries as legacy residue. The earlier
-transitional v2 shape — capability lists on package rows, a persistent
-`.agents/packages/installed/` store — is rejected as an invalid lock and
-recreated by a fresh acquisition, never migrated. See `docs/capabilities.md`
-(“Distribution packages”), the schemas `docs/oas-package.schema.json` /
-`docs/oas-lock.schema.json`, and `docs/design/package-engine-contract.md`.
+readable and usable. `oas migrate` converts a scope to the revised v2 lock
+**all-or-nothing**: if any entry cannot map to a package yet, the whole scope
+stays byte-identical v1 and keeps working, and a successful run converts the
+entire scope at once. There is no residue container — a converted lock never
+carries leftover v1 entries. The earlier transitional v2 shape — capability
+lists on package rows, a persistent `.agents/packages/installed/` store — is
+rejected as an invalid lock and recreated by a fresh acquisition, never
+migrated. See `docs/capabilities.md` (“Distribution packages”), the schemas
+`docs/oas-package.schema.json` / `docs/oas-lock.schema.json`, and
+`docs/design/package-engine-contract.md`.
 
 ## CLI
 

@@ -302,10 +302,12 @@ dependencies; OAS materializes it with `npm ci --ignore-scripts` only — npm
 lifecycle scripts never run at acquisition, and capability code/hook paths
 must resolve inside the materialized capability root.
 
-`oas migrate` maps a scope's v1 marketplace/git/path capability locks directly
-into the revised v2 lock, preserving `from: installed` activation. Entries with
-no published package yet remain as legacy residue (doctor flags them);
-executable approvals are never carried over.
+`oas migrate` converts a scope's v1 capability locks to the revised v2 lock,
+preserving `from: installed` activation. It is all-or-nothing per scope: a scope
+converts only when every entry maps to a package, and if any entry cannot be
+mapped yet the whole scope stays byte-identical v1 and keeps working (re-run
+later). There is no residue container — a converted lock never carries leftover
+v1 entries. Executable approvals are never carried over.
 
 All package operations are agent-callable: every command above supports
 `--json` (one stdout envelope; failures carry the contract's stable error
@@ -316,7 +318,7 @@ instance) teaches the full lifecycle.
 ## Acquisition, lock, restore, and trust (single capabilities)
 
 ```bash
-oas install oas.jira --dir /path/to/repo             # legacy kernel-bundled capability (framework-trusted)
+oas install oas.jira --dir /path/to/repo             # official catalog id; approve executable surfaces with `oas trust`
 oas install https://example.invalid/team-chat.git --dir /path/to/repo
 oas install ../team-chat --dir /path/to/repo
 oas install                       # bare: restore locked-but-missing artifacts

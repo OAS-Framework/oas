@@ -336,22 +336,26 @@ oas migrate --official --recursive --dir <team-root>             # apply
 - **Config files are not rewritten.** Packages export the same capability IDs,
   so activation, layer bindings, targets, settings, exclusions, and injection
   overrides remain valid byte-for-byte.
-- **Held, not half-converted.** If this release's catalog cannot map every
-  official capability at a scope, that scope is left completely untouched and the
-  run reports it as held with a nonzero exit. Legacy capabilities keep working
-  until the mapping publishes. A `--dry-run` containing held scopes is nonzero
-  too (with the complete plan under `error.details`), so a readiness check can
-  never read "planned" as "can migrate now".
-- **Custom entries are untouched.** `git:`/`path:`/unknown v1 sources are never
-  acquired by the guided mode. They are kept exactly as they are (as residue in
-  a scope that converts for its official capabilities, and untouched in a scope
-  with no official capabilities at all). Plain `oas migrate` still maps custom
-  sources and creates residue when asked.
-- **One package, several capabilities.** When aliases map more than one legacy
-  capability onto the same package, all of them leave the residue map together
-  and the package is acquired once.
+- **All-or-nothing per scope.** If this release's catalog cannot map every
+  official capability at a scope, that scope is left completely untouched
+  (byte-identical v1) and the run reports it as held with a nonzero exit. Legacy
+  capabilities keep working until the mapping publishes. A successful run
+  converts the whole scope to revised v2 at once — there is no residue container,
+  so a converted lock never carries leftover v1 entries. A `--dry-run`
+  containing held scopes is nonzero too (with the complete plan under
+  `error.details`), so a readiness check can never read "planned" as "can
+  migrate now".
+- **Custom entries are left to plain `oas migrate`.** The guided `--official`
+  mode never touches `git:`/`path:`/unknown v1 sources — it converts only
+  official capabilities and leaves the rest byte-identical. Plain `oas migrate`
+  (without `--official`) is how you convert custom sources, and it is
+  all-or-nothing too: it converts a scope only when every entry maps to a
+  package, otherwise the scope stays v1.
+- **One package, several capabilities.** When catalog aliases map more than one
+  legacy capability onto the same package, they convert together and the package
+  is acquired once.
 - **Per scope transactional.** Each scope acquires its package closure, writes
-  its revised v2 lock, and only then removes the superseded v1 artifacts. A
+  a fresh revised v2 lock, and only then removes the superseded v1 artifacts. A
   failing scope is rolled back byte-identically. Other scopes keep their
   (truthfully reported) result, and the aggregate exit is nonzero.
 - **Trust is re-earned, never transferred.** A capability's materialized
