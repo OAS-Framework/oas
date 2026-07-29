@@ -3,7 +3,7 @@ name: oas-packages
 description: >-
   How to acquire, lock, restore, trust, update, remove, and migrate OAS
   distribution packages with the oas CLI. Use for package sources (git/local/
-  official catalog), oas-lock.json v2, migration residue, exact restore,
+  official catalog), oas-lock.json v2, all-or-nothing scope migration, exact restore,
   per-capability executable trust, runtime dependency closures, or package
   doctor failures. Triggers: "install a package", "oas install", "oas list",
   "oas update", "oas remove", "oas migrate", "oas trust", "lockfileVersion",
@@ -14,7 +14,7 @@ description: >-
 
 A **package** is the install/update/review unit: one git repo (or local dir)
 with an `oas-package.json` exporting one or more **capabilities** (the
-activation unit) and optional config profiles. Acquiring a package activates
+activation unit) and optional config templates. Acquiring a package activates
 NOTHING — activation stays in `oas-config.yaml` (see the oas-config skill).
 Never hand-edit `oas-lock.json` or the stores; every operation below is a CLI
 command, and all of them take `--json` (one stdout envelope, stable error
@@ -67,18 +67,14 @@ Local capability development is untouched by all of this:
 `.agents/capabilities/owned/<id>` (`from: owned`) and `from: path:<dir>` are
 not package sources and are never routed through package paths.
 
-Interim cutover note: official ids that are still KERNEL-MARKETPLACE
-capabilities (e.g. `oas.okf` today) route through the legacy capability path
-and are trusted at acquisition because they ship with the kernel you already
-installed. Once workstream 3 publishes them as catalog packages, the same id
-acquires as a package with NO automatic executable trust. Doctor's migration
-residue reporting tracks the cutover per scope.
-
-Dependencies declared in `oas-package.json` must be pinnable (official
-selector, tag/commit, or path). The whole closure is exact-locked in the
-scope's `oas-lock.json` (`lockfileVersion: 2`): source, exact commit, tree
-integrity, exported capabilities, dependencies, per-capability approvals.
-Installed roots live in `<scope>/.agents/packages/installed/` (gitignored).
+Installing a package MATERIALIZES each capability it exports into
+`<scope>/.agents/capabilities/installed/<id>/` (gitignored). There is no
+persistent package store. Dependencies declared in `oas-package.json` must be
+pinnable (official selector, tag/commit, or path). The whole closure is
+exact-locked in the scope's `oas-lock.json` (`lockfileVersion: 2`), which
+records two maps: `packages` (source, exact commit, selected path, payload
+integrity, dependencies) and `capabilities` (each artifact's version, provider
+package, path, integrity, trust).
 
 ## Everyday operations
 
@@ -94,41 +90,43 @@ oas remove <package>           # refuses while config or dependent packages refe
 
 ## Trust
 
-Executable surfaces (commands/hooks) are blocked until approved at the
-provider package's EXACT integrity:
+Executable surfaces (commands/hooks) are blocked until approved at each
+capability artifact's EXACT integrity:
 
 ```
 oas trust <capability>                     # approve only that capability
 oas trust <package> --all-capabilities     # explicit bulk; prints the full executable surface first
 ```
 
-Any integrity change (update, drift) invalidates every approval — re-review,
-then re-trust. Skill/instruction/config-only capabilities need lock integrity
-but no approval. Official-catalog identity is NOT executable trust.
+Any artifact integrity change (update, drift) resets that capability's trust —
+re-review, then re-trust. Skill/instruction/config-only capabilities need lock
+integrity but no approval. Official-catalog identity is NOT executable trust.
 
 ## Runtime dependencies
 
-A package (root or per-capability dir) may check in `package.json` +
-`package-lock.json`; OAS materializes it with
-`npm ci --omit=dev --omit=peer --ignore-scripts` — production tree only, no
-lifecycle scripts. The source hash excludes `node_modules`, but the
-materialized closure is hashed SEPARATELY as the lock's `depsIntegrity` and
-verified by trust and restore — tampering materialized deps invalidates
-approvals like source drift. Closures must be platform-invariant in v1.
-Host peer APIs are reached only through the supported runtime
-boundary, never auto-installed.
+A capability may check in `package.json` + `package-lock.json`; OAS materializes
+it with `npm ci --omit=dev --omit=peer --ignore-scripts` — production tree only,
+no lifecycle scripts. The package payload hash EXCLUDES `node_modules`. The
+materialized `node_modules` is instead part of that capability's own artifact
+integrity, so tampering with materialized deps resets the capability's trust
+just like source drift, and restore re-verifies it. Closures must be
+platform-invariant. Host peer APIs are reached only through the supported
+runtime boundary, never auto-installed.
 
 ## Migration from v1 locks
 
 ```
 oas migrate --dry-run          # plan: which v1 capability locks map to packages
-oas migrate                    # atomic: converts mappable entries, retains the rest
-                               # as residue in the v2 lock; rolls back on failure
+oas migrate                    # convert this scope to revised v2 — all-or-nothing
 ```
 
-Residue entries keep legacy restore/trust semantics and show in doctor as
-pending migration; re-run `oas migrate` when the official package publishes.
-Approvals never carry over — re-trust after migrating.
+`oas migrate` is all-or-nothing per scope. It converts a scope to the revised v2
+lock only when EVERY entry maps to a package. If any entry cannot be mapped yet
+(a marketplace id the catalog does not resolve, an unknown source), the whole
+scope stays byte-identical v1 and keeps working — re-run when it can map. A
+successful run writes a fresh v2 lock for the scope. There is NO residue
+container: a converted lock never carries leftover v1 entries. Approvals never
+carry over — re-trust after migrating.
 
 ### Upgrading a 0.18 deployment (bundled official capabilities → packages)
 
@@ -146,11 +144,12 @@ path order, ancestors first), then applies each scope transactionally.
   URL or tag, and no ref is guessed from the v1 capability version.
 - Config files are never rewritten — exported ids are unchanged, so activation,
   layers, targets, settings and exclusions stay valid.
-- No mapping yet at a scope → that scope is HELD and left untouched (nonzero
-  exit, `--dry-run` included); legacy capabilities keep working. Nothing is
-  converted to residue prematurely.
-- `git:`/`path:`/unknown and owned capabilities are untouched; plain
-  `oas migrate` is still the way to convert custom sources.
+- No mapping yet at a scope → that scope is HELD and left byte-identical v1
+  (nonzero exit, `--dry-run` included); legacy capabilities keep working. A
+  converting scope moves whole to revised v2 — there is no residue container, so
+  a converted lock never carries leftover v1 entries.
+- `git:`/`path:`/unknown and owned capabilities are left byte-identical by
+  guided mode; plain `oas migrate` is the way to convert custom sources.
 - After it runs: `oas trust <capability> --dir <scope>` for each executable
   surface it names (approvals never transfer), then `oas install --dir <scope>`
   — already-installed host requirements verify, nothing is reinstalled.
@@ -167,8 +166,10 @@ confirming the legacy capabilities remain supported.
 `oas doctor [dir] [--json]` distinguishes: missing locked package (run
 `oas install`), integrity drift (reacquire/update explicitly — approvals are
 already invalid), capability-list mismatch, untrusted executable surface
-(`oas trust <capability>`), legacy lock needing `oas migrate`, and migration
-residue (JSON: `migrationResidue[]`, each with the exact retry action).
+(`oas trust <capability>`), a legacy v1 lock pending migration (with the exact
+`oas migrate --dir <scope>` retry and `officialMigration` readiness for guided
+upgrades), and an unsupported transitional-v2 lock (fix or remove the entry —
+never auto-repaired).
 
 Source of truth beyond this skill: `oas --help` output,
 `docs/oas-package.schema.json`, `docs/oas-lock.schema.json`, and

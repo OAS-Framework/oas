@@ -183,9 +183,9 @@ lock-governed — from the official marketplace by id, a git URL, or a local
 path), `owned` (authored at this scope under `.agents/capabilities/owned/`),
 or `path:<dir>` (development declaration pointing at a manifest directory).
 A mismatch between `from:` and the discovered artifact origin is an error.
-`from: bundled` was removed: official capabilities are acquired from the
-marketplace (`oas install <id>`) like any other package — marketplace
-installs are trusted at acquisition.
+`from: bundled` was removed. Official capabilities are acquired like any other
+package, and acquisition never grants executable trust — approve executable
+surfaces explicitly with `oas trust <capability>`.
 
 ### `injection-override`
 
@@ -243,40 +243,57 @@ Its failure warns without hiding the instance.
 
 ## Acquisition and lockfile
 
-External acquisition writes `oas-lock.json` beside the declaring config:
+External acquisition writes `oas-lock.json` beside the declaring config in
+`lockfileVersion: 2`. It records two levels — a `packages` map (source, exact
+commit, selected path, payload integrity, dependencies) and a `capabilities`
+map (each materialized capability's version, provider package, path, artifact
+integrity, and executable trust):
 
 ```json
 {
-  "lockfileVersion": 1,
+  "lockfileVersion": 2,
+  "packages": {
+    "example.engineering": {
+      "source": "git:https://example.invalid/engineering.git@v1.4.2",
+      "version": "1.4.2",
+      "commit": "0123456789abcdef0123456789abcdef01234567",
+      "path": "oas-package",
+      "integrity": "sha256-…",
+      "dependencies": []
+    }
+  },
   "capabilities": {
     "example.review": {
-      "source": "git:https://example.invalid/review.git",
       "version": "1.4.2",
-      "commit": "0123456789abcdef",
+      "package": "example.engineering",
+      "path": "capabilities/example-review",
       "integrity": "sha256-…",
-      "trustedExecutables": false
+      "trusted": false
     }
   }
 }
 ```
 
-No command silently updates this record. Changed integrity blocks the package.
-`oas trust <id>` approves commands/hooks only for the exact locked integrity.
-Declarative skill/instruction packages need a valid lock but not executable
-approval. Bundled packages and packages authored under a scope's
-`.agents/capabilities/owned/` follow their reviewed source provenance.
-Acquired artifacts live in `.agents/capabilities/installed/` beside their
-lock, stay gitignored, and are reacquired by bare `oas install` with integrity
-verification.
+No command silently updates this record. Changed capability integrity blocks the
+artifact and resets its trust. `oas trust <id>` approves commands and hooks only
+for the exact locked artifact integrity, and official identity never grants it.
+Declarative skill/instruction capabilities need a valid lock but no executable
+approval. Capabilities authored under a scope's `.agents/capabilities/owned/`
+follow their reviewed source provenance. Materialized artifacts live in
+`.agents/capabilities/installed/<id>/` beside their lock, stay gitignored, and
+are re-materialized by bare `oas install` with integrity verification.
 
-Distribution packages (multi-capability install units) use `lockfileVersion: 2`
-with a `packages` map — exact source, commit, tree integrity, exported
-capability list, dependency closure, and per-capability `trustedCapabilities`
-approvals; installed roots live in `.agents/packages/installed/`. See
-`docs/capabilities.md` (“Distribution packages”), the schemas
+Legacy `lockfileVersion: 1` locks (per-capability marketplace installs) remain
+readable and usable. `oas migrate` converts a scope to the revised v2 lock
+**all-or-nothing**: if any entry cannot map to a package yet, the whole scope
+stays byte-identical v1 and keeps working, and a successful run converts the
+entire scope at once. There is no residue container — a converted lock never
+carries leftover v1 entries. The earlier transitional v2 shape — capability
+lists on package rows, a persistent `.agents/packages/installed/` store — is
+rejected as an invalid lock and recreated by a fresh acquisition, never
+migrated. See `docs/capabilities.md` (“Distribution packages”), the schemas
 `docs/oas-package.schema.json` / `docs/oas-lock.schema.json`, and
-`docs/design/package-engine-contract.md`. `oas migrate` maps v1 locks to v2,
-retaining unmappable entries as legacy residue.
+`docs/design/package-engine-contract.md`.
 
 ## CLI
 
@@ -315,18 +332,20 @@ templates:
   team: https://example.invalid/oas-templates.git
 ```
 
-Templates are snapshots: init copies the content, records provenance in a
-leading `# template:` comment, rewrites `name:`, strips the `templates:` map,
-and runs a restore so declared external capabilities are present. Later
-template edits never propagate silently.
+A template seed is copied once. `init` copies the content, records provenance in
+a leading `# template:` comment, rewrites `name:`, strips the `templates:` map,
+and runs a restore so declared external capabilities are present. Later template
+edits never propagate silently.
 
-### Package config profiles
+### Package config templates
 
 When the config and its capability providers travel together, prefer
-`oas init --package <source> [--config <name>]` — it validates and snapshots a
-reference profile shipped by a distribution package, with package/profile/
-commit provenance, and `oas config diff` reports later drift. See
-[Distribution packages](packages.md).
+`oas init --package <source> [--config <name>]`. It validates a reference config
+template shipped by a distribution package and writes it as your local
+`oas-config.yaml`, recording the exact template as a commit-safe adopted base
+with package, template, and commit provenance. `oas config diff` and
+`oas config sync` compare against that base later. Installing the package alone
+adopts no template. See [Distribution packages](packages.md).
 
 ## Fundamental-layer disable
 
