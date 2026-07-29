@@ -27,7 +27,7 @@ import {
   parsePackageSource, inspectGitSourceRoot, acquirePackage, restorePackages, listInstalledPackages, readPackageLocks, readLockedConfigTemplates, residueEntryViolation,
   officialCapabilityPackage, officialPackageCatalog,
   approveCapability, updatePackage, removePackage, migrateLegacyLock, applyLegacyLockMigration,
-  packageIntegrity, capabilityArtifactIntegrity, installedCapabilityDir, loadPackageManifestAt,
+  packageIntegrity, capabilityArtifactIntegrity, installedCapabilityDir, installedCapabilitiesDir, ownedCapabilitiesDir, loadPackageManifestAt,
   resolveOasConfig, resolveWorkMode, composeInstanceAgentsMd, parseYamlNested, packagedInject, teamAgentRoots,
   findTeamAgent, findTeamInstance, findCapabilityAgent, findInstanceHome, listCapabilityAgents, workspaceOf,
   ensureRoot, findRoot, findAgent, listAgents, listInstances, listAgentDefs, createAgent as coreCreateAgent,
@@ -1906,12 +1906,19 @@ function updatePackageCmd(id) {
 /**
  * oas init [--raw] [--dir <dir>] [--knowledge <id>] [--messaging <id>] [--tasks <id>]
  *
- * Per-layer flags override template defaults (canonical capability ID or "none").
- * Values are validated against known manifests and requires are checked.
+ * Per-layer flags name a canonical capability ID or "none". A layer is filled by
+ * a capability already at this scope (own store first — no config exists yet, so
+ * the config-chain walk cannot see it), otherwise by acquiring the official
+ * PACKAGE that supplies it through the materialization engine. Acquisition is
+ * not activation, not executable trust and not requirement consent, and the
+ * whole run is one transaction that rolls back on any failure.
  */
 /** Resolve a template (name via outer-config `templates:` maps, local path, or git URL's
  * main-branch oas-config.yaml) into snapshot text with a provenance comment. */
 function loadTemplateConfig(spec, dir) {
+  // THROWS typed errors rather than exiting: `oas init --template` reports
+  // through the same single JSON envelope as every other init form.
+  const fail = (code, message) => { const e = new Error(message); e.code = code; throw e; };
   let source = spec;
   const isDirect = /^(https?:\/\/|git@|ssh:\/\/)/.test(spec) || spec.startsWith(".") || spec.startsWith("/") || spec.startsWith("~");
   if (!isDirect) {
@@ -1919,7 +1926,7 @@ function loadTemplateConfig(spec, dir) {
     for (const cfg of configChain(dir)) {
       if (cfg.templates?.[spec]) { named = { value: cfg.templates[spec], level: cfg._level }; break; }
     }
-    if (!named) die(`unknown template "${spec}" — declare it under templates: in an outer oas-config.yaml, or pass a path/git URL`);
+    if (!named) fail("E_UNKNOWN_TEMPLATE", `unknown template "${spec}" — declare it under templates: in an outer oas-config.yaml, or pass a path/git URL`);
     source = /^(https?:\/\/|git@|ssh:\/\/)/.test(named.value) || named.value.startsWith("/") || named.value.startsWith("~")
       ? named.value : resolve(named.level, named.value);
   }
@@ -1929,14 +1936,14 @@ function loadTemplateConfig(spec, dir) {
     try {
       execFileSync("git", ["clone", "-q", "--depth", "1", source, tmp], { stdio: "inherit" });
       const cfgFile = join(tmp, "oas-config.yaml");
-      if (!existsSync(cfgFile)) die(`template repo has no oas-config.yaml on its default branch: ${source}`);
+      if (!existsSync(cfgFile)) fail("E_TEMPLATE_SOURCE", `template repo has no oas-config.yaml on its default branch: ${source}`);
       body = readFileSync(cfgFile, "utf8");
       const commit = execFileSync("git", ["-C", tmp, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
       provenance = `${source}@${commit.slice(0, 12)}`;
     } finally { rmSync(tmp, { recursive: true, force: true }); }
   } else {
     const path = resolve(source.replace(/^~\//, `${homedir()}/`));
-    if (!existsSync(path)) die(`template config not found: ${path}`);
+    if (!existsSync(path)) fail("E_TEMPLATE_SOURCE", `template config not found: ${path}`);
     body = readFileSync(path, "utf8");
     provenance = path;
   }
@@ -1956,37 +1963,58 @@ function init() {
   const dir = dirFlag();
   const file = join(dir, "oas-config.yaml");
   const pkgSrc = flag("package");
-  if (existsSync(file)) {
-    const msg = `${shortPath(file)} already exists — edit it or use \`oas use\``;
-    if (JSON_MODE && pkgSrc) jsonFail("E_CONFIG_EXISTS", msg);
-    die(msg);
-  }
+  // Every init form — classic, --template and --package — reports through the
+  // SAME one-envelope JSON boundary; nothing here may print two documents.
+  const bail = (code, msg) => (JSON_MODE ? jsonFail(code, msg) : die(msg));
+  const note = (msg) => (JSON_MODE ? console.error(msg) : console.log(msg));
+  if (existsSync(file)) bail("E_CONFIG_EXISTS", `${shortPath(file)} already exists — edit it or use \`oas use\``);
 
   if (pkgSrc && pkgSrc !== true) { initPackage(pkgSrc, dir, file); return; }
-  if (pkgSrc === true) (JSON_MODE ? jsonFail("E_USAGE", "--package needs a package id, local path, or git URL") : die("--package needs a package id, local path, or git URL"));
+  if (pkgSrc === true) { bail("E_USAGE", "--package needs a package id, local path, or git URL"); return; }
 
   const template = flag("template");
   if (template && template !== true) {
-    const text = loadTemplateConfig(template, dir);
+    let text;
+    try { text = loadTemplateConfig(template, dir); }
+    catch (e) { bail(e.code || "E_TEMPLATE_SOURCE", e.message); return; }
     writeFileSync(file, text);
-    console.log(`Created ${shortPath(file)} (${levelOf(dir)} level) from template ${template}`);
+    note(`Created ${shortPath(file)} (${levelOf(dir)} level) from template ${template}`);
     restore(dir);
+    if (JSON_MODE) {
+      // A seeded config that cannot resolve is reported through the envelope,
+      // never as an uncaught stack: it is the one thing a JSON caller must see.
+      let activated;
+      try { activated = resolveOasConfig(dir).capabilities.map((c) => ({ capability: c.id, layer: c.layer || null })); }
+      catch (e) { bail(e.code || "E_CONFIG_UNRESOLVABLE", `${shortPath(file)} was created from template ${template} but does not resolve: ${e.message}`); return; }
+      jsonOk({ file, level: levelOf(dir), raw, adopted: false, template, acquired: [], activated, requirements: [] });
+      return;
+    }
     offerTmuxMouseScrolling();
     return;
   }
-  if (template === true) die("--template needs a name, local config path, or git URL");
+  if (template === true) { bail("E_USAGE", "--template needs a name, local config path, or git URL"); return; }
 
   // Per-layer overrides: --knowledge oas.okf, --messaging none, --tasks oas.jira …
   const overrides = {};
   const market = marketplaceCapabilities();
-  const mans = { ...market, ...capabilityManifests(dir) };
+  // Own-scope manifests are read DIRECTLY: no oas-config.yaml exists here yet,
+  // so the config-chain walk cannot see this scope's own store, and a
+  // capability already installed here would look unknown.
+  const mans = { ...market, ...capabilityManifests(dir), ...ownScopeCapabilityManifests(dir) };
   for (const layer of LAYERS) {
     const v = flag(layer);
     if (v === undefined) continue;
-    if (v === true || String(v).startsWith("--")) die(`--${layer} needs a canonical capability ID or "none"`);
+    if (v === true || String(v).startsWith("--")) bail("E_USAGE", `--${layer} needs a canonical capability ID or "none"`);
     if (v !== "none") {
-      if (!mans[v]) die(`unknown capability "${v}" for --${layer} (known: ${Object.keys(mans).join(", ") || "none"})`);
-      if (mans[v].layer !== layer) die(`capability "${v}" declares layer "${mans[v].layer || "none"}", not "${layer}"`);
+      // Known locally: its declared layer is checkable right now, before any
+      // mutation. Otherwise the official catalog may still supply it, and the
+      // layer is verified against the MATERIALIZED manifest after acquisition —
+      // inside the run transaction, so a disagreement rolls the whole run back.
+      if (mans[v]) {
+        if (mans[v].layer !== layer) bail("E_LAYER_MISMATCH", `capability "${v}" declares layer "${mans[v].layer || "none"}", not "${layer}"`);
+      } else if (!officialCapabilityPackage(v).available) {
+        bail("E_UNKNOWN_CAPABILITY", `unknown capability "${v}" for --${layer} — it is not acquired at ${shortPath(dir)}, not in the marketplace (${Object.keys(market).join(", ") || "empty"}), and no official package supplies it (catalog: ${Object.keys(officialPackageCatalog()).join(", ") || "empty"})`);
+      }
     }
     overrides[layer] = v;
   }
@@ -1998,7 +2026,7 @@ function init() {
 
   // Interactive TTY with no explicit layer flags: present each default and ask.
   // Non-interactive contexts (agents, CI) keep flags-or-silent-defaults — never hang.
-  if (!raw && process.stdin.isTTY && process.stdout.isTTY && !Object.keys(overrides).length) {
+  if (!raw && !JSON_MODE && process.stdin.isTTY && process.stdout.isTTY && !Object.keys(overrides).length) {
     const byLayer = (l) => Object.values(mans).filter((m) => m.layer === l).map((m) => m.capability);
     console.log("Fundamental layers for this scope — Enter keeps the default, or type a capability id / \"none\":");
     const ask = (prompt) => {
@@ -2020,6 +2048,21 @@ function init() {
     }
     if ((layers.messaging || "none") !== "none") console.log("  (messaging via aweb: after init, run `oas aweb setup` for guided onboarding)");
   }
+  // ---- Everything below MUTATES. It is ONE run-level transaction: the config
+  // file, the lock, the flat capability artifacts, the capability .gitignore
+  // and any `.agents` anchor this run creates roll back together. A capability
+  // that was already installed at this scope before the run is restored
+  // byte-identically — this run only ever undoes its own changes. ----
+  let journal;
+  try { journal = beginRunJournal(dir); }
+  catch (e) { bail(e.code || "E_JOURNAL_FAILED", e.message); return; }
+  const abort = (e, code) => {
+    const report = journal.rollback();
+    bail(code || e.code || "E_INIT_FAILED", report.complete ? e.message : `${e.message} — ${report.summary}`);
+  };
+
+  const acquisitions = [];
+  let resolved;
   const lines = [
     `name: ${basename(dir)}`,
     "",
@@ -2033,61 +2076,152 @@ function init() {
     "  # Fundamental layers — exclusive slots; a capability entry or an explicit none.",
     "  layers:",
   ];
-  for (const layer of LAYERS) {
-    const selected = layers[layer];
-    if (!selected) { lines.push(`    # ${layer}: (unset — inherits from outer config scopes; set an entry or "none")`); continue; }
-    if (selected === "none") { lines.push(`    ${layer}: none`); continue; }
-    let manifest = capabilityManifest(selected, dir);
-    // Marketplace capabilities are acquired into this scope's installed/ store first.
-    if (!manifest && market[selected]) {
-      try {
-        const r = acquireCapability(dir, selected);
-        try {
-          writeCapabilityLock(dir, r.manifest.capability, {
-            source: r.source, version: r.manifest.version || null, integrity: r.integrity, trustedExecutables: true,
-          });
-        } catch (e) { rmSync(r.dest, { recursive: true, force: true }); throw e; }
-        console.log(`Acquired ${r.manifest.capability}@${r.manifest.version} from the marketplace → ${shortPath(r.dest)}`);
-        // Discovery needs the config file (written below); trust the acquisition result here.
-        manifest = { ...r.manifest, _origin: `installed:${dir}` };
-      } catch (e) { die(`could not acquire ${selected}: ${e.message}`); }
+  try {
+    for (const layer of LAYERS) {
+      const selected = layers[layer];
+      if (!selected) { lines.push(`    # ${layer}: (unset — inherits from outer config scopes; set an entry or "none")`); continue; }
+      if (selected === "none") { lines.push(`    ${layer}: none`); continue; }
+      // Already here (own scope first — see above), or acquired now.
+      const manifest = ownScopeCapabilityManifest(dir, selected)
+        || capabilityManifest(selected, dir)
+        || acquireLayerCapability(dir, selected, layer, acquisitions, note);
+      lines.push(`    ${layer}:`);
+      lines.push(`      capability: ${manifest.capability}`);
+      if (String(manifest._origin).startsWith("installed:")) { lines.push("      from: installed"); lines.push(`      # injection-override: .agents/injections/capabilities/${manifest.capability}.md`); }
+      else if (String(manifest._origin).startsWith("owned:")) { lines.push("      from: owned"); lines.push(`      # injection edited at source: .agents/capabilities/owned/${manifest.capability}/injects/`); }
     }
-    if (!manifest) die(`capability "${selected}" is not acquired at ${shortPath(dir)} and is not in the marketplace (${Object.keys(market).join(", ") || "empty"})`);
-    lines.push(`    ${layer}:`);
-    lines.push(`      capability: ${manifest.capability}`);
-    if (String(manifest._origin).startsWith("installed:")) { lines.push("      from: installed"); lines.push(`      # injection-override: .agents/injections/capabilities/${manifest.capability}.md`); }
-    else if (String(manifest._origin).startsWith("owned:")) { lines.push("      from: owned"); lines.push(`      # injection edited at source: .agents/capabilities/owned/${manifest.capability}/injects/`); }
-  }
-  lines.push(
-    "  # Additive capabilities — non-exclusive; target global, agent-types, or souls.",
-    "  # additive:",
-    "  #   <capability-id>:",
-    "  #     from: installed",
-    "  #     global: true",
-    "  #     # injection-override: .agents/injections/capabilities/<capability-id>.md",
-    "",
-    "# ── Work modes — optional per-mode env bootstrap.",
-    "# `setup:` runs inside each NEW worktree right after `git worktree add` — use it",
-    "# for env setup scripts (installs, .env copying, direnv, mise, etc.).",
-    "# The path is relative to this config's directory.",
-    "work-modes:",
-    "  worktree:",
-    "    # setup: scripts/setup-worktree.sh",
-    "",
-    "# ── OAS defaults — the framework's baseline instruction block.",
-    "oas:",
-    "  # injection-override: .agents/injections/oas-defaults/oas.md",
-  );
-  writeFileSync(file, lines.join("\n") + "\n");
-  console.log(`Created ${shortPath(file)} (${levelOf(dir)} level${raw ? ", raw" : ""})`);
+    lines.push(
+      "  # Additive capabilities — non-exclusive; target global, agent-types, or souls.",
+      "  # additive:",
+      "  #   <capability-id>:",
+      "  #     from: installed",
+      "  #     global: true",
+      "  #     # injection-override: .agents/injections/capabilities/<capability-id>.md",
+      "",
+      "# ── Work modes — optional per-mode env bootstrap.",
+      "# `setup:` runs inside each NEW worktree right after `git worktree add` — use it",
+      "# for env setup scripts (installs, .env copying, direnv, mise, etc.).",
+      "# The path is relative to this config's directory.",
+      "work-modes:",
+      "  worktree:",
+      "    # setup: scripts/setup-worktree.sh",
+      "",
+      "# ── OAS defaults — the framework's baseline instruction block.",
+      "oas:",
+      "  # injection-override: .agents/injections/oas-defaults/oas.md",
+    );
+    writeFileSync(file, lines.join("\n") + "\n");
+    // Resolve INSIDE the transaction: a config this run wrote that cannot
+    // resolve is a broken scope, so it fails the init and rolls back rather
+    // than being left behind for the next command to trip over.
+    resolved = resolveOasConfig(dir);
+    journal.finalize();
+  } catch (e) { abort(e); return; }
 
-  const r = resolveOasConfig(dir);
+  note(`Created ${shortPath(file)} (${levelOf(dir)} level${raw ? ", raw" : ""})`);
+  // Acquisition is not activation, not executable trust, and not requirement
+  // consent — say so per acquisition rather than implying the layer is ready.
+  for (const a of acquisitions) {
+    if (!a.executableSurface.length) continue;
+    note(`Executable surfaces from ${a.package || "the marketplace"} are blocked until trusted: ${a.executableSurface.map((c) => `oas trust ${c}`).join("; ")}`);
+  }
+
+  const r = resolved;
+  const activated = [];
   for (const cap of r.capabilities) {
-    console.log(`Activated: ${cap.id}${cap.layer ? ` → ${cap.layer}` : ""}`);
-    for (const miss of cap.missingRequires) console.log(`WARNING: required command "${miss.command}" not on PATH — ${miss.why || ""}${miss.install ? ` (install: ${miss.install})` : ""}`);
+    activated.push({ capability: cap.id, layer: cap.layer || null });
+    note(`Activated: ${cap.id}${cap.layer ? ` → ${cap.layer}` : ""}`);
+    for (const miss of cap.missingRequires) note(`WARNING: required command "${miss.command}" not on PATH — ${miss.why || ""}${miss.install ? ` (install: ${miss.install})` : ""}`);
+  }
+  if (JSON_MODE) {
+    jsonOk({
+      file, level: levelOf(dir), raw, adopted: false,
+      layers: Object.fromEntries(LAYERS.map((l) => [l, layers[l] ?? null])),
+      acquired: acquisitions, activated,
+      requirements: r.capabilities.flatMap((c) => c.missingRequires.map((m) => ({ capability: c.id, command: m.command, install: m.install || null }))),
+    });
+    return;
   }
   offerTmuxMouseScrolling();
 }
+
+/** Acquire the capability backing one fundamental layer at classic-init time.
+ *
+ * Catalog-first: when an official package supplies the capability it comes
+ * through the package engine — flat materialization, a capability-materialization
+ * lock, and NO implicit executable trust. The legacy standalone-capability route
+ * survives only for marketplace capabilities the official catalog cannot supply
+ * today, and it is the only branch that still writes a v1 lock.
+ *
+ * Throws on every failure: the caller holds the run journal, and exiting here
+ * would strand its backup. */
+function acquireLayerCapability(dir, capId, layer, acquired, note) {
+  const fail = (code, message) => { const e = new Error(message); e.code = code; throw e; };
+  const official = officialCapabilityPackage(capId);
+  if (official.available) {
+    const acq = acquirePackage(dir, official.package);
+    if (!acq.capabilities.some((c) => c.capability === capId)) {
+      fail("E_LAYER_NOT_EXPORTED", `package ${official.package} does not export capability "${capId}" — it exports ${acq.capabilities.map((c) => c.capability).join(", ") || "nothing"}`);
+    }
+    // The layer is verified against the manifest actually WRITTEN TO DISK, never
+    // against the marketplace copy or the catalog's word for it.
+    const manifest = ownScopeCapabilityManifest(dir, capId);
+    if (!manifest) fail("E_LAYER_UNREADABLE", `capability "${capId}" was materialized but its manifest under ${shortPath(installedCapabilityDir(dir, capId))} is unreadable`);
+    if (manifest.layer !== layer) fail("E_LAYER_MISMATCH", `capability "${capId}" declares layer "${manifest.layer || "none"}", not "${layer}"`);
+    const executableSurface = acq.capabilities
+      .filter((c) => c.executableSurface?.commands?.length || c.executableSurface?.hooks?.length)
+      .map((c) => c.capability);
+    acquired.push({
+      layer, capability: capId, route: "package", package: official.package, via: official.via,
+      packages: acq.installed.map((p) => ({ package: p.package, version: p.version || null, commit: p.commit || null })),
+      lockFile: acq.lockFile, trusted: false, executableSurface,
+    });
+    note(`Acquired package ${official.package} for the ${layer} layer → ${capId} (${acq.installed.map((p) => `${p.package}@${p.version}`).join(", ")}) → ${shortPath(acq.lockFile)}`);
+    return { ...manifest, _origin: `installed:${dir}` };
+  }
+  const market = marketplaceCapabilities();
+  if (!market[capId]) {
+    fail("E_UNKNOWN_CAPABILITY", `capability "${capId}" is not acquired at ${shortPath(dir)}, is not in the marketplace (${Object.keys(market).join(", ") || "empty"}), and no official package supplies it`);
+  }
+  // Legacy route: kernel-bundled marketplace capabilities predate the official
+  // packages, ship with the kernel already installed, and keep their v1 lock and
+  // acquisition-time trust until the catalog covers them.
+  const r = acquireCapability(dir, capId);
+  try {
+    writeCapabilityLock(dir, r.manifest.capability, {
+      source: r.source, version: r.manifest.version || null, integrity: r.integrity, trustedExecutables: true,
+    });
+  } catch (e) { rmSync(r.dest, { recursive: true, force: true }); throw e; }
+  if (r.manifest.layer !== layer) fail("E_LAYER_MISMATCH", `capability "${capId}" declares layer "${r.manifest.layer || "none"}", not "${layer}"`);
+  acquired.push({ layer, capability: capId, route: "marketplace", package: null, via: "marketplace", packages: [], lockFile: join(dir, OAS_LOCK_FILE), trusted: true, executableSurface: [] });
+  note(`Acquired ${r.manifest.capability}@${r.manifest.version} from the marketplace → ${shortPath(r.dest)}`);
+  return { ...r.manifest, _origin: `installed:${dir}` };
+}
+
+/** Capability manifests physically present at THIS scope's own store.
+ *
+ * `capabilityManifests` walks the config chain, so during `oas init` — when no
+ * oas-config.yaml exists at the target scope yet — this scope is not a level and
+ * its own installed/ and owned/ capabilities are invisible. Init reads them
+ * directly instead, which is also what makes a same-run acquisition visible to
+ * the rest of the run. */
+function ownScopeCapabilityManifests(dir) {
+  const out = {};
+  for (const [sub, origin] of [[installedCapabilitiesDir(dir), "installed"], [ownedCapabilitiesDir(dir), "owned"]]) {
+    if (!existsSync(sub)) continue;
+    let entries;
+    try { entries = readdirSync(sub, { withFileTypes: true }); } catch { continue; }
+    for (const e of entries) {
+      // Dot-prefixed entries are transaction staging, never installed content.
+      if (!e.isDirectory() || e.name.startsWith(".")) continue;
+      let m;
+      try { m = JSON.parse(readFileSync(join(sub, e.name, "oas.json"), "utf8")); } catch { continue; }
+      if (m && typeof m.capability === "string") out[m.capability] = { ...m, _dir: join(sub, e.name), _origin: `${origin}:${dir}` };
+    }
+  }
+  return out;
+}
+const ownScopeCapabilityManifest = (dir, capId) => ownScopeCapabilityManifests(dir)[capId];
 
 // ---------- roster: status / spawn / retire / create ----------
 function status() {
@@ -2661,15 +2795,21 @@ Usage:
   oas type list                             souls join via create --type / soul.yaml
   oas inject eject <cap|work-mode|oas>      copy a packaged injection to the conventional
       [--dir <d>]                           .agents/injections/ path and set injection-override
-  oas init [--raw] [--dir <dir>]            create an oas-config.yaml here
-      [--package <id|path|git-url>]         adopt one config TEMPLATE from a package as your
-      [--config <template>] [--json]        own local config and record the exact adopted base
-      [--template <name|path|git-url>]      (named template, else the marked default, else the
-                                            only one); refuses to overwrite an existing config;
-      [--knowledge <id|none>]               --json = one result envelope, noninteractive);
-      [--messaging <id|none>]               or seed from a template config (named via
-      [--tasks <id|none>]                   outer templates: map, a local file, or a
-      [--tmux-mouse|--no-tmux-mouse]        git repo's default-branch oas-config.yaml)
+  oas init [--raw] [--dir <dir>] [--json]   create an oas-config.yaml here. Fundamental
+      [--knowledge <id|none>]               layers are filled from what is already at this
+      [--messaging <id|none>]               scope, else acquired from the official package
+      [--tasks <id|none>]                   that supplies them — capabilities materialize
+      [--tmux-mouse|--no-tmux-mouse]        flat, executable surfaces stay untrusted, and
+                                            the whole run rolls back on any failure.
+      [--package <id|path|git-url>]         instead: adopt one config TEMPLATE from a package
+      [--config <template>]                 as your own local config and record the exact
+                                            adopted base (named template, else the marked
+                                            default, else the only one).
+      [--template <name|path|git-url>]      instead: seed from a template config (named via an
+                                            outer templates: map, a local file, or a git repo's
+                                            default-branch oas-config.yaml).
+                                            Every form refuses to overwrite an existing config;
+                                            --json = exactly one result envelope, noninteractive.
   oas root                                  print this package's install root
                                             (adapters resolve the kernel from it)
   oas <namespace> <command> [args…]         run an operational command only when its
