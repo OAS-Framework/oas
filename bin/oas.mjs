@@ -1465,10 +1465,16 @@ function configCmd() {
   try { chosen = selectConfigTemplate(locked.templates, wanted, packageId); }
   catch (e) { bail(e.code || "E_TEMPLATE_AMBIGUOUS", e.message); }
 
-  // Switching base rebases the ONE local config against the new template; the
-  // base for comparison is then the currently adopted one when there is one, or
-  // the local file itself on first adoption (everything reads as a local edit).
-  const baseText = adopted ? adopted.baseText : localText;
+  // Switching base rebases the ONE local config against the new template.
+  //
+  // With no adopted base there is NO common ancestor, and pretending the local
+  // file is one is the dangerous answer: a three-way merge whose base equals
+  // local classifies every difference as upstream-only, so a first adopt would
+  // silently replace a handcrafted config wholesale — no conflicts, no consent,
+  // no preview of what was lost. An EMPTY base states the truth instead: every
+  // existing local byte is local work, and anything the template also wants to
+  // put there is a conflict the operator must resolve explicitly.
+  const baseText = adopted ? adopted.baseText : "";
   const plan = planConfigMerge(baseText, localText, chosen.content);
 
   const describe = (r) => ({

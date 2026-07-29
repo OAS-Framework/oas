@@ -3073,3 +3073,95 @@ test("the recoverable backup is run state: a failed sync restores its prior abse
   } finally { chmodSync(templateDir, 0o755); }
   for (const d of [base, scope]) rmSync(d, { recursive: true, force: true });
 });
+
+// ---------- B3: a first adopt must not erase handcrafted config ----------
+
+const HANDCRAFTED = `# our workspace — hand written, never generated
+name: acme
+team:
+  name: platform
+
+capabilities:
+  additive:
+    acme.internal:
+      global: true
+`;
+
+test("first adopt over a handcrafted config REFUSES noninteractively and changes nothing", () => {
+  const base = temp();
+  const pkg = materializedPackage(base);
+  write(join(pkg, "config-templates/default/oas-config.yaml"), TEMPLATE_V1);
+  const scope = temp();
+  // A config nobody generated: written by hand, never adopted from anything.
+  const file = join(scope, "oas-config.yaml");
+  writeFileSync(file, HANDCRAFTED);
+  const inst = cli(["install", pkg, "--dir", scope]);
+  assert.equal(inst.status, 0, inst.stdout + inst.stderr);
+  const before = readFileSync(file, "utf8");
+
+  // There is NO common ancestor here. Treating the local file as the base would
+  // classify every one of its lines as upstream-only and replace the lot.
+  const r = cli(["config", "adopt", "example.engineering", "--dir", scope, "--json"]);
+  assert.notEqual(r.status, 0, `adopt replaced a handcrafted config:\n${r.stdout}`);
+  const err = JSON.parse(r.stdout).error;
+  assert.equal(err.code, "E_SYNC_AMBIGUOUS", err.message);
+  assert.match(err.message, /--accept/, "the refusal names the way to resolve it");
+  assert.equal(readFileSync(file, "utf8"), before, "the handcrafted config was modified");
+  assert.equal(existsSync(`${file}.bak`), false, "a refused adopt left a backup behind");
+
+  // The refusal IS the guided preview on this path: `oas config diff` needs an
+  // adopted base to compare against and has none yet, so the conflict list has
+  // to travel with the refusal or the operator is told "no" with no way in.
+  assert.match(err.message, /conflict\(s\) need an explicit choice \(/);
+  const named = /\(([^)]*)\) — pass --accept/.exec(err.message);
+  assert.ok(named && named[1].split(", ").filter(Boolean).length, `no conflict ids to act on: ${err.message}`);
+
+  // And the report-only command still refuses rather than inventing a base.
+  const diff = cli(["config", "diff", "--config", "default", "--dir", scope, "--json"]);
+  assert.notEqual(diff.status, 0);
+  assert.equal(JSON.parse(diff.stdout).error.code, "E_NO_ADOPTED_BASE");
+  assert.equal(readFileSync(file, "utf8"), before, "a report-only command wrote");
+  for (const d of [base, scope]) rmSync(d, { recursive: true, force: true });
+});
+
+test("first adopt lands once every conflict is decided, and --reset --yes replaces after a preview and a backup", () => {
+  const base = temp();
+  const pkg = materializedPackage(base);
+  write(join(pkg, "config-templates/default/oas-config.yaml"), TEMPLATE_V1);
+
+  // (a) explicit decisions: adopt applies exactly what was chosen.
+  const chosen = temp();
+  writeFileSync(join(chosen, "oas-config.yaml"), HANDCRAFTED);
+  assert.equal(cli(["install", pkg, "--dir", chosen]).status, 0);
+  // No adopted base yet, so the conflict ids come from the adopt refusal — the
+  // only place that knows them before a base exists.
+  const refusal = JSON.parse(cli(["config", "adopt", "example.engineering", "--dir", chosen, "--json"]).stdout).error;
+  assert.equal(refusal.code, "E_SYNC_AMBIGUOUS", refusal.message);
+  const conflicts = /\(([^)]*)\) — pass --accept/.exec(refusal.message)[1].split(", ").filter(Boolean);
+  assert.ok(conflicts.length, "the fixture must actually conflict");
+  const accepts = conflicts.flatMap((id) => ["--accept", `${id}=local`]);
+  const kept = cli(["config", "adopt", "example.engineering", ...accepts, "--dir", chosen, "--json"]);
+  assert.equal(kept.status, 0, kept.stdout);
+  assert.match(readFileSync(join(chosen, "oas-config.yaml"), "utf8"), /^name: acme$/m, "an explicit keep-local lost the local value");
+
+  // (b) taking the package side is equally available — it just has to be ASKED
+  // for, region by region, and it leaves the previous bytes recoverable.
+  // (`config sync --reset` is not the escape hatch here: like `diff`, it
+  // presupposes an adopted base, and this scope has never adopted anything.)
+  const taken = temp();
+  writeFileSync(join(taken, "oas-config.yaml"), HANDCRAFTED);
+  assert.equal(cli(["install", pkg, "--dir", taken]).status, 0);
+  const file = join(taken, "oas-config.yaml");
+  const noBase = cli(["config", "sync", "--reset", "--yes", "--dir", taken, "--json"]);
+  assert.notEqual(noBase.status, 0, "reset ran without an adopted base");
+  assert.equal(JSON.parse(noBase.stdout).error.code, "E_NO_ADOPTED_BASE");
+  assert.equal(readFileSync(file, "utf8"), HANDCRAFTED, "a refused reset still wrote");
+
+  const takeAll = conflicts.flatMap((id) => ["--accept", `${id}=package`]);
+  const replaced = cli(["config", "adopt", "example.engineering", ...takeAll, "--dir", taken, "--json"]);
+  assert.equal(replaced.status, 0, replaced.stdout);
+  const after = readFileSync(file, "utf8");
+  assert.match(after, /name: workspace/, "the package side was not applied where it was chosen");
+  assert.equal(readFileSync(`${file}.bak`, "utf8"), HANDCRAFTED, "the handcrafted config is not recoverable");
+  for (const d of [base, chosen, taken]) rmSync(d, { recursive: true, force: true });
+});
