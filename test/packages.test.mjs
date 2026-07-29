@@ -6,7 +6,8 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { resolveOasConfig, capabilityIntegrity, acquirePackage, loadPackageManifestAt, parsePackageSource, readPackageLocks } from "../lib/core.mjs";
 import {
-  aggregateMissingRequirements, capabilityRuntimeTargets, commandOnPath, diffConfigTexts, discoverWorkspaceScopes,
+  aggregateMissingRequirements, applyConfigMerge, capabilityRuntimeTargets, commandOnPath, diffConfigTexts, discoverWorkspaceScopes,
+  planConfigMerge, splitConfigLines,
   lockedPackageCapabilities, normalizeRequirement, packageSpecIdentity, runtimePackageInstalled, runtimePackageStatus,
   parseProfileProvenance, profileProvenanceHeader, requirementInstallPlan,
   readProfileText, resolveProfilePackage, runRequirementInstall, selectProfile, validateProfile,
@@ -279,6 +280,269 @@ test("diffConfigTexts produces a minimal line diff", () => {
   assert.deepEqual(d, [
     { kind: "same", line: "a" }, { kind: "local", line: "b" }, { kind: "package", line: "x" }, { kind: "same", line: "c" },
   ]);
+});
+
+// ---------- config template three-way merge (byte-preserving) ----------
+//
+// These cover the merge CORE only: three texts in, one text out. No engine
+// symbol, no lock, no filesystem — the CLI transaction that feeds it the
+// adopted base, the local config, and the locked template is a separate layer.
+
+/** A hand-edited local config: comments, blank lines, a non-alphabetical key
+ * order, two-space and four-space indentation mixed, and no trailing newline.
+ * Every byte of this outside an explicitly selected region must survive. */
+const HAND_EDITED = [
+  "# our workspace — do not reformat, the ordering is deliberate",
+  "team: acme",
+  "",
+  "capabilities:",
+  "  layers:",
+  "    knowledge:",
+  "      capability: example.delivery   # trailing comment we care about",
+  "  additive:",
+  "    example.review: {}",
+  "",
+  "# agent types last on purpose",
+  "agent-types:",
+  "    dev: {}",
+].join("\n");
+
+test("splitConfigLines round-trips bytes exactly: LF, CRLF, no trailing newline, blank lines, empty", () => {
+  for (const text of ["", "a\n", "a", "a\nb\n", "a\r\nb\r\n", "a\r\nb", "\n\n\n", "a\n\nb\n", HAND_EDITED]) {
+    assert.equal(splitConfigLines(text).join(""), text, `round-trip failed for ${JSON.stringify(text)}`);
+  }
+  assert.deepEqual(splitConfigLines("a\nb"), ["a\n", "b"]);
+  assert.deepEqual(splitConfigLines("a\r\nb\r\n"), ["a\r\n", "b\r\n"]);
+  assert.deepEqual(splitConfigLines(""), []);
+});
+
+test("no drift: identical base/local/template yields no regions and a byte-identical apply", () => {
+  const plan = planConfigMerge(HAND_EDITED, HAND_EDITED, HAND_EDITED);
+  assert.deepEqual(plan.regions, []);
+  assert.equal(plan.clean, true);
+  assert.deepEqual(plan.counts, { upstream: 0, local: 0, conflict: 0, agreed: 0 });
+  const { text, applied } = applyConfigMerge(HAND_EDITED, plan, {});
+  assert.equal(text, HAND_EDITED);
+  assert.deepEqual(applied, []);
+});
+
+test("conflict-free sync: an upstream-only change applies while every untouched local byte stays identical", () => {
+  // Local hand-edited the team line and added a comment; the template added a
+  // new additive capability somewhere else entirely. Disjoint regions.
+  const base = HAND_EDITED;
+  const local = HAND_EDITED.replace("team: acme", "team: acme-eu   # renamed after the split");
+  const template = HAND_EDITED.replace("    example.review: {}", "    example.review: {}\n    example.audit: {}");
+
+  const plan = planConfigMerge(base, local, template);
+  assert.equal(plan.clean, true);
+  assert.deepEqual(plan.counts, { upstream: 1, local: 1, conflict: 0, agreed: 0 });
+  const upstream = plan.regions.find((r) => r.kind === "upstream");
+  const localOnly = plan.regions.find((r) => r.kind === "local");
+  assert.equal(upstream.recommended, "package");
+  assert.equal(localOnly.recommended, "local");
+  assert.match(upstream.template.text, /example\.audit/);
+
+  const { text, applied } = applyConfigMerge(local, plan, {});
+  // The local-only edit survived, the upstream addition landed, and nothing
+  // else moved: byte-for-byte the local file plus exactly that one insertion.
+  assert.equal(text, local.replace("    example.review: {}", "    example.review: {}\n    example.audit: {}"));
+  assert.match(text, /team: acme-eu   # renamed after the split/);
+  assert.match(text, /# our workspace — do not reformat, the ordering is deliberate/);
+  assert.match(text, /      capability: example\.delivery   # trailing comment we care about/);
+  assert.match(text, /^agent-types:\n    dev: \{\}$/m);
+  assert.deepEqual(applied.map((a) => a.kind), ["upstream"]);
+});
+
+test("local-only drift is never offered away: keeping the recommendations returns the local bytes unchanged", () => {
+  const base = HAND_EDITED;
+  const local = `${HAND_EDITED}\n\n# a whole block only we have\nwork-modes:\n  worktree: {}\n`;
+  const plan = planConfigMerge(base, local, base);
+  assert.deepEqual(plan.counts, { upstream: 0, local: 1, conflict: 0, agreed: 0 });
+  assert.equal(plan.regions[0].recommended, "local");
+  assert.equal(applyConfigMerge(local, plan, {}).text, local);
+});
+
+test("both sides made the SAME change: reported as agreed, applying it is a no-op", () => {
+  const base = HAND_EDITED;
+  const same = HAND_EDITED.replace("team: acme", "team: acme-global");
+  const plan = planConfigMerge(base, same, same);
+  assert.deepEqual(plan.counts, { upstream: 0, local: 0, conflict: 0, agreed: 1 });
+  assert.equal(plan.clean, true);
+  const { text, applied } = applyConfigMerge(same, plan, {});
+  assert.equal(text, same);
+  assert.deepEqual(applied, []);
+});
+
+test("overlapping edits are an explicit conflict: no decision fails closed, local/package/edit all resolve byte-preservingly", () => {
+  const base = HAND_EDITED;
+  const local = HAND_EDITED.replace("team: acme", "team: acme-eu");
+  const template = HAND_EDITED.replace("team: acme", "team: acme-global");
+
+  const plan = planConfigMerge(base, local, template);
+  assert.deepEqual(plan.counts, { upstream: 0, local: 0, conflict: 1, agreed: 0 });
+  assert.equal(plan.clean, false);
+  assert.deepEqual(plan.conflicts, ["h1"]);
+  const region = plan.regions[0];
+  assert.equal(region.recommended, null);
+  assert.equal(region.base.text, "team: acme\n");
+  assert.equal(region.local.text, "team: acme-eu\n");
+  assert.equal(region.template.text, "team: acme-global\n");
+
+  // Noninteractive ambiguity: a conflict cannot be resolved by default.
+  assert.throws(() => applyConfigMerge(local, plan, {}), (e) => e.code === "E_SYNC_AMBIGUOUS" && /conflict/.test(e.message));
+
+  assert.equal(applyConfigMerge(local, plan, { h1: "local" }).text, local);
+  assert.equal(applyConfigMerge(local, plan, { h1: "package" }).text, template);
+  const edited = applyConfigMerge(local, plan, { h1: { edit: "team: acme-eu-global\n" } });
+  assert.equal(edited.text, HAND_EDITED.replace("team: acme", "team: acme-eu-global"));
+  assert.deepEqual(edited.applied, [{ id: "h1", kind: "conflict", choice: "edit" }]);
+});
+
+test("one conflict does not block the independent upstream and local regions around it", () => {
+  const base = ["a: 1", "b: 2", "c: 3", "d: 4", "e: 5", "f: 6"].join("\n");
+  const local = ["a: 1", "b: local", "c: 3", "d: 4", "e: 5", "f: local-only"].join("\n");
+  const template = ["a: 1", "b: upstream", "c: 3", "d: upstream", "e: 5", "f: 6"].join("\n");
+
+  const plan = planConfigMerge(base, local, template);
+  assert.deepEqual(plan.counts, { upstream: 1, local: 1, conflict: 1, agreed: 0 });
+  assert.deepEqual(plan.regions.map((r) => r.kind), ["conflict", "upstream", "local"]);
+  const { text } = applyConfigMerge(local, plan, { [plan.regions[0].id]: "package" });
+  assert.equal(text, ["a: 1", "b: upstream", "c: 3", "d: upstream", "e: 5", "f: local-only"].join("\n"));
+});
+
+test("an upstream edit ADJACENT to a local edit is one conflict, not a silently applied neighbour", () => {
+  // The template changed `a` and `b`; the local file changed only `b`. Those
+  // are one contiguous disputed span, so `a` cannot be applied behind the
+  // user's back while `b` is still being decided — the whole span is offered
+  // as a single local/package/edit choice.
+  const base = ["a: 1", "b: 2", "c: 3"].join("\n");
+  const local = ["a: 1", "b: local", "c: 3"].join("\n");
+  const template = ["a: upstream", "b: upstream", "c: 3"].join("\n");
+
+  const plan = planConfigMerge(base, local, template);
+  assert.deepEqual(plan.counts, { upstream: 0, local: 0, conflict: 1, agreed: 0 });
+  assert.equal(plan.regions[0].local.text, "a: 1\nb: local\n");
+  assert.equal(plan.regions[0].template.text, "a: upstream\nb: upstream\n");
+  assert.throws(() => applyConfigMerge(local, plan, {}), (e) => e.code === "E_SYNC_AMBIGUOUS");
+});
+
+test("upstream deletions, insertions at both ends, and the missing trailing newline all survive apply", () => {
+  const base = "keep: 1\ndrop: 2\ntail: 3\n";
+  const local = "keep: 1\ndrop: 2\ntail: 3\n";
+  const template = "head: 0\nkeep: 1\ntail: 3\nfoot: 4";
+
+  const plan = planConfigMerge(base, local, template);
+  assert.equal(plan.counts.conflict, 0);
+  const { text } = applyConfigMerge(local, plan, {});
+  assert.equal(text, template);
+
+  // No trailing newline on the local side is a byte the merge must not add.
+  const noNewline = "keep: 1\ntail: 3";
+  const plan2 = planConfigMerge(noNewline, noNewline, noNewline);
+  assert.equal(applyConfigMerge(noNewline, plan2, {}).text, noNewline);
+});
+
+test("a line differing only in its terminator is a real difference, not a silent rewrite", () => {
+  const base = "a: 1\nb: 2\n";
+  const local = "a: 1\nb: 2\n";
+  const template = "a: 1\r\nb: 2\r\n";
+  const plan = planConfigMerge(base, local, template);
+  assert.equal(plan.counts.upstream, 1);
+  // Keeping the recommendation would adopt CRLF; keeping local leaves the file untouched.
+  assert.equal(applyConfigMerge(local, plan, { h1: "local" }).text, local);
+});
+
+test("an edit decision cannot glue two YAML lines together, but may end the file without a newline", () => {
+  const base = "a: 1\nb: 2\nc: 3\n";
+  const local = "a: 1\nb: local\nc: 3\n";
+  const template = "a: 1\nb: upstream\nc: 3\n";
+  const plan = planConfigMerge(base, local, template);
+  assert.equal(applyConfigMerge(local, plan, { h1: { edit: "b: merged" } }).text, "a: 1\nb: merged\nc: 3\n");
+
+  const tailBase = "a: 1\nb: 2\n";
+  const tailLocal = "a: 1\nb: local\n";
+  const tailTemplate = "a: 1\nb: upstream\n";
+  const tailPlan = planConfigMerge(tailBase, tailLocal, tailTemplate);
+  assert.equal(applyConfigMerge(tailLocal, tailPlan, { h1: { edit: "b: merged" } }).text, "a: 1\nb: merged");
+});
+
+test("merge decisions fail closed: stale plan, unknown region, malformed decision, oversized input", () => {
+  const base = "a: 1\n";
+  const local = "a: local\n";
+  const template = "a: upstream\n";
+  const plan = planConfigMerge(base, local, template);
+
+  assert.throws(() => applyConfigMerge("a: changed underneath\n", plan, { h1: "local" }),
+    (e) => e.code === "E_SYNC_STALE_PLAN");
+  assert.throws(() => applyConfigMerge(local, plan, { h9: "local" }),
+    (e) => e.code === "E_SYNC_UNKNOWN_REGION");
+  assert.throws(() => applyConfigMerge(local, plan, { h1: "upstream" }),
+    (e) => e.code === "E_SYNC_BAD_DECISION");
+  assert.throws(() => applyConfigMerge(local, plan, { h1: { edit: 42 } }),
+    (e) => e.code === "E_SYNC_BAD_DECISION");
+
+  const huge = `${"x: 1\n".repeat(2100)}`;
+  assert.throws(() => planConfigMerge(huge, `y: 0\n${huge}`, huge), (e) => e.code === "E_SYNC_TOO_LARGE");
+});
+
+test("byte-preservation invariants hold over randomized three-way inputs", () => {
+  // Deterministic PRNG — a byte-preservation failure must be reproducible.
+  let seed = 20260729;
+  const rnd = (n) => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed % n; };
+  const mutate = (lines) => {
+    const out = [];
+    for (const line of lines) {
+      const roll = rnd(10);
+      if (roll < 2) continue;                                    // delete
+      if (roll < 4) out.push(`${line}   # touched ${rnd(100)}`);  // change
+      else out.push(line);
+      if (roll === 9) out.push(`inserted-${rnd(1000)}: yes`);     // insert
+    }
+    return out;
+  };
+  const join = (lines) => (lines.length ? `${lines.join("\n")}\n` : "");
+
+  for (let round = 0; round < 200; round++) {
+    const baseLines = Array.from({ length: 1 + rnd(14) }, (_, i) => (rnd(4) ? `key${i}: ${rnd(50)}` : `# comment ${i}`));
+    const base = join(baseLines);
+    const local = join(mutate(baseLines));
+    const template = join(mutate(baseLines));
+    const plan = planConfigMerge(base, local, template);
+    const where = `round ${round}\nbase=${JSON.stringify(base)}\nlocal=${JSON.stringify(local)}\ntemplate=${JSON.stringify(template)}`;
+
+    // 1. Choosing the local side everywhere is a guaranteed no-op, byte for byte.
+    const keepLocal = Object.fromEntries(plan.regions.map((r) => [r.id, "local"]));
+    assert.equal(applyConfigMerge(local, plan, keepLocal).text, local, `keep-local not byte-identical — ${where}`);
+
+    // 2. Choosing the package side everywhere reconstructs the template exactly:
+    //    the regions and the untouched spans between them must together account
+    //    for every byte of both files, or the splice geometry is wrong.
+    const takePackage = Object.fromEntries(plan.regions.map((r) => [r.id, "package"]));
+    assert.equal(applyConfigMerge(local, plan, takePackage).text, template, `take-package did not reconstruct the template — ${where}`);
+
+    // 3. Regions are disjoint and ordered in the local file.
+    let cursor = 0;
+    for (const r of plan.regions) {
+      assert.ok(r.local.start >= cursor && r.local.end >= r.local.start, `region ${r.id} overlaps or inverts — ${where}`);
+      cursor = r.local.end;
+    }
+
+    // 4. Every region's recorded slice text really is the file's bytes there.
+    const localLines = splitConfigLines(local);
+    const templateLines = splitConfigLines(template);
+    for (const r of plan.regions) {
+      assert.equal(r.local.text, localLines.slice(r.local.start, r.local.end).join(""), `region ${r.id} local slice drifted — ${where}`);
+      assert.equal(r.template.text, templateLines.slice(r.template.start, r.template.end).join(""), `region ${r.id} template slice drifted — ${where}`);
+    }
+  }
+});
+
+test("a plan region binds to the exact three texts it was computed from", () => {
+  const a = planConfigMerge("a: 1\n", "a: local\n", "a: upstream\n");
+  const b = planConfigMerge("a: 1\n", "a: local\n", "a: other\n");
+  assert.notEqual(a.regions[0].digest, b.regions[0].digest);
+  assert.notEqual(a.planDigest, b.planDigest);
+  assert.equal(a.planDigest, planConfigMerge("a: 1\n", "a: local\n", "a: upstream\n").planDigest);
 });
 
 // ---------- lock v2 reading ----------
