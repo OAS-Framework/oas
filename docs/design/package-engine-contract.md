@@ -776,6 +776,13 @@ continues past an invalid lock, and it never uses the invalid data.
   resets `trusted` to false.
 - No silent lock advancement anywhere: bare restore never changes
   source/version/commit/path; only an explicit `oas update <package-id>` may.
+  The selected package ROOT advances only where the source owns it: a catalog
+  entry supplies `path`, so an update adopts a moved root and reports
+  `pathChanged`; a Git spec's `#<path>` is the operator's own selection and
+  stays sticky across updates. A path mismatch on acquire therefore names the
+  route that can resolve it — `oas update` for catalog sources, `oas remove`
+  followed by a re-install with the intended `#<path>` for Git sources (removal
+  still refuses while config or dependent packages reference the package).
 - No npm lifecycle scripts, ever; production closure only; platform-invariant
   closures required.
 - Existing config targeting / layer / injection / override / scope-precedence

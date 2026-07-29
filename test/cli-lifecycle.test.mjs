@@ -644,8 +644,9 @@ test("an upstream package-root move: restore stays exact, a git selection is sti
 
   const git = scope(base, "git");
   const cat = scope(base, "cat");
+  const cat2 = scope(base, "cat2"); // the same catalog install, kept for the drift branch
   assert.equal(cli(["install", `${url}#pkgs/x`, "--dir", git]).status, 0);
-  assert.equal(cli(["install", "g.p", "--dir", cat], { catalog: catalogFile }).status, 0);
+  for (const d of [cat, cat2]) assert.equal(cli(["install", "g.p", "--dir", d], { catalog: catalogFile }).status, 0);
   const lockedCommit = lockOf(git).packages["g.p"].commit;
 
   // Upstream moves the package root and the catalog follows it.
@@ -671,9 +672,14 @@ test("an upstream package-root move: restore stays exact, a git selection is sti
   assert.match(failEnvelope(stuck).message, /package path "pkgs\/x" is not a directory/);
   assert.equal(lockOf(git).packages["g.p"].path, "pkgs/x", "a failed update moved the lock");
   // And acquisition never advances a locked source, whatever path you name.
+  // The refusal must name the route that can ACTUALLY resolve it: for a git
+  // spec that is remove + re-install, never `oas update` (which would keep the
+  // sticky selection and fail on the stale path).
   const reacquire = cli(["install", `${url}#packages/x`, "--dir", git, "--json"], { cwd: git });
-  assert.equal(failEnvelope(reacquire, "integrity-drift").message.includes("oas update g.p"), true,
-    "the refusal must name the command that CAN advance it");
+  const gitErr = failEnvelope(reacquire, "integrity-drift");
+  assert.match(gitErr.message, /oas remove g\.p/);
+  assert.match(gitErr.message, /config or dependent packages/, "removal blockers are stated up front");
+  assert.doesNotMatch(gitErr.message, /use `oas update/, "update cannot move a sticky git selection");
 
   // A CATALOG entry owns its path, so an explicit update adopts the moved root
   // — and says so, even though the payload bytes are unchanged.
@@ -687,5 +693,11 @@ test("an upstream package-root move: restore stays exact, a git selection is sti
   const human = cli(["update", "g.p", "--dir", cat], { cwd: cat, catalog: catalogFile });
   assert.equal(human.status, 0, human.stderr);
   assert.doesNotMatch(human.stdout, /MOVED/, "a second update has nothing left to move");
+
+  // The catalog branch of the same refusal: re-acquiring a catalog package whose
+  // root has moved DOES point at `oas update`, because the catalog owns the path.
+  const catErr = failEnvelope(cli(["install", "g.p", "--dir", cat2, "--json"], { cwd: cat2, catalog: catalogFile }), "integrity-drift");
+  assert.match(catErr.message, /use `oas update g\.p`/);
+  assert.doesNotMatch(catErr.message, /oas remove/);
   rmSync(base, { recursive: true, force: true });
 });
