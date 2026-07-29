@@ -429,6 +429,15 @@ export function validateCapabilityLockEntry(capabilityId, entry, allPackages, op
  * the lock bytes and the ignore bytes are rolled back to the pre-operation
  * state. Staging is always removed.
  *
+ * ANCHOR DIRECTORIES: staging must live inside the store, so on a scope with no
+ * store this necessarily creates `.agents/`, `.agents/capabilities/` and
+ * `.agents/capabilities/installed/`. Every refusal and failure path removes
+ * exactly the anchors THIS operation created — deepest-first, only while empty,
+ * never a pre-existing one and never one holding owned/, adopted/ or any
+ * unrelated state. A refused or failed acquisition therefore leaves the scope's
+ * tree byte-for-byte and entry-for-entry as it found it, including on a
+ * completely clean scope.
+ *
  * A v1 lock at the scope is refused BEFORE any source fetch, staging, ignore or
  * artifact work — every v1, INCLUDING AN EMPTY ONE. An empty v1 is still an
  * unconverted scope: converting it as a side effect of `oas install` is the
@@ -450,7 +459,7 @@ export function validateCapabilityLockEntry(capabilityId, entry, allPackages, op
  *   //   { root, packages: [{ package, version, source, path, commit, integrity,
  *   //                        dependencies, capabilities }],
  *   //     capabilities: [{ capability, version, package, path, integrity,
- *   //                      trusted, status, executableSurface }],
+ *   //                      trusted, status, layer, executableSurface }],
  *   //     configTemplates }   // identical descriptors to the return value's,
  *   //                         // including `content` and `contentIntegrity`
  *   //
@@ -462,6 +471,16 @@ export function validateCapabilityLockEntry(capabilityId, entry, allPackages, op
  *   // `oas update` refuse a config-referenced export drop byte-exactly (§5.5).
  *   // Staging paths are deliberately NOT exposed: the gate decides, it does not
  *   // reach into the transaction.
+ *   //
+ *   // `layer` is the capability's DECLARED fundamental layer, normalized to
+ *   // null when it declares none. It is in the preview because a config
+ *   // template may bind a fundamental slot to a capability the ROOT PACKAGE
+ *   // ITSELF supplies: before the commit that capability is not materialized,
+ *   // is not in the lock, and is not discoverable, so the preview is the only
+ *   // place the binding can be validated. Validating it after the commit and
+ *   // unwinding is strictly worse — the gate exists so that case never needs an
+ *   // outer rollback. The field is the minimum needed for that check; it is not
+ *   // a staging path and not the manifest.
  * @returns {{
  *   root: string,
  *   lockFile: string,
@@ -469,6 +488,7 @@ export function validateCapabilityLockEntry(capabilityId, entry, allPackages, op
  *                      dependencies: string[], capabilities: string[], kept: boolean }>,
  *   capabilities: Array<{ capability, version, package, path, integrity, dir,
  *                         trusted: boolean, status: "installed"|"replaced"|"kept",
+ *                         layer: string|null,
  *                         executableSurface: { commands: string[], hooks: string[] } }>,
  *   configTemplates: Array<{ package, template, path, description?, default: boolean,
  *                            content: string, contentIntegrity: string,
