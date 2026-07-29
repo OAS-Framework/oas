@@ -180,8 +180,8 @@ than letting the file grow stale.
 
 ## In flight
 
-- No package-architecture delivery or release remains in flight. Framework and all six official-package repositories are clean and pushed; the former package-payload implementation instance and its helper have been harvested and retired.
-- Historical open PRs #37, #43, and #48 remain outside this completed release scope and require separate owner decisions.
+- **Capability materialization and config-template synchronization (accepted 2026-07-29)** — founder-approved decision `5519d36` makes package staging transient, materializes actual versioned capability artifacts under gitignored `.agents/capabilities/installed`, renames optional package config sources to `config-templates`/`configTemplates`, preserves one fully locally editable config and adopted base per scope, and requires explicit guided sync/reset/switch behavior. `dev-coordinator-capability-materialization` owns disjoint engine and config/init lanes, one integrated head, full compatibility/security/runtime gates, and one PR. No package repository publication or live deployment migration is authorized yet. Frozen pre-decision init code/docs/audit branches are donor evidence only.
+- Historical open PRs #37, #43, and #48 remain outside this feature scope and require separate owner decisions.
 
 ## Recent deliveries
 
