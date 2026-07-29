@@ -1245,8 +1245,12 @@ function initPackage(src, dir, file) {
     if (executable.length) note(`  executable surfaces needing separate approval: ${executable.map((c) => c.capability).join(", ")} (\`oas trust <id>\`)`);
 
     chosen = selectConfigTemplate(templates, configFlag, preview.root); // throws typed codes
+    // Layer bindings onto this package's OWN capabilities cannot be checked
+    // here — preview rows carry no manifest — so they are deferred to the
+    // post-commit re-validation below, which rolls the run back on disagreement.
     const errors = validateConfigTemplate(chosen, preview.root, {
       dependencyProviders: dependencyClosureProviders(preview.root, dir, projected).capabilities,
+      deferUnknownLayers: true,
     });
     if (errors.length) {
       const e = new Error(`config template "${chosen.template}" of package ${preview.root} failed validation:\n  - ${errors.join("\n  - ")}`);
@@ -1283,6 +1287,27 @@ function initPackage(src, dir, file) {
 
   note(`Acquired + locked: ${acq.installed.map((p) => `${p.package}@${p.version}`).join(", ")} → ${shortPath(acq.lockFile)}`);
   const capabilities = acq.capabilities.map((c) => c.capability);
+
+  // The deferred half of template validation. The capabilities are materialized
+  // now, so every layer binding can finally be checked against the real
+  // manifest. A disagreement here is still a refusal: the journal restores the
+  // scope completely, so nothing of this run survives — the user sees the same
+  // outcome as a gate refusal.
+  const materialized = new Map();
+  for (const c of acq.capabilities) {
+    let manifest = null;
+    try { manifest = JSON.parse(readFileSync(join(installedCapabilityDir(dir, c.capability), "oas.json"), "utf8")); }
+    catch { /* unreadable artifact is reported by doctor; leave it unverifiable */ }
+    materialized.set(c.capability, manifest);
+  }
+  for (const [id, m] of dependencyClosureProviders(acq.root, dir).capabilities) if (!materialized.has(id)) materialized.set(id, m);
+  const lateErrors = validateConfigTemplate(chosen, acq.root, { dependencyProviders: materialized });
+  if (lateErrors.length) {
+    const e = new Error(`config template "${chosen.template}" of package ${acq.root} failed validation:\n  - ${lateErrors.join("\n  - ")}`);
+    e.code = "E_TEMPLATE_INVALID";
+    abort(e);
+    return;
+  }
 
   let adoption;
   try {
