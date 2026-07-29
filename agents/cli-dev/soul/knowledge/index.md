@@ -33,6 +33,7 @@ read what the current task needs, not everything.
 * [architecture/spawn-relations-lineage-fields.md](architecture/spawn-relations-lineage-fields.md) - final child/sibling/parent/unrelated semantics, sparse lineage fields, attached-owner binding, ambiguity validation, and retirement splice behavior.
 
 ## Lessons
+* [lessons/cli-tests-scrub-oas-pi-env.md](lessons/cli-tests-scrub-oas-pi-env.md) - CLI tests spawned inside an OAS instance inherit instance and laptop-level context unless their child environment removes OAS/PI variables and pins HOME to a fixture directory.
 * [lessons/unreachable-guards-cannot-be-mutation-verified.md](lessons/unreachable-guards-cannot-be-mutation-verified.md) - A defensive check that survives its own removal mutant is either untestable dead weight or a sign the real guarantee lives elsewhere — find which, then either delete it or pin the ordering that makes it redundant.
 * [lessons/integrity-alone-cannot-see-disputed-origin.md](lessons/integrity-alone-cannot-see-disputed-origin.md) - A repaired integrity hash makes a tampered .oas-installation.json invisible to the engine's approval path, so the CLI refuses on the lock/provenance disagreement before delegating to approveCapability.
 * [lessons/catalog-first-classic-init-costs.md](lessons/catalog-first-classic-init-costs.md) - Routing official fundamental layers through the package catalog makes classic init clone the package, leave executable trust false until oas trust, and validate layer agreement against the materialized manifest inside the run transaction.

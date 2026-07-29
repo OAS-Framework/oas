@@ -1,6 +1,8 @@
 # Knowledge Log
 
 ## 2026-07-29
+* **Creation**: [cli-tests-scrub-oas-pi-env](/lessons/cli-tests-scrub-oas-pi-env.md) records that CLI tests run inside an OAS instance must scrub inherited `OAS_*`/`PI_*`, pin fixture `HOME`, and set fixture `OAS_HOME_DIR` before spawning `bin/oas.mjs`.
+* **Update**: [test-conventions](/playbooks/test-conventions.md) adds the CLI helper hermeticity rule for spawned `bin/oas.mjs` tests.
 * **Creation**: [mixed-scope-migration-refuses-whole](/decisions/mixed-scope-migration-refuses-whole.md) records founder ruling that mixed guided official migration refuses the whole v1 scope, clears convertible for retain, removes residue from result shapes, and exposes blocked dry-run/apply status.
 * **Update**: [guided-official-migration-shape](/decisions/guided-official-migration-shape.md) replaces the old residue-or-hold warning with the final mixed-scope refusal contract.
 * **Update**: [guided-mixed-retain-needs-residue-or-hold](/lessons/guided-mixed-retain-needs-residue-or-hold.md) links the original data-loss lesson to the no-residue refusal ruling.
