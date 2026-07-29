@@ -19,7 +19,9 @@ read what the current task needs, not everything.
 * [decisions/package-payload-root-contract.md](decisions/package-payload-root-contract.md) - Git package roots are selected by a #<path> fragment, catalog roots by a catalog path field, local paths by their named directory, and locks keep the canonical path separate from source so updates and restores can preserve the right owner.
 * [decisions/guided-official-migration-shape.md](decisions/guided-official-migration-shape.md) - Guided official migration (`oas migrate --official [--recursive]`) maps legacy marketplace capabilities through catalog aliases, holds a scope unchanged when an official mapping is missing, and retains non-official entries without rewriting.
 * [decisions/package-runtime-boundary-structured-cli.md](decisions/package-runtime-boundary-structured-cli.md) - Official packages reach the kernel only through oas CLI commands with Desktop-API-v1 JSON envelopes and a packageRuntimeApi probe field; a blessed module export was rejected because it preserves the oas-root dynamic-import coupling and creates a second public JS surface.
-* [decisions/flat-single-capability-packages.md](decisions/flat-single-capability-packages.md) - A capability directory may be the package root with oas-package.json and oas.json side by side when capabilities is exactly ["."]; package integrity covers the whole tree, and npm materialization roots are realpath-deduped.
+* [decisions/legacy-capability-root-discriminator.md](decisions/legacy-capability-root-discriminator.md) - Keying legacy-package acceptance on the deprecated `configs` spelling would strand oas.authoring@1.0.0, because it declares "." without either template map.
+* [decisions/transitional-lock-detection-by-presence.md](decisions/transitional-lock-detection-by-presence.md) - Rejecting the old package-root spelling of lockfileVersion 2 has to key on Object.hasOwn, because the giveaway fields are legitimately empty in exactly the locks a truthiness check would let through.
+* [decisions/flat-single-capability-packages.md](decisions/flat-single-capability-packages.md) - A manifest with capabilities ["."] is accepted only as legacy compatibility when configTemplates is absent; newly authored packages must not emit it.
 * [decisions/per-capability-npm-locks.md](decisions/per-capability-npm-locks.md) - Materialization roots are the package root plus declared capability dirs that have both package.json and package-lock.json; each root runs an independent npm ci --ignore-scripts, and inner resources resolve manifest-relative inside containment.
 
 ## Architecture
@@ -32,6 +34,8 @@ read what the current task needs, not everything.
 * [architecture/spawn-relations-lineage-fields.md](architecture/spawn-relations-lineage-fields.md) - final child/sibling/parent/unrelated semantics, sparse lineage fields, attached-owner binding, ambiguity validation, and retirement splice behavior.
 
 ## Lessons
+* [lessons/npm-prefix-in-worktree-instances.md](lessons/npm-prefix-in-worktree-instances.md) - A stray cd to instance home makes npm find the main checkout's package.json, so the quality gate silently validates the wrong tree.
+* [lessons/pre-commit-gate-beats-post-hoc-rollback.md](lessons/pre-commit-gate-beats-post-hoc-rollback.md) - Undoing a committed package update by re-acquiring the previous version silently fails when the source itself has moved on; the policy check belongs inside the staging transaction.
 * [lessons/dry-run-exit-status-contract.md](lessons/dry-run-exit-status-contract.md) - A dry run that reports a held or otherwise blocked state must exit nonzero when apply would exit nonzero, or automation can read "planned" as "ready".
 * [lessons/residue-collision-during-batched-migration.md](lessons/residue-collision-during-batched-migration.md) - When multiple legacy capabilities convert to one package, deleting only the current residue before acquiring collides with sibling entries the package also exports.
 * [lessons/never-run-migrate-in-the-work-tree.md](lessons/never-run-migrate-in-the-work-tree.md) - `node bin/oas.mjs migrate --help` executed a real migration because command-specific help flags are ignored, so mutating oas commands must be checked only inside temp deployments with explicit --dir.
@@ -119,6 +123,7 @@ read what the current task needs, not everything.
 
 * [playbooks/release-tag-driven-ci.md](playbooks/release-tag-driven-ci.md) - Releases are cut by pushing a vX.Y.Z tag on main which makes CI bump and publish packages; local version bumps break the workflow, retries must skip already-published artifacts, and verification means installing the published artifact.
 * [playbooks/test-conventions.md](playbooks/test-conventions.md) - Kernel and CLI tests run node:test against temp directories with fixture souls, fake/runtime tmux shims on PATH, spawnSync of bin/oas.mjs for CLI behavior, and regression coverage at the layer where bugs occurred.
+* [playbooks/test-process-aborting-regressions.md](playbooks/test-process-aborting-regressions.md) - Node's recursive cpSync can terminate the process on an unreadable directory, so the regression test for it must run out-of-process or a failure kills the whole runner.
 
 ## References
 * [references/strict-curriculum-scoping.md](references/strict-curriculum-scoping.md) - Launch-path facts and maintainer rulings for strict instance curriculum enforcement, including the 0.19.0 release gate for complete active-capability resource materialization.

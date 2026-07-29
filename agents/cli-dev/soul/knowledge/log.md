@@ -1,5 +1,13 @@
 # Knowledge Log
 
+## 2026-07-29
+* **Creation**: [test-process-aborting-regressions](/playbooks/test-process-aborting-regressions.md) records the child-process fixture pattern for regressions whose failure mode aborts the Node test runner.
+* **Creation**: [legacy-capability-root-discriminator](/decisions/legacy-capability-root-discriminator.md) records that legacy `capabilities: ["."]` acceptance keys on absence of `configTemplates`, not presence of deprecated `configs`.
+* **Update**: [flat-single-capability-packages](/decisions/flat-single-capability-packages.md) supersedes broad new-package support for `capabilities: ["."]` with the compatibility-only discriminator.
+* **Creation**: [npm-prefix-in-worktree-instances](/lessons/npm-prefix-in-worktree-instances.md) records that quality gates from instance home can silently climb to the main checkout unless npm/git are pointed at the worktree explicitly.
+* **Creation**: [pre-commit-gate-beats-post-hoc-rollback](/lessons/pre-commit-gate-beats-post-hoc-rollback.md) records that refused package updates needing old bytes must gate before commit, with tests asserting byte-identical locks and artifacts.
+* **Creation**: [transitional-lock-detection-by-presence](/decisions/transitional-lock-detection-by-presence.md) records that unsupported transitional lockfileVersion 2 rows are detected by own-property field presence, not truthiness.
+
 ## 2026-07-28
 * **Creation**: [hoisted-resource-fallbacks-anchor-at-declaring-dir](/lessons/hoisted-resource-fallbacks-anchor-at-declaring-dir.md) records that marketplace hoisted-resource fallbacks must anchor manifest-relative paths at the declaring capability's canonical marketplace directory, verify marketplace source/version identity, and still walk hoisted trees for containment.
 * **Update**: [marketplace-trust-and-hoisted-paths](/lessons/marketplace-trust-and-hoisted-paths.md) supersedes the older PKG_ROOT-anchored fallback wording with the lock-provenance and declaring-directory anchor rule.
