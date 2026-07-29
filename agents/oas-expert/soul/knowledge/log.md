@@ -1,5 +1,9 @@
 # Knowledge Log
 
+## 2026-07-29
+* **Creation**: [Packages materialize capabilities while config templates remain explicitly adopted local policy](/decisions/capability-materialization-and-config-template-sync.md) supersedes the persistent package-store/config-profile shape: package acquisition stages temporarily, capabilities are the flat versioned installed entities under `.agents`, package templates use `config-templates/`, one active config and adopted base exist per scope, and sync/reset/switch operations are explicit and guided.
+* **Update**: [Distribution packages, config profiles, and consented host requirements](/decisions/distribution-packages-config-profiles-and-requirements.md) now points its storage/template details to the accepted capability-materialization decision while preserving package transaction, config sovereignty, and consent principles.
+
 ## 2026-07-28
 * **Creation**: [Strict resource preflight exposes capability layout debt at the first targeted spawn](/lessons/strict-preflight-exposes-capability-layout-debt.md) — a capability that declares resources outside its acquired artifact can remain latent until strict targeted composition resolves the paths and fails closed.
 * **Creation**: [OAS package repositories select an explicit payload root](/decisions/oas-package-repository-payload-root.md) — Git package sources copy, hash, lock, and install only an explicit package subtree, with `oas-package/` as the official convention.

@@ -7,7 +7,7 @@ tags: [architecture, packages, capabilities, config, install, trust, requirement
 timestamp: 2026-07-26
 ---
 
-**Status: accepted by the founder 2026-07-26.** This decision
+**Status: accepted by the founder 2026-07-26.** Its package-store and config-profile resource details are superseded by [Packages materialize capabilities while config templates remain explicitly adopted local policy](/decisions/capability-materialization-and-config-template-sync.md), accepted 2026-07-29. The package source/integrity/update unit, independently targetable capabilities, config sovereignty, and consented-requirement principles remain binding. This decision
 amends [capability packages](/decisions/capability-packages.md), the [scoped
 capability store](/decisions/scoped-capability-store-and-templates.md), and the
 [marketplace transition](/decisions/marketplace-workmodes-runtime.md). It keeps
