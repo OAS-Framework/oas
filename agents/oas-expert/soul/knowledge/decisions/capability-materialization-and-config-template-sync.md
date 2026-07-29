@@ -58,6 +58,18 @@ capabilities must never enter commits. It must not ignore `owned/` or
 bases are intentionally reviewable/committable. Non-Git scopes use the same
 layout without pretending Git owns their durability.
 
+## Official catalog resolution is authoritative
+
+For a capability ID mapped by the official catalog, fresh classic init and
+explicit installation always acquire that catalog package and materialize its
+capabilities under the revised-v2 contract. They never fall back implicitly to
+the kernel's bundled legacy marketplace: that would recreate v1 state and grant
+legacy acquisition trust. Catalog source unavailability fails clearly and
+rolls the operation back. Offline operators use `--raw`, an explicit local
+package/profile source, or an operator-supplied local catalog; OAS does not add
+an ambient cache or compatibility bridge in this contract. Tests use hermetic
+local catalogs and never depend on live network.
+
 ## Materialized capabilities are self-contained
 
 For a new-format package, every capability entry names a dedicated capability
