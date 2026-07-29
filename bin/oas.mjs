@@ -27,7 +27,7 @@ import {
   parsePackageSource, inspectGitSourceRoot, acquirePackage, restorePackages, listInstalledPackages, readPackageLocks, readLockedConfigTemplates, residueEntryViolation,
   officialCapabilityPackage, officialPackageCatalog,
   approveCapability, updatePackage, removePackage, migrateLegacyLock, applyLegacyLockMigration,
-  packageIntegrity, capabilityArtifactIntegrity, installedCapabilityDir, installedCapabilitiesDir, ownedCapabilitiesDir, loadPackageManifestAt,
+  packageIntegrity, capabilityArtifactIntegrity, verifyCapabilityInstallation, installedCapabilityDir, installedCapabilitiesDir, ownedCapabilitiesDir, loadPackageManifestAt,
   resolveOasConfig, resolveWorkMode, composeInstanceAgentsMd, parseYamlNested, packagedInject, teamAgentRoots,
   findTeamAgent, findTeamInstance, findCapabilityAgent, findInstanceHome, listCapabilityAgents, workspaceOf,
   ensureRoot, findRoot, findAgent, listAgents, listInstances, listAgentDefs, createAgent as coreCreateAgent,
@@ -166,6 +166,34 @@ function officialMigrationState(legacyLocks, { teamScope, ctx }) {
     : { status: "ready", capabilities, command, reason: null };
 }
 
+/** The health of ONE materialized capability, against the rows it was projected
+ * from. Shared by doctor and list so both name the same states with the same
+ * codes — and so the `.oas-installation.json` provenance is checked in BOTH,
+ * not only deep inside trust resolution where it surfaces as a bare "untrusted".
+ *
+ * Order matters: a missing artifact cannot be hashed, drifted bytes make an
+ * approval meaningless (so trust is not ALSO reported), and provenance is only
+ * worth reading once the bytes are the locked ones. */
+function capabilityHealth(level, cap, capRow, pkgRow) {
+  const dir = installedCapabilityDir(level, cap.id);
+  if (!cap.installed) return { status: "missing", code: "missing-capability-artifact", dir, detail: `capability ${cap.id} is locked but not materialized — run \`oas install\` to re-materialize it` };
+  let integrity;
+  try { integrity = capabilityArtifactIntegrity(dir); }
+  catch (e) { return { status: "broken", code: e.code || "invalid-capability-artifact", dir, detail: `capability ${cap.id}: ${e.message}` }; }
+  if (integrity !== cap.integrity) {
+    return { status: "drifted", code: "integrity-drift", dir, integrity, detail: `capability ${cap.id}: artifact integrity drift — installed ${integrity}, locked ${cap.integrity}; its executable approval is invalid` };
+  }
+  // The artifact's own provenance and the lock must tell the SAME story before
+  // either is believed. Neither silently wins; the disagreement is the finding.
+  if (capRow && pkgRow) {
+    try { verifyCapabilityInstallation(dir, cap.id, capRow, pkgRow); }
+    catch (e) { return { status: "provenance-mismatch", code: e.code || "invalid-lock", dir, integrity, detail: `capability ${cap.id}: ${e.message}` }; }
+  }
+  const executable = Object.keys(cap.manifest?.commands || {}).length || Object.keys(cap.manifest?.hooks || {}).length;
+  if (executable && !cap.trusted) return { status: "untrusted", code: "untrusted-surface", dir, integrity, detail: `capability ${cap.id}: executable surface UNTRUSTED — \`oas trust ${cap.id}\`` };
+  return { status: "ok", code: null, dir, integrity, detail: null };
+}
+
 function doctorPackagesData(ctx, chain, { teamScope } = {}) {
   // reviewer-455ba15 fix 4: the ENGINE diagnostics the human doctor renders
   // (invalid locks, missing artifacts, integrity/runtime-closure drift,
@@ -192,20 +220,8 @@ function doctorPackagesData(ctx, chain, { teamScope } = {}) {
       // artifacts. So every health check is per capability, against the artifact
       // integrity the engine recorded for it.
       for (const c of p.capabilities) {
-        if (!c.installed) {
-          problems.push({ code: "missing-capability-artifact", detail: `capability ${c.id} is locked but not materialized — run \`oas install\` to re-materialize it` });
-          continue;
-        }
-        const artifact = installedCapabilityDir(p.level, c.id);
-        let now;
-        try { now = capabilityArtifactIntegrity(artifact); }
-        catch (e) { problems.push({ code: e.code || "invalid-capability-artifact", detail: `capability ${c.id}: ${e.message}` }); continue; }
-        if (now !== c.integrity) {
-          problems.push({ code: "integrity-drift", detail: `capability ${c.id}: artifact integrity drift — installed ${now}, locked ${c.integrity}; its executable approval is invalid` });
-          continue; // an approval against drifted bytes means nothing; do not also report it untrusted
-        }
-        const executable = Object.keys(c.manifest?.commands || {}).length || Object.keys(c.manifest?.hooks || {}).length;
-        if (executable && !c.trusted) problems.push({ code: "untrusted-surface", detail: `capability ${c.id}: executable surface UNTRUSTED — \`oas trust ${c.id}\`` });
+        const h = capabilityHealth(p.level, c, pkgLocks.capabilities[c.id], lock);
+        if (h.status !== "ok") problems.push({ code: h.code, detail: h.detail });
       }
     }
     packages.push({
@@ -784,17 +800,24 @@ function installPackage(dir, src, opts = {}) {
   let r;
   try { r = acquirePackage(dir, src, opts); }
   catch (e) { bail(e); return true; }
-  if (JSON_MODE) { jsonOk({ root: r.root, installed: r.installed, lockFile: r.lockFile, depWarnings: r.depWarnings || [] }); return true; }
+  // Packages are transport; capabilities are what lands on disk. Report both,
+  // and let the CAPABILITY rows carry the provenance an operator acts on.
+  if (JSON_MODE) { jsonOk({ root: r.root, installed: r.installed, capabilities: r.capabilities, lockFile: r.lockFile, depWarnings: r.depWarnings || [] }); return true; }
   for (const p of r.installed) {
-    console.log(`${p.kept ? "ok       " : "Acquired "}${p.package}@${p.version} → ${shortPath(p.dir)}`);
-    console.log(`  locked ${p.commit === "local" ? "local tree" : p.commit} at path ${p.path} (${p.integrity}); capabilities: ${p.capabilities.join(", ") || "(none)"}`);
+    console.log(`${p.kept ? "ok       " : "Acquired "}${p.package}@${p.version}`);
+    console.log(`  locked ${p.commit === "local" ? "local tree" : p.commit} at path ${p.path} (${p.integrity})`);
+    for (const c of r.capabilities.filter((x) => x.package === p.package)) {
+      console.log(`  capability ${c.capability}@${c.version}${c.layer ? `  layer: ${c.layer}` : ""} → ${shortPath(c.dir)}  (${c.integrity})`);
+    }
+    if (!r.capabilities.some((x) => x.package === p.package)) console.log("  capabilities: (none)");
   }
   for (const w of r.depWarnings || []) console.log(`WARNING: ${w}`);
   console.log(`Locked in ${shortPath(r.lockFile)}; nothing activated.`);
-  const executables = r.installed.flatMap((p) => p.capabilities).filter((c) => {
-    const m = capabilityManifest(c, dir);
-    return m && (Object.keys(m.commands || {}).length || Object.keys(m.hooks || {}).length);
-  });
+  // Read the executable surface off the ENGINE's projection, not a config-chain
+  // manifest lookup: at a scope with no config yet, that lookup sees nothing.
+  const executables = r.capabilities
+    .filter((c) => c.executableSurface?.commands?.length || c.executableSurface?.hooks?.length)
+    .map((c) => c.capability);
   if (executables.length) console.log(`Executable surfaces blocked until trusted: ${executables.map((c) => `oas trust ${c}`).join("; ")}`);
   return true;
 }
@@ -1105,8 +1128,8 @@ function trust() {
   const dir = dirFlag();
   const all = args.includes("--all-capabilities");
   // Package-backed approval path (per-capability, or explicit bulk on a package id).
-  let pkgs;
-  try { pkgs = listInstalledPackages(dir); } catch (e) { cmdFail(e.code || "invalid-lock", e.message || e); return; }
+  let pkgs, locks;
+  try { pkgs = listInstalledPackages(dir); locks = readPackageLocks(dir); } catch (e) { cmdFail(e.code || "invalid-lock", e.message || e); return; }
   const backing = all ? pkgs.find((p) => p.package === id) : pkgs.find((p) => p.capabilities.some((c) => c.id === id));
   if (backing) {
     if (all) {
@@ -1120,16 +1143,30 @@ function trust() {
         out(`  ${c.id}: commands [${cmds.join(", ") || "none"}], hooks [${hooks.join(", ") || "none"}]`);
       }
     }
+    // FAIL CLOSED BEFORE APPROVING. The engine binds approval to the artifact's
+    // integrity, but integrity alone cannot see a `.oas-installation.json` that
+    // claims a different origin than the lock — and approving a capability whose
+    // own provenance is disputed is exactly the thing trust must not do.
+    const disputed = backing.capabilities
+      .filter((c) => all || c.id === id)
+      .map((c) => capabilityHealth(backing.level, c, locks.capabilities[c.id], locks.packages[backing.package]))
+      .filter((h) => h.status !== "ok" && h.status !== "untrusted");
+    if (disputed.length) { cmdFail(disputed[0].code || "invalid-lock", `refusing to trust: ${disputed.map((h) => h.detail).join("; ")}`); return; }
     let r;
     try { r = approveCapability(dir, id, { allCapabilities: all }); } catch (e) { cmdFail(e.code || "invalid-lock", e.message || e); return; }
+    // Approval binds to each capability's exact MATERIALIZED ARTIFACT, so the
+    // integrity reported is per capability — there is no package-level digest
+    // to approve against and none to print.
+    const approvedIntegrity = {};
+    for (const c of backing.capabilities) if (r.approved.includes(c.id)) approvedIntegrity[c.id] = c.integrity || null;
     if (JSON_MODE) {
-      const surface = {};
-      for (const c of backing.capabilities) surface[c.id] = { commands: Object.keys(c.manifest.commands || {}), hooks: Object.keys(c.manifest.hooks || {}) };
-      jsonOk({ package: r.package, integrity: r.integrity, approved: r.approved, skipped: r.skipped, executableSurface: surface, file: r.file });
+      // The engine's own surface, not a re-derivation: what it approved and what
+      // it saw must be the same object.
+      jsonOk({ package: r.package, level: r.level, approved: r.approved, skipped: r.skipped, approvedIntegrity, executableSurface: r.executableSurface, file: r.file });
       return;
     }
-    if (r.approved.length) console.log(`Trusted executable commands/hooks for ${r.approved.join(", ")} (package ${r.package} at ${r.integrity}).`);
-    if (r.skipped.length) console.log(`No executable surface (lock integrity suffices, no approval needed): ${r.skipped.join(", ")}`);
+    for (const c of r.approved) console.log(`Trusted executable commands/hooks for ${c} (from package ${r.package}, artifact ${approvedIntegrity[c] || "?"}).`);
+    if (r.skipped.length) console.log(`No executable surface (artifact integrity suffices, no approval needed): ${r.skipped.join(", ")}`);
     return;
   }
   if (all) { cmdFail("unknown-capability", `no installed package "${id}" — --all-capabilities takes a package identity`); return; }
@@ -1639,21 +1676,51 @@ function listCmd() {
   let pkgs, locks;
   try { pkgs = listInstalledPackages(dir); locks = readPackageLocks(dir); }
   catch (e) { JSON_MODE ? jsonFail(e.code || "invalid-lock", e.message || e) : die(e.message); return; }
+  // Packages are TRANSPORT; capabilities are what is installed. So the listing
+  // is capability-first: every row names its own provider, artifact, integrity,
+  // trust and health, and the package rows keep only what the transport itself
+  // pins. Trust is per capability — there is no package-level approval to list.
+  const capabilities = [];
+  for (const p of pkgs) {
+    for (const c of p.capabilities) {
+      const h = capabilityHealth(p.level, c, locks.capabilities[c.id], locks.packages[p.package]);
+      capabilities.push({
+        capability: c.id, version: c.version || null, package: p.package, level: p.level,
+        path: c.path || null, dir: h.dir, integrity: c.integrity || null,
+        installedIntegrity: h.integrity ?? null,
+        layer: c.manifest?.layer || null, trusted: c.trusted === true, installed: c.installed,
+        executableSurface: {
+          commands: Object.keys(c.manifest?.commands || {}),
+          hooks: Object.keys(c.manifest?.hooks || {}),
+        },
+        status: h.status, code: h.code, detail: h.detail,
+      });
+    }
+  }
   if (JSON_MODE) {
     jsonOk({
-      packages: pkgs.map((p) => ({ package: p.package, version: p.version, level: p.level, source: p.source || null, path: p.path || null, commit: p.commit || null, integrity: p.integrity || null, locked: p.locked, dependencies: p.dependencies, trustedCapabilities: p.trustedCapabilities, capabilities: p.capabilities.map((c) => c.id) })),
+      packages: pkgs.map((p) => ({ package: p.package, version: p.version, level: p.level, source: p.source || null, path: p.path || null, commit: p.commit || null, integrity: p.integrity || null, locked: p.locked, dependencies: p.dependencies, capabilities: p.capabilities.map((c) => c.id) })),
+      capabilities,
       legacy: locks.legacy.map((l) => ({ file: l.file, level: l.level, lockfileVersion: l.lockfileVersion, capabilities: Object.keys(l.capabilities) })),
     });
     return;
   }
   if (!pkgs.length) console.log("No installed packages in this config chain.");
+  const byPackage = new Map();
+  for (const c of capabilities) {
+    if (!byPackage.has(c.package)) byPackage.set(c.package, []);
+    byPackage.get(c.package).push(c);
+  }
   for (const p of pkgs) {
     console.log(`${p.package}@${p.version}  [${levelOf(p.level)} ${shortPath(p.level)}]${p.locked ? "" : "  UNLOCKED (no lock entry — reacquire)"}`);
     if (p.source) console.log(`  source: ${p.source}  path: ${p.path || "?"}  commit: ${p.commit || "?"}`);
-    for (const c of p.capabilities) {
-      const executable = Object.keys(c.manifest.commands || {}).length || Object.keys(c.manifest.hooks || {}).length;
-      const trusted = p.trustedCapabilities.includes(c.id);
-      console.log(`  capability ${c.id}${c.manifest.layer ? `  layer: ${c.manifest.layer}` : ""}${executable ? (trusted ? "  [trusted]" : "  [executable — needs oas trust]") : ""}`);
+    for (const c of byPackage.get(p.package) || []) {
+      const executable = c.executableSurface.commands.length || c.executableSurface.hooks.length;
+      const trust = executable ? (c.trusted ? "  [trusted]" : "  [executable — needs oas trust]") : "";
+      console.log(`  capability ${c.capability}${c.layer ? `  layer: ${c.layer}` : ""}${trust}`);
+      // A capability whose bytes or provenance disagree with the lock is named
+      // as broken HERE — never rendered as an ordinary usable row.
+      if (c.status !== "ok" && c.status !== "untrusted") console.log(`    ${c.status.toUpperCase()}: ${c.detail}`);
     }
     if (p.dependencies.length) console.log(`  depends on: ${p.dependencies.join(", ")}`);
   }

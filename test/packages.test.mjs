@@ -4,7 +4,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, symlinkSync, writeFileSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { resolveOasConfig, capabilityIntegrity, acquirePackage, loadPackageManifestAt, parsePackageSource, readPackageLocks } from "../lib/core.mjs";
+import { resolveOasConfig, capabilityIntegrity, capabilityArtifactIntegrity, acquirePackage, loadPackageManifestAt, parsePackageSource, readPackageLocks } from "../lib/core.mjs";
 import {
   aggregateMissingRequirements, applyConfigMerge, beginRunJournal, capabilityRuntimeTargets, commandOnPath, discoverWorkspaceScopes,
   planConfigMerge, splitConfigLines,
@@ -2738,3 +2738,123 @@ test("the JSON consent plan shows every step the installer will run (reviewer-fi
 
 
 
+// ---------- lifecycle output: flat capability provenance ----------
+
+/** A package whose capability ships an executable surface, so trust matters. */
+function executablePackage(dir, { id = "exec.pkg", capability = "exec.cap", layer } = {}) {
+  write(join(dir, "capabilities/exec/oas.json"), JSON.stringify({
+    capability, version: "1.0.0", description: "Executable capability.",
+    ...(layer ? { layer } : {}), commands: { run: "run.mjs" },
+  }, null, 2));
+  write(join(dir, "capabilities/exec/run.mjs"), "// run\n");
+  write(join(dir, "oas-package.json"), JSON.stringify({
+    package: id, version: "1.0.0", description: "Executable package.",
+    compatibility: { oas: ">=0.19.0" }, capabilities: ["capabilities/exec"],
+  }, null, 2));
+  return dir;
+}
+
+test("install and list report CAPABILITY provenance: package rows lock the transport, capability rows carry artifact, integrity and trust", () => {
+  const pkg = executablePackage(temp());
+  const scope = temp();
+
+  const inst = cli(["install", pkg, "--dir", scope, "--json"]);
+  assert.equal(inst.status, 0, inst.stderr);
+  const installed = JSON.parse(inst.stdout).result;
+  // Package rows lock the TRANSPORT; they carry no capability trust of their own.
+  assert.deepEqual(installed.installed.map((p) => p.package), ["exec.pkg"]);
+  // Capability rows are the installed entity, with their own dir and integrity.
+  assert.deepEqual(installed.capabilities.map((c) => c.capability), ["exec.cap"]);
+  assert.equal(installed.capabilities[0].package, "exec.pkg");
+  assert.equal(installed.capabilities[0].trusted, false, "acquisition is not trust");
+  assert.deepEqual(installed.capabilities[0].executableSurface.commands, ["run"]);
+
+  const list = cli(["list", "--dir", scope, "--json"]);
+  assert.equal(list.status, 0, list.stderr);
+  const listed = JSON.parse(list.stdout).result;
+  assert.equal(listed.packages.length, 1);
+  assert.equal(Object.hasOwn(listed.packages[0], "trustedCapabilities"), false, "there is no package-level trust to list");
+  const [cap] = listed.capabilities;
+  assert.equal(cap.capability, "exec.cap");
+  assert.equal(cap.package, "exec.pkg");
+  assert.equal(cap.status, "untrusted", "an unapproved executable surface is named as such");
+  assert.equal(cap.installed, true);
+  assert.equal(cap.trusted, false);
+  assert.equal(cap.installedIntegrity, cap.integrity, "on-disk bytes match the lock");
+  assert.ok(existsSync(join(cap.dir, "oas.json")), "the row names the real artifact");
+
+  // Human output names the capability, its layer-less state and the trust step.
+  const human = cli(["list", "--dir", scope]);
+  assert.match(human.stdout, /capability exec\.cap\s+\[executable — needs oas trust\]/);
+
+  for (const d of [pkg, scope]) rmSync(d, { recursive: true, force: true });
+});
+
+test("trust approves per capability and reports the ARTIFACT integrity it bound to, not a package digest", () => {
+  const pkg = executablePackage(temp());
+  const scope = temp();
+  assert.equal(cli(["install", pkg, "--dir", scope]).status, 0);
+  const locked = JSON.parse(readFileSync(join(scope, "oas-lock.json"), "utf8")).capabilities["exec.cap"];
+
+  const r = cli(["trust", "exec.cap", "--dir", scope, "--json"]);
+  assert.equal(r.status, 0, r.stderr);
+  const payload = JSON.parse(r.stdout).result;
+  assert.deepEqual(payload.approved, ["exec.cap"]);
+  assert.equal(payload.approvedIntegrity["exec.cap"], locked.integrity, "approval binds to the exact materialized artifact");
+  assert.deepEqual(payload.executableSurface["exec.cap"].commands, ["run"]);
+
+  // Human mode says the same thing, with no "undefined" package digest.
+  const scope2 = temp();
+  assert.equal(cli(["install", pkg, "--dir", scope2]).status, 0);
+  const human = cli(["trust", "exec.cap", "--dir", scope2]);
+  assert.equal(human.status, 0, human.stderr);
+  assert.match(human.stdout, /Trusted executable commands\/hooks for exec\.cap \(from package exec\.pkg, artifact sha256-[0-9a-f]{64}\)/);
+  assert.doesNotMatch(human.stdout, /undefined/);
+
+  assert.equal(JSON.parse(cli(["list", "--dir", scope, "--json"]).stdout).result.capabilities[0].status, "ok");
+  for (const d of [pkg, scope, scope2]) rmSync(d, { recursive: true, force: true });
+});
+
+test("a capability whose .oas-installation.json disagrees with the lock is DIAGNOSED, never listed as usable", () => {
+  const pkg = executablePackage(temp());
+  const scope = temp();
+  assert.equal(cli(["install", pkg, "--dir", scope]).status, 0);
+  const artifact = join(scope, ".agents/capabilities/installed/exec.cap");
+
+  // Rewrite the provenance file to claim a different providing package, then
+  // restore the artifact's integrity so ONLY the provenance disagrees — the
+  // case where an integrity check alone would say everything is fine.
+  const provFile = join(artifact, ".oas-installation.json");
+  const prov = JSON.parse(readFileSync(provFile, "utf8"));
+  writeFileSync(provFile, JSON.stringify({ ...prov, package: "somebody.else" }, null, 2) + "\n");
+  const lockFile = join(scope, "oas-lock.json");
+  const lock = JSON.parse(readFileSync(lockFile, "utf8"));
+  lock.capabilities["exec.cap"].integrity = capabilityArtifactIntegrity(artifact);
+  writeFileSync(lockFile, JSON.stringify(lock, null, 2) + "\n");
+
+  const listed = JSON.parse(cli(["list", "--dir", scope, "--json"]).stdout).result.capabilities[0];
+  assert.equal(listed.status, "provenance-mismatch");
+  assert.equal(listed.code, "invalid-lock");
+  assert.match(listed.detail, /\.oas-installation\.json "package" is "somebody\.else" but the lock records "exec\.pkg"/);
+
+  // Human list names it too, rather than rendering an ordinary usable row.
+  assert.match(cli(["list", "--dir", scope]).stdout, /PROVENANCE-MISMATCH: .*oas-installation\.json/);
+
+  // Doctor reports it as a package problem with the same code.
+  const doc = JSON.parse(cli(["doctor", scope, "--json"]).stdout);
+  const broken = doc.packages.find((p) => p.id === "exec.pkg");
+  assert.equal(broken.status, "broken");
+  assert.ok(broken.problems.some((q) => q.code === "invalid-lock" && /oas-installation\.json/.test(q.detail)), JSON.stringify(broken.problems));
+
+  // And trust FAILS CLOSED against it: a disputed origin cannot be approved.
+  // The engine's own approval path checks integrity, which a repaired hash
+  // satisfies — so the CLI refuses on the provenance disagreement before
+  // delegating, and the lock keeps trusted:false.
+  const t = cli(["trust", "exec.cap", "--dir", scope, "--json"]);
+  assert.equal(t.status, 1, t.stdout);
+  assert.equal(JSON.parse(t.stdout).error.code, "invalid-lock");
+  assert.match(JSON.parse(t.stdout).error.message, /refusing to trust:/);
+  assert.equal(JSON.parse(readFileSync(lockFile, "utf8")).capabilities["exec.cap"].trusted, false);
+
+  for (const d of [pkg, scope]) rmSync(d, { recursive: true, force: true });
+});
