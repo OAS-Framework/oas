@@ -235,8 +235,13 @@ second config.
 The kernel continues to read valid v1 capability locks and their
 `.agents/capabilities/installed/` artifacts so existing 0.18 deployments keep
 working. Guided official migration converts v1 directly into the revised v2
-lock and flat installed-capability artifacts. Custom owned/path capabilities
-remain unchanged and executable trust is never broadened.
+lock and flat installed-capability artifacts. Revised v2 has no legacy-residue
+container: if any row at one v1 scope must be retained, handled manually, or
+held—including custom Git/path locks—the entire scope is blocked and remains
+byte-identical usable v1. Official rows are not partially acquired, committed,
+or removed. A scope with no convertible official work reports skipped plus its
+retained IDs; dry-run and apply agree on readiness. Custom owned/path
+capabilities remain unchanged and executable trust is never broadened.
 
 The earlier transitional v2 package-root shape and
 `.agents/packages/installed/` store receive no product migration path, dual
