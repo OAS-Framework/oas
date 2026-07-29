@@ -132,7 +132,7 @@ const emptyCatalog = (base) => write(join(base, "empty.json"), JSON.stringify({ 
 
 // ---------- the materialization route ----------
 
-test("classic init acquires official layers through the package engine: flat capabilities, a materialization lock, no v1 residue", () => {
+test("classic init acquires official layers through the package engine: flat capabilities, a materialization lock, no v1 lock", () => {
   const { base, catalog } = published();
   const scope = gitify(join(base, "scope"));
 

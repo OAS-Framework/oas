@@ -28,9 +28,12 @@ What that means concretely, and why each part is load-bearing:
   untouched ids under `retained`.
 - **`residue` is removed from every result shape**, the CLI's human and JSON
   output, the engine contract's return shape, and the public docs that promised
-  it. Doctor's `migrationResidue` stays and is *not* the same thing: it
-  diagnoses pre-existing on-disk state written by an older release that
-  converted around entries — precisely the damage this refusal now prevents.
+  it. Doctor's `migrationResidue` view is gone too — I argued to keep it as a
+  diagnosis of damage already on disk and was overruled, correctly: the strict
+  reader rejects the superseded transitional v2 shape wholesale, so that view
+  could never be populated from it, and calling a supported v1 entry "residue"
+  was simply false terminology. A supported v1 scope is one diagnosis
+  (`legacyLockFiles` + migration readiness); a refused lock is one `lockError`.
 - **The CLI plan gained a `blocked` status** so dry-run and apply agree, and a
   dry run containing one is nonzero. Automation must never read a blocked scope
   as ready.

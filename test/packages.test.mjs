@@ -1214,7 +1214,7 @@ test("lock v2 packages map is read scope-wise (contract envelope) and supplies c
   assert.equal(r3.legacy[0].lockfileVersion, 1);
 });
 
-test("empty v1 locks: reconcile LEGACY rows, doctor pending-format-migration (distinct from residue), lock-only-scope discovery", () => {
+test("empty v1 locks: reconcile LEGACY rows, doctor pending-format-migration, lock-only-scope discovery", () => {
   const base = temp();
   const ws = join(base, "ws");
   write(join(ws, "oas-config.yaml"), "name: ws\nteam:\n  name: t\n");
@@ -1227,18 +1227,50 @@ test("empty v1 locks: reconcile LEGACY rows, doctor pending-format-migration (di
   const r = cli(["install", "--no-requirements", "--dir", ws], { cwd: ws });
   assert.equal(r.status, 0, r.stdout);
   assert.match(r.stdout, /LEGACY\s+.*member\/oas-lock\.json/);
-  // (c) doctor: pending lock-format migration line, DISTINCT from residue
+  // (c) doctor: a supported v1 scope is ONE diagnosis — pending lock-format
+  // migration. There is no second "residue" view to disagree with it.
   const d = cli(["doctor", member], { cwd: ws });
   assert.equal(d.status, 0, d.stderr);
   assert.match(d.stdout, /empty lockfileVersion 1 file — pending lock-format migration/);
-  assert.doesNotMatch(d.stdout, /migration residue/);
-  // (d) doctor --json: legacyLockFiles entry (empty: true), migrationResidue stays empty
+  assert.doesNotMatch(d.stdout, /residue/i);
+  // (d) doctor --json: legacyLockFiles entry (empty: true), and nothing else.
   const dj = JSON.parse(cli(["doctor", member, "--json"], { cwd: ws }).stdout);
   const lf = dj.legacyLockFiles.find((l) => l.level === member);
   assert.ok(lf, JSON.stringify(dj.legacyLockFiles));
   assert.equal(lf.empty, true);
   assert.equal(lf.status, "pending-format-migration");
-  assert.deepEqual(dj.migrationResidue, [], "empty v1 is never capability residue");
+  assert.equal(Object.hasOwn(dj, "migrationResidue"), false);
+  assert.equal(dj.lockError, null, "a supported v1 lock is not an error");
+});
+
+test("doctor on the SUPERSEDED transitional v2 shape is one typed invalid-lock diagnosis, with no partial data", () => {
+  const scope = temp();
+  write(join(scope, "oas-config.yaml"), "name: broken\n");
+  // The package-root lock: lockfileVersion 2 with NO top-level capabilities map.
+  // The strict reader rejects it wholesale, so doctor must surface exactly that
+  // — never a partially parsed row, and never a "residue" view of its entries.
+  write(join(scope, "oas-lock.json"), JSON.stringify({
+    lockfileVersion: 2,
+    packages: { "a.b": { source: "path:/x", path: ".", version: "1.0.0", integrity: `sha256-${"0".repeat(64)}`, capabilities: ["a.cap"], trustedCapabilities: [] } },
+  }, null, 2));
+
+  const r = cli(["doctor", scope, "--json"], { cwd: scope });
+  const dj = JSON.parse(r.stdout);
+  // ONE typed diagnosis, and NO partial data of any kind: the chain itself does
+  // not resolve, so there is no packages/legacy view to disagree with it — and
+  // certainly no "residue" view of entries the reader refused to interpret.
+  assert.equal(dj.error.code, "invalid-lock");
+  assert.match(dj.error.message, /unsupported transitional package-root lockfileVersion 2/);
+  assert.match(dj.error.message, /recreate the scope's state with `oas install`/);
+  assert.deepEqual(Object.keys(dj).sort(), ["context", "error"]);
+  assert.doesNotMatch(r.stdout, /residue/i);
+
+  // Human doctor is a REPORT: it stays exit 0 and names the fault, rather than
+  // dying, so an operator can still read the rest of the resolved deployment.
+  const human = cli(["doctor", scope], { cwd: scope });
+  assert.match(human.stderr + human.stdout, /unsupported transitional package-root lockfileVersion 2/);
+  assert.doesNotMatch(human.stderr + human.stdout, /residue/i);
+  rmSync(scope, { recursive: true, force: true });
 });
 
 test("discoverWorkspaceScopes: deterministic path order with pruning of stores, vendor dirs, instances, and nested team boundaries", () => {
@@ -1282,7 +1314,7 @@ test("bare oas install at a team boundary prints the boundary FIRST, restores ea
   write(join(ws, "oas-config.yaml"), "name: ws\nteam:\n  name: t\n");
   // a descendant scope with an unrestorable lock
   write(join(ws, "member", "oas-config.yaml"), "name: member\n");
-  // entry shape passes the strict residue validator (b3ac4c6) so the failure
+  // entry shape passes the strict legacy-entry validator (b3ac4c6) so the failure
   // under test stays the unrestorable SOURCE, not a malformed-entry raise.
   write(join(ws, "member", "oas-lock.json"), JSON.stringify({ lockfileVersion: 1, capabilities: { "ghost.cap": { source: "path:/nonexistent-src", version: "1.0.0", integrity: `sha256-${"a".repeat(64)}` } } }));
   const r = cli(["install", "--no-requirements", "--dir", ws], { cwd: ws });

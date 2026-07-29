@@ -166,9 +166,12 @@ confirming the legacy capabilities remain supported.
 
 `oas doctor [dir] [--json]` distinguishes: missing locked package (run
 `oas install`), integrity drift (reacquire/update explicitly — approvals are
-already invalid), capability-list mismatch, untrusted executable surface
-(`oas trust <capability>`), legacy lock needing `oas migrate`, and migration
-residue (JSON: `migrationResidue[]`, each with the exact retry action).
+already invalid), a capability whose `.oas-installation.json` disagrees with the
+lock, untrusted executable surface (`oas trust <capability>`), and a legacy
+lockfileVersion 1 file needing `oas migrate` (JSON: `legacyLockFiles[]`, each
+with the exact command). A lock the reader refuses outright — including the
+superseded transitional v2 shape — is reported as the single `lockError`
+diagnosis, never partially interpreted.
 
 Source of truth beyond this skill: `oas --help` output,
 `docs/oas-package.schema.json`, `docs/oas-lock.schema.json`, and

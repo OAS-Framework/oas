@@ -24,7 +24,7 @@ import {
   acquireCapability, restoreCapabilities, marketplaceCapabilities,
   capabilityManifests, capabilityManifest, capabilityMissingRequires, capabilityIntegrity, capabilityTrust, capabilityExecutablePath,
   readCapabilityLocks, writeCapabilityLock,
-  parsePackageSource, inspectGitSourceRoot, acquirePackage, restorePackages, listInstalledPackages, readPackageLocks, readLockedConfigTemplates, residueEntryViolation,
+  parsePackageSource, inspectGitSourceRoot, acquirePackage, restorePackages, listInstalledPackages, readPackageLocks, readLockedConfigTemplates,
   officialCapabilityPackage, officialPackageCatalog,
   approveCapability, updatePackage, removePackage, migrateLegacyLock, applyLegacyLockMigration,
   packageIntegrity, capabilityArtifactIntegrity, verifyCapabilityInstallation, installedCapabilityDir, installedCapabilitiesDir, ownedCapabilitiesDir, loadPackageManifestAt,
@@ -198,7 +198,7 @@ function capabilityHealth(level, cap, capRow, pkgRow) {
 function doctorPackagesData(ctx, chain, { teamScope } = {}) {
   // reviewer-455ba15 fix 4: the ENGINE diagnostics the human doctor renders
   // (invalid locks, missing artifacts, integrity/runtime-closure drift,
-  // capability-list mismatches, untrusted surfaces, legacy/residue states)
+  // capability-list mismatches, untrusted surfaces, legacy-lock states)
   // are computed HERE so doctor --json exposes them structurally — machine
   // consumers see every state the human report calls broken. Fail-closed
   // reads are diagnosed, never consumed as data and never swallowed.
@@ -240,27 +240,13 @@ function doctorPackagesData(ctx, chain, { teamScope } = {}) {
       packages.push({ id, version: lock.version || null, level: lock._level, source: lock.source || null, path: lock.path || null, commit: lock.commit || null, capabilities: provided, dependencies: lock.dependencies || [], status: "broken", problems: [{ code: "missing-locked-package", detail: `locked in ${lock._file} but not installed — run oas install` }] });
     }
   }
-  // `migrationResidue` diagnoses PRE-EXISTING on-disk state: v1 capability
-  // entries found inside a lockfileVersion-2 document, written by an older
-  // release that converted around them. It is not a result field — migration
-  // itself never produces residue, because a v2 lock has no container for it
-  // and a scope that cannot convert completely stays v1 in full.
-  //
-  // Legacy v1 files and v2 residue — the ENGINE's doctor shapes (its tests pin
-  // status/action fields): empty/nonempty v1 = pending LOCK-FORMAT migration
-  // (maintainer ruling — distinct from capability residue); v2 residue entries
-  // carry pending-migration or invalid-lock with the retry/fix action.
+  // Supported v1 scopes — empty or not — are pending an explicit LOCK-FORMAT
+  // migration (maintainer ruling). There is no second view beside this one:
+  // migration never produces residue, and the superseded transitional v2 shape
+  // is rejected wholesale by the strict reader, so it reaches doctor as the
+  // single `lockError` diagnosis above rather than as partially parsed entries.
   const legacyLockFiles = pkgLocks.legacy
-    .filter((l) => l.lockfileVersion !== 2)
     .map((l) => ({ file: l.file, level: l.level, lockfileVersion: l.lockfileVersion ?? 1, empty: !Object.keys(l.capabilities || {}).length, status: "pending-format-migration", action: `oas migrate --dir ${l.level}` }));
-  const migrationResidue = pkgLocks.legacy
-    .filter((l) => l.lockfileVersion === 2)
-    .flatMap((l) => Object.entries(l.capabilities || {}).map(([id, lock]) => {
-      const violation = residueEntryViolation(lock);
-      return violation
-        ? { id, file: l.file, level: l.level, source: lock?.source || null, status: "invalid-lock", violation, action: `fix or remove the entry in ${l.file} (never auto-repaired)` }
-        : { id, file: l.file, level: l.level, source: lock.source, status: "pending-migration", action: `oas migrate --dir ${l.level}` };
-    }));
   // Adoption provenance now comes from the visible, commit-safe adopted base —
   // not from a provenance comment the local config could lose to an edit.
   const adoptedTemplates = [];
@@ -299,7 +285,7 @@ function doctorPackagesData(ctx, chain, { teamScope } = {}) {
       ? `oas install --accept-requirement ${req.command} --dir ${shellQuote(ctx)}`
       : null,
   }));
-  return { lockError: lockBroken, packages, legacyLockFiles, migrationResidue, adoptedTemplates, missingHostRequirements, officialMigration: officialMigrationState(pkgLocks.legacy, { teamScope, ctx }) };
+  return { lockError: lockBroken, packages, legacyLockFiles, adoptedTemplates, missingHostRequirements, officialMigration: officialMigrationState(pkgLocks.legacy, { teamScope, ctx }) };
 }
 
 function doctorJson(dir) {
@@ -333,11 +319,10 @@ retiredLocks: (() => { try { return Object.entries(readCapabilityLocks(ctx)); } 
       .map(([id, m]) => ({ id, dir: m._dir, origin: m._origin, reason: retiredCapabilityReason(id) })),
     // Shared WS2+engine package payload (fix 4: human and JSON doctor derive
     // from ONE computation; fail-closed reads are diagnosed via lockError —
-    // doctorPackagesData carries the engine's residue/legacy-lock shapes).
+    // doctorPackagesData carries the engine's legacy-lock shapes).
     packages: pkg.packages,
     lockError: pkg.lockError,
     legacyLockFiles: pkg.legacyLockFiles,
-    migrationResidue: pkg.migrationResidue,
     officialMigration: pkg.officialMigration,
     adoptedTemplates: pkg.adoptedTemplates,
     missingHostRequirements: pkg.missingHostRequirements,
@@ -446,7 +431,7 @@ function doctor(dir) {
     console.log(`  ERROR: ${pkg.lockError.message} [${pkg.lockError.code}]`);
     if (pkg.lockError.file) console.log(`         fix or remove the offending entry in ${shortPath(pkg.lockError.file)} — the lock is never auto-repaired; package operations fail closed until it is valid`);
   }
-  if (!pkg.lockError && !pkg.packages.length && !pkg.legacyLockFiles.length && !pkg.migrationResidue.length) console.log("  (none)");
+  if (!pkg.lockError && !pkg.packages.length && !pkg.legacyLockFiles.length) console.log("  (none)");
   for (const p of pkg.packages) {
     console.log(`  ${p.id}@${p.version}  [${levelOf(p.level)} ${shortPath(p.level)}]`);
     for (const prob of p.problems) {
@@ -455,12 +440,8 @@ function doctor(dir) {
     }
   }
   for (const l of pkg.legacyLockFiles) {
-    if (l.empty) console.log(`  WARNING: ${shortPath(l.file)} is an empty lockfileVersion ${l.lockfileVersion} file — pending lock-format migration: run \`oas migrate --dir ${shortPath(l.level)}\` (converts to canonical v2, no residue)`);
+    if (l.empty) console.log(`  WARNING: ${shortPath(l.file)} is an empty lockfileVersion ${l.lockfileVersion} file — pending lock-format migration: run \`oas migrate --dir ${shortPath(l.level)}\` (converts to canonical v2)`);
     else console.log(`  WARNING: ${shortPath(l.file)} is lockfileVersion ${l.lockfileVersion} — \`oas migrate\` maps its capability locks to packages`);
-  }
-  for (const res of pkg.migrationResidue) {
-    if (res.status === "invalid-lock") console.log(`  ERROR: residue entry ${res.id} in ${shortPath(res.file)} is malformed (${res.violation}) — never auto-repaired; fix or remove the entry [invalid-lock]`);
-    else console.log(`  NOTE: ${res.id} in ${shortPath(res.file)} is legacy migration residue (${res.source}) — pending migration: re-run \`oas migrate --dir ${shortPath(res.level)}\` when its official package publishes, or remove the entry if the capability is abandoned`);
   }
   if (pkg.officialMigration) {
     const om = pkg.officialMigration;
@@ -740,7 +721,8 @@ function install() {
   let lockFile;
   try { lockFile = writeCapabilityLock(dir, r.manifest.capability, lock); }
   catch (e) {
-    // Refused lock write (e.g. legacy-lock: v2 scope rejects NEW residue) must
+    // Refused lock write (e.g. legacy-lock: a converted scope rejects a NEW v1
+    // capability entry) must
     // not strand the acquired artifact — compensate before failing.
     rmSync(r.dest, { recursive: true, force: true });
     cmdFail(e.code || "legacy-lock", e.message); return;

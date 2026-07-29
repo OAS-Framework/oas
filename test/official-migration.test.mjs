@@ -237,7 +237,7 @@ test("no catalog mappings (0.19.0): doctor says not yet available and the guided
   assert.equal(env.ok, false);
   assert.equal(env.error.code, "E_MIGRATE_FAILED");
   assert.deepEqual(env.error.details.scopes.map((s) => s.status), ["held", "held", "held"]);
-  // Held is a hold, not a conversion: no residue was created anywhere.
+  // Held is a hold, not a conversion: nothing anywhere was rewritten.
   assert.deepEqual(snapshot(outer), before, "every official v1 state is untouched when mappings are missing");
   rmSync(base, { recursive: true, force: true });
 });
@@ -453,7 +453,7 @@ test("several legacy capabilities aliased to ONE package migrate together, acqui
   const base = temp();
   // One package exporting two capabilities, both reached through catalog aliases —
   // the shape oas.dev already has, and the shape that must not collide with its
-  // own not-yet-converted residue during acquisition.
+  // own still-unconverted v1 entries during acquisition.
   const bundle = pkgSource(join(base, "pkgs", "bundle"), "oas.bundle", {
     a: { capability: "oas.a" },
     b: { capability: "oas.b", commands: { go: "go.mjs" }, _files: { "go.mjs": "// go\n" } },
@@ -540,7 +540,7 @@ test("--recursive without --official refuses a scope it cannot fully map, leavin
   rmSync(base, { recursive: true, force: true });
 });
 
-test("rerun is idempotent and the migrated deployment reaches zero v1 files / zero residue", () => {
+test("rerun is idempotent and the migrated deployment reaches zero v1 lock files", () => {
   const base = temp();
   // All-official deployment (the plain existing-user cutover).
   const root = join(base, "deployment");
@@ -569,7 +569,8 @@ test("rerun is idempotent and the migrated deployment reaches zero v1 files / ze
   assert.equal(inst.status, 0, inst.stderr || inst.stdout);
   const doc = JSON.parse(cli(root, catalog, "doctor", root, "--json").stdout);
   assert.deepEqual(doc.legacyLockFiles, [], "no v1 lock files remain");
-  assert.deepEqual(doc.migrationResidue, [], "no residue remains");
+  assert.equal(Object.hasOwn(doc, "migrationResidue"), false, "there is no residue view — migration never produces residue");
+  assert.equal(doc.lockError, null, "and every lock in the chain reads cleanly");
   assert.equal(doc.officialMigration, null, "nothing left to migrate");
   assert.deepEqual(doc.packages.flatMap((p) => p.problems), [], JSON.stringify(doc.packages));
   rmSync(base, { recursive: true, force: true });
