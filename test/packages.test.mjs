@@ -1,12 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync, chmodSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, symlinkSync, writeFileSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { resolveOasConfig, capabilityIntegrity, acquirePackage, loadPackageManifestAt, parsePackageSource, readPackageLocks } from "../lib/core.mjs";
 import {
-  aggregateMissingRequirements, capabilityRuntimeTargets, commandOnPath, diffConfigTexts, discoverWorkspaceScopes,
+  aggregateMissingRequirements, applyConfigMerge, beginRunJournal, capabilityRuntimeTargets, commandOnPath, diffConfigTexts, discoverWorkspaceScopes,
+  planConfigMerge, splitConfigLines,
   lockedPackageCapabilities, normalizeRequirement, packageSpecIdentity, runtimePackageInstalled, runtimePackageStatus,
   parseProfileProvenance, profileProvenanceHeader, requirementInstallPlan,
   readProfileText, resolveProfilePackage, runRequirementInstall, selectProfile, validateProfile,
@@ -153,38 +154,46 @@ test("profile validation: schema, dependency closure, layer agreement, agent typ
 
 // ---------- init --package (CLI) ----------
 
-test("oas init --package: previews, validates, snapshots with provenance; default and explicit profiles; overwrite refusal", () => {
+test("oas init --package: adopts a template verbatim with a recorded base; default and explicit choice; refusals write nothing", () => {
   const base = temp();
   const pkg = fixturePackage(join(base, "pkg"));
   const ws = join(base, "ws"); mkdirSync(ws);
 
   const r = cli(["init", "--package", pkg, "--dir", ws, "--no-tmux-mouse"]);
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /profile "default"/);
-  assert.match(r.stdout, /exports capabilities: example\.review, example\.delivery/);
+  assert.match(r.stdout, /Config template "default"/);
+  assert.match(r.stdout, /installs 2 capability\(ies\): example\.review, example\.delivery/);
+
   const file = join(ws, "oas-config.yaml");
   const text = readFileSync(file, "utf8");
-  assert.match(text, /^# package: example\.engineering@\S+ profile: default \(snapshot/);
-  assert.match(text, /capability: example\.delivery/);
-  // name rewritten to the target scope
-  assert.match(text, new RegExp(`^name: ws$`, "m"));
-  const prov = parseProfileProvenance(text);
-  assert.equal(prov.package, "example.engineering");
-  assert.equal(prov.profile, "default");
+  const templateText = readFileSync(join(pkg, "configs/default/oas-config.yaml"), "utf8");
+  // The adopted config is the template's EXACT bytes. It is not rewritten on the
+  // way in — not even `name:` — because the recorded base must equal the
+  // template, so that the first `oas config diff` truthfully reports no drift.
+  assert.equal(text, templateText, "the adopted config must be the template byte for byte");
+  const adoptedDir = join(ws, ".agents/config-templates/adopted/example.engineering/default");
+  assert.equal(readFileSync(join(adoptedDir, "oas-config.yaml"), "utf8"), templateText, "the recorded base must be the same exact bytes");
+  const meta = JSON.parse(readFileSync(join(adoptedDir, "adoption.json"), "utf8"));
+  assert.equal(meta.package, "example.engineering");
+  assert.equal(meta.template, "default");
+  assert.match(meta.hash, /^sha256-[0-9a-f]{64}$/);
+  // Commit-safe: a local source is recorded as such, never as a machine path.
+  assert.equal(meta.source, null);
+  assert.equal(meta.localSource, true);
 
   // refusal to overwrite an existing config
   const r2 = cli(["init", "--package", pkg, "--dir", ws, "--no-tmux-mouse"]);
   assert.equal(r2.status, 1);
   assert.match(r2.stderr, /already exists/);
-  assert.equal(readFileSync(file, "utf8"), text, "existing snapshot must not be rewritten");
+  assert.equal(readFileSync(file, "utf8"), text, "an existing config must not be rewritten");
 
-  // explicit profile choice
+  // explicit template choice
   const ws2 = join(base, "ws2"); mkdirSync(ws2);
   const r3 = cli(["init", "--package", pkg, "--config", "minimal", "--dir", ws2, "--no-tmux-mouse"]);
   assert.equal(r3.status, 0, r3.stderr);
-  assert.match(readFileSync(join(ws2, "oas-config.yaml"), "utf8"), /profile: minimal/);
+  assert.equal(existsSync(join(ws2, ".agents/config-templates/adopted/example.engineering/minimal/adoption.json")), true);
 
-  // multiple unmarked profiles require --config
+  // multiple unmarked templates require --config, and refuse before touching anything
   const multiPkg = fixturePackage(join(base, "multi"), { id: "multi.pkg", configs: {
     a: { path: "configs/default/oas-config.yaml" }, b: { path: "configs/minimal/oas-config.yaml" },
   } });
@@ -192,9 +201,9 @@ test("oas init --package: previews, validates, snapshots with provenance; defaul
   const r4 = cli(["init", "--package", multiPkg, "--dir", ws3, "--no-tmux-mouse"]);
   assert.equal(r4.status, 1);
   assert.match(r4.stderr, /--config/);
-  assert.equal(existsSync(join(ws3, "oas-config.yaml")), false);
+  assert.deepEqual(readdirSync(ws3), [], "an ambiguous refusal must leave the scope completely untouched");
 
-  // invalid profile refuses to snapshot
+  // an invalid template refuses, and leaves nothing behind
   const badPkg = fixturePackage(join(base, "bad"), { id: "bad.pkg", extraFiles: {
     "configs/x/oas-config.yaml": "name: w\ncapabilities:\n  additive:\n    ghost.cap:\n      from: installed\n      global: true\n",
   }, configs: { x: { path: "configs/x/oas-config.yaml", default: true } } });
@@ -202,7 +211,9 @@ test("oas init --package: previews, validates, snapshots with provenance; defaul
   const r5 = cli(["init", "--package", badPkg, "--dir", ws4, "--no-tmux-mouse"]);
   assert.equal(r5.status, 1);
   assert.match(r5.stderr, /failed validation/);
-  assert.equal(existsSync(join(ws4, "oas-config.yaml")), false);
+  assert.deepEqual(readdirSync(ws4), [], "a refused template must leave no lock, store, or anchor");
+
+  rmSync(base, { recursive: true, force: true });
 });
 
 // ---------- adopter sovereignty ----------
@@ -279,6 +290,851 @@ test("diffConfigTexts produces a minimal line diff", () => {
   assert.deepEqual(d, [
     { kind: "same", line: "a" }, { kind: "local", line: "b" }, { kind: "package", line: "x" }, { kind: "same", line: "c" },
   ]);
+});
+
+// ---------- config template three-way merge (byte-preserving) ----------
+//
+// These cover the merge CORE only: three texts in, one text out. No engine
+// symbol, no lock, no filesystem — the CLI transaction that feeds it the
+// adopted base, the local config, and the locked template is a separate layer.
+
+/** A hand-edited local config: comments, blank lines, a non-alphabetical key
+ * order, two-space and four-space indentation mixed, and no trailing newline.
+ * Every byte of this outside an explicitly selected region must survive. */
+const HAND_EDITED = [
+  "# our workspace — do not reformat, the ordering is deliberate",
+  "team: acme",
+  "",
+  "capabilities:",
+  "  layers:",
+  "    knowledge:",
+  "      capability: example.delivery   # trailing comment we care about",
+  "  additive:",
+  "    example.review: {}",
+  "",
+  "# agent types last on purpose",
+  "agent-types:",
+  "    dev: {}",
+].join("\n");
+
+test("splitConfigLines round-trips bytes exactly: LF, CRLF, no trailing newline, blank lines, empty", () => {
+  for (const text of ["", "a\n", "a", "a\nb\n", "a\r\nb\r\n", "a\r\nb", "\n\n\n", "a\n\nb\n", HAND_EDITED]) {
+    assert.equal(splitConfigLines(text).join(""), text, `round-trip failed for ${JSON.stringify(text)}`);
+  }
+  assert.deepEqual(splitConfigLines("a\nb"), ["a\n", "b"]);
+  assert.deepEqual(splitConfigLines("a\r\nb\r\n"), ["a\r\n", "b\r\n"]);
+  assert.deepEqual(splitConfigLines(""), []);
+});
+
+test("no drift: identical base/local/template yields no regions and a byte-identical apply", () => {
+  const plan = planConfigMerge(HAND_EDITED, HAND_EDITED, HAND_EDITED);
+  assert.deepEqual(plan.regions, []);
+  assert.equal(plan.clean, true);
+  assert.deepEqual(plan.counts, { upstream: 0, local: 0, conflict: 0, agreed: 0 });
+  const { text, applied } = applyConfigMerge(HAND_EDITED, plan, {});
+  assert.equal(text, HAND_EDITED);
+  assert.deepEqual(applied, []);
+});
+
+test("conflict-free sync: an upstream-only change applies while every untouched local byte stays identical", () => {
+  // Local hand-edited the team line and added a comment; the template added a
+  // new additive capability somewhere else entirely. Disjoint regions.
+  const base = HAND_EDITED;
+  const local = HAND_EDITED.replace("team: acme", "team: acme-eu   # renamed after the split");
+  const template = HAND_EDITED.replace("    example.review: {}", "    example.review: {}\n    example.audit: {}");
+
+  const plan = planConfigMerge(base, local, template);
+  assert.equal(plan.clean, true);
+  assert.deepEqual(plan.counts, { upstream: 1, local: 1, conflict: 0, agreed: 0 });
+  const upstream = plan.regions.find((r) => r.kind === "upstream");
+  const localOnly = plan.regions.find((r) => r.kind === "local");
+  assert.equal(upstream.recommended, "package");
+  assert.equal(localOnly.recommended, "local");
+  assert.match(upstream.template.text, /example\.audit/);
+
+  const { text, applied } = applyConfigMerge(local, plan, {});
+  // The local-only edit survived, the upstream addition landed, and nothing
+  // else moved: byte-for-byte the local file plus exactly that one insertion.
+  assert.equal(text, local.replace("    example.review: {}", "    example.review: {}\n    example.audit: {}"));
+  assert.match(text, /team: acme-eu   # renamed after the split/);
+  assert.match(text, /# our workspace — do not reformat, the ordering is deliberate/);
+  assert.match(text, /      capability: example\.delivery   # trailing comment we care about/);
+  assert.match(text, /^agent-types:\n    dev: \{\}$/m);
+  assert.deepEqual(applied.map((a) => a.kind), ["upstream"]);
+});
+
+test("local-only drift is never offered away: keeping the recommendations returns the local bytes unchanged", () => {
+  const base = HAND_EDITED;
+  const local = `${HAND_EDITED}\n\n# a whole block only we have\nwork-modes:\n  worktree: {}\n`;
+  const plan = planConfigMerge(base, local, base);
+  assert.deepEqual(plan.counts, { upstream: 0, local: 1, conflict: 0, agreed: 0 });
+  assert.equal(plan.regions[0].recommended, "local");
+  assert.equal(applyConfigMerge(local, plan, {}).text, local);
+});
+
+test("both sides made the SAME change: reported as agreed, applying it is a no-op", () => {
+  const base = HAND_EDITED;
+  const same = HAND_EDITED.replace("team: acme", "team: acme-global");
+  const plan = planConfigMerge(base, same, same);
+  assert.deepEqual(plan.counts, { upstream: 0, local: 0, conflict: 0, agreed: 1 });
+  assert.equal(plan.clean, true);
+  const { text, applied } = applyConfigMerge(same, plan, {});
+  assert.equal(text, same);
+  assert.deepEqual(applied, []);
+});
+
+test("overlapping edits are an explicit conflict: no decision fails closed, local/package/edit all resolve byte-preservingly", () => {
+  const base = HAND_EDITED;
+  const local = HAND_EDITED.replace("team: acme", "team: acme-eu");
+  const template = HAND_EDITED.replace("team: acme", "team: acme-global");
+
+  const plan = planConfigMerge(base, local, template);
+  assert.deepEqual(plan.counts, { upstream: 0, local: 0, conflict: 1, agreed: 0 });
+  assert.equal(plan.clean, false);
+  assert.deepEqual(plan.conflicts, ["h1"]);
+  const region = plan.regions[0];
+  assert.equal(region.recommended, null);
+  assert.equal(region.base.text, "team: acme\n");
+  assert.equal(region.local.text, "team: acme-eu\n");
+  assert.equal(region.template.text, "team: acme-global\n");
+
+  // Noninteractive ambiguity: a conflict cannot be resolved by default.
+  assert.throws(() => applyConfigMerge(local, plan, {}), (e) => e.code === "E_SYNC_AMBIGUOUS" && /conflict/.test(e.message));
+
+  assert.equal(applyConfigMerge(local, plan, { h1: "local" }).text, local);
+  assert.equal(applyConfigMerge(local, plan, { h1: "package" }).text, template);
+  const edited = applyConfigMerge(local, plan, { h1: { edit: "team: acme-eu-global\n" } });
+  assert.equal(edited.text, HAND_EDITED.replace("team: acme", "team: acme-eu-global"));
+  assert.deepEqual(edited.applied, [{ id: "h1", kind: "conflict", choice: "edit" }]);
+});
+
+test("one conflict does not block the independent upstream and local regions around it", () => {
+  const base = ["a: 1", "b: 2", "c: 3", "d: 4", "e: 5", "f: 6"].join("\n");
+  const local = ["a: 1", "b: local", "c: 3", "d: 4", "e: 5", "f: local-only"].join("\n");
+  const template = ["a: 1", "b: upstream", "c: 3", "d: upstream", "e: 5", "f: 6"].join("\n");
+
+  const plan = planConfigMerge(base, local, template);
+  assert.deepEqual(plan.counts, { upstream: 1, local: 1, conflict: 1, agreed: 0 });
+  assert.deepEqual(plan.regions.map((r) => r.kind), ["conflict", "upstream", "local"]);
+  const { text } = applyConfigMerge(local, plan, { [plan.regions[0].id]: "package" });
+  assert.equal(text, ["a: 1", "b: upstream", "c: 3", "d: upstream", "e: 5", "f: local-only"].join("\n"));
+});
+
+test("an upstream edit ADJACENT to a local edit is one conflict, not a silently applied neighbour", () => {
+  // The template changed `a` and `b`; the local file changed only `b`. Those
+  // are one contiguous disputed span, so `a` cannot be applied behind the
+  // user's back while `b` is still being decided — the whole span is offered
+  // as a single local/package/edit choice.
+  const base = ["a: 1", "b: 2", "c: 3"].join("\n");
+  const local = ["a: 1", "b: local", "c: 3"].join("\n");
+  const template = ["a: upstream", "b: upstream", "c: 3"].join("\n");
+
+  const plan = planConfigMerge(base, local, template);
+  assert.deepEqual(plan.counts, { upstream: 0, local: 0, conflict: 1, agreed: 0 });
+  assert.equal(plan.regions[0].local.text, "a: 1\nb: local\n");
+  assert.equal(plan.regions[0].template.text, "a: upstream\nb: upstream\n");
+  assert.throws(() => applyConfigMerge(local, plan, {}), (e) => e.code === "E_SYNC_AMBIGUOUS");
+});
+
+test("upstream deletions, insertions at both ends, and the missing trailing newline all survive apply", () => {
+  const base = "keep: 1\ndrop: 2\ntail: 3\n";
+  const local = "keep: 1\ndrop: 2\ntail: 3\n";
+  const template = "head: 0\nkeep: 1\ntail: 3\nfoot: 4";
+
+  const plan = planConfigMerge(base, local, template);
+  assert.equal(plan.counts.conflict, 0);
+  const { text } = applyConfigMerge(local, plan, {});
+  assert.equal(text, template);
+
+  // No trailing newline on the local side is a byte the merge must not add.
+  const noNewline = "keep: 1\ntail: 3";
+  const plan2 = planConfigMerge(noNewline, noNewline, noNewline);
+  assert.equal(applyConfigMerge(noNewline, plan2, {}).text, noNewline);
+});
+
+test("a line differing only in its terminator is a real difference, not a silent rewrite", () => {
+  const base = "a: 1\nb: 2\n";
+  const local = "a: 1\nb: 2\n";
+  const template = "a: 1\r\nb: 2\r\n";
+  const plan = planConfigMerge(base, local, template);
+  assert.equal(plan.counts.upstream, 1);
+  // Keeping the recommendation would adopt CRLF; keeping local leaves the file untouched.
+  assert.equal(applyConfigMerge(local, plan, { h1: "local" }).text, local);
+});
+
+test("an edit decision cannot glue two YAML lines together, but may end the file without a newline", () => {
+  const base = "a: 1\nb: 2\nc: 3\n";
+  const local = "a: 1\nb: local\nc: 3\n";
+  const template = "a: 1\nb: upstream\nc: 3\n";
+  const plan = planConfigMerge(base, local, template);
+  assert.equal(applyConfigMerge(local, plan, { h1: { edit: "b: merged" } }).text, "a: 1\nb: merged\nc: 3\n");
+
+  const tailBase = "a: 1\nb: 2\n";
+  const tailLocal = "a: 1\nb: local\n";
+  const tailTemplate = "a: 1\nb: upstream\n";
+  const tailPlan = planConfigMerge(tailBase, tailLocal, tailTemplate);
+  assert.equal(applyConfigMerge(tailLocal, tailPlan, { h1: { edit: "b: merged" } }).text, "a: 1\nb: merged");
+});
+
+test("merge decisions fail closed: stale plan, unknown region, malformed decision, oversized input", () => {
+  const base = "a: 1\n";
+  const local = "a: local\n";
+  const template = "a: upstream\n";
+  const plan = planConfigMerge(base, local, template);
+
+  assert.throws(() => applyConfigMerge("a: changed underneath\n", plan, { h1: "local" }),
+    (e) => e.code === "E_SYNC_STALE_PLAN");
+  assert.throws(() => applyConfigMerge(local, plan, { h9: "local" }),
+    (e) => e.code === "E_SYNC_UNKNOWN_REGION");
+  assert.throws(() => applyConfigMerge(local, plan, { h1: "upstream" }),
+    (e) => e.code === "E_SYNC_BAD_DECISION");
+  assert.throws(() => applyConfigMerge(local, plan, { h1: { edit: 42 } }),
+    (e) => e.code === "E_SYNC_BAD_DECISION");
+
+  const huge = `${"x: 1\n".repeat(2100)}`;
+  assert.throws(() => planConfigMerge(huge, `y: 0\n${huge}`, huge), (e) => e.code === "E_SYNC_TOO_LARGE");
+});
+
+test("byte-preservation invariants hold over randomized three-way inputs", () => {
+  // Deterministic PRNG — a byte-preservation failure must be reproducible.
+  let seed = 20260729;
+  const rnd = (n) => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed % n; };
+  const mutate = (lines) => {
+    const out = [];
+    for (const line of lines) {
+      const roll = rnd(10);
+      if (roll < 2) continue;                                    // delete
+      if (roll < 4) out.push(`${line}   # touched ${rnd(100)}`);  // change
+      else out.push(line);
+      if (roll === 9) out.push(`inserted-${rnd(1000)}: yes`);     // insert
+    }
+    return out;
+  };
+  const join = (lines) => (lines.length ? `${lines.join("\n")}\n` : "");
+
+  for (let round = 0; round < 200; round++) {
+    const baseLines = Array.from({ length: 1 + rnd(14) }, (_, i) => (rnd(4) ? `key${i}: ${rnd(50)}` : `# comment ${i}`));
+    const base = join(baseLines);
+    const local = join(mutate(baseLines));
+    const template = join(mutate(baseLines));
+    const plan = planConfigMerge(base, local, template);
+    const where = `round ${round}\nbase=${JSON.stringify(base)}\nlocal=${JSON.stringify(local)}\ntemplate=${JSON.stringify(template)}`;
+
+    // 1. Choosing the local side everywhere is a guaranteed no-op, byte for byte.
+    const keepLocal = Object.fromEntries(plan.regions.map((r) => [r.id, "local"]));
+    assert.equal(applyConfigMerge(local, plan, keepLocal).text, local, `keep-local not byte-identical — ${where}`);
+
+    // 2. Choosing the package side everywhere reconstructs the template exactly:
+    //    the regions and the untouched spans between them must together account
+    //    for every byte of both files, or the splice geometry is wrong.
+    const takePackage = Object.fromEntries(plan.regions.map((r) => [r.id, "package"]));
+    assert.equal(applyConfigMerge(local, plan, takePackage).text, template, `take-package did not reconstruct the template — ${where}`);
+
+    // 3. Regions are disjoint and ordered in the local file.
+    let cursor = 0;
+    for (const r of plan.regions) {
+      assert.ok(r.local.start >= cursor && r.local.end >= r.local.start, `region ${r.id} overlaps or inverts — ${where}`);
+      cursor = r.local.end;
+    }
+
+    // 4. Every region's recorded slice text really is the file's bytes there.
+    const localLines = splitConfigLines(local);
+    const templateLines = splitConfigLines(template);
+    for (const r of plan.regions) {
+      assert.equal(r.local.text, localLines.slice(r.local.start, r.local.end).join(""), `region ${r.id} local slice drifted — ${where}`);
+      assert.equal(r.template.text, templateLines.slice(r.template.start, r.template.end).join(""), `region ${r.id} template slice drifted — ${where}`);
+    }
+  }
+});
+
+test("a plan region binds to the exact three texts it was computed from", () => {
+  const a = planConfigMerge("a: 1\n", "a: local\n", "a: upstream\n");
+  const b = planConfigMerge("a: 1\n", "a: local\n", "a: other\n");
+  assert.notEqual(a.regions[0].digest, b.regions[0].digest);
+  assert.notEqual(a.planDigest, b.planDigest);
+  assert.equal(a.planDigest, planConfigMerge("a: 1\n", "a: local\n", "a: upstream\n").planDigest);
+});
+
+// ---------- guided template adoption transaction ----------
+
+/** A materialization-era package: one capability root plus one config template. */
+function materializedPackage(dir, { id = "example.engineering", version = "1.0.0", capability = "example.review", body = "hi", templates } = {}) {
+  write(join(dir, "capabilities/example-review/oas.json"), JSON.stringify({ capability, version, description: "Review capability." }, null, 2));
+  write(join(dir, "capabilities/example-review/skills/review/SKILL.md"), `# review\n${body}\n`);
+  write(join(dir, "config-templates/default/oas-config.yaml"), "# adopt me\nname: workspace\n\ncapabilities:\n  additive:\n    example.review: {}\n");
+  write(join(dir, "oas-package.json"), JSON.stringify({
+    package: id, version, description: "Engineering package.", compatibility: { oas: ">=0.19.0" },
+    capabilities: ["capabilities/example-review"],
+    configTemplates: templates ?? { default: { path: "config-templates/default/oas-config.yaml", description: "Recommended setup", default: true } },
+  }, null, 2));
+  return dir;
+}
+
+test("init --package is ADOPTION, not an install alias: default template selection, and refusals mutate nothing", () => {
+  const pkg = materializedPackage(temp());
+
+  // No --config still adopts: the single marked default.
+  const scope = temp();
+  const ok = cli(["init", "--package", pkg, "--dir", scope, "--json"]);
+  assert.equal(ok.status, 0, ok.stderr);
+  const okPayload = JSON.parse(ok.stdout).result;
+  assert.equal(okPayload.adopted, true);
+  assert.equal(okPayload.template, "default");
+  assert.equal(existsSync(join(scope, "oas-config.yaml")), true);
+  assert.equal(existsSync(join(scope, ".agents/config-templates/adopted/example.engineering/default/adoption.json")), true);
+
+  // Several unmarked templates: ambiguous, and the scope stays untouched
+  // because the refusal happens inside the pre-commit gate.
+  const ambiguous = materializedPackage(temp(), {
+    templates: { a: { path: "config-templates/default/oas-config.yaml" }, b: { path: "config-templates/default/oas-config.yaml" } },
+  });
+  const scope2 = temp();
+  const amb = cli(["init", "--package", ambiguous, "--dir", scope2, "--json"]);
+  assert.equal(amb.status, 1);
+  assert.equal(JSON.parse(amb.stdout).error.code, "E_TEMPLATE_AMBIGUOUS");
+  assert.deepEqual(readdirSync(scope2), [], "an ambiguous refusal must not create a lock, a store, or an anchor");
+
+  // A named template that does not exist, and a package with no templates.
+  const scope3 = temp();
+  const missing = cli(["init", "--package", pkg, "--config", "nope", "--dir", scope3, "--json"]);
+  assert.equal(JSON.parse(missing.stdout).error.code, "E_TEMPLATE_NOT_FOUND");
+  assert.deepEqual(readdirSync(scope3), []);
+
+  const noTemplates = materializedPackage(temp(), { templates: {} });
+  const scope4 = temp();
+  const none = cli(["init", "--package", noTemplates, "--dir", scope4, "--json"]);
+  assert.equal(JSON.parse(none.stdout).error.code, "E_NO_TEMPLATES");
+  assert.deepEqual(readdirSync(scope4), []);
+
+  for (const d of [pkg, scope, ambiguous, scope2, scope3, noTemplates, scope4]) rmSync(d, { recursive: true, force: true });
+});
+
+test("a journal that cannot even be constructed still yields exactly one JSON envelope", () => {
+  const scope = temp();
+  const outside = temp();
+  mkdirSync(join(scope, ".agents"), { recursive: true });
+  // An intermediate symlink leaving the scope: the journal refuses to snapshot
+  // through it, and that refusal happens before anything is acquired.
+  symlinkSync(outside, join(scope, ".agents/capabilities"));
+  const pkg = materializedPackage(temp());
+
+  const r = cli(["init", "--package", pkg, "--dir", scope, "--json"]);
+  assert.equal(r.status, 1);
+  // Exactly one envelope on stdout — not a stack trace, not two objects.
+  const parsed = JSON.parse(r.stdout);
+  assert.equal(r.stdout.trimEnd().split("\n").length, 1, "stdout must carry ONE envelope and nothing else");
+  assert.equal(parsed.ok, false);
+  assert.equal(parsed.schemaVersion, 1);
+  assert.equal(parsed.error.code, "E_JOURNAL_PATH_ESCAPE");
+  assert.doesNotMatch(r.stdout, /at .*\(.*:\d+:\d+\)/, "no stack trace may reach stdout");
+
+  // And nothing was acquired or written.
+  assert.equal(existsSync(join(scope, "oas-lock.json")), false);
+  assert.equal(existsSync(join(scope, "oas-config.yaml")), false);
+  assert.deepEqual(readdirSync(outside), [], "the escaping target must be untouched");
+
+  for (const d of [scope, outside, pkg]) rmSync(d, { recursive: true, force: true });
+});
+
+test("adoption failure AFTER the engine commits rolls the whole run back: pre-existing same-name capability, lock, ignore and base return", () => {
+  const scope = temp();
+  execFileSync("git", ["init", "-q", scope]); // Git-backed, so the ignore file is part of the transaction
+  const pkg = materializedPackage(temp(), { version: "1.0.0", body: "ORIGINAL BYTES" });
+
+  // Pre-existing state: the capability is already installed (via install, which
+  // writes no config), so the later init --package touches the SAME capability.
+  const seeded = cli(["install", pkg, "--dir", scope]);
+  assert.equal(seeded.status, 0, seeded.stderr);
+  const capDir = join(scope, ".agents/capabilities/installed/example.review");
+  const skill = join(capDir, "skills/review/SKILL.md");
+
+  // Drift the installed artifact. Re-acquiring the same locked package then
+  // REPROJECTS it, which is what makes the engine actually commit a replacement
+  // of a pre-existing same-name capability before our adoption write runs.
+  // Without this the run would be refused at integrity-drift and never reach
+  // the post-commit path this test exists to cover.
+  writeFileSync(skill, "# review\nDRIFTED ON DISK\n");
+  const before = {
+    skill: readFileSync(skill),
+    provenance: readFileSync(join(capDir, ".oas-installation.json")),
+    lock: readFileSync(join(scope, "oas-lock.json")),
+    ignore: readFileSync(join(scope, ".agents/capabilities/.gitignore")),
+  };
+
+  // Injected post-engine failure: the adopted-base directory path is occupied
+  // by a FILE, so the adoption write fails only after the engine committed.
+  write(join(scope, ".agents/config-templates"), "not a directory\n");
+
+  const failed = cli(["init", "--package", pkg, "--dir", scope, "--json"]);
+  assert.equal(failed.status, 1, "the run must fail");
+  const err = JSON.parse(failed.stdout).error;
+  assert.equal(err.code, "E_ADOPT_FAILED", "a CLI-owned write failure needs a stable code, not a raw errno");
+  assert.match(err.message, /after the package was installed/);
+
+  // Every pre-command byte is back — including the drifted artifact, because
+  // rollback restores the state the command STARTED from, not an idealised one.
+  assert.deepEqual(readFileSync(skill), before.skill, "the pre-existing same-name capability artifact must return byte-identically");
+  assert.deepEqual(readFileSync(join(capDir, ".oas-installation.json")), before.provenance, "provenance must return byte-identically");
+  assert.deepEqual(readFileSync(join(scope, "oas-lock.json")), before.lock, "the pre-command lock must return byte-identically");
+  assert.deepEqual(readFileSync(join(scope, ".agents/capabilities/.gitignore")), before.ignore, "the ignore bytes must return");
+  assert.equal(existsSync(join(scope, "oas-config.yaml")), false, "no config may survive a failed adoption");
+  assert.equal(existsSync(join(scope, ".agents/config-templates/adopted")), false, "no adopted base may survive a failed adoption");
+
+  for (const d of [scope, pkg]) rmSync(d, { recursive: true, force: true });
+});
+
+// ---------- oas config sync / --reset / adopt ----------
+
+/** Publish a new template body (and version) for an already-installed fixture. */
+function republish(pkgDir, body, version) {
+  write(join(pkgDir, "config-templates/default/oas-config.yaml"), body);
+  const manifest = JSON.parse(readFileSync(join(pkgDir, "oas-package.json"), "utf8"));
+  manifest.version = version;
+  write(join(pkgDir, "oas-package.json"), JSON.stringify(manifest, null, 2));
+}
+
+const TEMPLATE_V1 = "# template header — do not lose me\nname: workspace\n\ncapabilities:\n  additive:\n    example.review: {}\n";
+
+test("config sync applies upstream-only changes and leaves every other local byte identical", () => {
+  const pkg = materializedPackage(temp());
+  write(join(pkg, "config-templates/default/oas-config.yaml"), TEMPLATE_V1);
+  const scope = temp();
+  const initRun = cli(["init", "--package", pkg, "--dir", scope]);
+  assert.equal(initRun.status, 0, `init: ${initRun.stderr}`);
+
+  // Hand edit near the TOP, with deliberate spacing and a trailing comment.
+  const file = join(scope, "oas-config.yaml");
+  const local = TEMPLATE_V1.replace("name: workspace", "name: acme     # our name, keep it exactly");
+  writeFileSync(file, local);
+
+  // Upstream changes a region genuinely far from the local edit — three
+  // unchanged lines apart. Anything closer would ENTANGLE with it into one
+  // conflict, which is correct behaviour but not what this case is about.
+  republish(pkg, `${TEMPLATE_V1}    example.audit: {}\n`, "1.1.0");
+  const upd = cli(["update", "example.engineering", "--dir", scope]);
+  assert.equal(upd.status, 0, `update: ${upd.stderr}`);
+
+  const r = cli(["config", "sync", "--dir", scope, "--json"]);
+  assert.equal(r.status, 0, r.stderr);
+  const payload = JSON.parse(r.stdout).result;
+  assert.equal(payload.changed, true);
+  assert.equal(payload.baseAdvanced, true);
+  assert.deepEqual(payload.applied.map((a) => a.kind), ["upstream"]);
+
+  const after = readFileSync(file, "utf8");
+  assert.match(after, /example\.audit: \{\}/, "the upstream addition must land");
+  assert.match(after, /name: acme {5}# our name, keep it exactly/, "the local edit and its exact spacing must survive");
+  assert.match(after, /^# template header — do not lose me$/m, "an untouched comment must survive verbatim");
+  // Everything except the applied region is byte-identical to what we wrote.
+  assert.equal(after, `${local}    example.audit: {}\n`);
+  assert.equal(readFileSync(payload.backup, "utf8"), local, "the backup holds the pre-sync bytes");
+
+  for (const d of [pkg, scope]) rmSync(d, { recursive: true, force: true });
+});
+
+test("config sync refuses noninteractive ambiguity, honours local/package choices, and records them so they are not re-asked", () => {
+  const pkg = materializedPackage(temp());
+  write(join(pkg, "config-templates/default/oas-config.yaml"), TEMPLATE_V1);
+  const scope = temp();
+  assert.equal(cli(["init", "--package", pkg, "--dir", scope]).status, 0);
+  const file = join(scope, "oas-config.yaml");
+  const local = TEMPLATE_V1.replace("    example.review: {}", "    example.review: { global: true }");
+  writeFileSync(file, local);
+
+  // Upstream touches the SAME line: a genuine conflict.
+  republish(pkg, TEMPLATE_V1.replace("    example.review: {}", "    example.review: { agent-types: { dev: true } }"), "1.1.0");
+  assert.equal(cli(["update", "example.engineering", "--dir", scope]).status, 0);
+
+  // Noninteractive with no decision: fail closed, change nothing.
+  const refused = cli(["config", "sync", "--dir", scope, "--json"]);
+  assert.equal(refused.status, 1);
+  assert.equal(JSON.parse(refused.stdout).error.code, "E_SYNC_AMBIGUOUS");
+  assert.equal(readFileSync(file, "utf8"), local, "a refused sync must not touch a byte");
+
+  // An explicit package choice applies it.
+  const taken = cli(["config", "sync", "--accept", "h1=package", "--dir", scope, "--json"]);
+  assert.equal(taken.status, 0, taken.stderr);
+  assert.match(readFileSync(file, "utf8"), /agent-types: \{ dev: true \}/);
+
+  // The decision was recorded: syncing again has nothing to ask or do.
+  const again = cli(["config", "sync", "--dir", scope, "--json"]);
+  assert.equal(again.status, 0, again.stderr);
+  assert.equal(JSON.parse(again.stdout).result.changed, false);
+
+  for (const d of [pkg, scope]) rmSync(d, { recursive: true, force: true });
+});
+
+test("keeping local on every conflict still advances the base, so the same conflict is never re-presented", () => {
+  const pkg = materializedPackage(temp());
+  write(join(pkg, "config-templates/default/oas-config.yaml"), TEMPLATE_V1);
+  const scope = temp();
+  assert.equal(cli(["init", "--package", pkg, "--dir", scope]).status, 0);
+  const file = join(scope, "oas-config.yaml");
+  const local = TEMPLATE_V1.replace("    example.review: {}", "    example.review: { global: true }");
+  writeFileSync(file, local);
+  republish(pkg, TEMPLATE_V1.replace("    example.review: {}", "    example.review: { global: false }"), "1.1.0");
+  assert.equal(cli(["update", "example.engineering", "--dir", scope]).status, 0);
+
+  const kept = cli(["config", "sync", "--accept", "h1=local", "--dir", scope, "--json"]);
+  assert.equal(kept.status, 0, kept.stderr);
+  const payload = JSON.parse(kept.stdout).result;
+  assert.equal(payload.changed, false, "keeping local changes no bytes");
+  assert.equal(payload.baseAdvanced, true, "but the decision must still be recorded");
+  assert.equal(readFileSync(file, "utf8"), local);
+
+  // Without base advancement this would raise the identical conflict forever.
+  const second = cli(["config", "sync", "--dir", scope, "--json"]);
+  assert.equal(second.status, 0, "the resolved conflict must not come back");
+  assert.equal(JSON.parse(second.stdout).result.changed, false);
+
+  for (const d of [pkg, scope]) rmSync(d, { recursive: true, force: true });
+});
+
+test("config sync --reset previews the loss, demands explicit acceptance, and keeps a recoverable backup", () => {
+  const pkg = materializedPackage(temp());
+  write(join(pkg, "config-templates/default/oas-config.yaml"), TEMPLATE_V1);
+  const scope = temp();
+  assert.equal(cli(["init", "--package", pkg, "--dir", scope]).status, 0);
+  const file = join(scope, "oas-config.yaml");
+  const local = `${TEMPLATE_V1}\n# months of local policy\nagent-types:\n  dev: {}\n`;
+  writeFileSync(file, local);
+
+  // Noninteractive without acceptance: refuse, change nothing.
+  const refused = cli(["config", "sync", "--reset", "--dir", scope, "--json"]);
+  assert.equal(refused.status, 1);
+  assert.equal(JSON.parse(refused.stdout).error.code, "E_RESET_NOT_CONFIRMED");
+  assert.equal(readFileSync(file, "utf8"), local, "a refused reset must not touch a byte");
+
+  const done = cli(["config", "sync", "--reset", "--yes", "--dir", scope, "--json"]);
+  assert.equal(done.status, 0, done.stderr);
+  const payload = JSON.parse(done.stdout).result;
+  assert.equal(payload.action, "reset");
+  assert.ok(payload.discardedRegions >= 1);
+  assert.equal(readFileSync(file, "utf8"), TEMPLATE_V1, "reset replaces the config with the template verbatim");
+  assert.equal(readFileSync(payload.backup, "utf8"), local, "the discarded local policy must be recoverable");
+
+  for (const d of [pkg, scope]) rmSync(d, { recursive: true, force: true });
+});
+
+test("config adopt switches base: exactly one survives on success, and a failure leaves everything unchanged", () => {
+  const first = materializedPackage(temp(), { id: "first.pkg", capability: "first.cap" });
+  write(join(first, "config-templates/default/oas-config.yaml"), "# first\nname: workspace\n");
+  const second = materializedPackage(temp(), { id: "second.pkg", capability: "second.cap" });
+  write(join(second, "config-templates/default/oas-config.yaml"), "# second\nname: workspace\nsettings:\n  x: 1\n");
+
+  const scope = temp();
+  assert.equal(cli(["init", "--package", first, "--dir", scope]).status, 0);
+  assert.equal(cli(["install", second, "--dir", scope]).status, 0);
+  const adoptedRoot = join(scope, ".agents/config-templates/adopted");
+  assert.deepEqual(readdirSync(adoptedRoot), ["first.pkg"]);
+
+  const r = cli(["config", "adopt", "second.pkg", "--dir", scope, "--json"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(readdirSync(adoptedRoot), ["second.pkg"], "exactly one adopted base may survive a switch");
+  assert.match(readFileSync(join(scope, "oas-config.yaml"), "utf8"), /settings:/);
+
+  // A failed switch changes nothing: the package is not installed here.
+  const before = readFileSync(join(scope, "oas-config.yaml"), "utf8");
+  const failed = cli(["config", "adopt", "absent.pkg", "--dir", scope, "--json"]);
+  assert.equal(failed.status, 1);
+  assert.deepEqual(readdirSync(adoptedRoot), ["second.pkg"], "a failed switch must leave the prior base in place");
+  assert.equal(readFileSync(join(scope, "oas-config.yaml"), "utf8"), before);
+
+  for (const d of [first, second, scope]) rmSync(d, { recursive: true, force: true });
+});
+
+// ---------- run-level rollback journal (CLI-private) ----------
+//
+// The run-level guarantee — a later failure rolls back only THIS run's changes
+// and leaves pre-existing bytes/artifacts identical — spans artifacts no single
+// engine call covers, so the CLI owns it. These tests exercise the mechanism
+// against real filesystem state; no engine symbol is involved.
+
+/** Exact fingerprint of a tree: relative path, type, mode, and content or link
+ * target. Two trees with equal fingerprints are byte- and behaviour-identical
+ * for our purposes, which is what "restored exactly" has to mean. */
+function fingerprint(root) {
+  const out = [];
+  const walk = (dir, prefix) => {
+    if (!existsSync(dir)) return;
+    for (const ent of readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      const abs = join(dir, ent.name);
+      const rel = prefix ? `${prefix}/${ent.name}` : ent.name;
+      const st = lstatSync(abs);
+      if (st.isSymbolicLink()) out.push(`${rel} symlink -> ${readlinkSync(abs)}`);
+      else if (st.isDirectory()) { out.push(`${rel} dir ${(st.mode & 0o777).toString(8)}`); walk(abs, rel); }
+      else out.push(`${rel} file ${(st.mode & 0o777).toString(8)} ${readFileSync(abs).toString("base64")}`);
+    }
+  };
+  walk(root, "");
+  return out.join("\n");
+}
+
+/** A scope with a pre-existing installed capability, lock, config, ignore file
+ * and adopted base — i.e. the state a second run must not damage. */
+function populatedScope({ git = false } = {}) {
+  const dir = temp();
+  write(join(dir, "oas-config.yaml"), "# hand written\nname: acme\n");
+  write(join(dir, "oas-lock.json"), JSON.stringify({ lockfileVersion: 2, packages: {}, capabilities: {} }, null, 2));
+  write(join(dir, ".agents/capabilities/.gitignore"), "installed/\n");
+  write(join(dir, ".agents/capabilities/installed/example.review/oas.json"), '{"capability":"example.review"}');
+  write(join(dir, ".agents/capabilities/installed/example.review/.oas-installation.json"), '{"package":"example.engineering"}');
+  writeFileSync(join(dir, ".agents/capabilities/installed/example.review/run.sh"), "#!/bin/sh\necho hi\n", { mode: 0o755 });
+  symlinkSync("./oas.json", join(dir, ".agents/capabilities/installed/example.review/manifest-link"));
+  write(join(dir, ".agents/capabilities/owned/acme.local/oas.json"), '{"capability":"acme.local"}');
+  write(join(dir, ".agents/config-templates/adopted/example.engineering/default/oas-config.yaml"), "name: acme\n");
+  write(join(dir, ".agents/config-templates/adopted/example.engineering/default/adoption.json"), '{"template":"default"}');
+  if (git) gitRepo(dir);
+  return dir;
+}
+
+test("run journal restores a scope byte-identically after a failed multi-step run (Git and non-Git layouts)", () => {
+  for (const git of [false, true]) {
+    const dir = populatedScope({ git });
+    const before = fingerprint(dir);
+    const journal = beginRunJournal(dir);
+
+    // A run that gets a long way in before failing: rewrites the config, the
+    // lock, the ignore file and the adopted base, replaces the pre-existing
+    // same-name capability, and adds a new one.
+    writeFileSync(join(dir, "oas-config.yaml"), "name: rewritten-by-the-run\n");
+    writeFileSync(join(dir, "oas-lock.json"), '{"lockfileVersion":2,"packages":{"x":{}},"capabilities":{}}');
+    writeFileSync(join(dir, ".agents/capabilities/.gitignore"), "installed/\nowned/\n");
+    rmSync(join(dir, ".agents/capabilities/installed/example.review"), { recursive: true, force: true });
+    write(join(dir, ".agents/capabilities/installed/example.review/oas.json"), '{"capability":"example.review","version":"9.9.9"}');
+    write(join(dir, ".agents/capabilities/installed/example.audit/oas.json"), '{"capability":"example.audit"}');
+    write(join(dir, ".agents/config-templates/adopted/other.package/default/oas-config.yaml"), "name: other\n");
+
+    // Proof the assertion below has teeth: without the rollback, the scope is
+    // genuinely different. A restore test that would also pass against a no-op
+    // rollback measures nothing.
+    assert.notEqual(fingerprint(dir), before, "fixture failed to mutate the scope");
+
+    const report = journal.rollback();
+    assert.equal(report.complete, true, `rollback reported incomplete: ${report.summary}`);
+    assert.equal(fingerprint(dir), before, `scope not byte-identical after rollback (git=${git})`);
+    // The owned capability was never in the blast radius.
+    assert.equal(readFileSync(join(dir, ".agents/capabilities/owned/acme.local/oas.json"), "utf8"), '{"capability":"acme.local"}');
+    assert.equal(existsSync(journal.backupDir), false, "a complete rollback must clean its backup");
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("run journal blocker regression: a pre-existing same-name capability, its provenance, lock and adopted base return exactly", () => {
+  const dir = populatedScope();
+  const capDir = join(dir, ".agents/capabilities/installed/example.review");
+  const originalManifest = readFileSync(join(capDir, "oas.json"));
+  const originalProvenance = readFileSync(join(capDir, ".oas-installation.json"));
+  const originalLock = readFileSync(join(dir, "oas-lock.json"));
+  const originalBase = readFileSync(join(dir, ".agents/config-templates/adopted/example.engineering/default/oas-config.yaml"));
+  const originalMode = lstatSync(join(capDir, "run.sh")).mode & 0o777;
+
+  const journal = beginRunJournal(dir);
+  // The run materializes over the SAME capability id, rewrites its provenance
+  // and the lock, advances the adopted base — then fails.
+  writeFileSync(join(capDir, "oas.json"), '{"capability":"example.review","version":"2.0.0"}');
+  writeFileSync(join(capDir, ".oas-installation.json"), '{"package":"someone.else"}');
+  writeFileSync(join(capDir, "run.sh"), "#!/bin/sh\nrm -rf /\n", { mode: 0o644 });
+  rmSync(join(capDir, "manifest-link"), { force: true });
+  writeFileSync(join(dir, "oas-lock.json"), "{}");
+  writeFileSync(join(dir, ".agents/config-templates/adopted/example.engineering/default/oas-config.yaml"), "name: upstream\n");
+
+  assert.equal(journal.rollback().complete, true);
+  assert.deepEqual(readFileSync(join(capDir, "oas.json")), originalManifest);
+  assert.deepEqual(readFileSync(join(capDir, ".oas-installation.json")), originalProvenance);
+  assert.deepEqual(readFileSync(join(dir, "oas-lock.json")), originalLock);
+  assert.deepEqual(readFileSync(join(dir, ".agents/config-templates/adopted/example.engineering/default/oas-config.yaml")), originalBase);
+  assert.equal(lstatSync(join(capDir, "run.sh")).mode & 0o777, originalMode, "executable bit must survive rollback");
+  assert.equal(lstatSync(join(capDir, "manifest-link")).isSymbolicLink(), true, "symlink must be restored as a symlink");
+  assert.equal(readlinkSync(join(capDir, "manifest-link")), "./oas.json");
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("run journal removes what the run created, including the .agents anchor, but only while empty", () => {
+  const bare = temp();
+  const journal = beginRunJournal(bare);
+  assert.equal(journal.anchorCreatedByRun, true);
+
+  write(join(bare, "oas-config.yaml"), "name: fresh\n");
+  write(join(bare, "oas-lock.json"), "{}");
+  write(join(bare, ".agents/capabilities/.gitignore"), "installed/\n");
+  write(join(bare, ".agents/capabilities/installed/example.review/oas.json"), "{}");
+  write(join(bare, ".agents/config-templates/adopted/example.engineering/default/adoption.json"), "{}");
+
+  assert.notEqual(fingerprint(bare), "", "fixture failed to create anything to remove");
+  assert.equal(journal.rollback().complete, true);
+  assert.equal(fingerprint(bare), "", "a fresh-scope rollback must leave nothing behind, anchor included");
+  rmSync(bare, { recursive: true, force: true });
+
+  // Same run, but the scope also holds an owned capability the run never made:
+  // the anchor is NOT ours to delete once something else lives under it.
+  const withOwned = temp();
+  write(join(withOwned, ".agents/capabilities/owned/acme.local/oas.json"), "{}");
+  const j2 = beginRunJournal(withOwned);
+  assert.equal(j2.anchorCreatedByRun, false);
+  write(join(withOwned, ".agents/capabilities/installed/example.review/oas.json"), "{}");
+  write(join(withOwned, ".agents/capabilities/.gitignore"), "installed/\n");
+  assert.equal(j2.rollback().complete, true);
+  assert.equal(existsSync(join(withOwned, ".agents/capabilities/owned/acme.local/oas.json")), true);
+  assert.equal(existsSync(join(withOwned, ".agents/capabilities/installed")), false);
+  assert.equal(existsSync(join(withOwned, ".agents/capabilities/.gitignore")), false);
+  rmSync(withOwned, { recursive: true, force: true });
+});
+
+test("run journal restores the capability .gitignore's prior bytes, and its prior ABSENCE", () => {
+  // Prior bytes: the engine's transactional ensure rewrote it; rollback undoes that.
+  const withIgnore = populatedScope();
+  const j1 = beginRunJournal(withIgnore);
+  writeFileSync(join(withIgnore, ".agents/capabilities/.gitignore"), "installed/\nowned/\nadopted/\n");
+  assert.equal(j1.rollback().complete, true);
+  assert.equal(readFileSync(join(withIgnore, ".agents/capabilities/.gitignore"), "utf8"), "installed/\n");
+  rmSync(withIgnore, { recursive: true, force: true });
+
+  // Prior absence: the engine created it during an operation that succeeded
+  // before the run failed later — compensating it is the CLI journal's job.
+  const withoutIgnore = temp();
+  write(join(withoutIgnore, ".agents/capabilities/owned/acme.local/oas.json"), "{}");
+  const j2 = beginRunJournal(withoutIgnore);
+  write(join(withoutIgnore, ".agents/capabilities/.gitignore"), "installed/\n");
+  assert.equal(j2.rollback().complete, true);
+  assert.equal(existsSync(join(withoutIgnore, ".agents/capabilities/.gitignore")), false);
+  rmSync(withoutIgnore, { recursive: true, force: true });
+});
+
+test("run journal rollback is truthful about partial failure instead of hiding it", { skip: process.getuid?.() === 0 ? "runs as root: permissions cannot be enforced" : false }, () => {
+  const dir = populatedScope();
+  const journal = beginRunJournal(dir);
+  writeFileSync(join(dir, "oas-config.yaml"), "name: rewritten\n");
+  writeFileSync(join(dir, "oas-lock.json"), "{}");
+
+  // Injected failure: make the scope directory unwritable so the config cannot
+  // be replaced, while the artifacts under .agents still can be.
+  chmodSync(dir, 0o500);
+  let report;
+  try { report = journal.rollback(); } finally { chmodSync(dir, 0o700); }
+
+  assert.equal(report.complete, false);
+  assert.match(report.summary, /^ROLLBACK INCOMPLETE — /);
+  assert.match(report.summary, /oas-config\.yaml/);
+  assert.ok(report.failures.length > 0, "failures must be enumerated, not summarised away");
+  assert.equal(existsSync(journal.backupDir), true, "an incomplete rollback must KEEP the backup — it is the only surviving copy");
+
+  // Recoverable: with the permission restored, rolling back again completes.
+  const second = journal.rollback();
+  assert.equal(second.complete, true, second.summary);
+  assert.equal(readFileSync(join(dir, "oas-config.yaml"), "utf8"), "# hand written\nname: acme\n");
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("run journal finalize and rollback are idempotent, mutually exclusive, and clean up the backup", () => {
+  const dir = populatedScope();
+  const j1 = beginRunJournal(dir);
+  writeFileSync(join(dir, "oas-config.yaml"), "name: kept\n");
+  j1.finalize();
+  j1.finalize(); // idempotent
+  assert.equal(existsSync(j1.backupDir), false);
+  assert.equal(readFileSync(join(dir, "oas-config.yaml"), "utf8"), "name: kept\n", "finalize must never revert the run's work");
+  assert.throws(() => j1.rollback(), (e) => e.code === "E_JOURNAL_FINALIZED");
+
+  const j2 = beginRunJournal(dir);
+  writeFileSync(join(dir, "oas-config.yaml"), "name: discarded\n");
+  assert.equal(j2.rollback().complete, true);
+  const again = j2.rollback(); // idempotent
+  assert.equal(again.complete, true);
+  assert.deepEqual([again.restored, again.removed], [[], []]);
+  assert.throws(() => j2.finalize(), (e) => e.code === "E_JOURNAL_ROLLED_BACK");
+  assert.equal(readFileSync(join(dir, "oas-config.yaml"), "utf8"), "name: kept\n");
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("run journal keeps its backup outside the protected tree and refuses escaping paths", () => {
+  const dir = populatedScope();
+  const journal = beginRunJournal(dir);
+  assert.equal(journal.backupDir.startsWith(`${dir}/`), false, "backup inside the scope would be destroyed by the restore it enables");
+  journal.finalize();
+
+  assert.throws(() => beginRunJournal(dir, { backupRoot: dir }), (e) => e.code === "E_JOURNAL_BACKUP_INSIDE_SCOPE");
+  assert.throws(() => beginRunJournal(dir, { extraPaths: ["../outside.yaml"] }), (e) => e.code === "E_JOURNAL_PATH_ESCAPE");
+  assert.throws(() => beginRunJournal(join(dir, "nope")), (e) => e.code === "E_JOURNAL_NO_SCOPE");
+
+  // An INTERMEDIATE component that leaves the scope is fatal: restoring through
+  // it would delete outer-scope state this run never owned.
+  const escaped = temp();
+  const outside = temp();
+  mkdirSync(join(escaped, ".agents"), { recursive: true });
+  symlinkSync(outside, join(escaped, ".agents/capabilities"));
+  assert.throws(() => beginRunJournal(escaped), (e) => e.code === "E_JOURNAL_PATH_ESCAPE");
+
+  // A CONTAINED alias is refused too: it makes two journal entries address the
+  // same bytes, so restoring one would delete or overwrite the other and the
+  // result would depend on entry order.
+  const aliased = temp();
+  mkdirSync(join(aliased, ".agents/real-capabilities"), { recursive: true });
+  symlinkSync("./real-capabilities", join(aliased, ".agents/capabilities"));
+  assert.throws(() => beginRunJournal(aliased), (e) => e.code === "E_JOURNAL_SYMLINK_COMPONENT");
+
+  for (const d of [dir, escaped, outside, aliased]) rmSync(d, { recursive: true, force: true });
+});
+
+test("run journal leaves no backup residue when construction itself fails", { skip: process.getuid?.() === 0 ? "runs as root: permissions cannot be enforced" : false }, () => {
+  const backupRoot = temp();
+  const residue = () => readdirSync(backupRoot).filter((n) => n.startsWith("oas-run-journal-"));
+
+  // Failure DURING snapshotting: the capability store cannot be read, so the
+  // copy throws after the backup directory already exists.
+  const dir = populatedScope();
+  const store = join(dir, ".agents/capabilities/installed");
+  chmodSync(store, 0o000);
+  try {
+    assert.throws(() => beginRunJournal(dir, { backupRoot }));
+  } finally { chmodSync(store, 0o700); }
+  assert.deepEqual(residue(), [], "a failed snapshot must not strand a partial backup");
+
+  // Failure from a refused layout, after mkdtemp: same guarantee.
+  const aliased = temp();
+  mkdirSync(join(aliased, ".agents/real-capabilities"), { recursive: true });
+  symlinkSync("./real-capabilities", join(aliased, ".agents/capabilities"));
+  assert.throws(() => beginRunJournal(aliased, { backupRoot }), (e) => e.code === "E_JOURNAL_SYMLINK_COMPONENT");
+  assert.deepEqual(residue(), []);
+
+  // And the original typed error survives the cleanup rather than being masked.
+  assert.throws(() => beginRunJournal(dir, { backupRoot, extraPaths: ["../escape.yaml"] }), (e) => e.code === "E_JOURNAL_PATH_ESCAPE");
+  assert.deepEqual(residue(), []);
+
+  for (const d of [dir, aliased, backupRoot]) rmSync(d, { recursive: true, force: true });
+});
+
+test("run journal path input is canonical, unique, and collision-free between a/b and a__b", () => {
+  const dir = populatedScope();
+  write(join(dir, "a/b"), "nested\n");
+  write(join(dir, "a__b"), "flat\n");
+
+  // Distinct artifacts whose flattened names are identical: a separator-
+  // substitution backup key would restore one over the other.
+  const journal = beginRunJournal(dir, { extraPaths: ["a/b", "a__b"] });
+  writeFileSync(join(dir, "a/b"), "nested-clobbered\n");
+  writeFileSync(join(dir, "a__b"), "flat-clobbered\n");
+  assert.equal(journal.rollback().complete, true);
+  assert.equal(readFileSync(join(dir, "a/b"), "utf8"), "nested\n");
+  assert.equal(readFileSync(join(dir, "a__b"), "utf8"), "flat\n");
+
+  // Fail-closed on ambiguous input rather than interpreting it.
+  assert.throws(() => beginRunJournal(dir, { extraPaths: ["a/b", "a/b"] }), (e) => e.code === "E_JOURNAL_DUPLICATE_PATH");
+  assert.throws(() => beginRunJournal(dir, { extraPaths: ["a/b", "./a/b"] }), (e) => e.code === "E_JOURNAL_DUPLICATE_PATH");
+  assert.throws(() => beginRunJournal(dir, { extraPaths: ["oas-config.yaml"] }), (e) => e.code === "E_JOURNAL_DUPLICATE_PATH");
+  assert.throws(() => beginRunJournal(dir, { extraPaths: [""] }), (e) => e.code === "E_JOURNAL_BAD_PATH");
+  assert.throws(() => beginRunJournal(dir, { extraPaths: ["   "] }), (e) => e.code === "E_JOURNAL_BAD_PATH");
+  assert.throws(() => beginRunJournal(dir, { extraPaths: ["."] }), (e) => e.code === "E_JOURNAL_BAD_PATH");
+  assert.throws(() => beginRunJournal(dir, { extraPaths: ["a\\b"] }), (e) => e.code === "E_JOURNAL_BAD_PATH");
+  assert.throws(() => beginRunJournal(dir, { extraPaths: [42] }), (e) => e.code === "E_JOURNAL_BAD_PATH");
+
+  // Canonicalization is real: "./a//b" is the same entry as "a/b" and restores it.
+  const j2 = beginRunJournal(dir, { extraPaths: ["./a//b"] });
+  assert.ok(j2.protected.some((p) => p.path === "a/b"));
+  writeFileSync(join(dir, "a/b"), "again\n");
+  assert.equal(j2.rollback().complete, true);
+  assert.equal(readFileSync(join(dir, "a/b"), "utf8"), "nested\n");
+  rmSync(dir, { recursive: true, force: true });
 });
 
 // ---------- lock v2 reading ----------
