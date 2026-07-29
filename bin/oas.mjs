@@ -36,7 +36,7 @@ import {
 import {
   aggregateMissingRequirements, beginRunJournal, discoverMigrationScopes, discoverWorkspaceScopes,
   adoptedTemplateDir, applyConfigMerge, lockedPackageCapabilities, planConfigMerge, readAdoptedTemplate, requirementInstallPlan,
-  writeFileAtomic,
+  assertNoSymlinkedParents, copyFileAtomic, writeFileAtomic,
   runRequirementInstall, selectConfigTemplate, validateConfigTemplate, writeAdoptedTemplate,
 } from "../lib/packages.mjs";
 
@@ -1527,7 +1527,11 @@ function configCmd() {
     }
     const journal = openJournal(dir, bail);
     try {
-      if (existsSync(file)) copyFileSync(file, backupFile);
+      // NEVER copyFileSync onto a fixed backup path: it opens the destination
+      // for write and therefore FOLLOWS it, so a pre-planted
+      // `oas-config.yaml.bak` symlink would redirect this copy onto whatever it
+      // points at. The atomic form replaces the entry itself.
+      if (existsSync(file)) copyFileAtomic(file, backupFile);
       writeFileAtomic(file, chosen.content);
       recordAdoption(dir, file, packageId, chosen, locked, adopted);
       journal.finalize();
@@ -1583,7 +1587,7 @@ function configCmd() {
   try {
     // Back up only when bytes actually change — a backup identical to the file
     // it shadows is noise the adopter has to reason about later.
-    if (changed) copyFileSync(file, backupFile);
+    if (changed) copyFileAtomic(file, backupFile);
     if (changed) writeFileAtomic(file, merged.text);
     recordAdoption(dir, file, packageId, chosen, locked, adopted);
     journal.finalize();
