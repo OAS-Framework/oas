@@ -1,6 +1,7 @@
 # Knowledge Log
 
 ## 2026-07-30
+* **Update**: [Repo state](/stewardship/repo-state.md) corrects the post-v0.20 package wave: all five leaf instances exited at scaffold with no product work, so package delivery is blocked on safe coordinator resumption while `oas.dev` and catalog remain frozen.
 * **Release**: v0.20.0 published OAS/Pi and the complete Desktop installer set from tag `1e73257`; run `30548558607` passed all artifact gates and failed only at the known post-publication Actions PR restriction. Manual bump PR #68 merged as `c6d92da`; official package revisions, catalog patch, and local cutover follow.
 * **Delivery**: PR #67 merged as `436b866` at exact head `b519756`; [repo state](/stewardship/repo-state.md) and [delivery log](/stewardship/delivery-log.md) record the unchanged Desktop API v1 band widening for v0.20, grounded release notes, green exact/full/CI/three-installer gates, and strict kernel→official packages→catalog release ordering.
 * **Delivery**: PR #66 merged as `dc30f0d` at exact head `ecd1b41`; [repo state](/stewardship/repo-state.md) and [delivery log](/stewardship/delivery-log.md) record revised-v2 flat capability materialization, fully local config-template sync, scope-atomic v1 migration, catalog-first init, the one bounded seven-finding security/correctness correction, green B1/B2/B3/full/CI gates, and the required v0.20.0/package/catalog/local-cutover follow-up.
