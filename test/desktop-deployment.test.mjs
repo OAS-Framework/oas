@@ -52,7 +52,14 @@ test("reader parity: souls and capability agents match the kernel", (t) => {
   }
   const ctx = dirname(roots[0]);
   const mineCaps = reader.listCapabilityAgents(ctx).map((c) => `${c.capability}:${c.name}`).sort();
-  const theirCaps = core.listCapabilityAgents(ctx).map((c) => `${c.capability}:${c.name}`).sort();
+  // Same rule as the live parity case above: the reader must ALWAYS resolve,
+  // while the kernel may legitimately throw on live-environment skew — here a
+  // lock anywhere in this machine's chain (including the laptop level) that the
+  // strict reader refuses. Parity is only comparable when the kernel resolves;
+  // the unconditional clean-fixture test below is the proof that cannot skip.
+  let theirCaps;
+  try { theirCaps = core.listCapabilityAgents(ctx).map((c) => `${c.capability}:${c.name}`).sort(); }
+  catch (e) { t.diagnostic(`kernel threw (${e.message}) — reader still resolved; parity skipped`); return; }
   if (JSON.stringify(mineCaps) !== JSON.stringify(theirCaps)) {
     t.diagnostic(`live deployment capability skew (${mineCaps.join(", ")} vs ${theirCaps.join(", ")}); unconditional fixture below remains the parity proof`);
     return;

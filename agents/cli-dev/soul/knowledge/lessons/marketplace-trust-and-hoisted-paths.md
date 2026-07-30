@@ -3,7 +3,7 @@ type: Lesson
 title: Marketplace over bundled — trust at acquisition, hoisted paths via lock source
 description: Official capabilities are acquired from the kernel-shipped marketplace folder into a scope's installed/ store with trust written into the lock at acquisition, and hoisted-resource fallbacks stay keyed to marketplace lock provenance rather than capability id heuristics.
 tags: [capabilities, marketplace, trust, integrity, oas-lock, hoisted]
-timestamp: 2026-07-28
+timestamp: 2026-07-29
 ---
 
 # The migration (v0.13.x)
@@ -22,6 +22,11 @@ installed; a second `oas trust` would be ceremony without a security boundary.
 Third-party git/path installs keep explicit `oas trust`. `capabilityTrust`
 reads the lock; committed trust survives `oas install` restore **only when
 integrity matches** (the repo is the trust boundary).
+
+This trust rule is specific to the kernel marketplace copy route. When classic
+init resolves an official fundamental layer through the package catalog, it is a
+package acquisition instead: it may clone from the catalog URL and leave
+executables untrusted until `oas trust`. See [catalog-first classic init costs](/lessons/catalog-first-classic-init-costs.md).
 
 # The hoisted-path gotcha
 

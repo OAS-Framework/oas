@@ -84,14 +84,16 @@ many concurrent sessions for a flat terminal list to remain understandable.
 | --- | --- |
 | **Package** | Git/local acquisition, exact lock, update, integrity, dependency, and review unit. |
 | **Capability** | Independently targetable behavior inside a package: skills, instructions, commands, agents, requirements, or lifecycle hooks. |
-| **Config profile** | A complete reference `oas-config.yaml` shipped by a package and adopted as an editable local snapshot. |
+| **Config template** | A complete reference `oas-config.yaml` a package ships. You adopt one explicitly, and it becomes your ordinary local config. |
+| **Adopted base** | The exact template recorded at adoption, kept commit-safe so guided sync can compare against it. |
 | **Config** | Local authority: selects layers, targets capabilities to agent types/souls, applies settings/exclusions/overrides. |
 | **Soul** | Durable specialist identity, curriculum, and accumulated knowledge. |
 | **Instance** | One disposable incarnation and provider-native working session. |
 
-Acquisition never implies activation. A package profile is a starting point,
-not mandatory policy; after adoption, local config may enable, disable,
-retarget, replace, or reconfigure every capability independently.
+Acquisition never implies activation, and installing a package never adopts a
+config template. A template is a starting point, not mandatory policy. After you
+adopt one, local config may enable, disable, retarget, replace, or reconfigure
+every capability independently, and you may change every copied setting.
 
 ## Instance home versus `work/`
 
@@ -141,10 +143,10 @@ example-package-repo/
   agents/example-package-expert/soul/   # development state, not distributed
   .github/
   README.md
-  oas-package/                          # installed/hash-locked payload
+  oas-package/                          # the acquired, hash-locked payload
     oas-package.json
-    capabilities/
-    configs/
+    capabilities/                       # one dedicated root per capability
+    config-templates/                   # optional reference configs
 ```
 
 ```bash
@@ -162,9 +164,13 @@ oas install 'https://github.com/example/root-package.git@v1.0.0#.'
 oas install ../project/oas-package
 ```
 
-Lock v2 records source, exact commit, selected path, integrity, dependency
-closure, exported capabilities, and executable approvals. Bare `oas install`
-restores the exact lock; it never advances source state. Updating is explicit:
+Installing a package materializes each capability it declares into
+`.agents/capabilities/installed/<id>/`. There is no persistent package store.
+The `lockfileVersion: 2` lock records two levels. A `packages` map holds source,
+exact commit, selected path, payload integrity, and dependencies. A
+`capabilities` map holds each capability's version, provider package, path,
+artifact integrity, and executable trust. Bare `oas install` restores the exact
+lock and never advances source state. Updating is explicit:
 
 ```bash
 oas update <package-id>
@@ -182,7 +188,7 @@ The official packages are independently versioned Git repositories in the
 | [`oas-authoring`](https://github.com/OAS-Framework/oas-authoring) | capability, skill, soul, and integration authoring craft |
 | [`oas-jira`](https://github.com/OAS-Framework/oas-jira) | adopter-selected Jira tasks layer |
 | [`oas-linear`](https://github.com/OAS-Framework/oas-linear) | adopter-selected Linear tasks layer |
-| [`oas-dev`](https://github.com/OAS-Framework/oas-dev) | OAS development profile plus `oas.review` |
+| [`oas-dev`](https://github.com/OAS-Framework/oas-dev) | OAS development config template plus `oas.review` |
 
 External CLIs and runtime plugins are separate informed-consent requirements.
 For example, aweb vendors its reviewed Markdown skills but declares Pi and
@@ -241,29 +247,33 @@ oas doctor
 
 Or ask a Pi agent to load `oas-getting-started` and guide the setup.
 
-### Adopt a complete package profile
+### Adopt a package config template
 
 ```bash
 mkdir my-workspace
 cd my-workspace
-oas init --package <package-id> --config <profile>
+oas init --package <package-id> --config <template>
 oas install
 ```
 
 `oas init --package` acquires and exact-locks the full closure, validates the
-profile against its providers, and snapshots a complete editable config. Bare
-`oas install` reconciles the team boundary and nested repository locks.
+chosen template against its providers, and writes it as your local
+`oas-config.yaml`. It also records the exact template as a commit-safe adopted
+base under `.agents/config-templates/adopted/`, so `oas config diff` and
+`oas config sync` can compare against it later. Bare `oas install` reconciles the
+team boundary and nested repository locks.
 
-For OAS framework/package development itself:
+For OAS framework and package development itself:
 
 ```bash
 oas init --package oas.dev --config default
 ```
 
-The profile preserves the `oas-framework` team name, defines
-`framework-authors`, `developers`, and `package-maintainers`, enables OKF/aweb,
-keeps tasks optional, and assigns authoring/review appropriately. It contains no
-provider team ID, credentials, account, or machine paths; those remain local.
+The template preserves the `oas-framework` team name, defines
+`framework-authors`, `developers`, and `package-maintainers`, enables OKF and
+aweb, keeps tasks optional, and assigns authoring and review appropriately. It
+carries no provider team ID, credentials, account, or machine paths. Those stay
+local, and you may change every copied setting.
 
 ## Upgrade from 0.18 official capabilities
 
@@ -290,14 +300,16 @@ oas retire <instance>
 oas install [<package-source>]
 oas update <package-id>
 oas trust <capability>
-oas init --package <package-id> --config <profile>
+oas init --package <package-id> --config <template>
 oas config diff
+oas config sync
+oas config adopt <package-id> --config <template>
 oas doctor --json
 ```
 
 Mainstream package/config/lock operations have deterministic CLI and stable JSON
-forms. Do not hand-edit managed package stores or reconstruct resolver behavior
-with ad-hoc shell commands.
+forms. Do not hand-edit the lock or installed stores, and do not reconstruct
+resolver behavior with ad-hoc shell commands.
 
 ## Learn more
 

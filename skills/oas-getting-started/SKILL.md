@@ -53,9 +53,10 @@ implementations are capability packages called integrations.
 
 Present these defaults to the user and ask before creating config. Common
 choices: disable messaging for a solo repo; choose `oas.linear`/`oas.jira` for
-tasks; use `--raw` for all layers off. Official integrations live in the
-marketplace shipped with the kernel; `oas init` acquires the selected ones
-into this scope's installed/ store (locked and trusted at acquisition). In an
+tasks; use `--raw` for all layers off. Official integrations are acquired like
+any other package; `oas init` acquires the selected ones into this scope's
+installed/ store (locked). Executable surfaces (like OKF's harvest) need
+`oas trust` before use — acquisition never grants executable trust. In an
 interactive terminal with no layer flags, bare `oas init` prompts per layer;
 through an agent, always pass explicit flags.
 
@@ -83,7 +84,7 @@ keyboard mappings. An interactive terminal prompts when neither tmux flag is
 provided.
 
 `init` activates only packages explicitly represented by the layer choices;
-it acquires the chosen marketplace layer capabilities into this scope's installed/ store, and does not activate anything else.
+it acquires the chosen layer capabilities into this scope's installed/ store, and does not activate anything else.
 
 ## 4. Decide shared capability targets
 
@@ -151,8 +152,8 @@ instructions and materializes only kernel + soul + active capability skills in
 that instance. Do not put deployment-specific package prose into the soul.
 
 Create/spawn only when asked. Suggest a team shape, then let the user decide.
-For operations load the `oas` skill; for local deployment policy and profile
-adoption use `oas-config`; package acquisition/locks/trust beyond the
+For operations load the `oas` skill; for local deployment policy and
+config-template adoption use `oas-config`; package acquisition/locks/trust beyond the
 bootstrap above belong to `oas-packages` (kernel baseline inside spawned
 instances); for custom layer/package work use `integration-authoring`; for
 deep architecture or bugs use `oas-support`.

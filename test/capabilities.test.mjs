@@ -203,9 +203,28 @@ test("duplicate skill names fail unless config explicitly selects a source", () 
   } finally { process.env.PATH = oldPath; }
 });
 
-test("marketplace lifecycle: init acquires layers, bundled is rejected, restore re-copies", () => {
+test("classic init acquires layers as PACKAGES, bundled is rejected, restore re-materializes", () => {
   const base = temp(); const repo = join(base, "repo"); gitRepo(repo);
-  let r = spawnSync(process.execPath, [CLI, "init", "--knowledge", "oas.okf", "--messaging", "none", "--no-tmux-mouse", "--dir", repo], { encoding: "utf8" });
+  // A hermetic local-Git fixture catalog: an official ID resolves to a real
+  // package on disk, so this case never reaches the network. Classic init has
+  // no bundled-marketplace fallback for a cataloged ID — an unreachable source
+  // fails and the run rolls back — so the fixture IS the official source here.
+  const src = join(base, "src", "okf");
+  write(join(src, "capabilities/okf/oas.json"), JSON.stringify({
+    capability: "oas.okf", version: "2.0.0", description: "knowledge layer", layer: "knowledge",
+    commands: { harvest: "harvest.mjs" },
+  }, null, 2));
+  write(join(src, "capabilities/okf/harvest.mjs"), "// harvest\n");
+  write(join(src, "oas-package.json"), JSON.stringify({
+    package: "oas.okf", version: "2.0.0", description: "official oas.okf",
+    compatibility: { oas: ">=0.1.0" }, capabilities: ["capabilities/okf"],
+  }, null, 2));
+  gitRepo(src);
+  const catalog = join(base, "catalog.json");
+  write(catalog, JSON.stringify({ packages: { "oas.okf": { url: src, path: "." } } }));
+  const env = { ...process.env, OAS_PACKAGE_CATALOG: catalog };
+
+  let r = spawnSync(process.execPath, [CLI, "init", "--knowledge", "oas.okf", "--messaging", "none", "--no-tmux-mouse", "--dir", repo], { encoding: "utf8", env });
   assert.equal(r.status, 0, r.stderr);
   const config = readFileSync(join(repo, "oas-config.yaml"), "utf8");
   assert.match(config, /from: installed/);
@@ -213,19 +232,36 @@ test("marketplace lifecycle: init acquires layers, bundled is rejected, restore 
   // Work modes scaffold shows setup:, not injection overrides.
   assert.match(config, /work-modes:\n  worktree:\n    # setup: scripts\/setup-worktree\.sh/);
   assert.doesNotMatch(config, /injections\/workmodes/);
-  // The acquired copy resolves and is trusted (marketplace source).
+
+  // Revised-v2 flat capability state: a package row for the transport, a
+  // capability row back-referencing it, and an id-keyed artifact directory.
+  const lock = JSON.parse(readFileSync(join(repo, "oas-lock.json"), "utf8"));
+  assert.equal(lock.lockfileVersion, 2);
+  assert.deepEqual(Object.keys(lock.packages), ["oas.okf"]);
+  assert.equal(lock.capabilities["oas.okf"].package, "oas.okf");
+  const artifact = join(repo, ".agents", "capabilities", "installed", "oas.okf");
+  assert.ok(existsSync(join(artifact, "oas.json")));
+
+  // Acquisition is NOT trust: the layer resolves, but its executable surface
+  // stays blocked until an explicit `oas trust`.
+  assert.equal(lock.capabilities["oas.okf"].trusted, false);
   const cap = resolveOasConfig(repo, "dev").capabilities.find((c) => c.id === "oas.okf");
-  assert.ok(cap.trust.trusted);
+  assert.equal(cap.trust.trusted, false);
+  assert.match(cap.trust.reason, /oas trust oas\.okf/);
   assert.ok(cap._dir || cap.provenance);
+  assert.equal(spawnSync(process.execPath, [CLI, "trust", "oas.okf", "--dir", repo], { encoding: "utf8", env }).status, 0);
+  assert.equal(resolveOasConfig(repo, "dev").capabilities.find((c) => c.id === "oas.okf").trust.trusted, true);
+
   // from: bundled is rejected with migration guidance.
   write(join(repo, "oas-config.yaml"), "capabilities:\n  layers:\n    knowledge:\n      capability: oas.okf\n      from: bundled\n");
   assert.throws(() => resolveOasConfig(repo, "dev"), /no longer supported.*oas install/s);
-  // Restore: delete the artifact, bare install brings it back at locked integrity.
+  // Restore: delete the artifact, bare install re-materializes it at locked integrity.
   write(join(repo, "oas-config.yaml"), "capabilities:\n  layers:\n    knowledge:\n      capability: oas.okf\n      from: installed\n");
-  rmSync(join(repo, ".agents", "capabilities", "installed", "oas-okf"), { recursive: true });
-  r = spawnSync(process.execPath, [CLI, "install", "--dir", repo], { encoding: "utf8" });
+  rmSync(artifact, { recursive: true });
+  r = spawnSync(process.execPath, [CLI, "install", "--dir", repo], { encoding: "utf8", env });
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /restored\s+oas\.okf/);
+  assert.match(r.stdout, /restored\s+package oas\.okf/);
+  assert.ok(existsSync(join(artifact, "oas.json")), "the flat capability artifact is back");
 });
 
 test("work-mode injection overrides are rejected; setup script resolves and runs at worktree spawn", () => {
@@ -701,7 +737,9 @@ test("oas type add declares agent types; inject eject copies a packaged default 
 test("init --template snapshots a local or named template with provenance and rewrites name", () => {
   const base = temp();
   const tpl = join(base, "template.yaml");
-  writeFileSync(tpl, "name: template-origin\ncapabilities:\n  oas.okf:\n    source: bundled\n    global: true\nlayers:\n  tasks: none\n");
+  // `layers:` moved under `capabilities.layers` — the top-level spelling is
+  // refused outright, so a template carrying it can never be seeded.
+  writeFileSync(tpl, "name: template-origin\ncapabilities:\n  layers:\n    tasks: none\n  additive:\n    oas.okf:\n      from: installed\n      global: true\n");
   const repo = join(base, "proj"); mkdirSync(repo);
   let r = spawnSync(process.execPath, [CLI, "init", "--template", tpl, "--dir", repo, "--no-tmux-mouse"], { encoding: "utf8" });
   assert.equal(r.status, 0, r.stderr);

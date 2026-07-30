@@ -13,7 +13,7 @@
  * The kernel resolves per-key closest-wins from wherever agents actually run,
  * so binding at a level scopes the capability to everything under it.
  */
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { execFileSync, spawnSync } from "node:child_process";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
@@ -24,24 +24,25 @@ import {
   acquireCapability, restoreCapabilities, marketplaceCapabilities,
   capabilityManifests, capabilityManifest, capabilityMissingRequires, capabilityIntegrity, capabilityTrust, capabilityExecutablePath,
   readCapabilityLocks, writeCapabilityLock,
-  parsePackageSource, inspectGitSourceRoot, acquirePackage, restorePackages, listInstalledPackages, readPackageLocks, residueEntryViolation,
+  parsePackageSource, inspectGitSourceRoot, acquirePackage, restorePackages, listInstalledPackages, readPackageLocks, readLockedConfigTemplates,
   officialCapabilityPackage, officialPackageCatalog,
   approveCapability, updatePackage, removePackage, migrateLegacyLock, applyLegacyLockMigration,
-  packageIntegrity, packageDepsIntegrity, installedPackagesDir, loadPackageManifestAt,
+  packageIntegrity, capabilityArtifactIntegrity, verifyCapabilityInstallation, installedCapabilityDir, installedCapabilitiesDir, ownedCapabilitiesDir, loadPackageManifestAt,
   resolveOasConfig, resolveWorkMode, composeInstanceAgentsMd, parseYamlNested, packagedInject, teamAgentRoots,
   findTeamAgent, findTeamInstance, findCapabilityAgent, findInstanceHome, listCapabilityAgents, workspaceOf,
   ensureRoot, findRoot, findAgent, listAgents, listInstances, listAgentDefs, createAgent as coreCreateAgent,
   spawnInstance, retireInstance, upsertLocalAgent, defaultRepo, RELATIONS,
 } from "../lib/core.mjs";
 import {
-  aggregateMissingRequirements, diffConfigTexts, discoverMigrationScopes, discoverWorkspaceScopes,
-  lockedPackageCapabilities, parseProfileProvenance, profileProvenanceHeader,
-  readProfileText, requirementInstallPlan, resolveProfilePackage,
-  runRequirementInstall, selectProfile, validateProfile,
+  aggregateMissingRequirements, beginRunJournal, discoverMigrationScopes, discoverWorkspaceScopes,
+  adoptedTemplateDir, applyConfigMerge, lockedPackageCapabilities, planConfigMerge, readAdoptedTemplate, requirementInstallPlan,
+  assertNoSymlinkedParents, copyFileAtomic, writeFileAtomic,
+  runRequirementInstall, selectConfigTemplate, validateConfigTemplate, writeAdoptedTemplate,
 } from "../lib/packages.mjs";
 
 const args = process.argv.slice(2);
 const cmd = args[0];
+const HELP_WORDS = new Set(["help", "--help", "-h"]);
 const flag = (name) => {
   const i = args.indexOf(`--${name}`);
   return i >= 0 ? (args[i + 1] && !args[i + 1].startsWith("--") ? args[i + 1] : true) : undefined;
@@ -166,10 +167,43 @@ function officialMigrationState(legacyLocks, { teamScope, ctx }) {
     : { status: "ready", capabilities, command, reason: null };
 }
 
+/** The health of ONE materialized capability, against the rows it was projected
+ * from. Shared by doctor and list so both name the same states with the same
+ * codes — and so the `.oas-installation.json` provenance is checked in BOTH,
+ * not only deep inside trust resolution where it surfaces as a bare "untrusted".
+ *
+ * Order matters: a missing artifact cannot be hashed, drifted bytes make an
+ * approval meaningless (so trust is not ALSO reported), and provenance is only
+ * worth reading once the bytes are the locked ones. */
+/** The lock rows AT one level. Never the merged maps: those resolve each
+ * identity independently, so an outer scope's capability can be paired with a
+ * nearer scope's package of the same id — a provider that never exported it. */
+const levelRows = (locks, level) => locks.levels.find((l) => l.level === level) || { packages: Object.create(null), capabilities: Object.create(null) };
+
+function capabilityHealth(level, cap, capRow, pkgRow) {
+  const dir = installedCapabilityDir(level, cap.id);
+  if (!cap.installed) return { status: "missing", code: "missing-capability-artifact", dir, detail: `capability ${cap.id} is locked but not materialized — run \`oas install\` to re-materialize it` };
+  let integrity;
+  try { integrity = capabilityArtifactIntegrity(dir); }
+  catch (e) { return { status: "broken", code: e.code || "invalid-capability-artifact", dir, detail: `capability ${cap.id}: ${e.message}` }; }
+  if (integrity !== cap.integrity) {
+    return { status: "drifted", code: "integrity-drift", dir, integrity, detail: `capability ${cap.id}: artifact integrity drift — installed ${integrity}, locked ${cap.integrity}; its executable approval is invalid` };
+  }
+  // The artifact's own provenance and the lock must tell the SAME story before
+  // either is believed. Neither silently wins; the disagreement is the finding.
+  if (capRow && pkgRow) {
+    try { verifyCapabilityInstallation(dir, cap.id, capRow, pkgRow); }
+    catch (e) { return { status: "provenance-mismatch", code: e.code || "invalid-lock", dir, integrity, detail: `capability ${cap.id}: ${e.message}` }; }
+  }
+  const executable = Object.keys(cap.manifest?.commands || {}).length || Object.keys(cap.manifest?.hooks || {}).length;
+  if (executable && !cap.trusted) return { status: "untrusted", code: "untrusted-surface", dir, integrity, detail: `capability ${cap.id}: executable surface UNTRUSTED — \`oas trust ${cap.id}\`` };
+  return { status: "ok", code: null, dir, integrity, detail: null };
+}
+
 function doctorPackagesData(ctx, chain, { teamScope } = {}) {
   // reviewer-455ba15 fix 4: the ENGINE diagnostics the human doctor renders
   // (invalid locks, missing artifacts, integrity/runtime-closure drift,
-  // capability-list mismatches, untrusted surfaces, legacy/residue states)
+  // capability-list mismatches, untrusted surfaces, legacy-lock states)
   // are computed HERE so doctor --json exposes them structurally — machine
   // consumers see every state the human report calls broken. Fail-closed
   // reads are diagnosed, never consumed as data and never swallowed.
@@ -187,57 +221,59 @@ function doctorPackagesData(ctx, chain, { teamScope } = {}) {
     const problems = [];
     if (!lock) problems.push({ code: "invalid-lock", detail: "installed but not locked — reacquire it" });
     else {
-      const integ = packageIntegrity(p.dir);
-      if (integ !== lock.integrity) problems.push({ code: "integrity-drift", detail: `integrity drift — installed ${integ}, locked ${lock.integrity}; all capability approvals are invalid` });
-      const depsNow = packageDepsIntegrity(p.dir);
-      if ((lock.depsIntegrity || undefined) !== depsNow) problems.push({ code: "integrity-drift", detail: `materialized runtime closure ${depsNow ? "differs from" : "missing vs"} the locked depsIntegrity — run oas install to re-materialize` });
-      const have = new Set(p.capabilities.map((c) => c.id));
-      for (const c of lock.capabilities || []) if (!have.has(c)) problems.push({ code: "capability-list-mismatch", detail: `locked capability "${c}" is missing from the package manifest` });
+      // There is no persistent package root to hash: the package row exact-locks
+      // a remote payload, and the only bytes on disk are the flat capability
+      // artifacts. So every health check is per capability, against the artifact
+      // integrity the engine recorded for it.
       for (const c of p.capabilities) {
-        const executable = Object.keys(c.manifest.commands || {}).length || Object.keys(c.manifest.hooks || {}).length;
-        if (executable && !(lock.trustedCapabilities || []).includes(c.id) && packageIntegrity(p.dir) === lock.integrity) problems.push({ code: "untrusted-surface", detail: `capability ${c.id}: executable surface UNTRUSTED — \`oas trust ${c.id}\`` });
+        const h = capabilityHealth(p.level, c, pkgLocks.capabilities[c.id], lock);
+        if (h.status !== "ok") problems.push({ code: h.code, detail: h.detail });
       }
     }
     packages.push({
       id: p.package, version: p.version || null, level: p.level, source: lock?.source || null,
       path: lock?.path || null, commit: lock?.commit || null, capabilities: p.capabilities.map((c) => c.id),
+      dependencies: lock?.dependencies || [],
       status: problems.length ? "broken" : "ok", problems,
     });
   }
   for (const [id, lock] of Object.entries(pkgLocks.packages)) {
     if (!installedPkgs.some((p) => p.package === id)) {
-      packages.push({ id, version: lock.version || null, level: lock._level, source: lock.source || null, path: lock.path || null, commit: lock.commit || null, capabilities: lock.capabilities || [], status: "broken", problems: [{ code: "missing-locked-package", detail: `locked in ${lock._file} but not installed — run oas install` }] });
+      // Capability rows carry the provider back-reference — the package row has
+      // no capability list to read any more.
+      const provided = Object.entries(pkgLocks.capabilities).filter(([, c]) => c.package === id).map(([capId]) => capId);
+      packages.push({ id, version: lock.version || null, level: lock._level, source: lock.source || null, path: lock.path || null, commit: lock.commit || null, capabilities: provided, dependencies: lock.dependencies || [], status: "broken", problems: [{ code: "missing-locked-package", detail: `locked in ${lock._file} but not installed — run oas install` }] });
     }
   }
-  // Legacy v1 files and v2 residue — the ENGINE's doctor shapes (its tests pin
-  // status/action fields): empty/nonempty v1 = pending LOCK-FORMAT migration
-  // (maintainer ruling — distinct from capability residue); v2 residue entries
-  // carry pending-migration or invalid-lock with the retry/fix action.
+  // Supported v1 scopes — empty or not — are pending an explicit LOCK-FORMAT
+  // migration (maintainer ruling). There is no second view beside this one:
+  // migration never produces residue, and the superseded transitional v2 shape
+  // is rejected wholesale by the strict reader, so it reaches doctor as the
+  // single `lockError` diagnosis above rather than as partially parsed entries.
   const legacyLockFiles = pkgLocks.legacy
-    .filter((l) => l.lockfileVersion !== 2)
     .map((l) => ({ file: l.file, level: l.level, lockfileVersion: l.lockfileVersion ?? 1, empty: !Object.keys(l.capabilities || {}).length, status: "pending-format-migration", action: `oas migrate --dir ${l.level}` }));
-  const migrationResidue = pkgLocks.legacy
-    .filter((l) => l.lockfileVersion === 2)
-    .flatMap((l) => Object.entries(l.capabilities || {}).map(([id, lock]) => {
-      const violation = residueEntryViolation(lock);
-      return violation
-        ? { id, file: l.file, level: l.level, source: lock?.source || null, status: "invalid-lock", violation, action: `fix or remove the entry in ${l.file} (never auto-repaired)` }
-        : { id, file: l.file, level: l.level, source: lock.source, status: "pending-migration", action: `oas migrate --dir ${l.level}` };
-    }));
-  const profileProvenance = [];
-  const adoptedPackages = new Set();
+  // Adoption provenance now comes from the visible, commit-safe adopted base —
+  // not from a provenance comment the local config could lose to an edit.
+  const adoptedTemplates = [];
   for (const cfg of chain) {
-    const prov = parseProfileProvenance(readFileSync(cfg._file, "utf8"));
-    if (!prov) continue;
-    profileProvenance.push({ file: cfg._file, package: prov.package, ref: prov.ref || null, profile: prov.profile });
-    adoptedPackages.add(prov.package);
+    const level = dirname(cfg._file);
+    let adopted;
+    try { adopted = readAdoptedTemplate(level); }
+    catch (e) { adoptedTemplates.push({ level, file: cfg._file, status: "broken", code: e.code || "E_ADOPTION_INVALID", detail: e.message }); continue; }
+    if (!adopted) continue;
+    let localChanges = null;
+    try { localChanges = readFileSync(cfg._file, "utf8") !== adopted.baseText; } catch { /* unreadable config is reported elsewhere */ }
+    adoptedTemplates.push({
+      level, file: cfg._file, package: adopted.package, template: adopted.template,
+      base: adopted.baseFile, source: adopted.metadata?.source || null,
+      version: adopted.metadata?.version || null, commit: adopted.metadata?.commit || null,
+      hash: adopted.metadata?.hash || null, localChanges, status: "ok",
+    });
   }
-  const unappliedProfiles = [];
-  for (const p of installedPkgs) {
-    if (adoptedPackages.has(p.package)) continue;
-    const profiles = Object.keys(p.manifest?.configs || {});
-    if (profiles.length) unappliedProfiles.push({ package: p.package, profiles });
-  }
+  // NOTE: doctor deliberately does NOT enumerate templates a package exports but
+  // nobody adopted. In the materialized model there is no package root on disk,
+  // so that list only exists behind a network fetch of the locked source — and
+  // a diagnostic command must never go to the network to render a hint.
   const missingHostRequirements = aggregateMissingRequirements([ctx]).map((req) => ({
     command: req.command, why: req.why || null, docs: req.docs || null,
     requestedBy: req.requestedBy,
@@ -254,7 +290,7 @@ function doctorPackagesData(ctx, chain, { teamScope } = {}) {
       ? `oas install --accept-requirement ${req.command} --dir ${shellQuote(ctx)}`
       : null,
   }));
-  return { lockError: lockBroken, packages, legacyLockFiles, migrationResidue, profileProvenance, unappliedProfiles, missingHostRequirements, officialMigration: officialMigrationState(pkgLocks.legacy, { teamScope, ctx }) };
+  return { lockError: lockBroken, packages, legacyLockFiles, adoptedTemplates, missingHostRequirements, officialMigration: officialMigrationState(pkgLocks.legacy, { teamScope, ctx }) };
 }
 
 function doctorJson(dir) {
@@ -288,14 +324,12 @@ retiredLocks: (() => { try { return Object.entries(readCapabilityLocks(ctx)); } 
       .map(([id, m]) => ({ id, dir: m._dir, origin: m._origin, reason: retiredCapabilityReason(id) })),
     // Shared WS2+engine package payload (fix 4: human and JSON doctor derive
     // from ONE computation; fail-closed reads are diagnosed via lockError —
-    // doctorPackagesData carries the engine's residue/legacy-lock shapes).
+    // doctorPackagesData carries the engine's legacy-lock shapes).
     packages: pkg.packages,
     lockError: pkg.lockError,
     legacyLockFiles: pkg.legacyLockFiles,
-    migrationResidue: pkg.migrationResidue,
     officialMigration: pkg.officialMigration,
-    profileProvenance: pkg.profileProvenance,
-    unappliedProfiles: pkg.unappliedProfiles,
+    adoptedTemplates: pkg.adoptedTemplates,
     missingHostRequirements: pkg.missingHostRequirements,
     composedInstructions: composition?.text,
     instructionBlocks: composition?.blocks,
@@ -402,7 +436,7 @@ function doctor(dir) {
     console.log(`  ERROR: ${pkg.lockError.message} [${pkg.lockError.code}]`);
     if (pkg.lockError.file) console.log(`         fix or remove the offending entry in ${shortPath(pkg.lockError.file)} — the lock is never auto-repaired; package operations fail closed until it is valid`);
   }
-  if (!pkg.lockError && !pkg.packages.length && !pkg.legacyLockFiles.length && !pkg.migrationResidue.length) console.log("  (none)");
+  if (!pkg.lockError && !pkg.packages.length && !pkg.legacyLockFiles.length) console.log("  (none)");
   for (const p of pkg.packages) {
     console.log(`  ${p.id}@${p.version}  [${levelOf(p.level)} ${shortPath(p.level)}]`);
     for (const prob of p.problems) {
@@ -411,12 +445,8 @@ function doctor(dir) {
     }
   }
   for (const l of pkg.legacyLockFiles) {
-    if (l.empty) console.log(`  WARNING: ${shortPath(l.file)} is an empty lockfileVersion ${l.lockfileVersion} file — pending lock-format migration: run \`oas migrate --dir ${shortPath(l.level)}\` (converts to canonical v2, no residue)`);
+    if (l.empty) console.log(`  WARNING: ${shortPath(l.file)} is an empty lockfileVersion ${l.lockfileVersion} file — pending lock-format migration: run \`oas migrate --dir ${shortPath(l.level)}\` (converts to canonical v2)`);
     else console.log(`  WARNING: ${shortPath(l.file)} is lockfileVersion ${l.lockfileVersion} — \`oas migrate\` maps its capability locks to packages`);
-  }
-  for (const res of pkg.migrationResidue) {
-    if (res.status === "invalid-lock") console.log(`  ERROR: residue entry ${res.id} in ${shortPath(res.file)} is malformed (${res.violation}) — never auto-repaired; fix or remove the entry [invalid-lock]`);
-    else console.log(`  NOTE: ${res.id} in ${shortPath(res.file)} is legacy migration residue (${res.source}) — pending migration: re-run \`oas migrate --dir ${shortPath(res.level)}\` when its official package publishes, or remove the entry if the capability is abandoned`);
   }
   if (pkg.officialMigration) {
     const om = pkg.officialMigration;
@@ -427,11 +457,14 @@ function doctor(dir) {
     if (om.status === "ready") console.log(`  READY: migrate with \`${om.command}\` (plan it first with --dry-run; approvals are re-earned afterwards)`);
     else console.log(`  NOT YET AVAILABLE: ${om.reason}`);
   }
-  for (const prov of pkg.profileProvenance) {
-    console.log(`\nConfig profile provenance: ${shortPath(prov.file)} adopted ${prov.package}${prov.ref ? `@${prov.ref}` : ""} profile "${prov.profile}" (snapshot — compare with \`oas config diff\`)`);
-  }
-  for (const u of pkg.unappliedProfiles) {
-    console.log(`\nNOTE: package ${u.package} exports config profile${u.profiles.length > 1 ? "s" : ""} (${u.profiles.join(", ")}) not applied at any scope — adopt one with \`oas init --package ${u.package}${u.profiles.length > 1 ? " --config <name>" : ""}\` at a fresh scope`);
+  for (const a of pkg.adoptedTemplates) {
+    if (a.status === "broken") {
+      console.log(`\nAdopted config template: BROKEN at ${shortPath(a.level)} — ${a.detail}`);
+      continue;
+    }
+    const drift = a.localChanges === null ? "" : a.localChanges ? " — local edits present (`oas config diff`)" : " — no local edits yet";
+    console.log(`\nAdopted config template: ${shortPath(a.file)} adopted ${a.package}:${a.template}${a.version ? `@${a.version}` : ""}${drift}`);
+    console.log(`  recorded base ${shortPath(a.base)} (commit it — \`oas config sync\` compares against it; package updates never rewrite your config)`);
   }
   if (pkg.missingHostRequirements.length) {
     console.log("\nMissing host commands (active capabilities):");
@@ -693,7 +726,8 @@ function install() {
   let lockFile;
   try { lockFile = writeCapabilityLock(dir, r.manifest.capability, lock); }
   catch (e) {
-    // Refused lock write (e.g. legacy-lock: v2 scope rejects NEW residue) must
+    // Refused lock write (e.g. legacy-lock: a converted scope rejects a NEW v1
+    // capability entry) must
     // not strand the acquired artifact — compensate before failing.
     rmSync(r.dest, { recursive: true, force: true });
     cmdFail(e.code || "legacy-lock", e.message); return;
@@ -760,17 +794,24 @@ function installPackage(dir, src, opts = {}) {
   let r;
   try { r = acquirePackage(dir, src, opts); }
   catch (e) { bail(e); return true; }
-  if (JSON_MODE) { jsonOk({ root: r.root, installed: r.installed, lockFile: r.lockFile, depWarnings: r.depWarnings || [] }); return true; }
+  // Packages are transport; capabilities are what lands on disk. Report both,
+  // and let the CAPABILITY rows carry the provenance an operator acts on.
+  if (JSON_MODE) { jsonOk({ root: r.root, installed: r.installed, capabilities: r.capabilities, lockFile: r.lockFile, depWarnings: r.depWarnings || [] }); return true; }
   for (const p of r.installed) {
-    console.log(`${p.kept ? "ok       " : "Acquired "}${p.package}@${p.version} → ${shortPath(p.dir)}`);
-    console.log(`  locked ${p.commit === "local" ? "local tree" : p.commit} at path ${p.path} (${p.integrity}); capabilities: ${p.capabilities.join(", ") || "(none)"}`);
+    console.log(`${p.kept ? "ok       " : "Acquired "}${p.package}@${p.version}`);
+    console.log(`  locked ${p.commit === "local" ? "local tree" : p.commit} at path ${p.path} (${p.integrity})`);
+    for (const c of r.capabilities.filter((x) => x.package === p.package)) {
+      console.log(`  capability ${c.capability}@${c.version}${c.layer ? `  layer: ${c.layer}` : ""} → ${shortPath(c.dir)}  (${c.integrity})`);
+    }
+    if (!r.capabilities.some((x) => x.package === p.package)) console.log("  capabilities: (none)");
   }
   for (const w of r.depWarnings || []) console.log(`WARNING: ${w}`);
   console.log(`Locked in ${shortPath(r.lockFile)}; nothing activated.`);
-  const executables = r.installed.flatMap((p) => p.capabilities).filter((c) => {
-    const m = capabilityManifest(c, dir);
-    return m && (Object.keys(m.commands || {}).length || Object.keys(m.hooks || {}).length);
-  });
+  // Read the executable surface off the ENGINE's projection, not a config-chain
+  // manifest lookup: at a scope with no config yet, that lookup sees nothing.
+  const executables = r.capabilities
+    .filter((c) => c.executableSurface?.commands?.length || c.executableSurface?.hooks?.length)
+    .map((c) => c.capability);
   if (executables.length) console.log(`Executable surfaces blocked until trusted: ${executables.map((c) => `oas trust ${c}`).join("; ")}`);
   return true;
 }
@@ -1081,9 +1122,11 @@ function trust() {
   const dir = dirFlag();
   const all = args.includes("--all-capabilities");
   // Package-backed approval path (per-capability, or explicit bulk on a package id).
-  let pkgs;
-  try { pkgs = listInstalledPackages(dir); } catch (e) { cmdFail(e.code || "invalid-lock", e.message || e); return; }
-  const backing = all ? pkgs.find((p) => p.package === id) : pkgs.find((p) => p.capabilities.some((c) => c.id === id));
+  let pkgs, locks;
+  try { pkgs = listInstalledPackages(dir); locks = readPackageLocks(dir); } catch (e) { cmdFail(e.code || "invalid-lock", e.message || e); return; }
+  // findLast: the listing runs outermost → innermost, and an identity resolves
+  // to the CLOSEST scope that locks it — the same rule the merged lock maps use.
+  const backing = all ? pkgs.findLast((p) => p.package === id) : pkgs.findLast((p) => p.capabilities.some((c) => c.id === id));
   if (backing) {
     if (all) {
       // Contract-required pre-approval review of the FULL executable surface:
@@ -1096,16 +1139,31 @@ function trust() {
         out(`  ${c.id}: commands [${cmds.join(", ") || "none"}], hooks [${hooks.join(", ") || "none"}]`);
       }
     }
+    // FAIL CLOSED BEFORE APPROVING. The engine binds approval to the artifact's
+    // integrity, but integrity alone cannot see a `.oas-installation.json` that
+    // claims a different origin than the lock — and approving a capability whose
+    // own provenance is disputed is exactly the thing trust must not do.
+    const trustRows = levelRows(locks, backing.level);
+    const disputed = backing.capabilities
+      .filter((c) => all || c.id === id)
+      .map((c) => capabilityHealth(backing.level, c, trustRows.capabilities[c.id], trustRows.packages[backing.package]))
+      .filter((h) => h.status !== "ok" && h.status !== "untrusted");
+    if (disputed.length) { cmdFail(disputed[0].code || "invalid-lock", `refusing to trust: ${disputed.map((h) => h.detail).join("; ")}`); return; }
     let r;
     try { r = approveCapability(dir, id, { allCapabilities: all }); } catch (e) { cmdFail(e.code || "invalid-lock", e.message || e); return; }
+    // Approval binds to each capability's exact MATERIALIZED ARTIFACT, so the
+    // integrity reported is per capability — there is no package-level digest
+    // to approve against and none to print.
+    const approvedIntegrity = {};
+    for (const c of backing.capabilities) if (r.approved.includes(c.id)) approvedIntegrity[c.id] = c.integrity || null;
     if (JSON_MODE) {
-      const surface = {};
-      for (const c of backing.capabilities) surface[c.id] = { commands: Object.keys(c.manifest.commands || {}), hooks: Object.keys(c.manifest.hooks || {}) };
-      jsonOk({ package: r.package, integrity: r.integrity, approved: r.approved, skipped: r.skipped, executableSurface: surface, file: r.file });
+      // The engine's own surface, not a re-derivation: what it approved and what
+      // it saw must be the same object.
+      jsonOk({ package: r.package, level: r.level, approved: r.approved, skipped: r.skipped, approvedIntegrity, executableSurface: r.executableSurface, file: r.file });
       return;
     }
-    if (r.approved.length) console.log(`Trusted executable commands/hooks for ${r.approved.join(", ")} (package ${r.package} at ${r.integrity}).`);
-    if (r.skipped.length) console.log(`No executable surface (lock integrity suffices, no approval needed): ${r.skipped.join(", ")}`);
+    for (const c of r.approved) console.log(`Trusted executable commands/hooks for ${c} (from package ${r.package}, artifact ${approvedIntegrity[c] || "?"}).`);
+    if (r.skipped.length) console.log(`No executable surface (artifact integrity suffices, no approval needed): ${r.skipped.join(", ")}`);
     return;
   }
   if (all) { cmdFail("unknown-capability", `no installed package "${id}" — --all-capabilities takes a package identity`); return; }
@@ -1136,197 +1194,485 @@ function flagAll(name) {
   return out;
 }
 
-/** Capability ids supplied by a package's dependency closure, read from visible locks (phase 1).
- * The scope's own lock is merged in directly: during init no oas-config.yaml exists
- * there yet, so configChain-based reading cannot see same-lock dependencies. */
-/** Capability ids supplied by a package's dependency closure, resolved through
- * the ENGINE's lock graph (dependencies recorded by identity) plus the indexed
- * installed store. During init the scope may have a lock without a config;
- * readPackageLocks walks the chain and the scope itself. */
-/** Dependency-closure PROVIDER RECORDS for profile validation, resolved from
- * the acquired root's LOCK entry (identity-valued dependencies) and the
- * engine-indexed store — reviewer-455ba15 fixes 2+3: no source-string
- * reverse-engineering (a dependency's source need not encode its identity),
- * and each provider carries its capability MANIFESTS so layer agreement
- * validates against the real provider, not just an ID match.
- * Returns { capabilities: Map<capabilityId, capManifest|null> }. */
-function dependencyClosureProviders(rootId, dir) {
-  // The scope's own lock is read directly: during init no oas-config.yaml
-  // exists there yet, so configChain-based reads cannot see that level.
-  const locks = { ...readPackageLocks(dir).packages };
-  const ownLock = {};
-  try {
-    const parsed = JSON.parse(readFileSync(join(dir, OAS_LOCK_FILE), "utf8"));
-    if (parsed.lockfileVersion === 2) for (const [id, e] of Object.entries(parsed.packages || {})) { ownLock[id] = e; locks[id] = e; }
-  } catch { /* no own lock (or fail-closed raise — init surfaces it at acquire) */ }
-  const byId = new Map(listInstalledPackages(dir).map((p) => [p.package, p]));
-  // Own-scope store OVERWRITES byId for every identity in the target scope's
-  // OWN lock (reviewer-ea6a77a): listInstalledPackages cannot index a
-  // configless level, so it may have returned an OUTER package with the same
-  // identity — the merged lock graph selects the inner entry, so provider
-  // manifests must come from the own-scope artifact, never the shadowed outer.
-  for (const id of Object.keys(ownLock)) {
-    const d = join(installedPackagesDir(dir), id);
-    if (!existsSync(join(d, "oas-package.json"))) continue;
-    try {
-      const m = loadPackageManifestAt(d);
-      byId.set(id, { package: id, capabilities: (m._capabilities || []).map((c) => ({ id: c.id, manifest: c.manifest })) });
-    } catch { /* invalid installed manifest surfaces via doctor */ }
-  }
-  const capabilities = new Map(); // capability id → capability manifest (or null when only lock metadata is visible)
-  const seen = new Set();
+/** Dependency-closure PROVIDER RECORDS for config-template validation.
+ *
+ * The flat model made this much smaller than its package-root ancestor: the
+ * engine's lock reader walks raw lock-owning scopes rather than the config
+ * chain, so a configless scope being initialized now sees its OWN lock without
+ * the manual merge this used to need, and capability rows carry the provider
+ * back-reference directly instead of package rows carrying capability lists.
+ *
+ * `staged` supplies the capabilities projected by THIS run's acquisition, which
+ * are not locked yet when the pre-commit gate validates the template.
+ * Returns { capabilities: Map<capabilityId, capabilityManifest|null> } — null
+ * means lock-visible but not materialized, so layer agreement is unverifiable.
+ */
+function dependencyClosureProviders(rootId, dir, staged = []) {
+  const capabilities = new Map();
+  let locks = { packages: {}, capabilities: {} };
+  try { locks = readPackageLocks(dir); } catch { /* invalid lock surfaces at acquire */ }
+
+  const closure = new Set();
   const visit = (pkgId) => {
-    if (!pkgId || seen.has(pkgId)) return;
-    seen.add(pkgId);
-    const entry = locks[pkgId];
-    const pkg = byId.get(pkgId);
-    if (pkg) for (const c of pkg.capabilities) capabilities.set(c.id, c.manifest || null);
-    else if (entry) for (const c of entry.capabilities || []) { if (!capabilities.has(c)) capabilities.set(c, null); }
-    // Lock-graph dependencies are package identities (engine contract).
-    for (const dep of entry?.dependencies || []) visit(dep);
+    if (!pkgId || closure.has(pkgId) || !Object.hasOwn(locks.packages, pkgId)) return;
+    closure.add(pkgId);
+    for (const dep of locks.packages[pkgId].dependencies || []) visit(dep);
   };
-  for (const dep of locks[rootId]?.dependencies || []) visit(dep);
+  visit(rootId);
+
+  for (const [capId, row] of Object.entries(locks.capabilities)) {
+    if (!closure.has(row.package)) continue;
+    let manifest = null;
+    try {
+      const artifact = installedCapabilityDir(row._level, capId);
+      if (existsSync(join(artifact, "oas.json"))) manifest = JSON.parse(readFileSync(join(artifact, "oas.json"), "utf8"));
+    } catch { /* unreadable artifact is a doctor problem, not a validation input */ }
+    capabilities.set(capId, manifest);
+  }
+  // Same-run acquisition visibility: the root's own exports exist only in
+  // staging while the gate runs, and a template that binds them must validate.
+  // Preview rows carry the declared `layer` (null when none) — the minimum the
+  // layer-agreement check needs — so a staged capability is represented by that
+  // one field rather than a manifest the engine deliberately does not expose.
+  for (const c of staged) capabilities.set(c.capability, c.manifest ?? { layer: c.layer ?? null });
   return { capabilities };
 }
 
-/** oas init --package <source> [--config <name>]: preview, validate, and snapshot one package config profile.
- * JSON mode: one compact envelope; WS2 codes E_PROFILE_INVALID / E_PROFILE_AMBIGUOUS /
- * E_PROFILE_NOT_FOUND (E_CONFIG_EXISTS is raised by init() before this); engine
- * error codes (invalid-package-manifest, path-escape, invalid-source, …) pass
- * through verbatim; fully noninteractive (no tmux prompt). */
+/** Adopt a template from a package ALREADY locked at this scope: read its exact
+ * locked templates, validate, then write config + base + metadata under the run
+ * journal. Nothing is fetched beyond the locked source, and nothing is
+ * re-acquired — the lock is already the truth about what is installed here. */
+function initPackageFromLock(packageId, dir, file, lockedRoot, configFlag, bail, note) {
+  let locked, chosen;
+  try { locked = readLockedConfigTemplates(dir, packageId); }
+  catch (e) { bail(e.code || "E_TEMPLATE_READ_FAILED", e.message); return; }
+  try { chosen = selectConfigTemplate(locked.templates, configFlag, packageId); }
+  catch (e) { bail(e.code || "E_TEMPLATE_AMBIGUOUS", e.message); return; }
+
+  const errors = validateConfigTemplate(chosen, packageId, {
+    dependencyProviders: dependencyClosureProviders(packageId, dir).capabilities,
+  });
+  if (errors.length) bail("E_TEMPLATE_INVALID", `config template "${chosen.template}" of package ${packageId} failed validation:\n  - ${errors.join("\n  - ")}`);
+
+  note(`Package ${packageId}${locked.version ? `@${locked.version}` : ""} is already locked here — adopting its config template "${chosen.template}" without re-acquiring.`);
+
+  let journal;
+  try { journal = beginRunJournal(dir); }
+  catch (e) { bail(e.code || "E_JOURNAL_FAILED", e.message); return; }
+  let adoption;
+  try {
+    adoption = writeAdoptedTemplate(dir, file, {
+      package: packageId, template: chosen,
+      root: { source: locked.source, version: locked.version, commit: locked.commit, path: locked.path },
+    });
+    journal.finalize();
+  } catch (e) {
+    const report = journal.rollback();
+    bail("E_ADOPT_FAILED", report.complete ? e.message : `${e.message} — ${report.summary}`);
+    return;
+  }
+
+  const locks = readPackageLocks(dir);
+  const capabilities = Object.entries(locks.capabilities).filter(([, c]) => c.package === packageId).map(([id]) => id);
+  note(`Created ${shortPath(file)} (${levelOf(dir)} level) from config template ${packageId}:${chosen.template}`);
+  if (JSON_MODE) {
+    jsonOk({
+      package: packageId, version: locked.version || null, commit: locked.commit || null,
+      template: chosen.template, adopted: true, file, capabilities,
+      adoptedBase: adoption.baseFile, adoptionMetadata: adoption.metadataFile,
+      contentIntegrity: chosen.contentIntegrity,
+      lockFile: lockedRoot._file || join(dir, OAS_LOCK_FILE), lockedPackages: Object.keys(locks.packages),
+    });
+    return;
+  }
+  offerTmuxMouseScrolling();
+}
+
+/** oas init --package <source> [--config <name>]: acquire a package AND adopt
+ * one of its config templates as this scope's local config.
+ *
+ * This command is adoption, not an install alias: `oas install <package>`
+ * installs capabilities and applies no template, while this one always adopts
+ * exactly one — the named template, else the single marked default, else the
+ * only one. Several unmarked templates are E_TEMPLATE_AMBIGUOUS and a package
+ * with none is E_NO_TEMPLATES; both refuse inside the pre-commit gate, so the
+ * scope is never touched.
+ *
+ * Transaction shape: the outer journal opens BEFORE acquisition, so its
+ * snapshot is the pre-command state. A gate refusal or acquire failure rolls it
+ * back (the engine is zero-mutation there, so this mainly closes the backup); a
+ * failure while writing the adoption files rolls back the lock, the capability
+ * store, the ignore file, the config and the adopted base together — the
+ * newly acquired state disappears and every pre-existing byte returns.
+ * finalize() runs only after every adoption write has succeeded.
+ *
+ * JSON mode: one compact envelope. CLI codes E_TEMPLATE_INVALID /
+ * E_TEMPLATE_AMBIGUOUS / E_TEMPLATE_NOT_FOUND / E_NO_TEMPLATES; engine codes
+ * pass through verbatim. Fully noninteractive. */
 function initPackage(src, dir, file) {
   const bail = (code, msg) => (JSON_MODE ? jsonFail(code, msg) : die(msg));
   const note = (msg) => (JSON_MODE ? console.error(msg) : console.log(msg));
   const configFlag = flag("config");
-  if (configFlag === true) bail("E_USAGE", "--config needs a profile name");
-  // During init the target scope may carry a lock/store WITHOUT an
-  // oas-config.yaml — configChain-based engine reads cannot see that level
-  // (init-acquires-before-config-exists), so read the scope's own lock v2
-  // directly for the id checks.
-  const ownLockV2 = (() => {
-    try {
-      const parsed = JSON.parse(readFileSync(join(dir, OAS_LOCK_FILE), "utf8"));
-      return parsed.lockfileVersion === 2 ? parsed.packages || {} : {};
-    } catch { return {}; }
-  })();
-  const installedAt = (id) => {
-    const d = join(installedPackagesDir(dir), id);
-    return ownLockV2[id] && existsSync(join(d, "oas-package.json")) ? d : undefined;
+  if (configFlag === true) bail("E_USAGE", "--config needs a template name");
+
+  let chosen = null;      // the selected+validated template descriptor
+  let rootRecord = null;  // the acquired root package row
+  let projected = [];     // projected capability rows
+
+  /** The pre-commit gate. Everything that can refuse refuses HERE, while the
+   * scope is still untouched. It THROWS rather than exiting: the process-exit
+   * path would strand the journal's backup, and the engine propagates a gate
+   * throw unchanged with nothing mutated. */
+  const assertCommittable = (preview) => {
+    rootRecord = preview.packages.find((p) => p.package === preview.root) || null;
+    projected = preview.capabilities || [];
+    const templates = (preview.configTemplates || []).filter((t) => t.package === preview.root);
+
+    note(`Package ${preview.root}${rootRecord?.version ? `@${rootRecord.version}` : ""} — installs ${projected.length} capability(ies): ${projected.map((c) => c.capability).join(", ") || "(none)"}`);
+    const executable = projected.filter((c) => c.executableSurface?.commands?.length || c.executableSurface?.hooks?.length);
+    if (executable.length) note(`  executable surfaces needing separate approval: ${executable.map((c) => c.capability).join(", ")} (\`oas trust <id>\`)`);
+
+    chosen = selectConfigTemplate(templates, configFlag, preview.root); // throws typed codes
+    // Every check now refuses PRE-COMMIT, layer agreement included: preview
+    // capability rows carry the declared layer, so a template binding a slot to
+    // one of the package's own staged capabilities is validated here, with the
+    // scope untouched and no rollback needed.
+    const errors = validateConfigTemplate(chosen, preview.root, {
+      dependencyProviders: dependencyClosureProviders(preview.root, dir, projected).capabilities,
+    });
+    if (errors.length) {
+      const e = new Error(`config template "${chosen.template}" of package ${preview.root} failed validation:\n  - ${errors.join("\n  - ")}`);
+      e.code = "E_TEMPLATE_INVALID";
+      throw e;
+    }
+    note(`Config template "${chosen.template}"${chosen.description ? `: ${chosen.description}` : ""} — validated (${chosen.contentIntegrity})`);
+    note(`  it becomes YOUR local ${shortPath(file)}: every copied setting is editable, and package updates never rewrite it.`);
   };
-  const isUrlOrCatalog = /^(https?:\/\/|git@|ssh:\/\/|git:)/.test(src) || (!src.startsWith(".") && !src.startsWith("/") && !src.startsWith("~") && !src.startsWith("path:") && !ownLockV2[src] && !readPackageLocks(dir).packages[src] && !listInstalledPackages(dir).some((p) => p.package === src));
+
+  // Opened BEFORE acquisition: a snapshot taken afterwards would record the new
+  // lock, artifacts and ignore bytes as the "pre-existing" state and could
+  // never undo them.
+  // An id already locked at this scope is adopted from the LOCK, not
+  // re-acquired: its exact source/commit is already pinned, the capabilities are
+  // already materialized, and going to the network (or the catalog) to re-fetch
+  // what the lock already names would be a different package than the one
+  // installed here. This is the `oas init --package <id>` half of the documented
+  // <id|path|git-url> form.
+  let lockedRoot = null;
+  try { lockedRoot = readPackageLocks(dir).packages[src] || null; }
+  catch { /* an invalid lock surfaces with its own typed code below */ }
+  if (lockedRoot) { initPackageFromLock(src, dir, file, lockedRoot, configFlag, bail, note); return; }
+
+  // Constructed inside its own guard: a journal that cannot be built (a symlink
+  // component, an unreadable snapshot, a backup that would land inside the
+  // scope) must still leave the command with exactly one JSON envelope. There
+  // is nothing to roll back yet, so its typed code goes straight to bail.
+  let journal;
+  try { journal = beginRunJournal(dir); }
+  catch (e) { bail(e.code || "E_JOURNAL_FAILED", e.message); return; }
+
+  /** Undo the run, then report. `code` is the engine's verbatim code for
+   * acquisition failures and a stable CLI code for our own write failures — a
+   * raw errno like ENOTDIR is not a contract automation can branch on. */
+  const abort = (e, code) => {
+    const report = journal.rollback();
+    const detail = code === "E_ADOPT_FAILED" ? `adopting the config template failed after the package was installed: ${e.message}` : e.message;
+    bail(code || e.code || "E_INIT_FAILED", report.complete ? detail : `${detail} — ${report.summary}`);
+  };
+
+  let acq;
+  try { acq = acquirePackage(dir, src, { assertCommittable }); }
+  catch (e) { abort(e); return; }
+
+  note(`Acquired + locked: ${acq.installed.map((p) => `${p.package}@${p.version}`).join(", ")} → ${shortPath(acq.lockFile)}`);
+  const capabilities = acq.capabilities.map((c) => c.capability);
+
+  // DEFENCE IN DEPTH, not the primary check. The gate above already validated
+  // every binding against the preview's declared layers; this re-checks them
+  // against the manifests actually written to disk, so a projection that
+  // disagreed with its own preview cannot leave a broken config behind. It
+  // should never fire — and if it does, the journal restores the scope
+  // completely, so nothing of the run survives.
+  const materialized = new Map();
+  for (const c of acq.capabilities) {
+    let manifest = null;
+    try { manifest = JSON.parse(readFileSync(join(installedCapabilityDir(dir, c.capability), "oas.json"), "utf8")); }
+    catch { /* unreadable artifact is reported by doctor; leave it unverifiable */ }
+    materialized.set(c.capability, manifest);
+  }
+  for (const [id, m] of dependencyClosureProviders(acq.root, dir).capabilities) if (!materialized.has(id)) materialized.set(id, m);
+  const lateErrors = validateConfigTemplate(chosen, acq.root, { dependencyProviders: materialized });
+  if (lateErrors.length) {
+    const e = new Error(`config template "${chosen.template}" of package ${acq.root} failed validation:\n  - ${lateErrors.join("\n  - ")}`);
+    e.code = "E_TEMPLATE_INVALID";
+    abort(e);
+    return;
+  }
+
+  let adoption;
   try {
-    // Gate 1: adoption leaves the root + dependency closure exact-locked via
-    // the ENGINE's acquirePackage — which now supports git, catalog, AND local
-    // sources. Acquisition runs BEFORE the config snapshot is published (a
-    // failed acquire/lock must not leave a config behind), and its exact-
-    // integrity reuse rejects same-ID/different-source drift. Already-installed
-    // ids are resolved from the store without re-fetching.
-    let manifest, commit;
-    const installedDir = !isUrlOrCatalog && (installedAt(src) || listInstalledPackages(dir).find((p) => p.package === src)?.dir);
-    if (installedDir) {
-      manifest = loadPackageManifestAt(installedDir);
-      commit = (ownLockV2[src] || readPackageLocks(dir).packages[src])?.commit || "local";
-    } else {
-      let acq;
-      try { acq = acquirePackage(dir, src); }
-      catch (e) { bail(e.code || "E_ACQUIRE_FAILED", e.message); }
-      note(`Acquired + locked package closure: ${acq.installed.map((p) => `${p.package}@${p.version}`).join(", ")} → ${shortPath(acq.lockFile)}`);
-      const rootRec = acq.installed.find((p) => p.package === acq.root);
-      manifest = loadPackageManifestAt(rootRec.dir);
-      commit = rootRec.commit;
-    }
-    let profile;
-    try { profile = selectProfile(manifest, configFlag); }
-    catch (e) { bail(e.code || "E_PROFILE_AMBIGUOUS", e.message); }
-    let errors;
-    try { errors = validateProfile(manifest, profile, { dependencyProviders: dependencyClosureProviders(manifest.package, dir).capabilities }); }
-    catch (e) { bail(e.code || "E_PROFILE_INVALID", e.message); }
-    if (errors.length) bail("E_PROFILE_INVALID", `profile "${profile.name}" of package ${manifest.package} failed validation:\n  - ${errors.join("\n  - ")}`);
-    let body;
-    try { body = readProfileText(manifest, profile); }
-    catch (e) { bail(e.code || "E_PROFILE_INVALID", e.message); }
-    const capabilities = (manifest._capabilities || []).map((c) => c.id);
-    // Preview before writing: package, profile, exported capabilities.
-    note(`Package ${manifest.package}@${manifest.version} — profile "${profile.name}"${profile.description ? `: ${profile.description}` : ""}`);
-    note(`  exports capabilities: ${capabilities.join(", ") || "(none)"}`);
-    const text = `${profileProvenanceHeader({ pkg: manifest.package, version: manifest.version, profile: profile.name, commit })}\n` +
-      body.replace(/^name:.*$/m, `name: ${basename(dir)}`).replace(/\n*$/, "\n");
-    writeFileSync(file, text);
-    note(`Created ${shortPath(file)} (${levelOf(dir)} level) from package profile ${manifest.package}:${profile.name}`);
-    note("The snapshot is an ordinary scoped config — edit it, retarget or disable any capability; package updates never rewrite it.");
-    // After the snapshot exists, the scope IS a config level — but merge the own
-    // lock read too for the paranoid path (lock written moments ago).
-    const locks = { ...readPackageLocks(dir).packages };
-    try {
-      const parsed = JSON.parse(readFileSync(join(dir, OAS_LOCK_FILE), "utf8"));
-      if (parsed.lockfileVersion === 2) for (const [id, e] of Object.entries(parsed.packages || {})) locks[id] = { ...e, _file: join(dir, OAS_LOCK_FILE) };
-    } catch { /* no own lock */ }
-    if (!locks[manifest.package]) note(`NOTE: package ${manifest.package} is not locked at this scope yet — acquire it with \`oas install ${src}\` so its capabilities restore.`);
-    if (JSON_MODE) {
-      const lockEntry = locks[manifest.package];
-      jsonOk({
-        package: manifest.package, version: manifest.version, commit: commit || null,
-        profile: profile.name, file, capabilities,
-        lockFile: lockEntry?._file || null,
-        lockedPackages: Object.keys(locks),
-      });
-      return;
-    }
-  } finally { /* engine acquisition stages its own temp dirs */ }
+    adoption = writeAdoptedTemplate(dir, file, { package: acq.root, template: chosen, root: rootRecord });
+    journal.finalize();
+  } catch (e) { abort(e, "E_ADOPT_FAILED"); return; }
+
+  note(`Created ${shortPath(file)} (${levelOf(dir)} level) from config template ${acq.root}:${chosen.template}`);
+  note(`Recorded the adopted base at ${shortPath(adoption.baseFile)} — commit it; \`oas config diff\` and \`oas config sync\` compare against it.`);
+  if (JSON_MODE) {
+    jsonOk({
+      package: acq.root, version: rootRecord?.version || null, commit: rootRecord?.commit || null,
+      template: chosen.template, adopted: true, file, capabilities,
+      adoptedBase: adoption.baseFile, adoptionMetadata: adoption.metadataFile,
+      contentIntegrity: chosen.contentIntegrity,
+      lockFile: acq.lockFile, lockedPackages: acq.installed.map((p) => p.package),
+    });
+    return;
+  }
   offerTmuxMouseScrolling();
 }
 
-/** oas config diff --package <id> --config <name>: report-only diff of the local snapshot vs the package's current profile.
- * The snapshot's provenance header supplies --package/--config defaults.
- * JSON mode: one envelope; zero differences = exit 0 with differingLines 0. */
-function configDiffCmd() {
+/** `oas config <diff|sync|adopt>` — the guided three-way template lane.
+ *
+ * All three share one comparison: the recorded adopted base, the current local
+ * oas-config.yaml, and the selected template read from the CURRENT EXACT LOCK.
+ * Only `sync` and `adopt` mutate, and both present the complete plan first.
+ */
+function configCmd() {
   const bail = (code, msg) => (JSON_MODE ? jsonFail(code, msg) : die(msg));
-  if (args[1] !== "diff") bail("E_USAGE", "usage: oas config diff --package <id> --config <name> [--dir <dir>] [--json]");
+  const sub = args[1];
+  if (!["diff", "sync", "adopt"].includes(sub)) {
+    bail("E_USAGE", "usage: oas config <diff|sync|adopt> [--config <template>] [--dir <dir>] [--json]");
+  }
   const dir = resolve(flag("dir") || process.cwd());
   const file = join(dir, "oas-config.yaml");
-  if (!existsSync(file)) bail("E_NO_CONFIG", `no oas-config.yaml at ${shortPath(dir)} — nothing to diff`);
+  if (!existsSync(file)) bail("E_NO_CONFIG", `no oas-config.yaml at ${shortPath(dir)} — adopt one with \`oas init --package <source> --config <name>\``);
   const localText = readFileSync(file, "utf8");
-  const provenance = parseProfileProvenance(localText);
-  const pkgId = flag("package") || provenance?.package;
-  if (!pkgId || pkgId === true) bail("E_USAGE", "usage: oas config diff --package <id> --config <name> (the snapshot's provenance header supplies defaults when present)");
-  const configFlag = flag("config");
-  if (configFlag === true) bail("E_USAGE", "--config needs a profile name");
-  const profileName = configFlag || provenance?.profile;
-  // Same engine classification resolveProfilePackage uses — the two must agree
-  // on which specs need a clone, or a git source arrives without one.
-  const pkgKind = (() => { try { return parsePackageSource(pkgId).kind; } catch { return undefined; } })();
-  const tmp = pkgKind === "git" ? mkdtempSync(join(tmpdir(), "oas-package-")) : undefined;
-  try {
-    let resolved;
-    try { resolved = resolveProfilePackage(pkgId, dir, { clone: tmp }); }
-    catch (e) { bail(e.code || "E_PACKAGE_UNRESOLVED", e.message); }
-    let profile;
-    try { profile = selectProfile(resolved.manifest, profileName); }
-    catch (e) { bail(e.code || "E_PROFILE_AMBIGUOUS", e.message); }
-    let packageText;
-    try { packageText = readProfileText(resolved.manifest, profile); }
-    catch (e) { bail(e.code || "E_PROFILE_INVALID", e.message); }
-    // Strip the local provenance header for a meaningful comparison.
-    const localBody = localText.replace(/^# package: .*\n/, "");
-    const diff = diffConfigTexts(localBody, packageText);
-    const changed = diff.filter((d) => d.kind !== "same");
+
+  let adopted;
+  try { adopted = readAdoptedTemplate(dir); }
+  catch (e) { bail(e.code || "E_ADOPTION_INVALID", e.message); }
+
+  // `adopt` switches base; the others need an existing one.
+  const adoptTarget = sub === "adopt" ? args[2] : undefined;
+  if (sub === "adopt" && (!adoptTarget || adoptTarget.startsWith("--"))) {
+    bail("E_USAGE", "usage: oas config adopt <package> [--config <template>] — the package must already be installed at this scope");
+  }
+  if (sub !== "adopt" && !adopted) {
+    bail("E_NO_ADOPTED_BASE", `${shortPath(file)} was not adopted from a config template, so there is no recorded base to compare against — adopt one with \`oas config adopt <package> --config <name>\``);
+  }
+
+  const packageId = sub === "adopt" ? adoptTarget : adopted.package;
+  const templateFlag = flag("config");
+  if (templateFlag === true) bail("E_USAGE", "--config needs a template name");
+  const wanted = templateFlag || (sub === "adopt" ? undefined : adopted.template);
+
+  // Exact locked read — never the network-free guess, never a package root.
+  let locked;
+  try { locked = readLockedConfigTemplates(dir, packageId); }
+  catch (e) { bail(e.code || "E_TEMPLATE_READ_FAILED", e.message); }
+  let chosen;
+  try { chosen = selectConfigTemplate(locked.templates, wanted, packageId); }
+  catch (e) { bail(e.code || "E_TEMPLATE_AMBIGUOUS", e.message); }
+
+  // Switching base rebases the ONE local config against the new template.
+  //
+  // With no adopted base there is NO common ancestor, and pretending the local
+  // file is one is the dangerous answer: a three-way merge whose base equals
+  // local classifies every difference as upstream-only, so a first adopt would
+  // silently replace a handcrafted config wholesale — no conflicts, no consent,
+  // no preview of what was lost. An EMPTY base states the truth instead: every
+  // existing local byte is local work, and anything the template also wants to
+  // put there is a conflict the operator must resolve explicitly.
+  const baseText = adopted ? adopted.baseText : "";
+  const plan = planConfigMerge(baseText, localText, chosen.content);
+
+  const describe = (r) => ({
+    id: r.id, kind: r.kind, recommended: r.recommended, digest: r.digest,
+    startLine: r.local.start + 1, lines: r.local.end - r.local.start,
+    base: r.base.text, local: r.local.text, package: r.template.text,
+  });
+
+  if (sub === "diff") {
     if (JSON_MODE) {
       jsonOk({
-        package: resolved.manifest.package, profile: profile.name,
-        version: resolved.manifest.version, file,
-        differingLines: changed.length, diff,
+        package: packageId, template: chosen.template, version: locked.version || null, commit: locked.commit || null,
+        file, adoptedBase: adopted?.baseFile || null, contentIntegrity: chosen.contentIntegrity,
+        clean: plan.clean, counts: plan.counts, conflicts: plan.conflicts,
+        regions: plan.regions.map(describe), planDigest: plan.planDigest,
       });
       return;
     }
-    console.log(`oas config diff — local ${shortPath(file)} vs ${resolved.manifest.package}@${resolved.manifest.version} profile "${profile.name}" (report only; nothing is merged or overwritten)\n`);
-    if (!changed.length) { console.log("No differences."); return; }
-    for (const d of diff) {
-      if (d.kind === "local") console.log(`+ ${d.line}`);
-      else if (d.kind === "package") console.log(`- ${d.line}`);
-      else console.log(`  ${d.line}`);
+    console.log(`oas config diff — ${shortPath(file)} vs ${packageId}:${chosen.template}${locked.version ? `@${locked.version}` : ""} (report only; nothing is written)\n`);
+    if (!plan.regions.length) { console.log("No differences: your config, the adopted base, and the package template agree."); return; }
+    for (const r of plan.regions) renderMergeRegion(r);
+    console.log(`\n${plan.counts.upstream} upstream-only, ${plan.counts.local} local-only, ${plan.counts.conflict} conflict(s), ${plan.counts.agreed} already agreed.`);
+    console.log(plan.clean
+      ? "Apply the upstream changes with `oas config sync` (local-only edits are kept)."
+      : "`oas config sync` needs an explicit choice for each conflict — it will never pick one for you.");
+    return;
+  }
+
+  // ---- sync / reset / adopt: everything below MUTATES, so plan first ----
+
+  const decisions = {};
+  for (const spec of flagAll("accept")) {
+    const m = /^([^=]+)=(local|package)$/.exec(spec);
+    if (!m) bail("E_USAGE", `--accept takes <regionId>=<local|package>, got "${spec}"`);
+    decisions[m[1]] = m[2];
+  }
+  const assumeYes = args.includes("--yes");
+  const isReset = args.includes("--reset");
+
+  // The recoverable backup survives a SUCCESSFUL run: the run journal is for
+  // undoing failures, this is for the adopter who changes their mind.
+  const backupFile = `${file}.bak`;
+
+  if (isReset) {
+    // Reset previews everything it will destroy, then demands explicit consent.
+    const lost = plan.regions.filter((r) => r.kind === "local" || r.kind === "conflict");
+    if (JSON_MODE || !process.stdin.isTTY) {
+      if (!assumeYes) {
+        bail("E_RESET_NOT_CONFIRMED", `oas config sync --reset would discard ${lost.length} local change region(s) in ${shortPath(file)} and replace it with ${packageId}:${chosen.template} verbatim — pass --yes to accept that noninteractively`);
+      }
+    } else if (!assumeYes) {
+      console.log(`This DISCARDS ${lost.length} local change region(s) in ${shortPath(file)}:\n`);
+      for (const r of lost) renderMergeRegion(r);
+      const answer = promptLine(`Type the word "discard" to replace it with ${packageId}:${chosen.template}: `);
+      if (answer.trim() !== "discard") bail("E_RESET_NOT_CONFIRMED", "reset cancelled — nothing was changed");
     }
-    console.log(`\n${changed.length} differing line${changed.length > 1 ? "s" : ""} (+ local only, - package profile only). Snapshots deliberately drift; adopt package changes by hand if wanted.`);
-  } finally { if (tmp) rmSync(tmp, { recursive: true, force: true }); }
+    const journal = openJournal(dir, bail);
+    try {
+      // NEVER copyFileSync onto a fixed backup path: it opens the destination
+      // for write and therefore FOLLOWS it, so a pre-planted
+      // `oas-config.yaml.bak` symlink would redirect this copy onto whatever it
+      // points at. The atomic form replaces the entry itself.
+      if (existsSync(file)) copyFileAtomic(file, backupFile);
+      writeFileAtomic(file, chosen.content);
+      recordAdoption(dir, file, packageId, chosen, locked, adopted);
+      journal.finalize();
+    } catch (e) { abortRun(journal, e, bail); return; }
+    if (JSON_MODE) { jsonOk({ action: "reset", package: packageId, template: chosen.template, file, backup: backupFile, discardedRegions: lost.length, contentIntegrity: chosen.contentIntegrity }); return; }
+    console.log(`Reset ${shortPath(file)} to ${packageId}:${chosen.template} verbatim. Previous contents saved at ${shortPath(backupFile)}.`);
+    return;
+  }
+
+  // sync / adopt share the three-way apply.
+  const unresolved = plan.conflicts.filter((id) => !Object.hasOwn(decisions, id));
+  if (unresolved.length) {
+    if (JSON_MODE || !process.stdin.isTTY) {
+      bail("E_SYNC_AMBIGUOUS", `${unresolved.length} conflict(s) need an explicit choice (${unresolved.join(", ")}) — pass --accept <id>=<local|package> for each; this command will never choose for you`);
+    }
+    for (const id of unresolved) {
+      const region = plan.regions.find((r) => r.id === id);
+      renderMergeRegion(region);
+      const answer = promptLine(`[${id}] keep (l)ocal or take (p)ackage? `).trim().toLowerCase();
+      if (answer === "l" || answer === "local") decisions[id] = "local";
+      else if (answer === "p" || answer === "package") decisions[id] = "package";
+      else bail("E_SYNC_AMBIGUOUS", `no choice made for ${id} — nothing was changed`);
+    }
+  }
+
+  let merged;
+  try { merged = applyConfigMerge(localText, plan, decisions); }
+  catch (e) { bail(e.code || "E_SYNC_FAILED", e.message); return; }
+
+  // Advancing the recorded base is the POINT of a sync, not a side effect of
+  // changing bytes. Deciding "keep local" on every conflict changes nothing on
+  // disk, but the decision must still be recorded — otherwise the base stays
+  // behind and the identical conflict is re-presented on every future sync,
+  // forever. So "nothing to do" means nothing applied AND the base already at
+  // this exact template.
+  const baseIsCurrent = adopted?.package === packageId
+    && adopted?.template === chosen.template
+    && adopted?.baseText === chosen.content;
+  if (!merged.applied.length && baseIsCurrent) {
+    if (JSON_MODE) { jsonOk({ action: sub, package: packageId, template: chosen.template, file, changed: false, baseAdvanced: false, applied: [], backup: null }); return; }
+    console.log(`Nothing to do: ${shortPath(file)} and the recorded base are already at ${packageId}:${chosen.template}.`);
+    return;
+  }
+
+  if (!JSON_MODE) {
+    console.log(`Plan for ${shortPath(file)} vs ${packageId}:${chosen.template}:`);
+    for (const a of merged.applied) console.log(`  [${a.id}] ${a.kind} → ${a.choice}`);
+    console.log("");
+  }
+
+  const changed = merged.text !== localText;
+  const journal = openJournal(dir, bail);
+  try {
+    // Back up only when bytes actually change — a backup identical to the file
+    // it shadows is noise the adopter has to reason about later.
+    if (changed) copyFileAtomic(file, backupFile);
+    if (changed) writeFileAtomic(file, merged.text);
+    recordAdoption(dir, file, packageId, chosen, locked, adopted);
+    journal.finalize();
+  } catch (e) { abortRun(journal, e, bail); return; }
+
+  if (JSON_MODE) {
+    jsonOk({
+      action: sub, package: packageId, template: chosen.template, file, changed,
+      baseAdvanced: true, applied: merged.applied, backup: changed ? backupFile : null,
+      adoptedBase: join(adoptedTemplateDir(dir, packageId, chosen.template), "oas-config.yaml"),
+      contentIntegrity: chosen.contentIntegrity,
+    });
+    return;
+  }
+  if (changed) console.log(`Applied ${merged.applied.length} change region(s) to ${shortPath(file)}; previous contents saved at ${shortPath(backupFile)}.`);
+  else console.log(`No bytes changed in ${shortPath(file)} — you kept every local choice.`);
+  console.log(`Adopted base advanced to ${packageId}:${chosen.template}, so these decisions will not be asked again. Local edits outside the applied regions are untouched.`);
+}
+
+/** Open the run journal with the command's one-envelope guarantee intact. */
+function openJournal(dir, bail) {
+  try { return beginRunJournal(dir); }
+  catch (e) { bail(e.code || "E_JOURNAL_FAILED", e.message); throw e; }
+}
+
+/** Undo a failed config mutation and report truthfully. */
+function abortRun(journal, e, bail) {
+  const report = journal.rollback();
+  bail(e.code || "E_CONFIG_WRITE_FAILED", report.complete ? e.message : `${e.message} — ${report.summary}`);
+}
+
+/** Write the adopted base + metadata for the template just synced against, and
+ * retire any previously adopted base so exactly one survives. */
+function recordAdoption(dir, file, packageId, chosen, locked, previous) {
+  const written = writeAdoptedTemplate(dir, file, {
+    package: packageId, template: chosen,
+    root: { source: locked.source, version: locked.version, commit: locked.commit, path: locked.path },
+  }, { writeConfig: false });
+  if (previous && (previous.package !== packageId || previous.template !== chosen.template)) {
+    rmSync(previous.dir, { recursive: true, force: true });
+    const parent = dirname(previous.dir);
+    try { if (!readdirSync(parent).length) rmSync(parent, { recursive: true, force: true }); } catch { /* sibling templates remain */ }
+  }
+  return written;
+}
+
+/** Read one line from the terminal (human confirmation paths only). */
+function promptLine(question) {
+  process.stdout.write(question);
+  const buf = Buffer.alloc(1024);
+  let read = 0;
+  try { read = readSync(0, buf, 0, buf.length, null); } catch { return ""; }
+  return buf.subarray(0, read).toString("utf8").replace(/\n.*$/s, "");
+}
+
+/** One merge region, rendered for a human deciding what to do about it. */
+function renderMergeRegion(r) {
+  const label = {
+    upstream: "UPSTREAM ONLY  — the package template changed this; your config did not",
+    local: "LOCAL ONLY     — you changed this; the package template did not (it stays)",
+    conflict: "CONFLICT       — both changed this; an explicit choice is required",
+    agreed: "ALREADY AGREED — you and the package made the same change",
+  }[r.kind];
+  console.log(`[${r.id}] line ${r.local.start + 1}: ${label}`);
+  const block = (title, text) => {
+    if (!text) { console.log(`    ${title}: (nothing)`); return; }
+    for (const line of text.replace(/\n$/, "").split("\n")) console.log(`    ${title}: ${line}`);
+  };
+  if (r.kind !== "local") block("package", r.template.text);
+  if (r.kind !== "upstream") block("yours  ", r.local.text);
+  console.log("");
 }
 
 /** oas list — installed packages, exported capabilities, scopes. */
@@ -1337,21 +1683,52 @@ function listCmd() {
   let pkgs, locks;
   try { pkgs = listInstalledPackages(dir); locks = readPackageLocks(dir); }
   catch (e) { JSON_MODE ? jsonFail(e.code || "invalid-lock", e.message || e) : die(e.message); return; }
+  // Packages are TRANSPORT; capabilities are what is installed. So the listing
+  // is capability-first: every row names its own provider, artifact, integrity,
+  // trust and health, and the package rows keep only what the transport itself
+  // pins. Trust is per capability — there is no package-level approval to list.
+  const capabilities = [];
+  for (const p of pkgs) {
+    const rows = levelRows(locks, p.level);
+    for (const c of p.capabilities) {
+      const h = capabilityHealth(p.level, c, rows.capabilities[c.id], rows.packages[p.package]);
+      capabilities.push({
+        capability: c.id, version: c.version || null, package: p.package, level: p.level,
+        path: c.path || null, dir: h.dir, integrity: c.integrity || null,
+        installedIntegrity: h.integrity ?? null,
+        layer: c.manifest?.layer || null, trusted: c.trusted === true, installed: c.installed,
+        executableSurface: {
+          commands: Object.keys(c.manifest?.commands || {}),
+          hooks: Object.keys(c.manifest?.hooks || {}),
+        },
+        status: h.status, code: h.code, detail: h.detail,
+      });
+    }
+  }
   if (JSON_MODE) {
     jsonOk({
-      packages: pkgs.map((p) => ({ package: p.package, version: p.version, level: p.level, source: p.source || null, path: p.path || null, commit: p.commit || null, integrity: p.integrity || null, locked: p.locked, dependencies: p.dependencies, trustedCapabilities: p.trustedCapabilities, capabilities: p.capabilities.map((c) => c.id) })),
+      packages: pkgs.map((p) => ({ package: p.package, version: p.version, level: p.level, source: p.source || null, path: p.path || null, commit: p.commit || null, integrity: p.integrity || null, locked: p.locked, dependencies: p.dependencies, capabilities: p.capabilities.map((c) => c.id) })),
+      capabilities,
       legacy: locks.legacy.map((l) => ({ file: l.file, level: l.level, lockfileVersion: l.lockfileVersion, capabilities: Object.keys(l.capabilities) })),
     });
     return;
   }
   if (!pkgs.length) console.log("No installed packages in this config chain.");
+  const byPackage = new Map();
+  for (const c of capabilities) {
+    if (!byPackage.has(c.package)) byPackage.set(c.package, []);
+    byPackage.get(c.package).push(c);
+  }
   for (const p of pkgs) {
     console.log(`${p.package}@${p.version}  [${levelOf(p.level)} ${shortPath(p.level)}]${p.locked ? "" : "  UNLOCKED (no lock entry — reacquire)"}`);
     if (p.source) console.log(`  source: ${p.source}  path: ${p.path || "?"}  commit: ${p.commit || "?"}`);
-    for (const c of p.capabilities) {
-      const executable = Object.keys(c.manifest.commands || {}).length || Object.keys(c.manifest.hooks || {}).length;
-      const trusted = p.trustedCapabilities.includes(c.id);
-      console.log(`  capability ${c.id}${c.manifest.layer ? `  layer: ${c.manifest.layer}` : ""}${executable ? (trusted ? "  [trusted]" : "  [executable — needs oas trust]") : ""}`);
+    for (const c of byPackage.get(p.package) || []) {
+      const executable = c.executableSurface.commands.length || c.executableSurface.hooks.length;
+      const trust = executable ? (c.trusted ? "  [trusted]" : "  [executable — needs oas trust]") : "";
+      console.log(`  capability ${c.capability}${c.layer ? `  layer: ${c.layer}` : ""}${trust}`);
+      // A capability whose bytes or provenance disagree with the lock is named
+      // as broken HERE — never rendered as an ordinary usable row.
+      if (c.status !== "ok" && c.status !== "untrusted") console.log(`    ${c.status.toUpperCase()}: ${c.detail}`);
     }
     if (p.dependencies.length) console.log(`  depends on: ${p.dependencies.join(", ")}`);
   }
@@ -1366,7 +1743,12 @@ function removeCmd() {
   let r;
   try { r = removePackage(dir, id); } catch (e) { cmdFail(e.code || "remove-blocked", e.message || e); return; }
   if (JSON_MODE) { jsonOk(r); return; }
-  console.log(`Removed package ${r.package} (${shortPath(r.dir)}) and its entry in ${shortPath(r.lockFile)}.`);
+  // There is no package directory to name — a package is transport, and what
+  // actually leaves the disk is its materialized capability artifacts.
+  console.log(`Removed package ${r.package} from ${shortPath(r.lockFile)}.`);
+  console.log(r.capabilities.length
+    ? `  capabilities de-materialized: ${r.capabilities.join(", ")}`
+    : "  it supplied no capabilities at this scope.");
 }
 
 /** The team boundary a guided migration walks, when the scope declares one.
@@ -1411,11 +1793,15 @@ function guidedMigrateCmd({ dir, dryRun, official, recursive }) {
       const acquire = plan.filter((s) => s.action === "acquire");
       const formatOnly = plan.some((s) => s.action === "convert-format");
       const keep = plan.filter((s) => s.action === "retain" || s.action === "manual");
-      // Generic (non-official) mode keeps `oas migrate`'s semantics even when
-      // nothing maps: converting a v1 file to v2 with residue IS the operation.
-      // Official mode never rewrites a scope it has no official work in.
+      // Both modes are ALL-OR-NOTHING: a v2 lock has no residue container, so a
+      // scope converts completely or stays v1 in full. `keep` entries therefore
+      // make a scope unconvertible rather than partially convertible — apply
+      // refuses it, and the plan says so rather than promising "ready".
+      // Official mode also never rewrites a scope it has no official work in.
+      const convertible = acquire.length || formatOnly || (!official && plan.length);
       const status = held.length ? "held"
-        : (acquire.length || formatOnly || (!official && plan.length)) ? "ready"
+        : (convertible && !keep.length) ? "ready"
+        : convertible ? "blocked"
         : "nothing";
       planned.push({ scope, file, status, plan, acquire, keep, held, warnings: w });
     } catch (e) {
@@ -1441,6 +1827,10 @@ function guidedMigrateCmd({ dir, dryRun, official, recursive }) {
       else out(`    keep       ${s.capabilityId}${s.v1?.source ? `  (${s.v1.source})` : ""} — not converted, entry kept unchanged`);
     }
     if (p.status === "nothing") out("    (nothing to migrate at this scope)");
+    if (p.status === "blocked") {
+      out(`    BLOCKED    this scope mixes convertible work with ${p.keep.length} entr${p.keep.length === 1 ? "y" : "ies"} that must stay lockfileVersion 1`);
+      out("               a capability-materialization lock has no place for them, so converting the rest would drop them — the WHOLE scope stays v1 and keeps working");
+    }
     if (p.status === "ready") {
       out(`    config     ${shortPath(join(p.scope, "oas-config.yaml"))} is NOT rewritten — capability ids, layers, targets, settings, exclusions and overrides stay valid (packages export the same ids)`);
       out("    trust      executable approvals are NOT carried over — they are re-earned after migrating (exact commands below)");
@@ -1460,8 +1850,10 @@ function guidedMigrateCmd({ dir, dryRun, official, recursive }) {
     // with a nonzero result in both modes, so automation can never read
     // "planned successfully" as "this deployment can migrate now"
     // (reviewer-90dbb36). The complete plan travels under error.details.
+    const mixed = planned.filter((p) => p.status === "blocked");
     const blocked = [
       ...(held.length ? [`${held.length} scope${held.length > 1 ? "s" : ""} held (no official package mapping yet)`] : []),
+      ...(mixed.length ? [`${mixed.length} scope${mixed.length > 1 ? "s" : ""} blocked (entries that must stay lockfileVersion 1)`] : []),
       ...(failed.length ? [`${failed.length} scope${failed.length > 1 ? "s" : ""} could not be planned`] : []),
     ];
     if (JSON_MODE) {
@@ -1469,9 +1861,10 @@ function guidedMigrateCmd({ dir, dryRun, official, recursive }) {
       jsonOk(result);
       return;
     }
-    out(`\nDry run — nothing was changed. ${actionable.length} scope${actionable.length === 1 ? "" : "s"} ready${held.length ? `, ${held.length} held` : ""}${failed.length ? `, ${failed.length} failed` : ""}.`);
+    out(`\nDry run — nothing was changed. ${actionable.length} scope${actionable.length === 1 ? "" : "s"} ready${held.length ? `, ${held.length} held` : ""}${mixed.length ? `, ${mixed.length} blocked` : ""}${failed.length ? `, ${failed.length} failed` : ""}.`);
     if (actionable.length) out(`Apply with: oas migrate${official ? " --official" : ""}${recursive ? " --recursive" : ""} --dir ${shellQuote(dir)}`);
     if (held.length) out("Held scopes stay on their v1 locks and their legacy capabilities keep working — re-run when the catalog publishes their packages.");
+    if (mixed.length) out("Blocked scopes stay on their v1 locks IN FULL and keep working — migration is all-or-nothing because a v2 lock has no place for an unconverted entry.");
     if (blocked.length) die(`${blocked.join("; ")} (${actionable.length} ready)`);
     return;
   }
@@ -1487,7 +1880,14 @@ function guidedMigrateCmd({ dir, dryRun, official, recursive }) {
       out(`\nHELD      ${shortPath(p.scope)} — left unchanged; its legacy capabilities keep working`);
       continue;
     }
-    if (p.status === "nothing") { row.status = "skipped"; continue; }
+    if (p.status === "nothing") {
+      // No official work here, so nothing is applied and nothing is rewritten.
+      // Say what the scope KEPT — `retained`, never `residue`: these entries
+      // were not left beside a conversion, there simply was no conversion.
+      row.status = "skipped";
+      if (p.keep.length) row.retained = p.keep.map((k) => k.capabilityId).filter(Boolean);
+      continue;
+    }
     let r;
     try { r = applyLegacyLockMigration(p.scope, opts); }
     catch (e) {
@@ -1499,14 +1899,16 @@ function guidedMigrateCmd({ dir, dryRun, official, recursive }) {
     }
     row.status = r.skipped ? "skipped" : r.formatConverted ? "format-converted" : "migrated";
     row.migrated = r.migrated;
-    row.residue = r.residue;
+    // `retained` exists only for a SKIPPED scope left entirely on v1; a scope
+    // that converts leaves nothing behind, and a mixed one is refused above.
+    if (r.retained) row.retained = r.retained;
     row.warnings = r.warnings;
     for (const t of r.trust || []) result.trust.push({ ...t, command: `oas trust ${t.capability} --dir ${shellQuote(p.scope)}` });
     out(`\n  ${shortPath(p.scope)}:`);
     for (const m of r.migrated) out(`    migrated   ${m.capability} → package ${m.package}@${m.version}`);
-    for (const c of r.residue) out(`    kept       ${c}  (unchanged legacy entry)`);
+    for (const c of r.retained || []) out(`    retained   ${c}  (this scope stays lockfileVersion 1, unchanged)`);
     for (const w of r.warnings) out(`    WARNING: ${w}`);
-    if (r.formatConverted) out(`    format     empty lockfileVersion 1 file → canonical v2 (no residue)`);
+    if (r.formatConverted) out(`    format     empty lockfileVersion 1 file → canonical v2`);
     else if (!r.skipped) out(`    ${shortPath(r.file)} is now lockfileVersion 2 — config activation (from: installed) is unchanged`);
   }
 
@@ -1570,9 +1972,8 @@ function migrateCmd() {
   try { r = applyLegacyLockMigration(dir); } catch (e) { cmdFail(e.code || "legacy-lock", e.message || e); return; }
   if (JSON_MODE) { jsonOk(r); return; }
   for (const m of r.migrated) console.log(`migrated  ${m.capability} → package ${m.package}@${m.version}`);
-  for (const c of r.residue) console.log(`residue   ${c}  (kept as a legacy capability lock)`);
   for (const w of r.warnings) console.log(`WARNING: ${w}`);
-  if (r.formatConverted) { console.log(`${shortPath(r.file)} was an empty lockfileVersion 1 file — converted to canonical v2 (no residue).`); return; }
+  if (r.formatConverted) { console.log(`${shortPath(r.file)} was an empty lockfileVersion 1 file — converted to canonical v2.`); return; }
   if (r.file) console.log(`${shortPath(r.file)} is now lockfileVersion 2. Config activation (from: installed) is unchanged; re-run \`oas trust\` for executable capabilities — package integrity approvals are not carried over.`);
 }
 
@@ -1604,12 +2005,19 @@ function updatePackageCmd(id) {
 /**
  * oas init [--raw] [--dir <dir>] [--knowledge <id>] [--messaging <id>] [--tasks <id>]
  *
- * Per-layer flags override template defaults (canonical capability ID or "none").
- * Values are validated against known manifests and requires are checked.
+ * Per-layer flags name a canonical capability ID or "none". A layer is filled by
+ * a capability already at this scope (own store first — no config exists yet, so
+ * the config-chain walk cannot see it), otherwise by acquiring the official
+ * PACKAGE that supplies it through the materialization engine. Acquisition is
+ * not activation, not executable trust and not requirement consent, and the
+ * whole run is one transaction that rolls back on any failure.
  */
 /** Resolve a template (name via outer-config `templates:` maps, local path, or git URL's
  * main-branch oas-config.yaml) into snapshot text with a provenance comment. */
 function loadTemplateConfig(spec, dir) {
+  // THROWS typed errors rather than exiting: `oas init --template` reports
+  // through the same single JSON envelope as every other init form.
+  const fail = (code, message) => { const e = new Error(message); e.code = code; throw e; };
   let source = spec;
   const isDirect = /^(https?:\/\/|git@|ssh:\/\/)/.test(spec) || spec.startsWith(".") || spec.startsWith("/") || spec.startsWith("~");
   if (!isDirect) {
@@ -1617,7 +2025,7 @@ function loadTemplateConfig(spec, dir) {
     for (const cfg of configChain(dir)) {
       if (cfg.templates?.[spec]) { named = { value: cfg.templates[spec], level: cfg._level }; break; }
     }
-    if (!named) die(`unknown template "${spec}" — declare it under templates: in an outer oas-config.yaml, or pass a path/git URL`);
+    if (!named) fail("E_UNKNOWN_TEMPLATE", `unknown template "${spec}" — declare it under templates: in an outer oas-config.yaml, or pass a path/git URL`);
     source = /^(https?:\/\/|git@|ssh:\/\/)/.test(named.value) || named.value.startsWith("/") || named.value.startsWith("~")
       ? named.value : resolve(named.level, named.value);
   }
@@ -1627,14 +2035,14 @@ function loadTemplateConfig(spec, dir) {
     try {
       execFileSync("git", ["clone", "-q", "--depth", "1", source, tmp], { stdio: "inherit" });
       const cfgFile = join(tmp, "oas-config.yaml");
-      if (!existsSync(cfgFile)) die(`template repo has no oas-config.yaml on its default branch: ${source}`);
+      if (!existsSync(cfgFile)) fail("E_TEMPLATE_SOURCE", `template repo has no oas-config.yaml on its default branch: ${source}`);
       body = readFileSync(cfgFile, "utf8");
       const commit = execFileSync("git", ["-C", tmp, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
       provenance = `${source}@${commit.slice(0, 12)}`;
     } finally { rmSync(tmp, { recursive: true, force: true }); }
   } else {
     const path = resolve(source.replace(/^~\//, `${homedir()}/`));
-    if (!existsSync(path)) die(`template config not found: ${path}`);
+    if (!existsSync(path)) fail("E_TEMPLATE_SOURCE", `template config not found: ${path}`);
     body = readFileSync(path, "utf8");
     provenance = path;
   }
@@ -1654,37 +2062,75 @@ function init() {
   const dir = dirFlag();
   const file = join(dir, "oas-config.yaml");
   const pkgSrc = flag("package");
-  if (existsSync(file)) {
-    const msg = `${shortPath(file)} already exists — edit it or use \`oas use\``;
-    if (JSON_MODE && pkgSrc) jsonFail("E_CONFIG_EXISTS", msg);
-    die(msg);
-  }
+  // Every init form — classic, --template and --package — reports through the
+  // SAME one-envelope JSON boundary; nothing here may print two documents.
+  const bail = (code, msg) => (JSON_MODE ? jsonFail(code, msg) : die(msg));
+  const note = (msg) => (JSON_MODE ? console.error(msg) : console.log(msg));
+  if (existsSync(file)) bail("E_CONFIG_EXISTS", `${shortPath(file)} already exists — edit it or use \`oas use\``);
 
   if (pkgSrc && pkgSrc !== true) { initPackage(pkgSrc, dir, file); return; }
-  if (pkgSrc === true) (JSON_MODE ? jsonFail("E_USAGE", "--package needs a package id, local path, or git URL") : die("--package needs a package id, local path, or git URL"));
+  if (pkgSrc === true) { bail("E_USAGE", "--package needs a package id, local path, or git URL"); return; }
 
   const template = flag("template");
   if (template && template !== true) {
-    const text = loadTemplateConfig(template, dir);
-    writeFileSync(file, text);
-    console.log(`Created ${shortPath(file)} (${levelOf(dir)} level) from template ${template}`);
-    restore(dir);
+    let text;
+    try { text = loadTemplateConfig(template, dir); }
+    catch (e) { bail(e.code || "E_TEMPLATE_SOURCE", e.message); return; }
+    // Seeding is a transaction too. A template can carry keys this kernel
+    // refuses, or lock entries that will not restore; either way the config this
+    // run wrote must not be left behind for the next command to trip over, and
+    // the failure must be a typed error rather than an uncaught stack.
+    let journal;
+    try { journal = beginRunJournal(dir); }
+    catch (e) { bail(e.code || "E_JOURNAL_FAILED", e.message); return; }
+    let activated = [];
+    try {
+      writeFileSync(file, text);
+      note(`Created ${shortPath(file)} (${levelOf(dir)} level) from template ${template}`);
+      // The GATE is that the kernel can read this config: a template carrying a
+      // retired key or a broken shape is a broken template, and leaving it
+      // behind would break every later command at this scope.
+      configChain(dir);
+      restore(dir);
+      // Activation is NOT a gate. A template's whole point is to seed policy you
+      // then acquire — a capability it activates but nothing supplies yet is the
+      // expected state right after seeding, not a reason to refuse the config.
+      try { activated = resolveOasConfig(dir).capabilities.map((c) => ({ capability: c.id, layer: c.layer || null })); }
+      catch (e) { note(`NOTE: ${shortPath(file)} does not resolve yet — ${e.message}. Acquire what it activates (\`oas install <source>\`), then re-check with \`oas doctor\`.`); }
+      journal.finalize();
+    } catch (e) {
+      const report = journal.rollback();
+      const detail = `${shortPath(file)} could not be seeded from template ${template}: ${e.message}`;
+      bail(e.code || "E_TEMPLATE_UNUSABLE", report.complete ? detail : `${detail} — ${report.summary}`);
+      return;
+    }
+    if (JSON_MODE) { jsonOk({ file, level: levelOf(dir), raw, adopted: false, template, acquired: [], activated, requirements: [] }); return; }
     offerTmuxMouseScrolling();
     return;
   }
-  if (template === true) die("--template needs a name, local config path, or git URL");
+  if (template === true) { bail("E_USAGE", "--template needs a name, local config path, or git URL"); return; }
 
   // Per-layer overrides: --knowledge oas.okf, --messaging none, --tasks oas.jira …
   const overrides = {};
   const market = marketplaceCapabilities();
-  const mans = { ...market, ...capabilityManifests(dir) };
+  // Own-scope manifests are read DIRECTLY: no oas-config.yaml exists here yet,
+  // so the config-chain walk cannot see this scope's own store, and a
+  // capability already installed here would look unknown.
+  const mans = { ...market, ...capabilityManifests(dir), ...ownScopeCapabilityManifests(dir) };
   for (const layer of LAYERS) {
     const v = flag(layer);
     if (v === undefined) continue;
-    if (v === true || String(v).startsWith("--")) die(`--${layer} needs a canonical capability ID or "none"`);
+    if (v === true || String(v).startsWith("--")) bail("E_USAGE", `--${layer} needs a canonical capability ID or "none"`);
     if (v !== "none") {
-      if (!mans[v]) die(`unknown capability "${v}" for --${layer} (known: ${Object.keys(mans).join(", ") || "none"})`);
-      if (mans[v].layer !== layer) die(`capability "${v}" declares layer "${mans[v].layer || "none"}", not "${layer}"`);
+      // Known locally: its declared layer is checkable right now, before any
+      // mutation. Otherwise the official catalog may still supply it, and the
+      // layer is verified against the MATERIALIZED manifest after acquisition —
+      // inside the run transaction, so a disagreement rolls the whole run back.
+      if (mans[v]) {
+        if (mans[v].layer !== layer) bail("E_LAYER_MISMATCH", `capability "${v}" declares layer "${mans[v].layer || "none"}", not "${layer}"`);
+      } else if (!officialCapabilityPackage(v).available) {
+        bail("E_UNKNOWN_CAPABILITY", `unknown capability "${v}" for --${layer} — it is not acquired at ${shortPath(dir)}, not in the marketplace (${Object.keys(market).join(", ") || "empty"}), and no official package supplies it (catalog: ${Object.keys(officialPackageCatalog()).join(", ") || "empty"})`);
+      }
     }
     overrides[layer] = v;
   }
@@ -1696,7 +2142,7 @@ function init() {
 
   // Interactive TTY with no explicit layer flags: present each default and ask.
   // Non-interactive contexts (agents, CI) keep flags-or-silent-defaults — never hang.
-  if (!raw && process.stdin.isTTY && process.stdout.isTTY && !Object.keys(overrides).length) {
+  if (!raw && !JSON_MODE && process.stdin.isTTY && process.stdout.isTTY && !Object.keys(overrides).length) {
     const byLayer = (l) => Object.values(mans).filter((m) => m.layer === l).map((m) => m.capability);
     console.log("Fundamental layers for this scope — Enter keeps the default, or type a capability id / \"none\":");
     const ask = (prompt) => {
@@ -1718,6 +2164,21 @@ function init() {
     }
     if ((layers.messaging || "none") !== "none") console.log("  (messaging via aweb: after init, run `oas aweb setup` for guided onboarding)");
   }
+  // ---- Everything below MUTATES. It is ONE run-level transaction: the config
+  // file, the lock, the flat capability artifacts, the capability .gitignore
+  // and any `.agents` anchor this run creates roll back together. A capability
+  // that was already installed at this scope before the run is restored
+  // byte-identically — this run only ever undoes its own changes. ----
+  let journal;
+  try { journal = beginRunJournal(dir); }
+  catch (e) { bail(e.code || "E_JOURNAL_FAILED", e.message); return; }
+  const abort = (e, code) => {
+    const report = journal.rollback();
+    bail(code || e.code || "E_INIT_FAILED", report.complete ? e.message : `${e.message} — ${report.summary}`);
+  };
+
+  const acquisitions = [];
+  let resolved;
   const lines = [
     `name: ${basename(dir)}`,
     "",
@@ -1731,61 +2192,159 @@ function init() {
     "  # Fundamental layers — exclusive slots; a capability entry or an explicit none.",
     "  layers:",
   ];
-  for (const layer of LAYERS) {
-    const selected = layers[layer];
-    if (!selected) { lines.push(`    # ${layer}: (unset — inherits from outer config scopes; set an entry or "none")`); continue; }
-    if (selected === "none") { lines.push(`    ${layer}: none`); continue; }
-    let manifest = capabilityManifest(selected, dir);
-    // Marketplace capabilities are acquired into this scope's installed/ store first.
-    if (!manifest && market[selected]) {
-      try {
-        const r = acquireCapability(dir, selected);
-        try {
-          writeCapabilityLock(dir, r.manifest.capability, {
-            source: r.source, version: r.manifest.version || null, integrity: r.integrity, trustedExecutables: true,
-          });
-        } catch (e) { rmSync(r.dest, { recursive: true, force: true }); throw e; }
-        console.log(`Acquired ${r.manifest.capability}@${r.manifest.version} from the marketplace → ${shortPath(r.dest)}`);
-        // Discovery needs the config file (written below); trust the acquisition result here.
-        manifest = { ...r.manifest, _origin: `installed:${dir}` };
-      } catch (e) { die(`could not acquire ${selected}: ${e.message}`); }
+  try {
+    for (const layer of LAYERS) {
+      const selected = layers[layer];
+      if (!selected) { lines.push(`    # ${layer}: (unset — inherits from outer config scopes; set an entry or "none")`); continue; }
+      if (selected === "none") { lines.push(`    ${layer}: none`); continue; }
+      // Already here (own scope first — see above), or acquired now.
+      const manifest = ownScopeCapabilityManifest(dir, selected)
+        || capabilityManifest(selected, dir)
+        || acquireLayerCapability(dir, selected, layer, acquisitions, note);
+      lines.push(`    ${layer}:`);
+      lines.push(`      capability: ${manifest.capability}`);
+      if (String(manifest._origin).startsWith("installed:")) { lines.push("      from: installed"); lines.push(`      # injection-override: .agents/injections/capabilities/${manifest.capability}.md`); }
+      else if (String(manifest._origin).startsWith("owned:")) { lines.push("      from: owned"); lines.push(`      # injection edited at source: .agents/capabilities/owned/${manifest.capability}/injects/`); }
     }
-    if (!manifest) die(`capability "${selected}" is not acquired at ${shortPath(dir)} and is not in the marketplace (${Object.keys(market).join(", ") || "empty"})`);
-    lines.push(`    ${layer}:`);
-    lines.push(`      capability: ${manifest.capability}`);
-    if (String(manifest._origin).startsWith("installed:")) { lines.push("      from: installed"); lines.push(`      # injection-override: .agents/injections/capabilities/${manifest.capability}.md`); }
-    else if (String(manifest._origin).startsWith("owned:")) { lines.push("      from: owned"); lines.push(`      # injection edited at source: .agents/capabilities/owned/${manifest.capability}/injects/`); }
-  }
-  lines.push(
-    "  # Additive capabilities — non-exclusive; target global, agent-types, or souls.",
-    "  # additive:",
-    "  #   <capability-id>:",
-    "  #     from: installed",
-    "  #     global: true",
-    "  #     # injection-override: .agents/injections/capabilities/<capability-id>.md",
-    "",
-    "# ── Work modes — optional per-mode env bootstrap.",
-    "# `setup:` runs inside each NEW worktree right after `git worktree add` — use it",
-    "# for env setup scripts (installs, .env copying, direnv, mise, etc.).",
-    "# The path is relative to this config's directory.",
-    "work-modes:",
-    "  worktree:",
-    "    # setup: scripts/setup-worktree.sh",
-    "",
-    "# ── OAS defaults — the framework's baseline instruction block.",
-    "oas:",
-    "  # injection-override: .agents/injections/oas-defaults/oas.md",
-  );
-  writeFileSync(file, lines.join("\n") + "\n");
-  console.log(`Created ${shortPath(file)} (${levelOf(dir)} level${raw ? ", raw" : ""})`);
+    lines.push(
+      "  # Additive capabilities — non-exclusive; target global, agent-types, or souls.",
+      "  # additive:",
+      "  #   <capability-id>:",
+      "  #     from: installed",
+      "  #     global: true",
+      "  #     # injection-override: .agents/injections/capabilities/<capability-id>.md",
+      "",
+      "# ── Work modes — optional per-mode env bootstrap.",
+      "# `setup:` runs inside each NEW worktree right after `git worktree add` — use it",
+      "# for env setup scripts (installs, .env copying, direnv, mise, etc.).",
+      "# The path is relative to this config's directory.",
+      "work-modes:",
+      "  worktree:",
+      "    # setup: scripts/setup-worktree.sh",
+      "",
+      "# ── OAS defaults — the framework's baseline instruction block.",
+      "oas:",
+      "  # injection-override: .agents/injections/oas-defaults/oas.md",
+    );
+    writeFileSync(file, lines.join("\n") + "\n");
+    // Resolve INSIDE the transaction: a config this run wrote that cannot
+    // resolve is a broken scope, so it fails the init and rolls back rather
+    // than being left behind for the next command to trip over.
+    resolved = resolveOasConfig(dir);
+    journal.finalize();
+  } catch (e) { abort(e); return; }
 
-  const r = resolveOasConfig(dir);
+  note(`Created ${shortPath(file)} (${levelOf(dir)} level${raw ? ", raw" : ""})`);
+  // Acquisition is not activation, not executable trust, and not requirement
+  // consent — say so per acquisition rather than implying the layer is ready.
+  for (const a of acquisitions) {
+    if (!a.executableSurface.length) continue;
+    note(`Executable surfaces from ${a.package || "the marketplace"} are blocked until trusted: ${a.executableSurface.map((c) => `oas trust ${c}`).join("; ")}`);
+  }
+
+  const r = resolved;
+  const activated = [];
   for (const cap of r.capabilities) {
-    console.log(`Activated: ${cap.id}${cap.layer ? ` → ${cap.layer}` : ""}`);
-    for (const miss of cap.missingRequires) console.log(`WARNING: required command "${miss.command}" not on PATH — ${miss.why || ""}${miss.install ? ` (install: ${miss.install})` : ""}`);
+    activated.push({ capability: cap.id, layer: cap.layer || null });
+    note(`Activated: ${cap.id}${cap.layer ? ` → ${cap.layer}` : ""}`);
+    for (const miss of cap.missingRequires) note(`WARNING: required command "${miss.command}" not on PATH — ${miss.why || ""}${miss.install ? ` (install: ${miss.install})` : ""}`);
+  }
+  if (JSON_MODE) {
+    jsonOk({
+      file, level: levelOf(dir), raw, adopted: false,
+      layers: Object.fromEntries(LAYERS.map((l) => [l, layers[l] ?? null])),
+      acquired: acquisitions, activated,
+      // Same facts the human run prints, in the same run: who asked, why, and
+      // the ONE copyable command that consents to installing it. Init never
+      // runs it — reporting a requirement and acting on it are separate steps,
+      // and an agent reading this envelope must be able to tell them apart.
+      requirements: r.capabilities.flatMap((c) => c.missingRequires.map((m) => ({
+        capability: c.id, command: m.command, why: m.why || null, install: m.install || null,
+        consentCommand: `oas install --accept-requirement ${m.command} --dir ${shellQuote(dir)}`,
+      }))),
+    });
+    return;
   }
   offerTmuxMouseScrolling();
 }
+
+/** Acquire the capability backing one fundamental layer at classic-init time.
+ *
+ * Catalog-first: when an official package supplies the capability it comes
+ * through the package engine — flat materialization, a capability-materialization
+ * lock, and NO implicit executable trust. The legacy standalone-capability route
+ * survives only for marketplace capabilities the official catalog cannot supply
+ * today, and it is the only branch that still writes a v1 lock.
+ *
+ * Throws on every failure: the caller holds the run journal, and exiting here
+ * would strand its backup. */
+function acquireLayerCapability(dir, capId, layer, acquired, note) {
+  const fail = (code, message) => { const e = new Error(message); e.code = code; throw e; };
+  const official = officialCapabilityPackage(capId);
+  if (official.available) {
+    const acq = acquirePackage(dir, official.package);
+    if (!acq.capabilities.some((c) => c.capability === capId)) {
+      fail("E_LAYER_NOT_EXPORTED", `package ${official.package} does not export capability "${capId}" — it exports ${acq.capabilities.map((c) => c.capability).join(", ") || "nothing"}`);
+    }
+    // The layer is verified against the manifest actually WRITTEN TO DISK, never
+    // against the marketplace copy or the catalog's word for it.
+    const manifest = ownScopeCapabilityManifest(dir, capId);
+    if (!manifest) fail("E_LAYER_UNREADABLE", `capability "${capId}" was materialized but its manifest under ${shortPath(installedCapabilityDir(dir, capId))} is unreadable`);
+    if (manifest.layer !== layer) fail("E_LAYER_MISMATCH", `capability "${capId}" declares layer "${manifest.layer || "none"}", not "${layer}"`);
+    const executableSurface = acq.capabilities
+      .filter((c) => c.executableSurface?.commands?.length || c.executableSurface?.hooks?.length)
+      .map((c) => c.capability);
+    acquired.push({
+      layer, capability: capId, route: "package", package: official.package, via: official.via,
+      packages: acq.installed.map((p) => ({ package: p.package, version: p.version || null, commit: p.commit || null })),
+      lockFile: acq.lockFile, trusted: false, executableSurface,
+    });
+    note(`Acquired package ${official.package} for the ${layer} layer → ${capId} (${acq.installed.map((p) => `${p.package}@${p.version}`).join(", ")}) → ${shortPath(acq.lockFile)}`);
+    return { ...manifest, _origin: `installed:${dir}` };
+  }
+  const market = marketplaceCapabilities();
+  if (!market[capId]) {
+    fail("E_UNKNOWN_CAPABILITY", `capability "${capId}" is not acquired at ${shortPath(dir)}, is not in the marketplace (${Object.keys(market).join(", ") || "empty"}), and no official package supplies it`);
+  }
+  // Legacy route: kernel-bundled marketplace capabilities predate the official
+  // packages, ship with the kernel already installed, and keep their v1 lock and
+  // acquisition-time trust until the catalog covers them.
+  const r = acquireCapability(dir, capId);
+  try {
+    writeCapabilityLock(dir, r.manifest.capability, {
+      source: r.source, version: r.manifest.version || null, integrity: r.integrity, trustedExecutables: true,
+    });
+  } catch (e) { rmSync(r.dest, { recursive: true, force: true }); throw e; }
+  if (r.manifest.layer !== layer) fail("E_LAYER_MISMATCH", `capability "${capId}" declares layer "${r.manifest.layer || "none"}", not "${layer}"`);
+  acquired.push({ layer, capability: capId, route: "marketplace", package: null, via: "marketplace", packages: [], lockFile: join(dir, OAS_LOCK_FILE), trusted: true, executableSurface: [] });
+  note(`Acquired ${r.manifest.capability}@${r.manifest.version} from the marketplace → ${shortPath(r.dest)}`);
+  return { ...r.manifest, _origin: `installed:${dir}` };
+}
+
+/** Capability manifests physically present at THIS scope's own store.
+ *
+ * `capabilityManifests` walks the config chain, so during `oas init` — when no
+ * oas-config.yaml exists at the target scope yet — this scope is not a level and
+ * its own installed/ and owned/ capabilities are invisible. Init reads them
+ * directly instead, which is also what makes a same-run acquisition visible to
+ * the rest of the run. */
+function ownScopeCapabilityManifests(dir) {
+  const out = {};
+  for (const [sub, origin] of [[installedCapabilitiesDir(dir), "installed"], [ownedCapabilitiesDir(dir), "owned"]]) {
+    if (!existsSync(sub)) continue;
+    let entries;
+    try { entries = readdirSync(sub, { withFileTypes: true }); } catch { continue; }
+    for (const e of entries) {
+      // Dot-prefixed entries are transaction staging, never installed content.
+      if (!e.isDirectory() || e.name.startsWith(".")) continue;
+      let m;
+      try { m = JSON.parse(readFileSync(join(sub, e.name, "oas.json"), "utf8")); } catch { continue; }
+      if (m && typeof m.capability === "string") out[m.capability] = { ...m, _dir: join(sub, e.name), _origin: `${origin}:${dir}` };
+    }
+  }
+  return out;
+}
+const ownScopeCapabilityManifest = (dir, capId) => ownScopeCapabilityManifests(dir)[capId];
 
 // ---------- roster: status / spawn / retire / create ----------
 function status() {
@@ -2252,7 +2811,7 @@ else if (cmd === "update") { const t = args[1] && !args[1].startsWith("--") ? ar
 else if (cmd === "type") typeCmd();
 else if (cmd === "inject") injectCmd();
 else if (cmd === "install") install();
-else if (cmd === "config") configDiffCmd();
+else if (cmd === "config") configCmd();
 else if (cmd === "trust") trust();
 else if (cmd === "list") listCmd();
 else if (cmd === "remove") removeCmd();
@@ -2265,10 +2824,14 @@ else if (cmd === "version" || cmd === "--version" || cmd === "-v") versionCmd();
 else if (cmd === "spawn") { try { spawnCmd(); } catch (e) { if (JSON_MODE) jsonFail("E_SPAWN_FAILED", e.message || e); throw e; } }
 else if (cmd === "retire") retireCmd();
 else if (cmd === "create") createCmd();
-else if (cmd && !cmd.startsWith("--") && capabilityCommand()) { /* dispatched */ }
+// `!HELP_WORDS.has(cmd)`: usage NEVER depends on deployment state. `help` is a
+// word, so without this it reaches the capability dispatch, which resolves the
+// config chain and reads every lock in it — and a scope whose lock the kernel
+// refuses could then not print its own usage, which is exactly when you need it.
+else if (cmd && !cmd.startsWith("--") && !HELP_WORDS.has(cmd) && capabilityCommand()) { /* dispatched */ }
 // No matching kernel command or capability namespace: in --json mode the help
 // text must NOT contaminate stdout — still one envelope object, nonzero exit.
-else if (cmd && !cmd.startsWith("--") && JSON_MODE) jsonFail("E_UNKNOWN_COMMAND", `unknown command "${cmd}" — no kernel subcommand or active capability namespace matches`);
+else if (cmd && !cmd.startsWith("--") && !HELP_WORDS.has(cmd) && JSON_MODE) jsonFail("E_UNKNOWN_COMMAND", `unknown command "${cmd}" — no kernel subcommand or active capability namespace matches`);
 else {
   console.log(`oas — Open Agent Specialization
 
@@ -2332,11 +2895,21 @@ Usage:
                                             transactionally, keeps custom/owned entries
                                             untouched, and prints the exact trust/install
                                             follow-up (held when the catalog cannot map yet)
-  oas config diff [--package <id|url|path>] report how the local snapshot differs from the
-      [--config <name>] [--dir <d>] [--json] package's current profile — never merges/overwrites;
-                                            an adopted snapshot's provenance header supplies
-                                            --package/--config defaults; --json emits one
-                                            envelope (differingLines 0 = no drift)
+  oas config diff [--config <template>]     three-way report: your config vs the recorded
+      [--dir <d>] [--json]                  adopted base vs the template in the current exact
+                                            lock — reports only, never writes; the adopted
+                                            base supplies the package/template defaults
+  oas config sync [--accept <r>=local|package] apply the template's changes to your config,
+      [--dir <d>] [--json]                  region by region, preserving every untouched local
+                                            byte, comment and ordering; local-only edits stay;
+                                            conflicts need an explicit --accept and are never
+                                            chosen for you; advances the recorded base
+  oas config sync --reset --yes             replace your config with the template verbatim;
+      [--config <template>] [--dir <d>]     previews every local change it discards, refuses
+      [--json]                              without --yes, and keeps a recoverable .bak
+  oas config adopt <package>                switch to another installed package's template,
+      [--config <template>] [--accept ...]  rebasing your one local config; exactly one adopted
+      [--dir <d>] [--json]                  base survives, and a failed switch changes nothing
   oas trust <capability> [--dir <dir>]      approve that capability's commands/hooks at
                                             the provider package's exact integrity
   oas trust <package> --all-capabilities    explicit bulk approval with a full
@@ -2349,19 +2922,26 @@ Usage:
   oas type list                             souls join via create --type / soul.yaml
   oas inject eject <cap|work-mode|oas>      copy a packaged injection to the conventional
       [--dir <d>]                           .agents/injections/ path and set injection-override
-  oas init [--raw] [--dir <dir>]            create an oas-config.yaml here
-      [--package <id|path|git-url>]         adopt a package config profile as a local
-      [--config <name>] [--json]            snapshot (default profile unless --config;
-      [--template <name|path|git-url>]      refuses to overwrite an existing config;
-      [--knowledge <id|none>]               --json = one result envelope, noninteractive);
-      [--messaging <id|none>]               or seed from a template config (named via
-      [--tasks <id|none>]                   outer templates: map, a local file, or a
-      [--tmux-mouse|--no-tmux-mouse]        git repo's default-branch oas-config.yaml)
+  oas init [--raw] [--dir <dir>] [--json]   create an oas-config.yaml here. Fundamental
+      [--knowledge <id|none>]               layers are filled from what is already at this
+      [--messaging <id|none>]               scope, else acquired from the official package
+      [--tasks <id|none>]                   that supplies them — capabilities materialize
+      [--tmux-mouse|--no-tmux-mouse]        flat, executable surfaces stay untrusted, and
+                                            the whole run rolls back on any failure.
+      [--package <id|path|git-url>]         instead: adopt one config TEMPLATE from a package
+      [--config <template>]                 as your own local config and record the exact
+                                            adopted base (named template, else the marked
+                                            default, else the only one).
+      [--template <name|path|git-url>]      instead: seed from a template config (named via an
+                                            outer templates: map, a local file, or a git repo's
+                                            default-branch oas-config.yaml).
+                                            Every form refuses to overwrite an existing config;
+                                            --json = exactly one result envelope, noninteractive.
   oas root                                  print this package's install root
                                             (adapters resolve the kernel from it)
   oas <namespace> <command> [args…]         run an operational command only when its
                                             capability is active (e.g. oas okf harvest)
 
 Layers: ${LAYERS.join(", ")}. Level detection: ~ → laptop, .git → repo, else workspace.`);
-  process.exit(cmd && !["help", "--help", "-h"].includes(cmd) ? 1 : 0);
+  process.exit(cmd && !HELP_WORDS.has(cmd) ? 1 : 0);
 }

@@ -1,26 +1,31 @@
 ---
 type: Decision
-title: Flat single-capability packages are supported
-description: A capability directory may be the package root with oas-package.json and oas.json side by side when capabilities is exactly ["."]; package integrity covers the whole tree, and npm materialization roots are realpath-deduped.
-tags: [packages, manifest, layout]
-timestamp: 2026-07-26
+title: Legacy "." capability roots are compatibility-only
+description: A manifest with capabilities ["."] is accepted only as legacy compatibility when configTemplates is absent; newly authored packages must not emit it.
+tags: [packages, manifest, layout, compatibility]
+timestamp: 2026-07-29
 ---
 
-# Decision
+# Current rule
 
-A package may be a flat, single-capability tree: the package root is also the
-capability directory, with `oas-package.json` and `oas.json` side by side, when
-the package manifest declares `capabilities: ["."]`.
+A package-root capability declared as `capabilities: ["."]` is compatibility-only.
+Newly authored packages must never emit it. The reader accepts it only under the
+compatibility discriminator in [A "." capability root is discriminated by configTemplates, never by configs](/decisions/legacy-capability-root-discriminator.md).
 
-`"."` must be the only `capabilities` entry. Mixing it with other capability
-paths would make the package root contain nested capabilities, which the engine
-rejects.
+This supersedes the older broad rule that flat single-capability packages were
+newly supported. The accepted legacy shape still has the package root as the
+capability directory, with `oas-package.json` and `oas.json` side by side, but
+only when the manifest is on the legacy side of that discriminator.
 
-# Engine consequences
+`"."` must still be the only `capabilities` entry. Mixing it with other
+capability paths would make the package root contain nested capabilities, which
+the engine rejects.
+
+# Engine consequences retained for accepted legacy packages
 
 Package integrity covers the whole tree. Manifest loading stays unambiguous
 because each manifest filename has one loader.
 
-Npm materialization roots are realpath-deduped. Without that, a flat package root
-would qualify both as the package root and as the `"."` capability root and run
-`npm ci` twice for the same tree.
+Npm materialization roots are realpath-deduped. Without that, an accepted `"."`
+package root would qualify both as the package root and as the capability root
+and run `npm ci` twice for the same tree.
