@@ -174,7 +174,7 @@ test("palette and quick open share the overlay-picker machinery (no duplicated c
 
 // ── Spawn view preselect handoff (jsdom) ─────────────────────────────────
 
-const CLI_OK = { ok: true, bin: "/seed/oas", version: "0.18.0", source: "path", required: { desktopApi: 1, range: ">=0.18.0 <0.20.0" }, probedAt: 1, tried: [] };
+const CLI_OK = { ok: true, bin: "/seed/oas", version: "0.18.0", source: "path", required: { desktopApi: 1, range: ">=0.18.0 <0.21.0" }, probedAt: 1, tried: [] };
 
 async function mountSpawn(t, { cliOk = true } = {}) {
   const dom = new JSDOM("<!doctype html><body><div id=host></div>", { url: "http://localhost" });

@@ -13,9 +13,9 @@ function dom() {
 }
 const payload = (ok, extra = {}) => ({
   ok, bin: ok ? "/usr/local/bin/oas" : null, version: ok ? "0.18.0" : null,
-  source: ok ? "path" : null, required: { desktopApi: 1, range: ">=0.18.0 <0.20.0" },
+  source: ok ? "path" : null, required: { desktopApi: 1, range: ">=0.18.0 <0.21.0" },
   install: "npm install -g @oas-framework/oas@0.19.0",
-  probedAt: 1, tried: ok ? [] : [{ path: "/old/oas", source: "path", reason: "version 0.17.6 outside >=0.18.0 <0.20.0", version: "0.17.6" }],
+  probedAt: 1, tried: ok ? [] : [{ path: "/old/oas", source: "path", reason: "version 0.17.6 outside >=0.18.0 <0.21.0", version: "0.17.6" }],
   ...extra,
 });
 const jsonCtx = (state) => ({
@@ -90,7 +90,7 @@ test("cliCard renders the full contract surface: detected, required, Choose, Ret
   assert.ok(el.textContent.includes("/old/oas"), "detected path shown");
   assert.ok(el.textContent.includes("0.17.6"), "detected version shown");
   // required range + api
-  assert.ok(el.textContent.includes(">=0.18.0 <0.20.0"), "required range shown");
+  assert.ok(el.textContent.includes(">=0.18.0 <0.21.0"), "required range shown");
   // copyable install command — the BACKEND's derived, version-pinned one
   assert.ok(el.querySelector(".cli-cmd").textContent.includes("npm install -g @oas-framework/oas@0.19.0"));
   assert.ok(el.querySelector(".cli-copy"), "copy affordance present");
@@ -137,9 +137,9 @@ test("cliCard states the requirement from the payload and never invents one when
 });
 
 test("cli-status: install/requirement helpers prefer the backend payload, fall back version-lessly", () => {
-  const withPayload = { required: { desktopApi: 1, range: ">=0.18.0 <0.20.0" }, install: "npm install -g @oas-framework/oas@0.19.0" };
+  const withPayload = { required: { desktopApi: 1, range: ">=0.18.0 <0.21.0" }, install: "npm install -g @oas-framework/oas@0.19.0" };
   assert.equal(cs.cliInstallCommand(withPayload), "npm install -g @oas-framework/oas@0.19.0");
-  assert.equal(cs.cliRequirementText(withPayload), ">=0.18.0 <0.20.0 with desktop API 1");
+  assert.equal(cs.cliRequirementText(withPayload), ">=0.18.0 <0.21.0 with desktop API 1");
   for (const absent of [null, undefined, {}, { install: "" }, { required: {} }]) {
     assert.equal(cs.cliInstallCommand(absent), cs.GENERIC_INSTALL_COMMAND);
     assert.match(cs.cliRequirementText(absent), /unknown/);

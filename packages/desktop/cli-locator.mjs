@@ -12,8 +12,9 @@
 //
 // Every candidate is canonicalized to an absolute executable and accepted
 // ONLY if executable and `<bin> version --json` returns the v1 probe:
-//   {"schemaVersion":1,"name":"@oas-framework/oas","version":"0.19.x","desktopApi":1}
-// Desktop 0.19 accepts desktopApi === 1 and semver >=0.18.0 <0.20.0.
+//   {"schemaVersion":1,"name":"@oas-framework/oas","version":"0.20.x","desktopApi":1}
+// Desktop accepts desktopApi === 1 and semver >=0.18.0 <0.21.0 (the band is
+// spelled ONCE, in ACCEPT_RANGE below — this line only paraphrases it).
 // API version — not source adjacency — is authoritative.
 //
 // Pure/injected: all process, fs and exec effects come through `io` so the
@@ -29,7 +30,11 @@ export const DESKTOP_API = 1;
 // release: Desktop and the kernel are built from one tag, so a band that
 // excluded its own kernel would ship an app that degrades to observation-only
 // against the CLI it was released with (the 0.19.0 readiness blocker).
-export const ACCEPT_RANGE = { min: [0, 18, 0], maxExclusive: [0, 20, 0] };
+// Widened to <0.21.0 for the breaking pre-1.0 v0.20.0 release: the Desktop v1
+// surface is UNCHANGED across that kernel bump (`version --json`, `spawn
+// --json`, `okf harvest --json` — test/cli-json-contract.test.mjs), so
+// DESKTOP_API stays 1 and only the upper bound moves.
+export const ACCEPT_RANGE = { min: [0, 18, 0], maxExclusive: [0, 21, 0] };
 /** The band as humans read it — derived, never hand-spelled, so the probe
  * rejection reason, the backend's /api status and the degradation card can
  * never disagree with the numbers actually enforced above. */
