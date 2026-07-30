@@ -24,6 +24,11 @@ decisions/ and referenced from here.
 
 ---
 
+## PR #66 — capability materialization and fully local config templates (2026-07-30)
+- verdict: MERGED as `dc30f0d1df7ea8e78df9fa5486857e77f33cfce5` at exact reviewed/API head `ecd1b41b3a47b188febe508a37874b4985b05ba4`. Direction/correctness/security/mergeability PASS after one merged-state RETURN at `b189fcb` and one bounded correction: revised lock v2 materializes self-contained capabilities under gitignored `.agents/capabilities/installed`; package staging is transient; config templates are optional fully editable local bases with byte-preserving diff/sync/reset/adopt; v1 migration is scope-atomic; classic init is catalog-first and untrusted. The correction closed capability-ID path traversal, adopted/backup symlink escapes, silent handcrafted-config replacement, same-package scope provenance, swap/export rollback, canonical template roots, and pre-staging ignore. Final evidence: affected 198/198, B1/B2/B3 PASS, 890 total/889 pass/0 fail/1 environment skip, all check/validate/pack/tarball/strict-OKF/diff gates, and required exact-head CI success. Same-account approval is comment `5131055219`; expected-head merge succeeded and remote feature branch was deleted.
+- owner: dev-coordinator-capability-materialization · coordinator: oas-expert-oas-packages
+- taught us: a distribution package can remain the atomic source/update boundary while installed capability artifacts are the inspectable trust units; config adoption needs a committed base and byte-preserving three-way semantics, and filesystem transaction claims must include path-derived IDs, symlinked write parents, generated-ignore timing, and every backup/swap boundary.
+
 ## PR #65 — v0.19.4 manifest bump after complete publication (2026-07-28)
 - verdict: MERGED as `9131b83c368296458ae50efac1d8af531fd1521b` from exact release-bump head `06f2256674694dc93453011a0ff54a2013bc1414`. The v0.19.4 release had already published `@oas-framework/oas`, `@oas-framework/pi`, checksums/provenance, and the complete Desktop installer matrix after all build/test/smoke gates passed in run `30396340346`; only the known organization policy prevented Actions from creating the version-bump PR, so the maintainer created and squash-merged it manually.
 - owner: oas-expert-oas-packages · coordinator: none

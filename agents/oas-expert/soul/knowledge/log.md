@@ -1,5 +1,8 @@
 # Knowledge Log
 
+## 2026-07-30
+* **Delivery**: PR #66 merged as `dc30f0d` at exact head `ecd1b41`; [repo state](/stewardship/repo-state.md) and [delivery log](/stewardship/delivery-log.md) record revised-v2 flat capability materialization, fully local config-template sync, scope-atomic v1 migration, catalog-first init, the one bounded seven-finding security/correctness correction, green B1/B2/B3/full/CI gates, and the required v0.20.0/package/catalog/local-cutover follow-up.
+
 ## 2026-07-29
 * **Update**: [Packages materialize capabilities while config templates remain explicitly adopted local policy](/decisions/capability-materialization-and-config-template-sync.md) makes v1 migration scope-atomic because revised v2 has no residue: any retained/manual/held row blocks the entire mixed scope byte-identically; no-official-work scopes skip while naming retained IDs.
 * **Update**: [Packages materialize capabilities while config templates remain explicitly adopted local policy](/decisions/capability-materialization-and-config-template-sync.md) makes the official catalog authoritative for fresh init/install: no implicit bundled-v1 fallback or silent trust; unreachable catalog sources fail/rollback, while offline use is explicit through raw init, local sources, or an operator-supplied catalog.
