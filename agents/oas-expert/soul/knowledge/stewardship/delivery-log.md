@@ -24,6 +24,11 @@ decisions/ and referenced from here.
 
 ---
 
+## PR #68 — v0.20.0 manifest bump after complete publication (2026-07-30)
+- verdict: MERGED as `c6d92da04b6c06c4da2987790d423e8b736744dd` from exact automated head `3f6805ec142537276b9a3c305ace10295adc8434`. Release run `30548558607` had already passed build/test/tarball, all three Desktop installer build+smoke legs, npm publication of OAS/Pi 0.20.0, checksums/provenance, and GitHub Release creation; only the known organization policy blocked Actions from creating its version-bump PR. Maintainer created and squash-merged the rescue PR manually.
+- owner: oas-expert-oas-packages · coordinator: dev-coordinator-capability-finalization
+- taught us: nothing new beyond the existing org-level Actions PR restriction; publication is complete before this expected failure, so rescue the immutable manifest bump without retagging.
+
 ## PR #67 — v0.20.0 Desktop compatibility and release readiness (2026-07-30)
 - verdict: MERGED as `436b86641ed7158d6d69e995ef8565479b96881d` at exact reviewed/API head `b5197563f078821efa543c5644396931cf1c5fb4`. The bounded follow-up keeps Desktop API v1 while widening the one authoritative CLI band to `>=0.18.0 <0.21.0`, pins unit and real discovery-path edges, updates the Desktop contract, and adds grounded v0.20.0 notes covering revised-v2 materialization, local config templates, scope-atomic v1 migration, release ordering, backups, and no credential cleanup. Exact local gate passed 892 total/891 pass/0 fail/1 skip plus all checks/strict OKF/pack/tarball/diff; required CI and all three verify-only installer matrix legs passed. Same-account approval is comment `5131615861`; expected-head merge succeeded and remote branch was deleted.
 - owner: dev-coordinator-capability-finalization · coordinator: oas-expert-oas-packages

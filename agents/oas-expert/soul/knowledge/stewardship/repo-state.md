@@ -15,6 +15,8 @@ than letting the file grow stale.
 
 ## On main
 
+- **RELEASED v0.20.0 (2026-07-30)** — tag `v0.20.0` at `1e73257` published `@oas-framework/oas@0.20.0`, `@oas-framework/pi@0.20.0`, and the complete Desktop 0.20.0 installer/checksum/provenance set. Release run `30548558607` passed build/test/tarball and all three Desktop build+smoke legs; its only failure was the known Actions-created-PR organization restriction after publication. Manual bump PR #68 merged as `c6d92da`, so main manifests are 0.20.0. Official package revisions, catalog follow-up, and local cutover are now authorized in that order.
+
 - **PR #67 merged 2026-07-30 as `436b866`** — exact reviewed head `b519756` makes main tag-ready for the breaking v0.20.0 line: Desktop API remains v1 and accepts released CLI `>=0.18.0 <0.21.0`, with unit and real discovery-path edge coverage; grounded release notes record revised-v2 capability materialization, fully local templates, v1 whole-scope migration, unsupported transitional v2, release order, and backup/credential guidance. Full local gate, required CI, and all three installer verification legs passed; same-account approval comment `5131615861`; expected-head merge succeeded and remote branch was deleted. Tag publication is next; official package revisions/catalog follow only after the kernel release.
 
 - **PR #66 merged 2026-07-30 as `dc30f0d`** — exact reviewed head `ecd1b41` replaces the transitional package-root v2 shape in place: packages are transient atomic transport/update units, capabilities materialize as flat self-contained versioned/trusted artifacts under gitignored `.agents/capabilities/installed`, optional `config-templates` become fully local editable configs with a committed adopted base and byte-preserving diff/sync/reset/adopt, classic init is catalog-first/untrusted, and v1 migration is whole-scope atomic with no residue. One terminal review RETURN at `b189fcb` closed seven demonstrated filesystem/config/provenance/rollback issues in one bounded pass. Final gates and exact-head CI passed; same-account approval comment `5131055219`; expected-head merge succeeded and the remote branch was deleted. Not yet released: a bounded Desktop API v1 compatibility-band/release-note follow-up must precede v0.20.0, then official packages/catalog and local cutover.
@@ -184,7 +186,7 @@ than letting the file grow stale.
 
 ## In flight
 
-- **v0.20.0 publication and post-kernel package cutover** — after PR #67, `dev-coordinator-capability-finalization` owns exact tag/publication verification, then dedicated-root/config-template revisions and immutable releases for all six official packages, catalog follow-up, normal global npm/Pi installation, supported local workspace rebuild (no transitional-v2 migration), three-workspace source Desktop restart, and safe branch/worktree cleanup. No credential deletion or old-v2 compatibility subsystem.
+- **Post-v0.20 official package and local cutover** — framework v0.20.0 is published; `dev-coordinator-capability-finalization` now owns dedicated-root/config-template revisions and immutable releases for all six official packages (leaf packages first, `oas.dev` last), catalog follow-up, normal global npm/Pi installation, supported local workspace rebuild (no transitional-v2 migration), three-workspace source Desktop restart, and safe branch/worktree cleanup. No credential deletion or old-v2 compatibility subsystem.
 - Historical open PRs #37, #43, and #48 remain outside this feature scope and require separate owner decisions.
 
 ## Recent deliveries
