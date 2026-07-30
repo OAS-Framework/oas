@@ -16,6 +16,8 @@ test("acceptProbe: exact v1 payload accepted; every deviation rejected with a re
   assert.equal(acceptProbe(PROBE("0.18.9")).ok, true);
   assert.equal(acceptProbe(PROBE("0.19.0")).ok, true, "the 0.19 kernel line is inside the band");
   assert.equal(acceptProbe(PROBE("0.19.7")).ok, true);
+  assert.equal(acceptProbe(PROBE("0.20.0")).ok, true, "the 0.20 kernel line is inside the band");
+  assert.equal(acceptProbe(PROBE("0.20.9")).ok, true);
   const cases = [
     [null, /no probe/],
     [{ ...PROBE(), schemaVersion: 2 }, /schemaVersion/],
@@ -23,7 +25,7 @@ test("acceptProbe: exact v1 payload accepted; every deviation rejected with a re
     [{ ...PROBE(), desktopApi: 2 }, /desktopApi 2/],
     [{ ...PROBE(), desktopApi: undefined }, /desktopApi missing/],
     [PROBE("0.17.9"), /outside/],
-    [PROBE("0.20.0"), /outside/],
+    [PROBE("0.21.0"), /outside/],
     [PROBE("1.0.0"), /outside/],
     [PROBE("not-a-version"), /unparsable/],
   ];
@@ -71,7 +73,31 @@ test("the accepted band admits the kernel version this Desktop ships with", () =
 
 test("the human-readable band is derived from the enforced numbers", () => {
   assert.equal(ACCEPT_RANGE_TEXT, `>=${ACCEPT_RANGE.min.join(".")} <${ACCEPT_RANGE.maxExclusive.join(".")}`);
-  assert.match(acceptProbe(PROBE("0.20.0")).reason, new RegExp(ACCEPT_RANGE_TEXT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(acceptProbe(PROBE("0.21.0")).reason, new RegExp(ACCEPT_RANGE_TEXT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+});
+
+// v0.20.0 band contract, spelled with LITERALS on purpose. The tests above
+// derive from ACCEPT_RANGE (so they follow any widening); these pin the exact
+// edges this release promises, so a stray re-narrowing — or a widening past
+// the v1 surface without a deliberate DESKTOP_API decision — fails here.
+test("band edges: released 0.20.x is accepted, 0.21.0 and the pre-0.18 floor are not", () => {
+  assert.deepEqual(ACCEPT_RANGE, { min: [0, 18, 0], maxExclusive: [0, 21, 0] });
+  assert.equal(ACCEPT_RANGE_TEXT, ">=0.18.0 <0.21.0");
+  assert.equal(DESKTOP_API, 1, "Desktop API stays v1 across the v0.20.0 kernel bump");
+  // inside — including both edges of the newly admitted minor
+  for (const v of ["0.18.0", "0.20.0", "0.20.1", "0.20.12"]) {
+    assert.equal(acceptProbe(PROBE(v)).ok, true, `${v} must be accepted`);
+  }
+  // outside — the exclusive ceiling and everything above it
+  for (const v of ["0.17.9", "0.21.0", "0.21.1", "0.22.0", "1.0.0"]) {
+    const r = acceptProbe(PROBE(v));
+    assert.equal(r.ok, false, `${v} must be rejected`);
+    assert.match(r.reason, /outside >=0\.18\.0 <0\.21\.0/, v);
+  }
+  // a PRERELEASE of the new minor is still not a released kernel
+  const pre = acceptProbe(PROBE("0.20.0-rc.1"));
+  assert.equal(pre.ok, false);
+  assert.match(pre.reason, /prerelease/);
 });
 
 test("parseProbeStdout: only a single JSON object passes", () => {
