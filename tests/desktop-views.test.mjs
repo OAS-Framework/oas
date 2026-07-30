@@ -17,7 +17,7 @@ const RENDERER = join(ROOT, "packages", "desktop", "renderer");
 {
   const cs = await import(new URL("../packages/desktop/renderer/views/cli-status.mjs", import.meta.url).href);
   await cs.refreshCli({
-    api: async () => ({ ok: true, status: 200, json: async () => ({ ok: true, bin: "/seed/oas", version: "0.18.0", source: "path", required: { desktopApi: 1, range: ">=0.18.0 <0.20.0" }, probedAt: 1, tried: [] }) }),
+    api: async () => ({ ok: true, status: 200, json: async () => ({ ok: true, bin: "/seed/oas", version: "0.18.0", source: "path", required: { desktopApi: 1, range: ">=0.18.0 <0.21.0" }, probedAt: 1, tried: [] }) }),
   });
 }
 
