@@ -186,7 +186,7 @@ than letting the file grow stale.
 
 ## In flight
 
-- **Post-v0.20 official package and local cutover** — framework v0.20.0 is published; `dev-coordinator-capability-finalization` owns dedicated-root/config-template revisions and immutable releases for all six official packages (leaf packages first, `oas.dev` last), catalog follow-up, normal global npm/Pi installation, supported local workspace rebuild (no transitional-v2 migration), three-workspace source Desktop restart, and safe branch/worktree cleanup. The first five leaf instances exited immediately after scaffolding without product changes; the coordinator has exact evidence and must safely resume the existing worktrees before the package wave is considered in progress. `oas.dev` and catalog remain frozen. No credential deletion or old-v2 compatibility subsystem.
+- **Post-v0.20 official package and local cutover** — framework v0.20.0 is published; `dev-coordinator-capability-finalization` owns dedicated-root/config-template revisions and immutable releases for all six official packages (leaf packages first, `oas.dev` last), catalog follow-up, normal global npm/Pi installation, supported local workspace rebuild (no transitional-v2 migration), three-workspace source Desktop restart, and safe branch/worktree cleanup. The five leaf instances are live on unchanged clean launch bases after bounded recovery from Claude trust/onboarding prompt exits; the coordinator checkout is restored, and package work is in progress. `oas.dev` and catalog remain frozen until the five leaf tags are immutable. No credential deletion or old-v2 compatibility subsystem.
 - Historical open PRs #37, #43, and #48 remain outside this feature scope and require separate owner decisions.
 
 ## Recent deliveries
