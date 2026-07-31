@@ -4218,3 +4218,98 @@ console.log(JSON.stringify({ meta: { retired: false, reason: 'self-delete-failed
   } finally { process.env.PATH = oldPath; }
   rmSync(base, { recursive: true, force: true });
 });
+
+test("ORDINARY retirement blocks and preserves evidence when a retire hook reports incomplete cleanup", () => {
+  const base = temp();
+  const { repo, root } = fixtureSoul(base, "pi");
+  // External state stands in for a remote identity the hook could not remove.
+  // The spawn SUCCEEDS here — this is the ordinary path, not a quarantine retry,
+  // which is exactly the asymmetry under test: a first failure was discarded
+  // while a retry was careful.
+  const remote = join(base, "remote-identity");
+  const allowCleanup = join(base, "cleanup-works");
+  capability(repo, "chan", {
+    capability: "acme.chan",
+    hooks: { spawn: "hook.mjs spawn", retire: "hook.mjs retire" },
+  }, {
+    "hook.mjs": `import {writeFileSync, existsSync} from 'node:fs';
+const remote = ${JSON.stringify(remote)};
+if (process.env.OAS_EVENT === 'spawn') {
+  writeFileSync(remote, 'joined');
+  console.log(JSON.stringify({ meta: { alias: 'probe' } }));
+  process.exit(0);
+}
+if (!existsSync(${JSON.stringify(allowCleanup)})) {
+  console.log(JSON.stringify({ meta: { retired: false, reason: 'self-delete-failed' } }));
+  process.exit(1);
+}
+console.log(JSON.stringify({ meta: { retired: true } }));`,
+  });
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.chan:\n      global: true\n");
+  const oldPath = process.env.PATH; process.env.PATH = fakeRuntimes(base);
+  const home = join(root, "dev", "instances", "dev-ord");
+  try {
+    spawnInstance(root, findAgent(root, "dev"), { instance: "dev-ord", launch: false });
+    assert.equal(existsSync(home), true, "ordinary spawn succeeded — no quarantine");
+    assert.equal(existsSync(join(home, ".oas-rollback-incomplete.json")), false, "and no marker yet");
+    assert.equal(existsSync(remote), true, "external state exists");
+
+    // FIRST failure on the ordinary path must retain, not delete.
+    const r = retireInstance(root, "dev-ord", { tmuxSession: "oas-test-nosuch" });
+    assert.ok(r.rollbackIncomplete, "incomplete cleanup is reported, not discarded");
+    assert.equal(r.removedDir, false, "the home is NOT removed");
+    assert.equal(existsSync(home), true, "the home and its credentials survive");
+    assert.equal(existsSync(remote), true, "the external state it still owes cleanup for is untouched");
+    // The evidence a retry needs: capabilities named as IDs, not only prose.
+    const marker = JSON.parse(readFileSync(join(home, ".oas-rollback-incomplete.json"), "utf8"));
+    assert.ok(marker.cleanup.capabilityRuntime.some((c) => c.id === "acme.chan"),
+      "the retained descriptor names the owing capability as an ID a retry can verify");
+
+    // MIRROR: a hook that completes must still delete exactly as before, or the
+    // fix has broken ordinary retirement in order to fix a corner of it.
+    writeFileSync(allowCleanup, "ok");
+    const done = retireInstance(root, "dev-ord", { tmuxSession: "oas-test-nosuch" });
+    assert.equal(done.rollbackIncomplete, undefined, "a completing hook reports clean");
+    assert.equal(existsSync(home), false, "and the home is removed as usual");
+  } finally { process.env.PATH = oldPath; }
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("self-retire is NOT turned into an owner cleanup quarantine by the ordinary blocking path", () => {
+  // The blocking path above must not reach self-retire. A self-retiring instance
+  // IS the caller and cannot hold the authority to complete owner cleanup, so
+  // retaining and quarantining its home would change a path that change is not
+  // scoped to touch. This regression exists because the first draft did exactly
+  // that and only an independent reviewer's fixed-vs-control run caught it.
+  const base = temp();
+  const { repo, root } = fixtureSoul(base, "pi");
+  const remote = join(base, "remote-identity");
+  capability(repo, "chan", {
+    capability: "acme.chan",
+    hooks: { spawn: "hook.mjs spawn", retire: "hook.mjs retire" },
+  }, {
+    "hook.mjs": `import {writeFileSync} from 'node:fs';
+if (process.env.OAS_EVENT === 'spawn') {
+  writeFileSync(${JSON.stringify(remote)}, 'joined');
+  console.log(JSON.stringify({ meta: { alias: 'probe' } }));
+  process.exit(0);
+}
+// Always reports incomplete — on the ORDINARY path this blocks; on SELF it must not.
+console.log(JSON.stringify({ meta: { retired: false, reason: 'self-delete-failed' } }));
+process.exit(1);`,
+  });
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.chan:\n      global: true\n");
+  const oldPath = process.env.PATH; process.env.PATH = fakeRuntimes(base);
+  const home = join(root, "dev", "instances", "dev-self");
+  try {
+    spawnInstance(root, findAgent(root, "dev"), { instance: "dev-self", launch: false });
+    assert.equal(existsSync(home), true, "spawned ordinarily");
+
+    const r = retireInstance(root, "dev-self", { tmuxSession: "oas-test-nosuch", self: true });
+    assert.equal(r.rollbackIncomplete, undefined, "self-retire does not report an owner quarantine");
+    assert.equal(existsSync(join(home, ".oas-rollback-incomplete.json")), false,
+      "and writes no quarantine marker — the incomplete operation is the cleanup owner's to reconcile");
+    assert.equal(existsSync(home), false, "self-retire still tears down its own local state");
+  } finally { process.env.PATH = oldPath; }
+  rmSync(base, { recursive: true, force: true });
+});
