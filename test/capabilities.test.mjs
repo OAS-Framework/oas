@@ -315,6 +315,24 @@ test("claude runtime resolves oas-claude-config and hooks contribute launch args
   } finally { process.env.PATH = oldPath; }
 });
 
+test("pi task positional precedes capability-contributed launch args", () => {
+  const base = temp(); const { repo, root, agent } = fixtureSoul(base, "pi");
+  const script = `console.log(JSON.stringify({ launch: { pi: "--append-system-prompt" } }));`;
+  capability(repo, "chan", { capability: "acme.chan", hooks: { spawn: "hook.mjs" } }, { "hook.mjs": script });
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    acme.chan:\n      global: true\n");
+  const oldPath = process.env.PATH; process.env.PATH = fakeRuntimes(base);
+  try {
+    const res = spawnInstance(root, agent, { instance: "dev-pi-order", launch: false });
+    const meta = JSON.parse(readFileSync(join(res.home, "instance.json"), "utf8"));
+    const taskIndex = meta.command.indexOf("@TASK.md");
+    const contributedArgIndex = meta.command.lastIndexOf("--append-system-prompt");
+    assert.ok(taskIndex >= 0, meta.command);
+    assert.ok(contributedArgIndex > taskIndex, `task must precede contributed args: ${meta.command}`);
+    assert.match(meta.command, /--no-skills/);
+    assert.match(meta.command, /--no-context-files/);
+  } finally { process.env.PATH = oldPath; }
+});
+
 test("team block resolves closest-first, reaches hooks/TASK.md, and drives team-wide status", () => {
   const base = temp(); const ws = join(base, "lfx"); mkdirSync(ws);
   const repo = join(ws, "self-serve"); gitRepo(repo);
