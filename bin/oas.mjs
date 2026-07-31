@@ -195,7 +195,9 @@ function capabilityHealth(level, cap, capRow, pkgRow) {
     try { verifyCapabilityInstallation(dir, cap.id, capRow, pkgRow); }
     catch (e) { return { status: "provenance-mismatch", code: e.code || "invalid-lock", dir, integrity, detail: `capability ${cap.id}: ${e.message}` }; }
   }
-  const executable = Object.keys(cap.manifest?.commands || {}).length || Object.keys(cap.manifest?.hooks || {}).length;
+  const executable = Object.keys(cap.manifest?.commands || {}).length
+    || Object.keys(cap.manifest?.hooks || {}).length
+    || (cap.manifest?.environment?.length || 0);
   if (executable && !cap.trusted) return { status: "untrusted", code: "untrusted-surface", dir, integrity, detail: `capability ${cap.id}: executable surface UNTRUSTED — \`oas trust ${cap.id}\`` };
   return { status: "ok", code: null, dir, integrity, detail: null };
 }
@@ -723,6 +725,9 @@ function install() {
     // trusted at acquisition; third-party git/path installs need explicit `oas trust`.
     trustedExecutables: !!r.marketplace,
   };
+  if (r.marketplace && r.manifest.environment?.length) {
+    (JSON_MODE ? console.error : console.log)(`Requested launch environment: ${r.manifest.environment.join(", ")}`);
+  }
   let lockFile;
   try { lockFile = writeCapabilityLock(dir, r.manifest.capability, lock); }
   catch (e) {
@@ -736,7 +741,10 @@ function install() {
   console.log(`Acquired ${r.manifest.capability} → ${shortPath(r.dest)}`);
   console.log(`Locked ${r.manifest.version || r.commit || "exact artifact"} (${r.integrity}) in ${shortPath(lockFile)}; not activated.`);
   if (r.marketplace) console.log("Marketplace package: executables trusted at acquisition.");
-  else if (r.manifest.commands || r.manifest.hooks) console.log(`Executable surface is blocked until: oas trust ${r.manifest.capability} --dir ${shortPath(dir)}`);
+  else if (r.manifest.commands || r.manifest.hooks || r.manifest.environment?.length) {
+    if (r.manifest.environment?.length) console.log(`Future trust request includes launch environment: ${r.manifest.environment.join(", ")}`);
+    console.log(`Executable surface is blocked until: oas trust ${r.manifest.capability} --dir ${shortPath(dir)}`);
+  }
 }
 
 /** Lock-file levels from dir upward (closest last — outermost first), like restoreCapabilities' walk. */
@@ -810,7 +818,7 @@ function installPackage(dir, src, opts = {}) {
   // Read the executable surface off the ENGINE's projection, not a config-chain
   // manifest lookup: at a scope with no config yet, that lookup sees nothing.
   const executables = r.capabilities
-    .filter((c) => c.executableSurface?.commands?.length || c.executableSurface?.hooks?.length)
+    .filter((c) => c.executableSurface?.commands?.length || c.executableSurface?.hooks?.length || c.executableSurface?.environment?.length)
     .map((c) => c.capability);
   if (executables.length) console.log(`Executable surfaces blocked until trusted: ${executables.map((c) => `oas trust ${c}`).join("; ")}`);
   return true;
@@ -1128,16 +1136,17 @@ function trust() {
   // to the CLOSEST scope that locks it — the same rule the merged lock maps use.
   const backing = all ? pkgs.findLast((p) => p.package === id) : pkgs.findLast((p) => p.capabilities.some((c) => c.id === id));
   if (backing) {
-    if (all) {
-      // Contract-required pre-approval review of the FULL executable surface:
-      // stdout in human mode; stderr in JSON mode (stdout stays one object).
-      const out = JSON_MODE ? console.error : console.log;
-      out(`Package ${backing.package}@${backing.version} full executable surface:`);
-      for (const c of backing.capabilities) {
-        const cmds = Object.keys(c.manifest.commands || {});
-        const hooks = Object.keys(c.manifest.hooks || {});
-        out(`  ${c.id}: commands [${cmds.join(", ") || "none"}], hooks [${hooks.join(", ") || "none"}]`);
-      }
+    // Approval is per capability unless --all-capabilities is explicit. Print
+    // exactly the authority this invocation will persist, before persisting it;
+    // JSON mode uses stderr so stdout remains one machine envelope.
+    const requested = all ? backing.capabilities : backing.capabilities.filter((c) => c.id === id);
+    const out = JSON_MODE ? console.error : console.log;
+    out(`Package ${backing.package}@${backing.version} ${all ? "full" : "requested"} executable surface:`);
+    for (const c of requested) {
+      const cmds = Object.keys(c.manifest.commands || {});
+      const hooks = Object.keys(c.manifest.hooks || {});
+      const environment = c.manifest.environment || [];
+      out(`  ${c.id}: commands [${cmds.join(", ") || "none"}], hooks [${hooks.join(", ") || "none"}], launch environment [${environment.join(", ") || "none"}]`);
     }
     // FAIL CLOSED BEFORE APPROVING. The engine binds approval to the artifact's
     // integrity, but integrity alone cannot see a `.oas-installation.json` that
@@ -1162,7 +1171,7 @@ function trust() {
       jsonOk({ package: r.package, level: r.level, approved: r.approved, skipped: r.skipped, approvedIntegrity, executableSurface: r.executableSurface, file: r.file });
       return;
     }
-    for (const c of r.approved) console.log(`Trusted executable commands/hooks for ${c} (from package ${r.package}, artifact ${approvedIntegrity[c] || "?"}).`);
+    for (const c of r.approved) console.log(`Trusted executable surface for ${c} (from package ${r.package}, artifact ${approvedIntegrity[c] || "?"}).`);
     if (r.skipped.length) console.log(`No executable surface (artifact integrity suffices, no approval needed): ${r.skipped.join(", ")}`);
     return;
   }
@@ -1175,10 +1184,11 @@ function trust() {
   const integrity = capabilityIntegrity(manifest._dir);
   if (integrity !== lock.integrity) { cmdFail("integrity-drift", `integrity changed (${lock.integrity} → ${integrity}); reacquire explicitly before trusting`); return; }
   const { _file, ...clean } = lock;
+  if (manifest.environment?.length) (JSON_MODE ? console.error : console.log)(`Requested launch environment: ${manifest.environment.join(", ")}`);
   try { writeCapabilityLock(dirname(_file), manifest.capability, { ...clean, trustedExecutables: true }); }
   catch (e) { cmdFail(e.code || "invalid-lock", e.message || e); return; }
-  if (JSON_MODE) { jsonOk({ capability: manifest.capability, integrity, legacy: true }); return; }
-  console.log(`Trusted executable commands/hooks for ${manifest.capability} at ${integrity}.`);
+  if (JSON_MODE) { jsonOk({ capability: manifest.capability, integrity, legacy: true, environment: [...(manifest.environment || [])] }); return; }
+  console.log(`Trusted executable surface for ${manifest.capability} at ${integrity}.`);
 }
 
 // ---------- package config profiles (oas init --package / oas config diff) ----------
@@ -1329,7 +1339,7 @@ function initPackage(src, dir, file) {
     const templates = (preview.configTemplates || []).filter((t) => t.package === preview.root);
 
     note(`Package ${preview.root}${rootRecord?.version ? `@${rootRecord.version}` : ""} — installs ${projected.length} capability(ies): ${projected.map((c) => c.capability).join(", ") || "(none)"}`);
-    const executable = projected.filter((c) => c.executableSurface?.commands?.length || c.executableSurface?.hooks?.length);
+    const executable = projected.filter((c) => c.executableSurface?.commands?.length || c.executableSurface?.hooks?.length || c.executableSurface?.environment?.length);
     if (executable.length) note(`  executable surfaces needing separate approval: ${executable.map((c) => c.capability).join(", ")} (\`oas trust <id>\`)`);
 
     chosen = selectConfigTemplate(templates, configFlag, preview.root); // throws typed codes
@@ -1700,6 +1710,7 @@ function listCmd() {
         executableSurface: {
           commands: Object.keys(c.manifest?.commands || {}),
           hooks: Object.keys(c.manifest?.hooks || {}),
+          environment: [...(c.manifest?.environment || [])],
         },
         status: h.status, code: h.code, detail: h.detail,
       });
@@ -1723,7 +1734,7 @@ function listCmd() {
     console.log(`${p.package}@${p.version}  [${levelOf(p.level)} ${shortPath(p.level)}]${p.locked ? "" : "  UNLOCKED (no lock entry — reacquire)"}`);
     if (p.source) console.log(`  source: ${p.source}  path: ${p.path || "?"}  commit: ${p.commit || "?"}`);
     for (const c of byPackage.get(p.package) || []) {
-      const executable = c.executableSurface.commands.length || c.executableSurface.hooks.length;
+      const executable = c.executableSurface.commands.length || c.executableSurface.hooks.length || c.executableSurface.environment.length;
       const trust = executable ? (c.trusted ? "  [trusted]" : "  [executable — needs oas trust]") : "";
       console.log(`  capability ${c.capability}${c.layer ? `  layer: ${c.layer}` : ""}${trust}`);
       // A capability whose bytes or provenance disagree with the lock is named
@@ -2292,7 +2303,7 @@ function acquireLayerCapability(dir, capId, layer, acquired, note) {
     if (!manifest) fail("E_LAYER_UNREADABLE", `capability "${capId}" was materialized but its manifest under ${shortPath(installedCapabilityDir(dir, capId))} is unreadable`);
     if (manifest.layer !== layer) fail("E_LAYER_MISMATCH", `capability "${capId}" declares layer "${manifest.layer || "none"}", not "${layer}"`);
     const executableSurface = acq.capabilities
-      .filter((c) => c.executableSurface?.commands?.length || c.executableSurface?.hooks?.length)
+      .filter((c) => c.executableSurface?.commands?.length || c.executableSurface?.hooks?.length || c.executableSurface?.environment?.length)
       .map((c) => c.capability);
     acquired.push({
       layer, capability: capId, route: "package", package: official.package, via: official.via,
@@ -2910,7 +2921,8 @@ Usage:
   oas config adopt <package>                switch to another installed package's template,
       [--config <template>] [--accept ...]  rebasing your one local config; exactly one adopted
       [--dir <d>] [--json]                  base survives, and a failed switch changes nothing
-  oas trust <capability> [--dir <dir>]      approve that capability's commands/hooks at
+  oas trust <capability> [--dir <dir>]      approve that capability's commands, hooks, and
+                                            launch-environment authority at
                                             the provider package's exact integrity
   oas trust <package> --all-capabilities    explicit bulk approval with a full
                                             executable-surface summary

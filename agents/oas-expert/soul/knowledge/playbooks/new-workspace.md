@@ -13,8 +13,8 @@ timestamp: 2026-07-11
    Activate general or layer capability packages with global/group/soul
    targets; keep deployment policy out of manifests and committed souls.
 3. Acquire external packages with `oas install`, inspect `oas-lock.json`, and
-   run `oas trust` only for reviewed executable commands/hooks at that exact
-   integrity.
+   run `oas trust` only for reviewed commands, hooks, and launch-environment
+   authority at that exact integrity.
 4. Create the agents root and souls (`oas create <name> …`). Author canonical
    `soul/AGENTS.md` for durable role/boundaries; use soul `skills/` only for
    role-private procedures.

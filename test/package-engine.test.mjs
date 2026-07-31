@@ -1036,7 +1036,7 @@ test("trust binds to the capability ARTIFACT integrity: approval, drift invalida
   const untrusted = capabilityTrust(s, "x.exec");
   assert.equal(untrusted.trusted, false);
   assert.match(untrusted.reason, /oas trust x\.exec/);
-  assert.deepEqual(untrusted.executableSurface, { commands: ["go"], hooks: ["spawn"] });
+  assert.deepEqual(untrusted.executableSurface, { commands: ["go"], hooks: ["spawn"], environment: [] });
 
   const approved = approveCapability(s, "x.exec");
   assert.deepEqual(approved.approved, ["x.exec"]);
@@ -1056,6 +1056,22 @@ test("trust binds to the capability ARTIFACT integrity: approval, drift invalida
   assert.deepEqual(bulk.approved, ["x.exec"]);
   assert.deepEqual(bulk.skipped, ["x.plain"]);
   throwsCode(() => approveCapability(s2, "nope.cap"), "unknown-capability", "unknown target");
+});
+
+test("a declared launch environment is trust-gated and materialized as part of the exact capability surface", () => {
+  const t = temp();
+  const src = pkgSource(join(t, "src"), { package: "x.p" }, {
+    "capabilities/env": { capability: "x.environment", environment: ["X_BROKER_SOCKET"] },
+  });
+  const s = scope(t);
+  const acquired = acquirePackage(s, src);
+  const projected = acquired.capabilities.find((c) => c.capability === "x.environment");
+  assert.deepEqual(projected.executableSurface, { commands: [], hooks: [], environment: ["X_BROKER_SOCKET"] });
+  const before = capabilityTrust(s, "x.environment");
+  assert.equal(before.trusted, false, "declaring launch authority requires explicit approval even before a hook uses it");
+  assert.deepEqual(before.executableSurface, projected.executableSurface);
+  assert.deepEqual(approveCapability(s, "x.environment").approved, ["x.environment"]);
+  assert.equal(capabilityTrust(s, "x.environment").trusted, true);
 });
 
 test("approval verifies PROVENANCE, not just integrity: a re-hashed .oas-installation.json cannot be trusted, and a bulk approval commits none", () => {
@@ -1411,7 +1427,7 @@ test("assertCommittable sees the COMPLETE staged plan — template bytes include
   assert.equal(cap.version, "2.1.0");
   assert.equal(cap.trusted, false);
   assert.equal(cap.status, "installed");
-  assert.deepEqual(cap.executableSurface, { commands: ["go"], hooks: [] }, "the surface to approve is presentable BEFORE committing");
+  assert.deepEqual(cap.executableSurface, { commands: ["go"], hooks: [], environment: [] }, "the surface to approve is presentable BEFORE committing");
   assert.equal(Object.hasOwn(cap, "dir"), false, "staging paths are not exposed — the gate decides, it does not reach in");
   // Template bytes and digests are present, so adoption can be validated first.
   assert.equal(seen.configTemplates[0].content, "name: adopted\n");

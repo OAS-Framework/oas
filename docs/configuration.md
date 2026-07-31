@@ -275,8 +275,9 @@ integrity, and executable trust):
 ```
 
 No command silently updates this record. Changed capability integrity blocks the
-artifact and resets its trust. `oas trust <id>` approves commands and hooks only
-for the exact locked artifact integrity, and official identity never grants it.
+artifact and resets its trust. `oas trust <id>` approves commands, hooks, and
+launch-environment authority only for the exact locked artifact integrity, and
+official identity never grants it.
 Declarative skill/instruction capabilities need a valid lock but no executable
 approval. Capabilities authored under a scope's `.agents/capabilities/owned/`
 follow their reviewed source provenance. Materialized artifacts live in

@@ -489,7 +489,8 @@ export function validateCapabilityLockEntry(capabilityId, entry, allPackages, op
  *   capabilities: Array<{ capability, version, package, path, integrity, dir,
  *                         trusted: boolean, status: "installed"|"replaced"|"kept",
  *                         layer: string|null,
- *                         executableSurface: { commands: string[], hooks: string[] } }>,
+ *                         executableSurface: { commands: string[], hooks: string[],
+ *                                              environment: string[] } }>,
  *   configTemplates: Array<{ package, template, path, description?, default: boolean,
  *                            content: string, contentIntegrity: string,
  *                            legacySpelling?: boolean }>
@@ -548,7 +549,8 @@ export const CAPABILITY_INSTALLATION_FILE   // ".oas-installation.json"
  * artifact integrity? Two call shapes (unchanged):
  *   capabilityTrust(startDir, capabilityId)   // contract shape
  *   capabilityTrust(manifest, startDir)       // internal resolver/dispatch shape
- * @returns {{ trusted, package, integrity, executableSurface: { commands, hooks },
+ * @returns {{ trusted, package, integrity,
+ *             executableSurface: { commands, hooks, environment },
  *             reason? }}
  */
 export function capabilityTrust(a, b)
