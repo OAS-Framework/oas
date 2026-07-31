@@ -48,6 +48,7 @@ A self-contained package has an `oas.json`:
   "skills": ["skills"],
   "inject": "injects/team-chat.md",
   "commands": { "auth": "bin/team-chat.mjs auth" },
+  "environment": ["EXAMPLE_IDENTITY_HOME"],
   "hooks": {
     "spawn": "bin/team-chat-hook.mjs spawn",
     "retire": "bin/team-chat-hook.mjs retire"
@@ -55,7 +56,10 @@ A self-contained package has an `oas.json`:
 }
 ```
 
-- `capability` is a namespaced ID. Duplicate IDs are errors.
+- `capability` is a namespaced ID. Duplicate IDs are errors. A capability that
+  declares launch environment must use a lowercase dotted vendor prefix such
+  as `aweb.identity`, because that prefix owns the corresponding `AWEB_*`
+  namespace.
 - `command` is an optional, unique CLI namespace. The example exposes
   `oas team-chat auth`.
 - `layer` is optional and may name exactly one fundamental layer. Two active
@@ -134,6 +138,8 @@ A self-contained package has an `oas.json`:
   the source it comes from. Declining
   leaves an actionable `oas doctor` warning. Consent to install is separate
   from capability trust.
+- `environment` lists the exact launch variables executable trust approves;
+  spawn hook output must be a subset and use the capability vendor prefix.
 - Target names never appear in a package manifest.
 
 `capability` is the only manifest identity field. The machine-readable
@@ -291,7 +297,8 @@ one package identity at a scope are errors with provenance. Acquisition
 resolves once and never advances on restore.
 
 Trust binds to each materialized capability artifact at its exact integrity.
-`oas trust <capability>` approves only that capability's commands and hooks.
+`oas trust <capability>` approves only that capability's commands, hooks, and
+declared launch environment.
 `oas trust <package> --all-capabilities` is the explicit bulk path and prints
 the full executable surface first. Any artifact integrity change (including
 `oas update`) resets that capability's trust.
@@ -341,7 +348,8 @@ records:
 
 OAS never pulls an existing package silently. Changed integrity blocks use
 until the package is deliberately reacquired. For external packages containing
-commands or hooks, approve that exact locked artifact:
+commands, hooks, or launch-environment authority, approve that exact locked
+artifact:
 
 ```bash
 oas trust example.team-chat --dir /path/to/repo
@@ -422,7 +430,58 @@ instance or soul context. Package-management commands (`install`, `trust`,
 Hooks receive `OAS_EVENT`, `OAS_CAPABILITY`, `OAS_LAYER`, `OAS_INSTANCE`,
 `OAS_HOME`, `OAS_AGENT`, `OAS_SOUL`, `OAS_CONTEXT`, `OAS_WORKSPACE`,
 `OAS_ROOT`, `OAS_LEVEL`, `OAS_SETTINGS`, and `OAS_META`. A final JSON line may
-return `meta`, `brief`, or `warning`.
+return `meta`, `brief`, `warning`, or runtime-specific `launch` arguments. A
+**spawn hook only** may also return an `env` object for the launched process;
+returning `env` from retire or soul-scaffold is an explicit contract error.
+
+Hook environment values are strings, at most 8192 UTF-8 bytes, with no NUL or
+newlines. Names use the portable environment grammar and must belong to an
+unambiguous vendor namespace. Only a dotted capability ID participates: its
+component before the first `.` must be lowercase alphanumeric. Thus `aweb.*`
+may contribute only `AWEB_*`; `aweb@evil` and `aweb/evil` are not vendor forms
+for this contract. Hyphenated vendors are also excluded because translating a
+hyphen to `_` would let `aweb-evil.*` collide with names already inside
+`aweb.*`'s `AWEB_*` namespace.
+
+A hook may return only names in its manifest's exact `environment` declaration.
+For acquired packages that declaration is part of the integrity-locked artifact.
+Third-party install previews the future request, and `oas trust` prints the
+exact request before persisting executable authority. Marketplace automatic
+trust likewise prints it before writing the trusted lock. Undeclared output is
+fatal. Config-owned packages receive the same exact-subset enforcement under
+their existing config-owned trust. This positive authority is the contract
+boundary — adding a new launch variable requires a visible manifest/trust
+change.
+
+`OAS_*`, `PI_AGENT_*`, kernel launch variables, and known shell/bootstrap/loader
+names are also rejected as defense in depth. The denylist includes current Node,
+JVM, .NET, Python, Perl, Ruby, Lua, PHP, ELF, and dyld surfaces, but is explicitly
+not the authority boundary: runtime bootstrap names are open-ended, so the
+manifest declaration and trust review enforce what an artifact may contribute.
+Two capabilities claiming the same name is an error even when their values
+match.
+
+Environment names are sorted before shell-quoted command construction, and a
+contributed value deliberately overrides an ambient value of the same name.
+Invalid or colliding contributions abort before `instance.json` and session
+launch. OAS enters the same rollback transaction as a required spawn-hook
+failure: declared retire compensation runs in reverse, worktree-mode Git state
+is removed and verified, and the home is deleted only after cleanup completes.
+A failed compensation, unverifiable topology removal, or reported spawn state
+without a retire hook uses the standard retryable quarantine instead. Ordinary
+advisory hook execution failure itself contributes no environment.
+
+The environment prefix applies to the initial Pi or Claude process. `--no-launch`
+validates command preparation but has no runtime consumer. The fallback shell
+after that process exits does not inherit command-scoped assignments, and OAS
+has no restart command or replay policy yet. The generated command is persisted
+as before; hooks must contribute locators, selectors, or broker endpoints—not
+bearer tokens or private key material. An instance-lifetime local principal may
+be selected by a home locator. A replaceable execution serving a durable global
+identity must instead use a custody/action broker or equivalent narrow adapter;
+this mechanism must never copy or expose that global identity's root keys to the
+worker process. Session-scoped execution credentials need a separate lifecycle
+and must not be encoded into this persisted spawn command.
 
 Spawn/scaffold order is outer scope to inner scope, then capability ID;
 retirement reverses successful spawn order. Scaffold hooks cannot modify or

@@ -186,8 +186,9 @@ External installation copies/clones one exact artifact and writes
 existing destination is never pulled silently. Resolution rejects changed
 locked artifacts and unlocked installed/path packages.
 
-Executable package hooks and commands are omitted until `oas trust <id>` marks
-the exact locked integrity approved. Bundled packages are framework-trusted.
+Executable package hooks, commands, and launch-environment authority are omitted
+until `oas trust <id>` marks the exact locked integrity approved. Bundled
+packages are framework-trusted.
 Packages under a scope's `owned/` subtree are config-owned. Anything under
 `installed/` requires a matching lock entry, so an acquired artifact cannot
 bypass executable trust by its directory location.
@@ -205,7 +206,25 @@ API and error taxonomy.
 Only `soul-scaffold`, `spawn`, and `retire` manifest hooks are accepted.
 Spawn/scaffold use outer-scope then capability-ID order; retire reverses it.
 Each hook receives package identity/layer plus structured OAS environment and
-may emit a final JSON object containing `meta`, `brief`, or `warning`.
+may emit a final JSON object containing `meta`, `brief`, `warning`, or `launch`.
+Only a spawn hook may add `env`; other lifecycle events reject it rather than
+silently discard it. Launch environment is string-only,
+size/control-character checked, owned by an unambiguous dotted capability
+vendor, and restricted to the manifest's exact trust-visible `environment`
+declaration. Capabilities that request this authority must use the stricter
+dotted ID form even though capabilities without environment authority retain
+the wider namespaced-ID compatibility contract. Explicit and automatic trust
+disclose the declaration before persisting authority. Known process-bootstrap
+names are denied in depth, not treated as an
+exhaustive authority list. Aggregation is deterministic, shell-quoted, and
+collision-fatal. It prefixes only the initial runtime command;
+values are persisted with that command, so the contract is for non-secret
+locators and broker endpoints, never bearer credentials or durable principal
+root keys. No restart/replay contract exists. A fatal environment contract error enters
+the required-spawn rollback transaction. It runs compensation in reverse,
+removes and verifies rollback-owned Git topology, and removes the home only
+when cleanup completed. Failed compensation or reported state with no retire
+hook uses the same retryable quarantine as every other incomplete spawn.
 
 Soul scaffolding snapshots files around each package hook and records new-file
 ownership in `.oas-scaffold-owners.json`. Overwriting canonical or another

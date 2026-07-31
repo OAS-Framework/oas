@@ -2791,7 +2791,7 @@ test("the JSON consent plan shows every step the installer will run (reviewer-fi
 function executablePackage(dir, { id = "exec.pkg", capability = "exec.cap", layer } = {}) {
   write(join(dir, "capabilities/exec/oas.json"), JSON.stringify({
     capability, version: "1.0.0", description: "Executable capability.",
-    ...(layer ? { layer } : {}), commands: { run: "run.mjs" },
+    ...(layer ? { layer } : {}), environment: ["EXEC_BROKER_SOCKET"], commands: { run: "run.mjs" },
   }, null, 2));
   write(join(dir, "capabilities/exec/run.mjs"), "// run\n");
   write(join(dir, "oas-package.json"), JSON.stringify({
@@ -2815,6 +2815,7 @@ test("install and list report CAPABILITY provenance: package rows lock the trans
   assert.equal(installed.capabilities[0].package, "exec.pkg");
   assert.equal(installed.capabilities[0].trusted, false, "acquisition is not trust");
   assert.deepEqual(installed.capabilities[0].executableSurface.commands, ["run"]);
+  assert.deepEqual(installed.capabilities[0].executableSurface.environment, ["EXEC_BROKER_SOCKET"]);
 
   const list = cli(["list", "--dir", scope, "--json"]);
   assert.equal(list.status, 0, list.stderr);
@@ -2827,6 +2828,7 @@ test("install and list report CAPABILITY provenance: package rows lock the trans
   assert.equal(cap.status, "untrusted", "an unapproved executable surface is named as such");
   assert.equal(cap.installed, true);
   assert.equal(cap.trusted, false);
+  assert.deepEqual(cap.executableSurface.environment, ["EXEC_BROKER_SOCKET"]);
   assert.equal(cap.installedIntegrity, cap.integrity, "on-disk bytes match the lock");
   assert.ok(existsSync(join(cap.dir, "oas.json")), "the row names the real artifact");
 
@@ -2849,13 +2851,15 @@ test("trust approves per capability and reports the ARTIFACT integrity it bound 
   assert.deepEqual(payload.approved, ["exec.cap"]);
   assert.equal(payload.approvedIntegrity["exec.cap"], locked.integrity, "approval binds to the exact materialized artifact");
   assert.deepEqual(payload.executableSurface["exec.cap"].commands, ["run"]);
+  assert.deepEqual(payload.executableSurface["exec.cap"].environment, ["EXEC_BROKER_SOCKET"]);
 
   // Human mode says the same thing, with no "undefined" package digest.
   const scope2 = temp();
   assert.equal(cli(["install", pkg, "--dir", scope2]).status, 0);
   const human = cli(["trust", "exec.cap", "--dir", scope2]);
   assert.equal(human.status, 0, human.stderr);
-  assert.match(human.stdout, /Trusted executable commands\/hooks for exec\.cap \(from package exec\.pkg, artifact sha256-[0-9a-f]{64}\)/);
+  assert.match(human.stdout, /launch environment \[EXEC_BROKER_SOCKET\]/);
+  assert.match(human.stdout, /Trusted executable surface for exec\.cap \(from package exec\.pkg, artifact sha256-[0-9a-f]{64}\)/);
   assert.doesNotMatch(human.stdout, /undefined/);
 
   assert.equal(JSON.parse(cli(["list", "--dir", scope, "--json"]).stdout).result.capabilities[0].status, "ok");

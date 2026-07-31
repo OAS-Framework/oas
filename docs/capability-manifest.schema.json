@@ -54,6 +54,15 @@
     "inject": {
       "type": "string"
     },
+    "environment": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,127}$"
+      },
+      "uniqueItems": true,
+      "description": "Exact launch-environment names this artifact asks the executable trust gate to approve; spawn hook output must be a subset."
+    },
     "requires": {
       "type": "array",
       "items": {

@@ -110,7 +110,7 @@ function pkgSource(dir, pkgId, capabilities, extra = {}) {
 function fixture(base) {
   return pkgSource(join(base, "src"), "x.p", {
     "capabilities/plain": { capability: "x.plain" },
-    "capabilities/exec": { capability: "x.exec", commands: { go: "bin/go.mjs run" }, hooks: { spawn: "bin/hook.mjs" }, _files: { "bin/go.mjs": "//\n", "bin/hook.mjs": "//\n" } },
+    "capabilities/exec": { capability: "x.exec", environment: ["X_BROKER_SOCKET"], commands: { go: "bin/go.mjs run" }, hooks: { spawn: "bin/hook.mjs" }, _files: { "bin/go.mjs": "//\n", "bin/hook.mjs": "//\n" } },
   });
 }
 
@@ -191,12 +191,12 @@ test("bulk package trust shows the FULL executable surface before approving, on 
   const result = okEnvelope(r);
   // The pre-approval review is a SIDE CHANNEL: it must not contaminate stdout.
   assert.match(r.stderr, /full executable surface/i);
-  assert.match(r.stderr, /x\.exec: commands \[go\], hooks \[spawn\]/);
-  assert.match(r.stderr, /x\.plain: commands \[none\], hooks \[none\]/);
+  assert.match(r.stderr, /x\.exec: commands \[go\], hooks \[spawn\], launch environment \[X_BROKER_SOCKET\]/);
+  assert.match(r.stderr, /x\.plain: commands \[none\], hooks \[none\], launch environment \[none\]/);
 
   assert.deepEqual(result.approved, ["x.exec"]);
   assert.deepEqual(result.skipped, ["x.plain"], "a capability with no executable surface needs no approval");
-  assert.deepEqual(result.executableSurface["x.exec"], { commands: ["go"], hooks: ["spawn"] });
+  assert.deepEqual(result.executableSurface["x.exec"], { commands: ["go"], hooks: ["spawn"], environment: ["X_BROKER_SOCKET"] });
   assert.equal(lockOf(s).capabilities["x.exec"].trusted, true);
   assert.equal(lockOf(s).capabilities["x.plain"].trusted, false, "approving a package never trusts a non-executable capability");
 

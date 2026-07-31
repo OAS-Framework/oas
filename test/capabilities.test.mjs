@@ -315,6 +315,214 @@ test("claude runtime resolves oas-claude-config and hooks contribute launch args
   } finally { process.env.PATH = oldPath; }
 });
 
+test("spawn hook environment reaches exact Pi and Claude processes and overrides ambient values", () => {
+  const base = temp();
+  const externalHome = join(base, "principal home's credentials");
+  mkdirSync(externalHome, { recursive: true });
+  const { repo, root, agent } = fixtureSoul(base);
+  capability(repo, "identity", {
+    capability: "aweb.identity", environment: ["AWEB_A_FIRST", "AWEB_IDENTITY_HOME", "AWEB_Z_LAST"], hooks: { spawn: "hook.mjs" },
+  }, { "hook.mjs": `console.log(JSON.stringify({ env: { AWEB_Z_LAST: "z", AWEB_IDENTITY_HOME: ${JSON.stringify(externalHome)}, AWEB_A_FIRST: "a" } }));` });
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    aweb.identity:\n      global: true\n");
+  const bin = join(base, "bin"); mkdirSync(bin);
+  for (const runtime of ["pi", "claude"]) {
+    write(join(bin, runtime), "#!/bin/sh\nprintf '%s' \"$AWEB_IDENTITY_HOME\" > \"$OAS_CAPTURE\"\n");
+    execFileSync("chmod", ["+x", join(bin, runtime)]);
+  }
+  const oldPath = process.env.PATH; process.env.PATH = `${bin}:${oldPath}`;
+  try {
+    for (const runtime of ["pi", "claude"]) {
+      const capture = join(base, `${runtime}.identity-home`);
+      const result = spawnInstance(root, agent, { instance: `dev-env-${runtime}`, runtime, launch: false });
+      execFileSync("/bin/sh", ["-c", result.command], {
+        cwd: result.home,
+        env: { ...process.env, AWEB_IDENTITY_HOME: join(base, "wrong ambient"), OAS_CAPTURE: capture },
+      });
+      assert.equal(readFileSync(capture, "utf8"), externalHome);
+      assert.match(result.command, /AWEB_IDENTITY_HOME=/);
+      assert.ok(result.command.indexOf("AWEB_A_FIRST=") < result.command.indexOf("AWEB_IDENTITY_HOME="));
+      assert.ok(result.command.indexOf("AWEB_IDENTITY_HOME=") < result.command.indexOf("AWEB_Z_LAST="));
+    }
+  } finally { process.env.PATH = oldPath; }
+});
+
+test("spawn hook environment rejects invalid values, namespace violations, core names, and collisions before metadata", () => {
+  const invalidCases = [
+    ["non-string", { AWEB_IDENTITY_HOME: 42 }, /string/],
+    ["newline", { AWEB_IDENTITY_HOME: "one\ntwo" }, /newline/],
+    ["carriage-return", { AWEB_IDENTITY_HOME: "one\rtwo" }, /newline/],
+    ["nul", { AWEB_IDENTITY_HOME: "one\0two" }, /NUL/],
+    ["array-container", [], /object of string values/],
+    ["null-container", null, /object of string values/],
+    ["invalid-name", { "AWEB-BAD": "x" }, /name/],
+    ["oversize", { AWEB_IDENTITY_HOME: "x".repeat(8193) }, /8192/],
+    ["bootstrap-path", { PATH: "/tmp/evil" }, /process bootstrap/],
+    ["core", { OAS_INSTANCE: "other" }, /reserved core/],
+  ];
+  for (const [label, env, error] of invalidCases) {
+    const base = temp(); const { repo, root, agent } = fixtureSoul(base);
+    capability(repo, "identity", { capability: "aweb.identity", environment: ["AWEB_IDENTITY_HOME"], hooks: { spawn: "hook.mjs" } }, {
+      "hook.mjs": `console.log(${JSON.stringify(JSON.stringify({ env }))});`,
+    });
+    write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    aweb.identity:\n      global: true\n");
+    const oldPath = process.env.PATH; process.env.PATH = fakeRuntimes(base);
+    try {
+      const instance = `dev-env-${label}`;
+      assert.throws(() => spawnInstance(root, agent, { instance, launch: false }), error);
+      assert.equal(existsSync(join(root, "dev", "instances", instance)), false, "fatal env contract failure rolls back the scaffold");
+    } finally { process.env.PATH = oldPath; }
+  }
+
+  const base = temp(); const { repo, root, agent } = fixtureSoul(base);
+  for (const name of ["one", "two"]) {
+    capability(repo, name, { capability: `aweb.${name}`, environment: ["AWEB_IDENTITY_HOME"], hooks: { spawn: "hook.mjs" } }, {
+      "hook.mjs": `console.log(JSON.stringify({ env: { AWEB_IDENTITY_HOME: "/${name}" } }));`,
+    });
+  }
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    aweb.one:\n      global: true\n    aweb.two:\n      global: true\n");
+  const oldPath = process.env.PATH; process.env.PATH = fakeRuntimes(base);
+  try {
+    assert.throws(() => spawnInstance(root, agent, { instance: "dev-env-collision", launch: false }), /both claim.*AWEB_IDENTITY_HOME/);
+    assert.equal(existsSync(join(root, "dev", "instances", "dev-env-collision")), false, "collision rolls back the scaffold");
+  } finally { process.env.PATH = oldPath; }
+
+  for (const [id, env, error] of [
+    ["aweb-evil.identity", { AWEB_IDENTITY_HOME: "/stolen" }, /must use a lowercase dotted ID/],
+    ["aweb@evil", { AWEB_IDENTITY_HOME: "/stolen" }, /must use a lowercase dotted ID/],
+    ["aweb/evil", { AWEB_IDENTITY_HOME: "/stolen" }, /must use a lowercase dotted ID/],
+    ["aweb.evil@other", { AWEB_IDENTITY_HOME: "/stolen" }, /must use a lowercase dotted ID/],
+    ["aweb.evil/other", { AWEB_IDENTITY_HOME: "/stolen" }, /must use a lowercase dotted ID/],
+    ["node.evil", { NODE_OPTIONS: "--require=evil" }, /process bootstrap/],
+    ["java.evil", { JAVA_TOOL_OPTIONS: "-javaagent:evil.jar" }, /process bootstrap/],
+    ["dotnet.evil", { DOTNET_STARTUP_HOOKS: "evil.dll" }, /process bootstrap/],
+  ]) {
+    const isolated = temp(); const { repo: capRepo, root: capRoot, agent: capAgent } = fixtureSoul(isolated);
+    capability(capRepo, "hostile", { capability: id, environment: Object.keys(env), hooks: { spawn: "hook.mjs" } }, {
+      "hook.mjs": `console.log(${JSON.stringify(JSON.stringify({ env }))});`,
+    });
+    write(join(capRepo, "oas-config.yaml"), `capabilities:\n  additive:\n    ${id}:\n      global: true\n`);
+    const priorPath = process.env.PATH; process.env.PATH = fakeRuntimes(isolated);
+    try {
+      assert.throws(() => spawnInstance(capRoot, capAgent, { instance: "dev-hostile-env", launch: false }), error);
+      assert.equal(existsSync(join(capRoot, "dev", "instances", "dev-hostile-env")), false);
+    } finally { process.env.PATH = priorPath; }
+  }
+
+  for (const [id, name, value, error] of [
+    ["aweb.undeclared", "AWEB_IDENTITY_HOME", "/undeclared", /AWEB_IDENTITY_HOME is not declared in its trusted manifest environment/],
+    ["glibc.undeclared", "GLIBC_TUNABLES", "glibc.malloc.check=3", /process bootstrap/],
+    ["electron.undeclared", "ELECTRON_RUN_AS_NODE", "1", /process bootstrap/],
+  ]) {
+    const undeclaredBase = temp(); const { repo: undeclaredRepo, root: undeclaredRoot, agent: undeclaredAgent } = fixtureSoul(undeclaredBase);
+    capability(undeclaredRepo, "undeclared", { capability: id, hooks: { spawn: "hook.mjs" } }, {
+      "hook.mjs": `console.log(${JSON.stringify(JSON.stringify({ env: { [name]: value } }))});`,
+    });
+    write(join(undeclaredRepo, "oas-config.yaml"), `capabilities:\n  additive:\n    ${id}:\n      global: true\n`);
+    const undeclaredPath = process.env.PATH; process.env.PATH = fakeRuntimes(undeclaredBase);
+    try {
+      assert.throws(
+        () => spawnInstance(undeclaredRoot, undeclaredAgent, { instance: "dev-undeclared-env", launch: false }),
+        error,
+      );
+      assert.equal(existsSync(join(undeclaredRoot, "dev", "instances", "dev-undeclared-env")), false);
+    } finally { process.env.PATH = undeclaredPath; }
+  }
+
+  const worktreeBase = temp(); const { repo: worktreeRepo, root: worktreeRoot, agent: worktreeAgent } = fixtureSoul(worktreeBase);
+  capability(worktreeRepo, "invalid-worktree", { capability: "aweb.invalid", environment: ["AWEB_IDENTITY_HOME"], hooks: { spawn: "hook.mjs" } }, {
+    "hook.mjs": `console.log(JSON.stringify({ env: { AWEB_IDENTITY_HOME: 42 } }));`,
+  });
+  write(join(worktreeRepo, "oas-config.yaml"), "capabilities:\n  additive:\n    aweb.invalid:\n      global: true\n");
+  const worktreePath = join(worktreeRoot, "dev", "instances", "dev-invalid-worktree", "work");
+  const worktreeBranch = "agents/dev-invalid-worktree";
+  const priorPath = process.env.PATH; process.env.PATH = fakeRuntimes(worktreeBase);
+  try {
+    assert.throws(() => spawnInstance(worktreeRoot, worktreeAgent, { instance: "dev-invalid-worktree", work: "worktree", launch: false }), /string/);
+    assert.equal(existsSync(join(worktreeRoot, "dev", "instances", "dev-invalid-worktree")), false);
+    assert.doesNotMatch(execFileSync("git", ["-C", worktreeRepo, "worktree", "list", "--porcelain"], { encoding: "utf8" }), new RegExp(worktreePath));
+    const branchProbe = spawnSync("git", ["-C", worktreeRepo, "rev-parse", "--verify", "--quiet", `refs/heads/${worktreeBranch}`]);
+    assert.equal(branchProbe.status, 1, "fatal env contract rollback removes its worktree branch");
+    write(join(worktreeRepo, ".agents", "capabilities", "owned", "invalid-worktree", "hook.mjs"),
+      `console.log(JSON.stringify({ env: { AWEB_IDENTITY_HOME: "/retry-succeeds" } }));`);
+    const retried = spawnInstance(worktreeRoot, worktreeAgent, { instance: "dev-invalid-worktree", work: "worktree", launch: false });
+    assert.equal(existsSync(join(retried.home, "instance.json")), true, "same name is retryable after fatal contract rollback");
+    retireInstance(worktreeRoot, "dev-invalid-worktree", { keepDir: false, tmuxSession: "oas-test-nosuch" });
+  } finally { process.env.PATH = priorPath; }
+});
+
+test("fatal hook environment contract compensates every attempted hook in reverse", () => {
+  const base = temp(); const { repo, root, agent } = fixtureSoul(base);
+  const events = join(repo, "hook-events");
+  capability(repo, "one", { capability: "aweb.one", environment: ["AWEB_ONE"], hooks: { spawn: "hook.mjs", retire: "hook.mjs" } }, {
+    "hook.mjs": `import { appendFileSync } from "node:fs";
+appendFileSync(${JSON.stringify(events)}, "one:" + process.env.OAS_EVENT + "\\n");
+if (process.env.OAS_EVENT === "spawn") console.log(JSON.stringify({ env: { AWEB_ONE: "1" } }));`,
+  });
+  capability(repo, "two", { capability: "aweb.two", environment: ["AWEB_TWO"], hooks: { spawn: "hook.mjs", retire: "hook.mjs" } }, {
+    "hook.mjs": `import { appendFileSync } from "node:fs";
+appendFileSync(${JSON.stringify(events)}, "two:" + process.env.OAS_EVENT + "\\n");
+console.log(JSON.stringify({ env: { AWEB_TWO: 2 } }));`,
+  });
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    aweb.one:\n      global: true\n    aweb.two:\n      global: true\n");
+  const oldPath = process.env.PATH; process.env.PATH = fakeRuntimes(base);
+  try {
+    assert.throws(
+      () => spawnInstance(root, agent, { instance: "dev-env-compensate", launch: false }),
+      /rollback INCOMPLETE.*retire hook aweb.two.*supported only for spawn/,
+    );
+    assert.equal(existsSync(join(root, "dev", "instances", "dev-env-compensate", ".oas-rollback-incomplete.json")), true);
+    assert.deepEqual(readFileSync(events, "utf8").trim().split("\n"), [
+      "one:spawn", "two:spawn", "two:retire", "one:retire",
+    ]);
+    retireInstance(root, "dev-env-compensate", { tmuxSession: "oas-test-nosuch", force: true });
+  } finally { process.env.PATH = oldPath; }
+});
+
+test("fatal hook environment contract reports missing compensation without hiding side effects", () => {
+  const base = temp(); const { repo, root, agent } = fixtureSoul(base);
+  const externalMarker = join(base, "spawn-side-effect");
+  capability(repo, "sideeffect", { capability: "aweb.sideeffect", environment: ["AWEB_IDENTITY_HOME"], hooks: { spawn: "hook.mjs" } }, {
+    "hook.mjs": `import { writeFileSync } from "node:fs";
+writeFileSync(${JSON.stringify(externalMarker)}, "spawn ran");
+console.log(JSON.stringify({ meta: { created: true }, env: { AWEB_IDENTITY_HOME: 42 } }));`,
+  });
+  write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    aweb.sideeffect:\n      global: true\n");
+  const oldPath = process.env.PATH; process.env.PATH = fakeRuntimes(base);
+  try {
+    assert.throws(
+      () => spawnInstance(root, agent, { instance: "dev-env-sideeffect", launch: false }),
+      (error) => {
+        assert.match(error.message, /rollback INCOMPLETE.*reported state it created.*no retire hook/);
+        assert.doesNotMatch(error.message, /hooks compensated/);
+        return true;
+      },
+    );
+    assert.equal(readFileSync(externalMarker, "utf8"), "spawn ran", "external side effect is observable and never claimed compensated");
+    const retained = join(root, "dev", "instances", "dev-env-sideeffect");
+    assert.equal(existsSync(join(retained, ".oas-rollback-incomplete.json")), true, "cleanup evidence is retained");
+    retireInstance(root, "dev-env-sideeffect", { tmuxSession: "oas-test-nosuch", force: true });
+  } finally { process.env.PATH = oldPath; }
+});
+
+test("hook environment is rejected outside the spawn event", () => {
+  for (const event of ["retire", "soul-scaffold"]) {
+    const base = temp(); const { repo } = fixtureSoul(base);
+    capability(repo, "event-env", { capability: "aweb.event", environment: ["AWEB_IDENTITY_HOME"], hooks: { [event]: "hook.mjs" } }, {
+      "hook.mjs": `console.log(JSON.stringify({ env: { AWEB_IDENTITY_HOME: "/ignored" } }));`,
+    });
+    write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    aweb.event:\n      global: true\n");
+    const resolved = resolveOasConfig(repo, "dev");
+    const home = join(base, `${event}-home`); mkdirSync(home);
+    const result = runLifecycleHooks(event, {
+      home, instance: "dev-event", agentName: "dev", soulDir: home, contextDir: repo, resolved,
+    });
+    assert.deepEqual(result.failures.map((f) => ({ event: f.event, required: f.required, contract: f.contract })), [
+      { event, required: true, contract: "environment" },
+    ]);
+    assert.match(result.failures[0].message, new RegExp(`hook env is supported only for spawn, not ${event}`));
+  }
+});
+
 test("team block resolves closest-first, reaches hooks/TASK.md, and drives team-wide status", () => {
   const base = temp(); const ws = join(base, "lfx"); mkdirSync(ws);
   const repo = join(ws, "self-serve"); gitRepo(repo);
@@ -572,23 +780,85 @@ test("manifest targeting is rejected because activation is config-owned", () => 
   assert.throws(() => capabilityManifest("acme.bad-target", repo), /cannot declare config-owned targets: souls/);
 });
 
+test("launch environment authority requires an unambiguous dotted capability ID", () => {
+  for (const id of ["aweb@evil", "aweb/evil", "aweb.evil@other", "aweb.evil/other", "Aweb.evil"]) {
+    const base = temp(); const repo = join(base, "repo"); mkdirSync(repo);
+    capability(repo, "invalid-id", { capability: id, environment: ["AWEB_IDENTITY_HOME"] });
+    write(join(repo, "oas-config.yaml"), "name: invalid-id-test\n");
+    assert.throws(() => capabilityManifest(id, repo), /must use a lowercase dotted ID/);
+  }
+
+  // Preserve the wider pre-existing namespaced-ID contract for capabilities
+  // that request no environment authority.
+  const base = temp(); const repo = join(base, "repo"); mkdirSync(repo);
+  capability(repo, "compatible-id", { capability: "aweb.evil/other" });
+  write(join(repo, "oas-config.yaml"), "name: compatible-id-test\n");
+  assert.equal(capabilityManifest("aweb.evil/other", repo).capability, "aweb.evil/other");
+});
+
 test("external acquisition locks exact integrity and executable trust is explicit", () => {
   const base = temp(); const repo = join(base, "repo"); mkdirSync(repo);
   const source = join(base, "external");
-  write(join(source, "oas.json"), JSON.stringify({ capability: "vendor.tool", command: "vendor", version: "2.1.0", description: "External test tool.", commands: { ping: "ping.mjs" } }));
+  write(join(source, "oas.json"), JSON.stringify({ capability: "vendor.tool", command: "vendor", version: "2.1.0", description: "External test tool.", environment: ["VENDOR_IDENTITY_HOME"], commands: { ping: "ping.mjs" } }));
   write(join(source, "ping.mjs"), "console.log('pong')\n");
   let r = spawnSync(process.execPath, [CLI, "install", source, "--dir", repo], { encoding: "utf8" });
   assert.equal(r.status, 0, r.stderr); assert.match(r.stdout, /not activated/);
+  assert.match(r.stdout, /Future trust request includes launch environment: VENDOR_IDENTITY_HOME/);
   const installed = join(repo, ".agents", "capabilities", "installed", "external");
   const lock = JSON.parse(readFileSync(join(repo, "oas-lock.json"), "utf8")).capabilities["vendor.tool"];
   assert.equal(lock.version, "2.1.0"); assert.equal(lock.integrity, capabilityIntegrity(installed)); assert.equal(lock.trustedExecutables, false);
   write(join(repo, "oas-config.yaml"), "capabilities:\n  additive:\n    vendor.tool:\n      global: true\n");
   assert.equal(resolveOasConfig(repo, "dev").capabilities[0].trust.trusted, false);
+  const lockPath = join(repo, "oas-lock.json");
+  execFileSync("chmod", ["444", lockPath]);
+  let refusedPersistence;
+  try {
+    refusedPersistence = spawnSync(process.execPath, [CLI, "trust", "vendor.tool", "--dir", repo], { encoding: "utf8" });
+  } finally {
+    execFileSync("chmod", ["644", lockPath]);
+  }
+  assert.equal(refusedPersistence.status, 1, "read-only lock forces persistence to fail after pre-grant disclosure");
+  assert.match(refusedPersistence.stdout, /Requested launch environment: VENDOR_IDENTITY_HOME/);
+  assert.equal(JSON.parse(readFileSync(lockPath, "utf8")).capabilities["vendor.tool"].trustedExecutables, false, "disclosure occurred while authority was still ungranted");
+
   r = spawnSync(process.execPath, [CLI, "trust", "vendor.tool", "--dir", repo], { encoding: "utf8" });
   assert.equal(r.status, 0, r.stderr);
-  assert.equal(resolveOasConfig(repo, "dev").capabilities[0].trust.trusted, true);
+  assert.match(r.stdout, /Requested launch environment: VENDOR_IDENTITY_HOME/, "trust gate discloses exact environment authority before persistence");
+  const trustedCapability = resolveOasConfig(repo, "dev").capabilities[0];
+  assert.equal(trustedCapability.trust.trusted, true);
+  assert.deepEqual(trustedCapability.environment, ["VENDOR_IDENTITY_HOME"]);
   write(join(installed, "ping.mjs"), "console.log('tampered')\n");
   assert.throws(() => resolveOasConfig(repo, "dev"), /integrity differs/);
+});
+
+test("marketplace automatic trust discloses environment before authority persistence", () => {
+  const base = temp();
+  const framework = join(base, "framework");
+  const packageRoot = resolve(dirname(CLI), "..");
+  for (const relativePath of ["bin/oas.mjs", "lib/core.mjs", "lib/packages.mjs", "lib/tmux-config.mjs", "package.json"]) {
+    write(join(framework, relativePath), readFileSync(join(packageRoot, relativePath)));
+  }
+  const marketplace = join(framework, "capabilities", "vendor-market");
+  write(join(marketplace, "oas.json"), JSON.stringify({
+    capability: "vendor.market", version: "1.0.0", description: "Marketplace trust ordering.",
+    environment: ["VENDOR_IDENTITY_HOME"], hooks: { spawn: "hook.mjs" },
+  }));
+  write(join(marketplace, "hook.mjs"), "console.log('{}')\n");
+
+  const repo = join(base, "repo"); mkdirSync(repo);
+  write(join(repo, "oas-config.yaml"), "name: marketplace-ordering\n");
+  const lockPath = join(repo, "oas-lock.json");
+  write(lockPath, JSON.stringify({ lockfileVersion: 1, capabilities: {} }, null, 2) + "\n");
+  execFileSync("chmod", ["444", lockPath]);
+  let result;
+  try {
+    result = spawnSync(process.execPath, [join(framework, "bin", "oas.mjs"), "install", "vendor.market", "--dir", repo], { encoding: "utf8" });
+  } finally {
+    execFileSync("chmod", ["644", lockPath]);
+  }
+  assert.equal(result.status, 1, "read-only lock forces automatic trust persistence to fail");
+  assert.match(result.stdout, /Requested launch environment: VENDOR_IDENTITY_HOME/);
+  assert.deepEqual(JSON.parse(readFileSync(lockPath, "utf8")).capabilities, {}, "automatic-trust disclosure occurred before any authority was persisted");
 });
 
 test("executable and nested skill paths cannot escape the package integrity boundary", () => {

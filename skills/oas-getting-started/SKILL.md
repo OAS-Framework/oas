@@ -109,9 +109,9 @@ capabilities:
 ```
 
 External packages must be acquired/locked before activation; executable
-commands/hooks need explicit trust. The minimal first-time sequence — this
-skill is the only one available before the first spawn, so it carries the
-bootstrap commands directly:
+commands, hooks, and launch-environment authority need explicit trust. The
+minimal first-time sequence — this skill is the only one available before the
+first spawn, so it carries the bootstrap commands directly:
 
 ```bash
 oas install <git-url|path> --dir /path/to/workspace   # acquire + exact-lock; inactive

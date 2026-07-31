@@ -114,7 +114,7 @@
                 "pattern": "^sha256-[0-9a-f]{64}$"
               },
               "trusted": {
-                "description": "Whether this capability's executable surface (commands/hooks) is approved at exactly this artifact integrity. Reset to false whenever the artifact integrity changes. Official catalog identity never grants it; there is no package-level approval.",
+                "description": "Whether this capability's executable surface (commands, hooks, and launch-environment authority) is approved at exactly this artifact integrity. Reset to false whenever the artifact integrity changes. Official catalog identity never grants it; there is no package-level approval.",
                 "type": "boolean"
               }
             },
