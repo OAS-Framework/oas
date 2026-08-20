@@ -1,5 +1,8 @@
 # Knowledge Log
 
+## 2026-08-20
+* **Update**: [Repo state](/stewardship/repo-state.md) records Juan Reyero's three independent open v0.20 follow-ups: PR #37 Pi task ordering, PR #48 trusted launch-environment authority, and PR #69 ordinary-retire cleanup retention, including their integration overlaps and required founder decisions.
+
 ## 2026-07-30
 * **Update**: [Repo state](/stewardship/repo-state.md) records verified recovery of the five existing leaf-package instances and coordinator checkout after Claude trust/onboarding prompt exits; all five exact launch bases remained clean, package work resumed, and `oas.dev` plus catalog stay frozen until immutable leaf tags.
 * **Update**: [Repo state](/stewardship/repo-state.md) corrects the post-v0.20 package wave: all five leaf instances exited at scaffold with no product work, so package delivery is blocked on safe coordinator resumption while `oas.dev` and catalog remain frozen.

@@ -3,7 +3,7 @@ type: Reference
 title: Repo state — the living picture of the OAS repo
 description: Always-current snapshot of what is on main, what is in flight (PRs, features, running instances), recent deliveries, and open threads. Every oas-expert instance updates the relevant subsection whenever it changes that reality (merge, release, spawn, retire, delivery).
 tags: [stewardship, repo-state, living]
-timestamp: 2026-07-30
+timestamp: 2026-08-20
 ---
 # Repo state — the living picture
 
@@ -186,8 +186,11 @@ than letting the file grow stale.
 
 ## In flight
 
+- **PR #69 open at `7feca4e` (Juan Reyero)** — makes an ordinary first retire-hook incompletion retain the instance home and retry evidence instead of deleting capability credentials/state and claiming retirement. It deliberately excludes `--self`, so founder review must decide whether self-retirement may remain lossy when owner cleanup fails. The branch is one commit directly on v0.20 main and CI is green.
+- **PR #48 open at `7306a9d` (Juan Reyero)** — proposes a new manifest-declared, capability-trusted launch-environment authority for spawn hooks, including namespace/value validation, deterministic shell quoting, package/CLI/schema exposure, and failed-spawn compensation. It is a new framework/trust contract with no accepted Decision concept yet; founder direction is required before integration. It also overlaps PRs #37/#69 in launch/quarantine code.
+- **PR #37 open at `380e4b0` (Juan Reyero)** — moves Pi's `@TASK.md` positional ahead of capability-contributed options because Pi rejects the `--` end-of-options mechanism Claude uses. The one-commit branch is based directly on v0.20 main, has real-runtime evidence and green CI, and overlaps PR #48's launch-command tests.
 - **Post-v0.20 official package and local cutover** — framework v0.20.0 is published; `dev-coordinator-capability-finalization` owns dedicated-root/config-template revisions and immutable releases for all six official packages (leaf packages first, `oas.dev` last), catalog follow-up, normal global npm/Pi installation, supported local workspace rebuild (no transitional-v2 migration), three-workspace source Desktop restart, and safe branch/worktree cleanup. The five leaf instances are live on unchanged clean launch bases after bounded recovery from Claude trust/onboarding prompt exits; the coordinator checkout is restored, and package work is in progress. `oas.dev` and catalog remain frozen until the five leaf tags are immutable. No credential deletion or old-v2 compatibility subsystem.
-- Historical open PRs #37, #43, and #48 remain outside this feature scope and require separate owner decisions.
+- Historical open PR #43 remains outside these feature scopes and requires a separate owner decision.
 
 ## Recent deliveries
 
