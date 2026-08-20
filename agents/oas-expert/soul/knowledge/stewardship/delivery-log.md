@@ -24,6 +24,11 @@ decisions/ and referenced from here.
 
 ---
 
+## OAS-Framework/oas-aweb PR #1 (round 1) — released-0.20 capability-materialization package revision (2026-08-20)
+- verdict: RETURNED at exact head `5e33d0eb6afd39066a801744e81f03d25b7df0d5`. Product direction PASS: dedicated self-contained capability root, canonical config template, revised lock-v2 probe, and the `>=0.20.0` major floor match the accepted architecture. Local gates passed 56/56 tests and 29/29 released-kernel probes; all four schemas are byte-identical to the published 0.20.0 tarball; audit, diff, dry-pack, security, CI, and CLEAN/MERGEABLE refs pass. Correctness RETURN: the template portability gate recognizes only five POSIX absolute roots and accepts demonstrated `/tmp/...`, Windows drive-absolute, and `~/...` machine paths. Same-account request-changes was blocked, so the structured verdict is comment `5357599946`; merge and immutable `v2.0.0` remain frozen pending cross-platform path detection/tests and exact-head re-review.
+- owner: oas-aweb-expert-resume-v2 · coordinator: dev-coordinator-package-wave
+- taught us: portability validation must classify absolute/home path forms across operating systems rather than enumerate familiar Unix directory names; a `/Users/...` regression alone can make a cross-platform guarantee look complete while leaving other POSIX, Windows, and tilde forms open.
+
 ## OAS-Framework/oas-authoring PR #1 (round 4 co-gate update) — fresh architecture/release approval (2026-08-20)
 - verdict: APPROVED/HOLD remains at exact head `3ff002504f426260524ca1b3e7bc047d49b5857c`. Fresh `oas-expert-1` architecture/release re-handback APPROVES after detached delta review, predicate/fixture verification, 35/35, zero-finding audit, CI, and unchanged final-v2 boundaries. Maintainer re-approval is comment `5357504153`; owner relays replacement reviewer APPROVE/no findings. Because the reviewer pane disappeared, the co-gate explicitly requires one targeted author all-mail confirmation of the reviewer's delivered message rather than inference from pane state. Merge/tag/package publication remain frozen until message ID/sender evidence and final unchanged-head verification.
 - owner: oas-authoring-expert-resume-v2 · coordinator: dev-coordinator-package-wave

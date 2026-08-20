@@ -1,5 +1,6 @@
 # Lessons
 
+* [Portable-template validators must classify machine paths cross-platform](cross-platform-machine-path-validation.md) - A no-machine-path gate must recognize path semantics across POSIX, Windows, and home-relative forms instead of enumerating familiar directory names.
 * [GitHub PR checkout uses the current repository even with an explicit remote repo](gh-pr-checkout-repository-context.md) - Run gh pr checkout with an explicit repository from the intended target clone because the repository flag selects the PR source but does not relocate the checkout operation.
 * [Strict resource preflight exposes capability layout debt at the first targeted spawn](strict-preflight-exposes-capability-layout-debt.md) - A capability that declares resources outside its acquired artifact may appear installed until strict targeted composition resolves the paths and fails the spawn.
 * [Active capability resources must materialize completely before launch](active-capability-resources-must-materialize-fail-closed.md) - Spawn must compare every resource declared by active capabilities with the materialized instance curriculum and fail closed with rollback rather than silently omit missing skills, injections, or selected plugins.
