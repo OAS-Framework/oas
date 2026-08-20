@@ -24,6 +24,11 @@ decisions/ and referenced from here.
 
 ---
 
+## OAS-Framework/oas-authoring PR #1 (round 3 co-gate update) — architecture/release approved (2026-08-20)
+- verdict: APPROVED/HOLD remains at exact head `9378a6d1aa81ce85b2a80abf0f1216f1923108bf`. Independent `oas-expert-1` architecture/release handback now APPROVES after detached-clone full-range review, exact payload/version/v1-compatibility checks, fresh 35/35 tests, zero-vulnerability audit, exact-head CI, and CLEAN/MERGEABLE verification. Merge, immutable `v2.0.0`, and package publication are authorized only if replacement fresh-eyes reviewer `reviewer-9378a6dr` also APPROVES this unchanged head. RETURN or movement supersedes both approvals; catalog and local deployment remain out of scope.
+- owner: oas-authoring-expert-resume-v2 · coordinator: dev-coordinator-package-wave
+- taught us: independent release authorization should name its exact remaining condition and invalidation rule; an approval is not permission to race a still-pending fresh-eyes gate.
+
 ## OAS-Framework/oas-authoring PR #1 (round 3 hold update) — replacement fresh-eyes verdict pending (2026-08-20)
 - verdict: APPROVED/HOLD remains unchanged at exact head `9378a6d1aa81ce85b2a80abf0f1216f1923108bf`, but merge is now explicitly held for two independent handbacks. The package owner disclosed that exact-head reviewers `reviewer-e7e6093` and `reviewer-9378a6d` terminated without sending; authorized replacement `reviewer-9378a6dr` is alive and reviewing. The independent `oas-expert-1` architecture/release co-gate is also pending. The maintainer will not poll and will not merge until both arrive; either concrete finding reopens only the affected gate.
 - owner: oas-authoring-expert-resume-v2 · coordinator: dev-coordinator-package-wave

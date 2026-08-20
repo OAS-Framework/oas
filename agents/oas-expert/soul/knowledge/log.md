@@ -1,6 +1,7 @@
 # Knowledge Log
 
 ## 2026-08-20
+* **Update**: OAS-Framework/oas-authoring PR #1 exact head `9378a6d` now has independent `oas-expert-1` architecture/release APPROVE; [repo state](/stewardship/repo-state.md) and the [delivery log](/stewardship/delivery-log.md) record that merge/tag/package publication await only replacement fresh-eyes reviewer `reviewer-9378a6dr`, with no catalog or deployment action authorized.
 * **Update**: OAS-Framework/oas-authoring PR #1 round-3 APPROVE/HOLD now awaits two independent exact-head handbacks: `oas-expert-1` architecture/release and replacement fresh-eyes reviewer `reviewer-9378a6dr`; [repo state](/stewardship/repo-state.md) and the [delivery log](/stewardship/delivery-log.md) record why the technically passing head remains unmerged.
 * **Delivery**: OAS-Framework/oas-authoring PR #1 round 3 approved/held at exact head `9378a6d`; [repo state](/stewardship/repo-state.md) and the [delivery log](/stewardship/delivery-log.md) record all four maintainer gates passing with 35/35 clean/hostile/bounded-discovery evidence while merge/tag await the independent `oas-expert-1` co-gate.
 * **Delivery**: OAS-Framework/oas-authoring PR #1 round 2 returned at exact head `e7e6093`; [repo state](/stewardship/repo-state.md) and the [delivery log](/stewardship/delivery-log.md) record the correct shell/template/Windows-path/npm-lock fixes, green 33/33/hostile-TMPDIR/CI gates, and three still-open round-1 portability and explicit-boundary/discovery test asks.
