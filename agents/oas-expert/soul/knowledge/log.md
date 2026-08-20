@@ -1,5 +1,8 @@
 # Knowledge Log
 
+## 2026-08-20
+* **Delivery**: OAS-Framework/oas-authoring PR #1 round 1 returned at exact head `d3991ea`; [repo state](/stewardship/repo-state.md) and the [delivery log](/stewardship/delivery-log.md) record direction/security and 30/30 test passes plus the five required validator realpath/portability/test-boundary, explicit test-discovery, and npm-lock identity corrections before merge or `v2.0.0`.
+
 ## 2026-07-30
 * **Update**: [Repo state](/stewardship/repo-state.md) records verified recovery of the five existing leaf-package instances and coordinator checkout after Claude trust/onboarding prompt exits; all five exact launch bases remained clean, package work resumed, and `oas.dev` plus catalog stay frozen until immutable leaf tags.
 * **Update**: [Repo state](/stewardship/repo-state.md) corrects the post-v0.20 package wave: all five leaf instances exited at scaffold with no product work, so package delivery is blocked on safe coordinator resumption while `oas.dev` and catalog remain frozen.

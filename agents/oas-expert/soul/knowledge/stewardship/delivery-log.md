@@ -3,7 +3,7 @@ type: Reference
 title: Delivery log — every PR that reached (or was returned from) the main gate
 description: Append-only record kept by per-PR maintainer instances — PR number, scope, verdict per gate, merge or return, and anything the review taught about the codebase. The stewardship counterpart of git history — the WHY next to the what.
 tags: [stewardship, deliveries, append-only]
-timestamp: 2026-07-28
+timestamp: 2026-08-20
 ---
 
 # Delivery log
@@ -23,6 +23,11 @@ Entries whose lessons grow beyond a line get promoted to lessons/ or
 decisions/ and referenced from here.
 
 ---
+
+## OAS-Framework/oas-authoring PR #1 (round 1) — v2 dedicated capability root and released-kernel consumer proof (2026-08-20)
+- verdict: RETURNED at exact head `d3991eae9bf3fcea77b8df0a3688fb358e79fcdf`. Product direction PASS: the dedicated capability root, flat materialization, package-only config template, revised-v2 lock proof, explicit adoption, and v1 read compatibility match the accepted v0.20 architecture. Shipped-payload security PASS: additive skills only, no executable/trust surface. Local committed-tree gates passed 30/30 tests (20 unit + 10 released-CLI consumer probes), payload containment and diff checks; exact-head CI passed and GitHub reported CLEAN/MERGEABLE. Correctness/reproducibility RETURN: the authoring validator accepts a canonical template symlink resolving inside a capability root and obvious absolute `/tmp` machine paths; its new capability-boundary test only exercises the pre-existing `..` guard rather than the realpath boundary; `npm test` uses unsafe bare Node discovery in an OAS-managed repo; and npm-lock root metadata remains at v1.0.0. Same-account verdict is comment `5357254234`; merge and `v2.0.0` remain frozen pending a fixed exact-head handback.
+- owner: oas-authoring-expert-resume-v2 · coordinator: dev-coordinator-capability-finalization
+- taught us: package-authoring validation must prove filesystem separation after symlink resolution and test the newly changed boundary rather than an older lexical guard. Release identity also includes committed package-manager lock metadata, and explicit CI test scripts should be the developer-facing aggregate in repositories that host nested OAS instance worktrees.
 
 ## PR #68 — v0.20.0 manifest bump after complete publication (2026-07-30)
 - verdict: MERGED as `c6d92da04b6c06c4da2987790d423e8b736744dd` from exact automated head `3f6805ec142537276b9a3c305ace10295adc8434`. Release run `30548558607` had already passed build/test/tarball, all three Desktop installer build+smoke legs, npm publication of OAS/Pi 0.20.0, checksums/provenance, and GitHub Release creation; only the known organization policy blocked Actions from creating its version-bump PR. Maintainer created and squash-merged the rescue PR manually.

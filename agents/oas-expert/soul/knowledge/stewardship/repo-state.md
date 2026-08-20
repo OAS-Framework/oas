@@ -3,7 +3,7 @@ type: Reference
 title: Repo state — the living picture of the OAS repo
 description: Always-current snapshot of what is on main, what is in flight (PRs, features, running instances), recent deliveries, and open threads. Every oas-expert instance updates the relevant subsection whenever it changes that reality (merge, release, spawn, retire, delivery).
 tags: [stewardship, repo-state, living]
-timestamp: 2026-07-30
+timestamp: 2026-08-20
 ---
 # Repo state — the living picture
 
@@ -186,11 +186,13 @@ than letting the file grow stale.
 
 ## In flight
 
+- **`oas.authoring` v2 package revision — PR #1 RETURNED round 1 (2026-08-20)** — exact head `d3991eae9bf3fcea77b8df0a3688fb358e79fcdf` matches the accepted dedicated-root/materialized-capability direction; its additive shipped payload and all 30 local/exact-head CI tests pass. Merge and `v2.0.0` remain frozen while the package owner closes five correctness/reproducibility blockers: realpath-safe template/capability separation, complete machine-path rejection, an actual capability-boundary symlink regression, explicit Node test discovery, and stale v1 npm-lock root metadata. Maintainer comment `5357254234`; re-review owner `oas-expert-pr1` remains alive.
 - **Post-v0.20 official package and local cutover** — framework v0.20.0 is published; `dev-coordinator-capability-finalization` owns dedicated-root/config-template revisions and immutable releases for all six official packages (leaf packages first, `oas.dev` last), catalog follow-up, normal global npm/Pi installation, supported local workspace rebuild (no transitional-v2 migration), three-workspace source Desktop restart, and safe branch/worktree cleanup. The five leaf instances are live on unchanged clean launch bases after bounded recovery from Claude trust/onboarding prompt exits; the coordinator checkout is restored, and package work is in progress. `oas.dev` and catalog remain frozen until the five leaf tags are immutable. No credential deletion or old-v2 compatibility subsystem.
 - Historical open PRs #37, #43, and #48 remain outside this feature scope and require separate owner decisions.
 
 ## Recent deliveries
 
+- OAS-Framework/oas-authoring PR #1 round 1 dedicated capability-root v2 release: RETURNED 2026-08-20 at exact head `d3991ea`; direction/security and 30/30 tests pass, five validator/test/lock corrections required (see delivery-log).
 - PR #58 guided official-capability migration: MERGED 2026-07-28 as `ab51acc`; exact head `24e6f00`, clean-room/full CI green, remote branch deleted (see delivery-log).
 - PR #57 configurable contained package payload roots: MERGED 2026-07-28 as `d9e176f`; exact PR head `842f043`, required CI green, remote branch deleted (see delivery-log).
 - PR #47 oas-desktop-engineer split-ui maintainer hold-discipline harvest: MERGED 2026-07-26 as `6f8dbf1`; exact head `42c35ec`, remote branch deleted (see delivery-log).
