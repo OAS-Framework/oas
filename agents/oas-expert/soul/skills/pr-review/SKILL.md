@@ -22,11 +22,14 @@ before its details. Does this belong in OAS, in this form?
   bounce even when the code is good.
 
 **2. Correctness.** Fetch and verify — never trust green checkmarks blind:
-- `gh pr checkout <n>` into a scratch worktree. Before judging failures, run
-  `npm install` there so validation can load devDependencies, and make sure
-  oas-web tests whose server `--dir` is the scratch worktree can see the
-  deployment's `.agents/capabilities/installed/` directory. Then run the full
-  gate: `npm test`, `npm run check`, `npm run validate`, `npm run pack:check`.
+- Create the scratch clone/worktree first, run `gh pr checkout <n> --repo owner/name`
+  with that scratch checkout as the process cwd (or use `git -C <scratch> fetch ...`
+  plus a detached checkout), and verify both the shared checkout branch and the
+  scratch `HEAD` before continuing. Before judging failures, run `npm install`
+  there so validation can load devDependencies, and make sure oas-web tests whose
+  server `--dir` is the scratch worktree can see the deployment's
+  `.agents/capabilities/installed/` directory. Then run the full gate:
+  `npm test`, `npm run check`, `npm run validate`, `npm run pack:check`.
 - Read the diff completely. For kernel changes, check every consumer
   (adapter, capabilities, panel/TUI) for the changed surface.
 - Tests: do new behaviors carry tests that would fail on regression?
@@ -124,6 +127,12 @@ BEFORE retiring — it is the last gate of the review.
   must use exact `=<session>:=<window>` targets, and tests must override the tmux
   session to a nonexistent name instead of touching the live default session.
   See `knowledge/lessons/tmux-target-exact-matching.md`.
+- **`gh pr checkout --repo` still mutates cwd**: the `--repo owner/name` flag
+  identifies the GitHub PR source, not the local checkout to update. For
+  cross-repository reviews, create the scratch clone first, run checkout/fetch
+  with that clone as cwd (or via `git -C <scratch>`), and verify both the shared
+  checkout branch and the scratch `HEAD` before touching tests or mergeability.
+  See `knowledge/lessons/gh-pr-checkout-repository-context.md`.
 - **Bare scratch worktree false failures**: `npm run validate` needs installed
   devDependencies (for example `ajv`), and the oas-web `/api/agents` test needs
   the deployment's `.agents/capabilities/installed/` under the server `--dir`

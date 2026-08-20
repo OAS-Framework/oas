@@ -1,6 +1,8 @@
 # Knowledge Log
 
 ## 2026-08-20
+* **Update**: skills/pr-review — clarified that `gh pr checkout --repo` still mutates the current checkout, so cross-repository reviews must run checkout/fetch from the intended scratch clone and verify both shared and scratch `HEAD`s.
+* **Creation**: [GitHub PR checkout uses the current repository even with an explicit remote repo](/lessons/gh-pr-checkout-repository-context.md) — `gh pr checkout --repo` identifies the GitHub PR but does not select the local target clone for checkout.
 * **Delivery**: OAS-Framework/oas-authoring PR #1 round 1 returned at exact head `d3991ea`; [repo state](/stewardship/repo-state.md) and the [delivery log](/stewardship/delivery-log.md) record direction/security and 30/30 test passes plus the five required validator realpath/portability/test-boundary, explicit test-discovery, and npm-lock identity corrections before merge or `v2.0.0`.
 
 ## 2026-07-30
