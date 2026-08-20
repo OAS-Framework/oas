@@ -1,5 +1,25 @@
 # Knowledge Log
 
+## 2026-08-20
+* **Update**: expanded [Post-merge developer harvests land on instance branches — preserve before retiring](/lessons/post-merge-harvest-stranding.md) with attached-parent conflict recovery from `attached-mode-harvest-relation-conflict.md`.
+* **Creation**: added [Agent discovery, addressability, and execution are distinct states](/lessons/agent-discovery-addressability-and-execution-are-distinct.md) from `attached-resume-agents-live-under-owner-and-team-scope.md`.
+* **Triage**: dropped `bare-node-test-can-discover-agent-worktree-tests.md` because this package-test implementation detail is already maintainer knowledge and does not change coordinator choreography.
+* **Triage**: dropped `consumer-gates-must-match-kernel-parser-semantics.md` because parser-parity implementation belongs to package authors and kernel maintainers rather than the coordinator soul.
+* **Triage**: dropped `double-quoting-does-not-stop-shell-command-substitution.md` because the shell-safety fix is developer implementation knowledge, not a coordinator procedure or release decision.
+* **Triage**: dropped `fixtures-must-reach-the-boundary-they-claim-to-test.md` because fixture falsification is developer/reviewer craft and adds no coordinator-specific behavior.
+* **Update**: expanded [Post-merge developer harvests land on instance branches — preserve before retiring](/lessons/post-merge-harvest-stranding.md) with frozen-note custody and zero-source verification from `freeze-note-writes-during-concurrent-harvest.md`.
+* **Triage**: dropped `isolation-probes-must-shadow-sibling-host-executables.md` because probe isolation is package-test implementation knowledge rather than coordinator choreography.
+* **Triage**: dropped `lexical-path-comparison-is-not-containment.md` because filesystem containment belongs to the package validator's owning developer soul.
+* **Triage**: dropped `oas-use-cannot-bootstrap-a-configless-scope.md` because it records a released-0.20 kernel limitation and leaf-package ruling that should remain with package/kernel stewardship.
+* **Triage**: dropped `released-020-agent-types-require-mapping-form.md` because it is version-bound package template compatibility knowledge for package authors and kernel maintainers.
+* **Triage**: dropped `released-020-doctor-misreads-v2-capability-locks.md` because the released-0.20 diagnosis and publication blocker belong to kernel release stewardship, not durable coordinator behavior.
+* **Update**: expanded [Agent discovery, addressability, and execution are distinct states](/lessons/agent-discovery-addressability-and-execution-are-distinct.md) with addressable/executing/blocked health states from `roster-presence-does-not-prove-agent-progress.md`.
+* **Triage**: dropped `schema-dispatch-must-use-own-properties.md` because untrusted-dictionary implementation belongs to the validator's owning developer soul.
+* **Creation**: added [Human approval remains a separate gate for irreversible releases](/decisions/human-approval-for-irreversible-releases.md) from `technical-gates-do-not-substitute-for-human-release-approval.md`.
+* **Triage**: dropped `validate-path-properties-not-known-prefixes.md` because path-property validation and fixture escaping are package implementation details rather than coordinator behavior.
+* **Update**: expanded [Merged-state reviewers catch stale-base drift against moving main](/lessons/stale-base-drift-merged-review.md) with fetched-main knowledge-PR scope verification from `verify-knowledge-only-diffs-against-fetched-main.md`.
+* **Update**: skills/multi-dev-feature — added workspace-scoped attached-agent health checks, harvest custody/recovery, fetched-main knowledge delivery, and irreversible-release authorization gates from the promoted package-wave notes.
+
 ## 2026-07-29
 * **Creation**: added [Compose atomic engine operations with an outer command rollback journal](/lessons/compose-atomic-engine-operations-with-an-outer-command-journal.md) from `compose-atomic-engine-operations-with-an-outer-command-journal.md`.
 * **Creation**: added [Config synchronization must preserve untouched local bytes](/lessons/config-sync-must-preserve-untouched-bytes.md) from `config-sync-must-preserve-untouched-bytes.md`.
