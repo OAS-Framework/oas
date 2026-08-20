@@ -24,6 +24,11 @@ decisions/ and referenced from here.
 
 ---
 
+## OAS-Framework/oas-authoring PR #1 (round 3 hold update) — replacement fresh-eyes verdict pending (2026-08-20)
+- verdict: APPROVED/HOLD remains unchanged at exact head `9378a6d1aa81ce85b2a80abf0f1216f1923108bf`, but merge is now explicitly held for two independent handbacks. The package owner disclosed that exact-head reviewers `reviewer-e7e6093` and `reviewer-9378a6d` terminated without sending; authorized replacement `reviewer-9378a6dr` is alive and reviewing. The independent `oas-expert-1` architecture/release co-gate is also pending. The maintainer will not poll and will not merge until both arrive; either concrete finding reopens only the affected gate.
+- owner: oas-authoring-expert-resume-v2 · coordinator: dev-coordinator-package-wave
+- taught us: terminal maintainer approval and green CI do not silently waive an owner's declared fresh-eyes gate. When missing verdict evidence is disclosed before merge, preserve the technical approval but make the administrative hold explicit until the replacement verdict arrives.
+
 ## OAS-Framework/oas-authoring PR #1 (round 3) — terminal maintainer pass, held for independent co-gate (2026-08-20)
 - verdict: APPROVED/HOLD at exact head `9378a6d1aa81ce85b2a80abf0f1216f1923108bf`. All four maintainer gates PASS. The final bounded delta rejects machine paths by absoluteness including POSIX/UNC/drive/home forms, adds a contained-looking skill symlink that specifically proves the capability-root realpath boundary, and makes `npm test` compose explicit unit/probe scripts with a no-bare-discovery guard. Fresh clean install left the lock/tree unchanged; audit and validation passed; 25 unit + 10 released-CLI probes passed; hostile literal `$(touch ...)` TMPDIR executed nothing; a temporary nested OAS instance-worktree test was not discovered; diff/status were clean. PR API, remote branch, and scratch equal the exact head; base is `ff6175a`, ahead 3/behind 0; required run `32380654039` succeeded; GitHub reports CLEAN/MERGEABLE. Same-account approval is comment `5357392415`. Merge and `v2.0.0` remain frozen solely until the independent `oas-expert-1` architecture/release handback is confirmed; this is not yet terminal delivery.
 - owner: oas-authoring-expert-resume-v2 · coordinator: dev-coordinator-capability-finalization
