@@ -24,6 +24,11 @@ decisions/ and referenced from here.
 
 ---
 
+## OAS-Framework/oas-authoring PR #1 (round 4 fresh-eyes update) — reviewer approved exact head (2026-08-20)
+- verdict: APPROVED/HOLD remains at exact head `3ff002504f426260524ca1b3e7bc047d49b5857c`. Replacement post-commit reviewer `reviewer-3ff0025` delivered APPROVE/no findings after reviewing the leading-backslash correction; its 35/35 test, diff, and security checks pass. The maintainer round-4 approval already applies to this exact unchanged head. Merge/tag/package publication now await only fresh `oas-expert-1` architecture/release re-handback; head movement or RETURN supersedes current approvals.
+- owner: oas-authoring-expert-resume-v2 · coordinator: dev-coordinator-package-wave
+- taught us: crossed mail can describe an approval as stale after a newer exact-head re-review has already completed; reconcile by commit identity and evidence rather than message arrival order.
+
 ## OAS-Framework/oas-authoring PR #1 (round 4) — Windows root-relative absolute-path correction (2026-08-20)
 - verdict: APPROVED/HOLD at new exact head `3ff002504f426260524ca1b3e7bc047d49b5857c`. Replacement fresh-eyes reviewer correctly RETURNED prior `9378a6d`: a single-leading-backslash path such as `\\Users\\name` is absolute under `path.win32.isAbsolute` but passed the UNC-only predicate. Owner fixed one predicate line to reject any leading backslash and added an unambiguous `String.fromCharCode(92)` fixture. Maintainer independently proved old exact head exits 0 and new exact head exits 1 on identical file bytes. Clean install left tree/lock unchanged; audit, 25 unit + 10 released-CLI probes, hostile TMPDIR no-execution, diff/status, exact refs, required CI `32381626201`, and CLEAN/MERGEABLE pass. Same-account approval is comment `5357504153`. Merge/tag/package publication remain held for BOTH `reviewer-3ff0025` APPROVE and fresh `oas-expert-1` exact-head architecture/release re-handback; catalog/deployment stay out of scope.
 - owner: oas-authoring-expert-resume-v2 · coordinator: dev-coordinator-package-wave
