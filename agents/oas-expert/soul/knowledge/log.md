@@ -1,6 +1,8 @@
 # Knowledge Log
 
 ## 2026-08-20
+* **Update**: skills/pr-review — merged the pending fix-handback note: on re-review, use the maintainer's own structured RETURN as the acceptance checklist rather than an owner's summary or an overlapping parallel-review verdict.
+* **Harvest**: pending exact-byte path-test note was already fully represented by [Portable-template validators must classify machine paths cross-platform](/lessons/cross-platform-machine-path-validation.md), including exact-byte construction across shell/host-language escaping; no concept change needed.
 * **Release**: `oas.authoring` v2.0.0 published from OAS-Framework/oas-authoring PR #1 merge `64bcc44` at exact reviewed head `3ff0025`; [repo state](/stewardship/repo-state.md) and the [delivery log](/stewardship/delivery-log.md) record four review rounds, all terminal gates, immutable annotated tag/release/checksum evidence, fresh tag-clone 35/35 consumer/scaffold verification, deleted branch, preserved v1.0.0, and no catalog/deployment change.
 * **Update**: OAS-Framework/oas-aweb PR #1 exact `5e33d0e` received an independent architecture/release RETURN for bare `node --test`; [repo state](/stewardship/repo-state.md) and the [delivery log](/stewardship/delivery-log.md) add explicit four-suite paths, a no-bare-discovery guard, and nested-worktree sentinel proof to the existing portability correction.
 * **Creation**: [Portable-template validators must classify machine paths cross-platform](/lessons/cross-platform-machine-path-validation.md) — portability gates must recognize POSIX, Windows drive/root-relative/UNC, and home-relative path semantics rather than enumerate familiar Unix roots.

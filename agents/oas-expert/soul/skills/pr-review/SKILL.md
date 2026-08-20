@@ -146,6 +146,12 @@ BEFORE retiring — it is the last gate of the review.
   check `gh pr view <n> --json mergeable` immediately before handback; consider
   sequencing or fast-tracking re-review for same-capability stacks. See
   `knowledge/lessons/pr-return-staleness-fast-capability-cadence.md`.
+- **A fix handback closes the maintainer's asks, not somebody else's list**:
+  when independent reviewers and the maintainer report overlapping findings,
+  preserve the maintainer's structured RETURN as the acceptance checklist and
+  verify each ask against the exact delta. The owner's summary and parallel
+  reviewer verdicts are evidence, not substitutes; superficially similar tests
+  may prove different invariants (for example, two distinct symlink boundaries).
 - **Final handback can be stale while reviewer nits are still landing**: a
   green exact SHA from the coordinator does not prove the merge head if an
   in-flight reviewer can still add a test-only fix or regression. Treat
