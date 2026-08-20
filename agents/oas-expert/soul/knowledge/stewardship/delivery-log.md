@@ -24,6 +24,11 @@ decisions/ and referenced from here.
 
 ---
 
+## OAS-Framework/oas-authoring PR #1 (round 4) — Windows root-relative absolute-path correction (2026-08-20)
+- verdict: APPROVED/HOLD at new exact head `3ff002504f426260524ca1b3e7bc047d49b5857c`. Replacement fresh-eyes reviewer correctly RETURNED prior `9378a6d`: a single-leading-backslash path such as `\\Users\\name` is absolute under `path.win32.isAbsolute` but passed the UNC-only predicate. Owner fixed one predicate line to reject any leading backslash and added an unambiguous `String.fromCharCode(92)` fixture. Maintainer independently proved old exact head exits 0 and new exact head exits 1 on identical file bytes. Clean install left tree/lock unchanged; audit, 25 unit + 10 released-CLI probes, hostile TMPDIR no-execution, diff/status, exact refs, required CI `32381626201`, and CLEAN/MERGEABLE pass. Same-account approval is comment `5357504153`. Merge/tag/package publication remain held for BOTH `reviewer-3ff0025` APPROVE and fresh `oas-expert-1` exact-head architecture/release re-handback; catalog/deployment stay out of scope.
+- owner: oas-authoring-expert-resume-v2 · coordinator: dev-coordinator-package-wave
+- taught us: backslash-sensitive regressions need exact byte construction, not shell/host-language literals whose escaping can falsify the probe. Cross-platform absoluteness includes Windows root-relative paths with one leading backslash, not only UNC.
+
 ## OAS-Framework/oas-authoring PR #1 (round 3 co-gate update) — architecture/release approved (2026-08-20)
 - verdict: APPROVED/HOLD remains at exact head `9378a6d1aa81ce85b2a80abf0f1216f1923108bf`. Independent `oas-expert-1` architecture/release handback now APPROVES after detached-clone full-range review, exact payload/version/v1-compatibility checks, fresh 35/35 tests, zero-vulnerability audit, exact-head CI, and CLEAN/MERGEABLE verification. Merge, immutable `v2.0.0`, and package publication are authorized only if replacement fresh-eyes reviewer `reviewer-9378a6dr` also APPROVES this unchanged head. RETURN or movement supersedes both approvals; catalog and local deployment remain out of scope.
 - owner: oas-authoring-expert-resume-v2 · coordinator: dev-coordinator-package-wave
