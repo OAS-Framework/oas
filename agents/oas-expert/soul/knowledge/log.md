@@ -1,6 +1,7 @@
 # Knowledge Log
 
 ## 2026-08-20
+* **Update**: OAS-Framework/oas-aweb PR #1 exact `5e33d0e` received an independent architecture/release RETURN for bare `node --test`; [repo state](/stewardship/repo-state.md) and the [delivery log](/stewardship/delivery-log.md) add explicit four-suite paths, a no-bare-discovery guard, and nested-worktree sentinel proof to the existing portability correction.
 * **Creation**: [Portable-template validators must classify machine paths cross-platform](/lessons/cross-platform-machine-path-validation.md) — portability gates must recognize POSIX, Windows drive/root-relative/UNC, and home-relative path semantics rather than enumerate familiar Unix roots.
 * **Delivery**: OAS-Framework/oas-aweb PR #1 round 1 returned at exact head `5e33d0e`; [repo state](/stewardship/repo-state.md) and the [delivery log](/stewardship/delivery-log.md) record passing direction/security/56-test/29-probe/schema-parity/CI gates plus the required cross-platform machine-path validation fix before merge or immutable `v2.0.0`.
 * **Update**: OAS-Framework/oas-authoring PR #1 exact `3ff0025` now has fresh architecture/release APPROVE; [repo state](/stewardship/repo-state.md) and the [delivery log](/stewardship/delivery-log.md) record the final hold for durable reviewer mail identity evidence after its pane disappeared, followed by unchanged-head recheck.
