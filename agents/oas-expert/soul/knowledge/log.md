@@ -1,6 +1,7 @@
 # Knowledge Log
 
 ## 2026-08-20
+* **Release**: `oas.authoring` v2.0.0 published from OAS-Framework/oas-authoring PR #1 merge `64bcc44` at exact reviewed head `3ff0025`; [repo state](/stewardship/repo-state.md) and the [delivery log](/stewardship/delivery-log.md) record four review rounds, all terminal gates, immutable annotated tag/release/checksum evidence, fresh tag-clone 35/35 consumer/scaffold verification, deleted branch, preserved v1.0.0, and no catalog/deployment change.
 * **Update**: OAS-Framework/oas-aweb PR #1 exact `5e33d0e` received an independent architecture/release RETURN for bare `node --test`; [repo state](/stewardship/repo-state.md) and the [delivery log](/stewardship/delivery-log.md) add explicit four-suite paths, a no-bare-discovery guard, and nested-worktree sentinel proof to the existing portability correction.
 * **Creation**: [Portable-template validators must classify machine paths cross-platform](/lessons/cross-platform-machine-path-validation.md) — portability gates must recognize POSIX, Windows drive/root-relative/UNC, and home-relative path semantics rather than enumerate familiar Unix roots.
 * **Delivery**: OAS-Framework/oas-aweb PR #1 round 1 returned at exact head `5e33d0e`; [repo state](/stewardship/repo-state.md) and the [delivery log](/stewardship/delivery-log.md) record passing direction/security/56-test/29-probe/schema-parity/CI gates plus the required cross-platform machine-path validation fix before merge or immutable `v2.0.0`.
