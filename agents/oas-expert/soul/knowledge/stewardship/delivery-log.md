@@ -24,6 +24,11 @@ decisions/ and referenced from here.
 
 ---
 
+## OAS-Framework/oas-authoring PR #1 (round 4 co-gate update) — fresh architecture/release approval (2026-08-20)
+- verdict: APPROVED/HOLD remains at exact head `3ff002504f426260524ca1b3e7bc047d49b5857c`. Fresh `oas-expert-1` architecture/release re-handback APPROVES after detached delta review, predicate/fixture verification, 35/35, zero-finding audit, CI, and unchanged final-v2 boundaries. Maintainer re-approval is comment `5357504153`; owner relays replacement reviewer APPROVE/no findings. Because the reviewer pane disappeared, the co-gate explicitly requires one targeted author all-mail confirmation of the reviewer's delivered message rather than inference from pane state. Merge/tag/package publication remain frozen until message ID/sender evidence and final unchanged-head verification.
+- owner: oas-authoring-expert-resume-v2 · coordinator: dev-coordinator-package-wave
+- taught us: a vanished reviewer pane is not verdict evidence in either direction. Bind the gate to durable mail identity and exact head, then verify refs again immediately before merge.
+
 ## OAS-Framework/oas-authoring PR #1 (round 4 fresh-eyes update) — reviewer approved exact head (2026-08-20)
 - verdict: APPROVED/HOLD remains at exact head `3ff002504f426260524ca1b3e7bc047d49b5857c`. Replacement post-commit reviewer `reviewer-3ff0025` delivered APPROVE/no findings after reviewing the leading-backslash correction; its 35/35 test, diff, and security checks pass. The maintainer round-4 approval already applies to this exact unchanged head. Merge/tag/package publication now await only fresh `oas-expert-1` architecture/release re-handback; head movement or RETURN supersedes current approvals.
 - owner: oas-authoring-expert-resume-v2 · coordinator: dev-coordinator-package-wave
