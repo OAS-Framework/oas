@@ -1,6 +1,7 @@
 # Knowledge Log
 
 ## 2026-08-20
+* **Update**: [Repo state](/stewardship/repo-state.md) records resumption of the post-v0.20 package wave under a fresh coordinator and five attached leaf specialists that preserve the dirty worktrees; delivery remains gated on released-0.20 probes, review, PRs, immutable leaf tags, then `oas.dev`, catalog, and rebuild.
 * **Fix**: [Repo state](/stewardship/repo-state.md) replaces the stale claim that the post-v0.20 package wave was actively progressing: five dead leaf instances preserve only uncommitted partial revisions, no package reached a commit/PR/tag, `oas.dev` never started, the catalog is unchanged, and deployment cutover remains pending.
 * **Update**: [Repo state](/stewardship/repo-state.md) records Juan Reyero's three independent open v0.20 follow-ups: PR #37 Pi task ordering, PR #48 trusted launch-environment authority, and PR #69 ordinary-retire cleanup retention, including their integration overlaps and required founder decisions.
 
