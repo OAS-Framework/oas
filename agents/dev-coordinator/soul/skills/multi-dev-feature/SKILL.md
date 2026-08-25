@@ -37,6 +37,7 @@ operator roots. Sequence dependency-heavy parts first.
 ## 2. During development
 
 - Track in STATE.md: developer, instance, branch, status, blockers.
+- **Agent health**: discover attached cross-repository agents from the configured workspace boundary with `oas status --team --dir <workspace-team-root>`. They appear beneath their worktree owners, not necessarily beneath you. Treat aweb roster presence as addressability only; require explicit progress or exact-pane evidence before reporting an agent as executing, and escalate interactive prompts as blockers.
 - **Dependency requests**: when developer B needs developer A's unmerged
   code: confirm A's relevant commits are pushed; merge `origin/<A>/<name>`
   into `feature/<name>` (validate it builds); push; mail B to merge
@@ -144,10 +145,12 @@ to the owning developer(s), re-merge, re-gate, re-review.
   fix means spawning a NEW reviewer on the new commit
   (`--purpose <new-short-sha>`); never wait on or mail a retired reviewer.
 - After merge: delete the feature branch and any temp worktree (`git worktree
-  remove`). Before deleting developer branches or retiring developers, confirm
-  their post-merge harvest commits are ancestors of `origin/main`; if not,
-  preserve every not-on-main harvest commit on a knowledge-only PR first. Then
-  retire them and log the delivery.
+  remove`). Before deleting developer branches or retiring developers, freeze
+  each source note directory once harvesting starts and confirm every post-merge
+  harvest commit is an ancestor of fetched `origin/main`. If not, preserve the
+  complete not-on-main harvest chain on a knowledge-only PR. Verify the source
+  `.md` count is zero before retirement, then retire the developer and log the
+  delivery.
 
 ## Gotchas
 
@@ -213,3 +216,21 @@ to the owning developer(s), re-merge, re-gate, re-review.
   satisfying reachability inside existing surfaces when possible. See
   [Merged-state review fixes can overreach scope — validate new user-facing
   surfaces with the human](../knowledge/lessons/review-fix-scope-overreach.md).
+- Agent presence is not execution. Attached agents appear under their worktree
+  owner in OAS discovery, cross-repository status requires the workspace team
+  scope, and an aweb roster row can hide an interactive trust prompt. See
+  [Agent discovery, addressability, and execution are distinct
+  states](../knowledge/lessons/agent-discovery-addressability-and-execution-are-distinct.md).
+- Do not write new notes after a harvester inventories a source directory. If
+  attached harvest fails on conflicting relation flags, preserve the source and
+  have the worktree owner launch the harvester after product-head review with no
+  explicit parent/relation flags. Never retire until strict validation,
+  knowledge-only delivery, and zero source notes are confirmed. See
+  [Post-merge developer harvests land on instance branches — preserve before
+  retiring](../knowledge/lessons/post-merge-harvest-stranding.md).
+- Technical review does not replace a separately required human authorization
+  for an irreversible tag or publication. Record the human provenance before
+  execution, and require acknowledgement of a late HOLD rather than assuming a
+  sent message stopped the terminal actor. See [Human approval remains a
+  separate gate for irreversible
+  releases](../knowledge/decisions/human-approval-for-irreversible-releases.md).
