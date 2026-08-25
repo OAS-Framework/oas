@@ -1,6 +1,7 @@
 # Knowledge Log
 
 ## 2026-08-25
+* **Release**: `oas.dev` v2.0.0 published from OAS-Framework/oas-dev PR #1 merge `ceb99c53` at exact head `2396d9dd`, annotated tag + SHA256SUMS + fresh-clone verification; [repo state](/stewardship/repo-state.md) and the [delivery log](/stewardship/delivery-log.md) record the three-round adversarial review, the synthetic-catalog closure proof, and the preserved v1.0.0.
 * **Update**: skills/pr-review — returned PRs with fully retired author lineage must get a separate bounded fixer from the exact returned head, then maintainer re-review of the new exact head; maintainers still never self-fix branches they gate.
 * **Creation**: [An ownerless returned PR needs a commissioned fixer, not maintainer self-fixing](/lessons/ownerless-returned-pr-needs-commissioned-fixer.md) — a fully ownerless returned PR preserves author/maintainer separation through a commissioned fixer and exact-head re-review, not maintainer self-fixing.
 * **Delivery**: OAS-Framework/oas-jira PR #2, oas-aweb PR #2, and oas-linear PR #2 knowledge harvests MERGED (`fde9297`/`1d692be`/`abb35cf`) at expected exact heads after 3-lens review; oas-linear required one truthfulness RETURN fixed at `314dc00`; [repo state](/stewardship/repo-state.md) and the [delivery log](/stewardship/delivery-log.md) record custody verification, branch cleanup, and jira/aweb/linear specialist retirement.
