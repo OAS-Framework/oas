@@ -751,6 +751,7 @@ Stable `error.code` values (also the `--json` envelope codes):
 | `unknown-config-template` | the package has no config template by that name |
 | `remove-blocked` | removal target is still referenced by config or by a dependent locked package (provenance: the blockers) |
 | `official-mapping-unavailable` | guided official migration cannot map a legacy official capability yet; the scope was left unchanged |
+| `unsafe-config-key` | a YAML document uses `__proto__` as a mapping key — the reader refuses it, because assigning it rewrites the parsed object's prototype instead of becoming data, leaving the entry invisible to every key validator |
 
 Fail-closed enforcement points: `parseLockFileStrict`, `readPackageLocks` and
 `listInstalledPackages` RAISE — consumers never see an invalid lock as absent or

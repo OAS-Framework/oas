@@ -2341,7 +2341,7 @@ function acquireLayerCapability(dir, capId, layer, acquired, note) {
  * directly instead, which is also what makes a same-run acquisition visible to
  * the rest of the run. */
 function ownScopeCapabilityManifests(dir) {
-  const out = {};
+  const out = Object.create(null); // capability-id keyed — never answer for `constructor`/`toString`
   for (const [sub, origin] of [[installedCapabilitiesDir(dir), "installed"], [ownedCapabilitiesDir(dir), "owned"]]) {
     if (!existsSync(sub)) continue;
     let entries;
@@ -2608,7 +2608,7 @@ function capabilityCommand() {
     let teamCtx;
     const instanceHome = process.env.PI_AGENT_HOME || process.env.OAS_HOME;
     const metaFile = instanceHome && join(instanceHome, "instance.json");
-    let capSettings = {};
+    let capSettings = Object.create(null); // capability-id keyed — never answer for `constructor`/`toString`
     try {
       if (metaFile && existsSync(metaFile)) {
         const meta = JSON.parse(readFileSync(metaFile, "utf8"));
@@ -2687,7 +2687,10 @@ function typeCmd() {
   const description = flag("description");
   let text = existsSync(file) ? readFileSync(file, "utf8") : `name: ${basename(dir)}\n`;
   const cfg = existsSync(file) ? parseYamlNested(text) : {};
-  if (cfg["agent-types"]?.[name]) die(`agent type "${name}" already declared in ${shortPath(file)}`);
+  // Own-property: `constructor` is a legal agent-type name, and a plain lookup
+  // would report it as already declared in a config that never mentions it.
+  const declaredTypes = cfg["agent-types"];
+  if (declaredTypes && typeof declaredTypes === "object" && Object.hasOwn(declaredTypes, name)) die(`agent type "${name}" already declared in ${shortPath(file)}`);
   const block = [`  ${name}:`, ...(description ? [`    description: ${description}`] : [])];
   const lines = text.replace(/\n*$/, "\n").split("\n");
   // Drop the scaffold comment block once a real agent-types block exists.
