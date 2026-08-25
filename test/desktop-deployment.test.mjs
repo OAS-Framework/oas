@@ -439,3 +439,35 @@ test("capability-id keyed reader maps never answer for an inherited name", () =>
   assert.deepEqual(reader.capabilitySkillDirs("toString", scope), []);
   fsExtra.rmSync(scope, { recursive: true, force: true });
 });
+
+test("a soul.yaml cannot declare the reader's own annotations about itself", () => {
+  const scope = mkdtempSync(join(tmpdir(), "oas-reader-annotation-spoof-"));
+  const root = join(scope, "agents");
+  const elsewhere = join(scope, "elsewhere");
+  mkdirSync(join(root, "ghost", "soul"), { recursive: true });
+  mkdirSync(elsewhere, { recursive: true });
+  // The brain view resolves a soul directory as `def._soulDir || join(def._dir,
+  // "soul")`, so a soul.yaml that could set `_soulDir` would point the
+  // skills/knowledge read at any directory on the machine — and `_packageDir`
+  // is the containment boundary that walk applies. Both are the READER's
+  // findings, never the document's claim.
+  writeFileSync(join(root, "ghost", "soul", "soul.yaml"),
+    `name: ghost\n_soulDir: ${elsewhere}\n_dir: ${elsewhere}\n_packageDir: ${elsewhere}\n`);
+
+  const def = reader.findAgent(root, "ghost");
+  assert.equal(def.name, "ghost");
+  assert.equal(def._soulDir, undefined, "the soul redirected its own soul directory");
+  assert.equal(def._packageDir, undefined, "the soul redirected its own containment boundary");
+  assert.equal(def._dir, join(root, "ghost"));
+  assert.deepEqual(reader.listAgents(root).map((a) => a._dir), [join(root, "ghost")]);
+
+  // A capability agent still gets a real `_soulDir` — the annotation works, it
+  // just cannot come from the document (control).
+  writeFileSync(join(scope, "oas-config.yaml"), "name: trust\ncapabilities:\n  additive:\n    owned.agent:\n      from: owned\n");
+  const ownedDir = join(scope, ".agents", "capabilities", "owned", "owned-agent");
+  mkdirSync(join(ownedDir, "agents", "helper"), { recursive: true });
+  writeFileSync(join(ownedDir, "oas.json"), JSON.stringify({ capability: "owned.agent", version: "1.0.0", description: "d", agents: ["agents/helper"] }));
+  writeFileSync(join(ownedDir, "agents", "helper", "soul.yaml"), "name: helper\nkind: local\n");
+  assert.equal(reader.findCapabilityAgent(scope, root, "helper")._soulDir, join(ownedDir, "agents", "helper"));
+  fsExtra.rmSync(scope, { recursive: true, force: true });
+});

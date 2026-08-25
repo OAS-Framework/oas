@@ -21,7 +21,7 @@ import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
-import { OAS_LOCK_FILE, capabilityIntegrity, installedCapabilitiesDir, writeCapabilityLock } from "../lib/core.mjs";
+import { OAS_LOCK_FILE, capabilityIntegrity, findAgent, installedCapabilitiesDir, writeCapabilityLock } from "../lib/core.mjs";
 
 const CLI = resolve(new URL("../bin/oas.mjs", import.meta.url).pathname);
 const temp = () => mkdtempSync(join(tmpdir(), "oas-cli-lifecycle-"));
@@ -445,6 +445,55 @@ test("a lock-only ancestor never answers the orphan check for a config scope bel
   const r = cli(["doctor", s], { cwd: s });
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /WARNING: x\.plain at .* is in installed\/ but has no lock entry/);
+  rmSync(base, { recursive: true, force: true });
+});
+
+// ---------- internal annotations are unforgeable ----------
+
+test("an artifact cannot declare the kernel's own annotations: a spoofed _capabilityLock does not silence the orphan warning", () => {
+  const base = temp();
+  const src = fixture(base);
+  const s = scope(base);
+  assert.equal(cli(["install", src, "--dir", s]).status, 0);
+
+  // A genuinely UNLOCKED artifact whose own oas.json asserts the kernel's
+  // internal annotations about itself. `_capabilityLock` is the scope-exact lock
+  // row the orphan check consults, so spreading the parsed manifest let an
+  // artifact nothing locks claim to be locked — and `_origin`/`_dir` are the
+  // provenance every consumer reads.
+  const realDir = artifact(s, "x.spoof");
+  write(join(realDir, "oas.json"), JSON.stringify({
+    capability: "x.spoof", version: "1.0.0", description: "cap",
+    _capabilityLock: { version: "1.0.0", package: "x.p", path: "capabilities/plain", integrity: `sha256-${"c".repeat(64)}`, trusted: true },
+    _package: "x.p",
+    _origin: "owned:/elsewhere",
+    _dir: "/elsewhere",
+  }));
+
+  const d = cli(["doctor", s], { cwd: s });
+  assert.equal(d.status, 0, d.stderr);
+  assert.match(d.stdout, /WARNING: x\.spoof at .* is in installed\/ but has no lock entry/);
+  assert.doesNotMatch(d.stdout, /\/elsewhere/, "the artifact's declared _dir must never be reported as its location");
+  // The correctly locked neighbour is still not an orphan (control).
+  assert.doesNotMatch(d.stdout, /WARNING: x\.plain .* has no lock entry/);
+
+  const j = JSON.parse(cli(["doctor", s, "--json"], { cwd: s }).stdout);
+  assert.equal(j.acquired["x.spoof"].origin, `installed:${s}`, "origin is the kernel's finding, not the artifact's claim");
+  assert.equal(j.acquired["x.spoof"].dir, realDir);
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("a soul.yaml cannot declare _soulDir or _dir about itself", () => {
+  const base = temp();
+  const root = join(base, "agents");
+  // `_soulDir` is consumed as "the read-only soul inside a package" and `_dir`
+  // as the agent home: a soul that could declare either would be redirecting
+  // its own spawn.
+  write(join(root, "ghost", "soul", "soul.yaml"), "name: ghost\n_soulDir: /elsewhere/soul\n_dir: /elsewhere\n");
+  const agent = findAgent(root, "ghost");
+  assert.equal(agent.name, "ghost");
+  assert.equal(agent._soulDir, undefined, "the soul declared its own package-soul directory");
+  assert.equal(agent._dir, join(root, "ghost"));
   rmSync(base, { recursive: true, force: true });
 });
 

@@ -198,11 +198,29 @@ export function findAgentsRoot(cwd) {
 
 // ---- souls (local agents) ---------------------------------------------------
 
+/** The `_`-prefixed namespace belongs to the READER, not to the document: `_dir`,
+ * `_soulDir`, `_origin`, `_level` and `_packageDir` are this module's own
+ * statements about where something was found, and consumers act on them. The
+ * reachable case is `_soulDir`: the brain view reads
+ * `def._soulDir || join(def._dir, "soul")`, so a local soul.yaml that could
+ * declare `_soulDir` would redirect the skills/knowledge read at any directory
+ * on the machine. Strip the whole namespace before annotating rather than
+ * relying on each writer to assign after the spread — the same invariant the
+ * kernel enforces in its own manifest and soul readers.
+ *
+ * `__proto__` starts with `_`, so a `__proto__` key is dropped here rather than
+ * re-assigned through the inherited setter. */
+function stripInternalAnnotations(parsed) {
+  const out = {};
+  for (const key of Object.keys(parsed)) if (!key.startsWith("_")) out[key] = parsed[key];
+  return out;
+}
+
 function readSoul(agentDir) {
   const p = join(agentDir, "soul", "soul.yaml");
   try {
     if (!existsSync(p)) return undefined;
-    const soul = parseYamlFlat(readFileSync(p, "utf8"));
+    const soul = stripInternalAnnotations(parseYamlFlat(readFileSync(p, "utf8")));
     soul._dir = agentDir;
     soul.name = soul.name || basename(agentDir);
     if (soul.kind === "tmp") soul.kind = "local"; // legacy kind — one shape now: full local souls
@@ -249,7 +267,9 @@ function loadManifestAt(idir, origin, level) {
   const mf = join(idir, "oas.json");
   try {
     if (!existsSync(mf)) return undefined;
-    const m = JSON.parse(readFileSync(mf, "utf8"));
+    const raw = JSON.parse(readFileSync(mf, "utf8"));
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+    const m = stripInternalAnnotations(raw);
     if (!m.capability) return undefined;
     return { ...m, _dir: idir, _origin: origin, _level: level };
   } catch { return undefined; }
