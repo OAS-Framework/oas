@@ -366,6 +366,49 @@ test("doctor reports a malformed v1 lock at a CONFIGLESS scope — human and JSO
   rmSync(base, { recursive: true, force: true });
 });
 
+// ---------- the orphan check reads BOTH lock shapes ----------
+
+test("doctor's orphan check consults the v2 capabilities map: a locked artifact is not an orphan, an unlocked one still is", () => {
+  const base = temp();
+  const src = fixture(base);
+  const s = scope(base);
+  assert.equal(cli(["install", src, "--dir", s]).status, 0);
+  assert.equal(lockOf(s).lockfileVersion, 2, "the fixture must actually be v2-locked");
+  assert.ok(lockOf(s).capabilities["x.plain"], "and the capability must carry a v2 lock row");
+
+  // The regression: reading only the LEGACY v1 map, doctor called every
+  // correctly materialized v2 capability an orphan and told the operator to
+  // reacquire artifacts that were already exactly locked.
+  const clean = cli(["doctor", s], { cwd: s });
+  assert.equal(clean.status, 0, clean.stderr);
+  assert.doesNotMatch(clean.stdout, /has no lock entry/, "a v2-locked artifact was reported as an orphan");
+
+  // A GENUINE orphan in the same scope still warns, and names only itself.
+  write(join(artifact(s, "x.stray"), "oas.json"), JSON.stringify({ capability: "x.stray", version: "1.0.0", description: "cap" }));
+  const dirty = cli(["doctor", s], { cwd: s });
+  assert.equal(dirty.status, 0, dirty.stderr);
+  assert.match(dirty.stdout, /WARNING: x\.stray at .* is in installed\/ but has no lock entry — reacquire it or move it to owned\//);
+  assert.doesNotMatch(dirty.stdout, /WARNING: x\.plain at .* has no lock entry/, "the locked capability is still not an orphan");
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("a legacy v1 capability lock still answers the orphan check for its own artifact", () => {
+  const base = temp();
+  const s = scope(base);
+  // An unconverted 0.18 scope: the artifact sits in the same flat installed/
+  // store, and only the v1 map locks it.
+  write(join(artifact(s, "x.legacy"), "oas.json"), JSON.stringify({ capability: "x.legacy", version: "1.0.0", description: "cap" }));
+  write(join(s, OAS_LOCK_FILE), JSON.stringify({
+    lockfileVersion: 1,
+    capabilities: { "x.legacy": { source: `path:${join(base, "src")}`, version: "1.0.0", commit: "local", integrity: `sha256-${"0".repeat(64)}`, trustedExecutables: false } },
+  }, null, 2));
+
+  const r = cli(["doctor", s], { cwd: s });
+  assert.equal(r.status, 0, r.stderr);
+  assert.doesNotMatch(r.stdout, /has no lock entry/, "the v1 lock stopped answering for its artifact");
+  rmSync(base, { recursive: true, force: true });
+});
+
 // ---------- canonical dispatch ----------
 
 test("a capability command runs through the CLI that dispatched it: a hostile PATH cannot intercept it", () => {

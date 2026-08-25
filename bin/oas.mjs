@@ -415,6 +415,16 @@ function doctor(dir) {
     console.log(`  ERROR: ${e.message} [invalid-lock]`);
     if (prov?.file) console.log(`         fix or remove the entry in ${shortPath(prov.file)} — never auto-repaired; legacy trust/restore fail closed until it is valid`);
   }
+  // The CANONICAL lock for a materialized artifact is the v2 capabilities map;
+  // `locks` above carries only the legacy v1 entries an unconverted scope still
+  // has. The orphan check below must consult BOTH, or every correctly v2-locked
+  // capability is reported as an orphan. A refused read is already diagnosed —
+  // above when it is a legacy scope, and always under `Installed packages`
+  // (doctorPackagesData.lockError) — so it leaves the map empty here rather
+  // than being rendered a third time.
+  let lockedCapabilities = {};
+  try { lockedCapabilities = readPackageLocks(ctx).capabilities; }
+  catch (e) { if (e.code !== "invalid-lock") throw e; }
   const mans = capabilityManifests(ctx);
   for (const [id, lock] of Object.entries(locks)) {
     const retiredReason = retiredCapabilityReason(id);
@@ -422,7 +432,9 @@ function doctor(dir) {
     if (!mans[id]) console.log(`  WARNING: ${id} is locked in ${shortPath(lock._file)} but not acquired — run \`oas install\``);
   }
   for (const [id, m] of Object.entries(mans)) {
-    if (String(m._origin).startsWith("installed:") && !locks[id]) console.log(`  WARNING: ${id} at ${shortPath(m._dir)} is in installed/ but has no lock entry — reacquire it or move it to owned/`);
+    if (!String(m._origin).startsWith("installed:")) continue;
+    if (Object.hasOwn(lockedCapabilities, id) || Object.hasOwn(locks, id)) continue;
+    console.log(`  WARNING: ${id} at ${shortPath(m._dir)} is in installed/ but has no lock entry — reacquire it or move it to owned/`);
   }
   if (existsSync(LEGACY_HOME_CAPABILITIES_DIR)) console.log(`  WARNING: legacy ~/.oas/capabilities exists and is no longer discovered — reinstall its packages at a config scope and remove it`);
 
