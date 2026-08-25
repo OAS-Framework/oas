@@ -28,7 +28,7 @@ import {
   officialCapabilityPackage, officialPackageCatalog,
   approveCapability, updatePackage, removePackage, migrateLegacyLock, applyLegacyLockMigration,
   packageIntegrity, capabilityArtifactIntegrity, verifyCapabilityInstallation, installedCapabilityDir, installedCapabilitiesDir, ownedCapabilitiesDir, loadPackageManifestAt,
-  resolveOasConfig, resolveWorkMode, composeInstanceAgentsMd, parseYamlNested, assertSafeConfigKey, withConfigFile, packagedInject, teamAgentRoots,
+  resolveOasConfig, resolveWorkMode, composeInstanceAgentsMd, parseYamlNested, assertSafeConfigValue, assertSafeConfigWriteKey, withConfigFile, packagedInject, teamAgentRoots,
   findTeamAgent, findTeamInstance, findCapabilityAgent, findInstanceHome, listCapabilityAgents, workspaceOf,
   ensureRoot, findRoot, findAgent, listAgents, listInstances, listAgentDefs, createAgent as coreCreateAgent,
   spawnInstance, retireInstance, upsertLocalAgent, defaultRepo, RELATIONS,
@@ -651,11 +651,17 @@ function use() {
     for (const kv of settingsArgs) {
       const eq = kv.indexOf("=");
       if (eq <= 0) die(`--settings expects key=value, got "${kv}"`);
-      // WRITE side of the same refusal the readers enforce: `--settings
-      // __proto__=x` assigned through the inherited setter, which swallowed the
-      // entry, and the command then reported success for a setting it never
-      // wrote. Fail closed instead.
-      entry.settings[assertSafeConfigKey(kv.slice(0, eq))] = kv.slice(eq + 1);
+      // WRITE side of the refusals the readers enforce. Two distinct hazards on
+      // this one line:
+      //   - `--settings __proto__=x` assigned through the inherited setter,
+      //     which swallowed the entry, and the command reported success for a
+      //     setting it never wrote;
+      //   - the VALUE is rendered verbatim into one `key: value` line, so a
+      //     newline-bearing value stopped being a value and became document —
+      //     a crafted one added a whole second capability entry.
+      // Both fail closed, before anything is written.
+      const key = assertSafeConfigWriteKey(kv.slice(0, eq), `--settings key ${JSON.stringify(kv.slice(0, eq))}`);
+      entry.settings[key] = assertSafeConfigValue(kv.slice(eq + 1), `--settings value for ${JSON.stringify(key)}`);
     }
   }
   if (targetKind === "global") entry.global = enabled;
@@ -664,9 +670,11 @@ function use() {
     // before narrowing, so adding a soul/type binding doesn't silently drop everyone else.
     if (manifest.layer && entry.global === undefined && !entry["agent-types"] && !entry.souls) entry.global = true;
     entry[targetKind] = entry[targetKind] && typeof entry[targetKind] === "object" ? entry[targetKind] : {};
-    // Same write-side refusal: `--soul __proto__` / `--type __proto__` would be
-    // swallowed by the inherited setter and reported as activated.
-    entry[targetKind][assertSafeConfigKey(targetName)] = enabled;
+    // Same write-side refusal, and for the same two reasons: `--soul
+    // __proto__` was swallowed by the inherited setter and reported as
+    // activated, and a `--soul`/`--type` NAME is written as a mapping key, so a
+    // newline in it injects document exactly like a settings value does.
+    entry[targetKind][assertSafeConfigWriteKey(targetName, `--${targetKind === "agent-types" ? "type" : "soul"} name ${JSON.stringify(String(targetName))}`)] = enabled;
   }
   writeFileSync(file, replaceCapabilitiesBlock(text, caps));
   console.log(`${enabled ? "Activated" : "Excluded"} ${manifest.capability} for ${targetKind === "global" ? "global" : `${targetKind === "agent-types" ? "type" : "soul"} ${targetName}`} at ${level} level (${shortPath(file)})`);
@@ -2731,7 +2739,10 @@ function typeCmd() {
   // would report it as already declared in a config that never mentions it.
   const declaredTypes = cfg["agent-types"];
   if (declaredTypes && typeof declaredTypes === "object" && Object.hasOwn(declaredTypes, name)) die(`agent type "${name}" already declared in ${shortPath(file)}`);
-  const block = [`  ${name}:`, ...(description ? [`    description: ${description}`] : [])];
+  // The NAME is already held to a strict grammar above; the DESCRIPTION was
+  // written verbatim onto its own line, so it could inject document the same
+  // way a `--settings` value could.
+  const block = [`  ${name}:`, ...(description ? [`    description: ${assertSafeConfigValue(description, "--description")}`] : [])];
   const lines = text.replace(/\n*$/, "\n").split("\n");
   // Drop the scaffold comment block once a real agent-types block exists.
   const scaffold = lines.findIndex((l) => /^# ── Agent types/.test(l));
@@ -2869,7 +2880,7 @@ function versionCmd() {
 // keeping it at column 0 makes the whole command table one reviewable diff of
 // added lines rather than ~150 lines of pure whitespace churn, and keeps `git
 // blame` pointing at the commit that last changed each command.
-const TYPED_CLI_FAILURES = new Set(["unsafe-config-key"]);
+const TYPED_CLI_FAILURES = new Set(["unsafe-config-key", "unsafe-config-value"]);
 try {
 if (cmd === "doctor") {
   const doctorDir = args[1] && !args[1].startsWith("--") ? args[1] : undefined;

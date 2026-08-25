@@ -380,6 +380,17 @@ instead of becoming data, which would hide the entry from every key validator.
 The kernel fails closed and reports the offending file; the desktop reader
 degrades that document to "not visible", per its read-only contract.
 
+The same commands also refuse text they cannot write as ONE YAML scalar on one
+line: a control character (a newline in a `--settings` value used to inject
+whole extra capability entries into the file), leading or trailing whitespace a
+read would strip, a leading YAML structure indicator (`#`, `|`, `>`, `&`, `*`,
+`!`, `%`, `@`, `` ` ``, a quote, a flow bracket, or `- `/`? `/`: `), and — for
+keys and `--soul`/`--type` names — the `:` and `#` that end a key token. Those
+fail with `unsafe-config-value` (values) or `unsafe-config-key` (keys and
+names), and nothing is written. Ordinary values are untouched: those characters
+are structural only in first position, so `expr=2 > 1` and `tag=v1.0#build`
+round-trip unchanged.
+
 ## Worked examples
 
 ### All souls use OKF; only developers use Linear

@@ -374,3 +374,68 @@ test("the reported filename is the path itself, even when it contains regex subs
   assert.notEqual(r.status, 0, r.stdout);
   assert.ok(r.stderr.includes(file), r.stderr);
 });
+
+test("a config write refuses text that cannot stay one YAML scalar — no injected document, nothing written", () => {
+  const dir = temp();
+  write(join(dir, ".agents", "capabilities", "owned", "acme.x", "oas.json"),
+    JSON.stringify({ capability: "acme.x", version: "1.0.0", description: "cap" }));
+  write(join(dir, "oas-config.yaml"), "name: demo\n");
+  const file = join(dir, "oas-config.yaml");
+  const before = readFileSync(file, "utf8");
+
+  // THE attack: the value is rendered verbatim onto one `key: value` line, so a
+  // newline plus indentation stops being a value and becomes more document —
+  // here a whole second capability entry the operator never wrote (which the
+  // next read then served, and doctor crashed on).
+  const injected = "fast\n    acme.injected:\n      from: owned\n      global: true";
+  const refusals = [
+    [["use", "acme.x", "--global", "--dir", dir, "--settings", `mode=${injected}`], "unsafe-config-value"],
+    [["use", "acme.x", "--global", "--dir", dir, "--settings", `mode=x\rzz`], "unsafe-config-value"],
+    [["use", "acme.x", "--global", "--dir", dir, "--settings", "mode=\tindented"], "unsafe-config-value"],
+    [["use", "acme.x", "--global", "--dir", dir, "--settings", "mode=| block"], "unsafe-config-value"],
+    [["use", "acme.x", "--global", "--dir", dir, "--settings", "mode={a: b}"], "unsafe-config-value"],
+    [["use", "acme.x", "--global", "--dir", dir, "--settings", "mode= padded"], "unsafe-config-value"],
+    // A KEY is written as a mapping key, so the same text injects the same way.
+    [["use", "acme.x", "--global", "--dir", dir, "--settings", `${injected}=x`], "unsafe-config-key"],
+    [["use", "acme.x", "--global", "--dir", dir, "--settings", "a:b=x"], "unsafe-config-key"],
+    // …and so does a --soul / --type NAME.
+    [["use", "acme.x", "--dir", dir, "--soul", "alice\n    acme.injected:\n      global: true"], "unsafe-config-key"],
+    [["use", "acme.x", "--dir", dir, "--type", "devs\n    acme.injected:\n      global: true"], "unsafe-config-key"],
+    // `oas type add --description` writes its own line too.
+    [["type", "add", "devs", "--description", "d\nteam:\n  name: Smuggled"], "unsafe-config-value"],
+  ];
+  for (const [argv, code] of refusals) {
+    const r = runCli(argv, dir);
+    assert.notEqual(r.status, 0, `${argv.join(" ")} => ${r.stdout}`);
+    assert.doesNotMatch(r.stderr, NODE_STACK, argv.join(" "));
+    assert.equal(r.stderr.trim().split("\n").length, 1, r.stderr);
+    assert.doesNotMatch(r.stdout, /Activated|Excluded|Declared/, argv.join(" "));
+    assert.equal(readFileSync(file, "utf8"), before, `nothing may be written: ${argv.join(" ")}`);
+
+    const json = runCli([...argv, "--json"], dir);
+    assert.notEqual(json.status, 0, json.stdout);
+    assert.doesNotMatch(json.stderr, NODE_STACK);
+    const doc = JSON.parse(json.stdout);
+    assert.equal(json.stdout.trim(), JSON.stringify(doc), "exactly one envelope on stdout");
+    assert.equal(doc.ok, false);
+    assert.equal(doc.error.code, code, doc.error.message);
+    assert.equal(readFileSync(file, "utf8"), before, `--json must not write either: ${argv.join(" ")}`);
+  }
+
+  // The other direction: ordinary values, including ones with characters that
+  // are only structural in FIRST position, still round-trip.
+  const ok = runCli(["use", "acme.x", "--global", "--dir", dir,
+    "--settings", "mode=fast", "path=/usr/local/bin", "note=a-b_c.d", "expr=2 > 1", "tag=v1.0#build", "list=a,b"], dir);
+  assert.equal(ok.status, 0, ok.stderr);
+  const written = readFileSync(file, "utf8");
+  assert.doesNotMatch(written, /acme\.injected|Smuggled/, "no refusal leaked into the file");
+  const round = parseYamlNested(written).capabilities.additive["acme.x"].settings;
+  assert.deepEqual(round, { mode: "fast", path: "/usr/local/bin", note: "a-b_c.d", expr: "2 > 1", tag: "v1.0#build", list: "a,b" });
+
+  const okSoul = runCli(["use", "acme.x", "--dir", dir, "--soul", "alice"], dir);
+  assert.equal(okSoul.status, 0, okSoul.stderr);
+  assert.equal(parseYamlNested(readFileSync(file, "utf8")).capabilities.additive["acme.x"].souls.alice, true);
+  const okType = runCli(["type", "add", "devs", "--description", "The dev family", "--dir", dir], dir);
+  assert.equal(okType.status, 0, okType.stderr);
+  assert.equal(parseYamlNested(readFileSync(file, "utf8"))["agent-types"].devs.description, "The dev family");
+});
