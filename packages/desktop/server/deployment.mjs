@@ -358,18 +358,20 @@ function readContainedYaml(packageDir, file) {
  *
  * `exclude` is what separates the TWO kernel digests this reader must be able to
  * reproduce, because a lock row's shape says which one pinned it:
- *   - legacy v1 capability rows pin the standalone-capability digest;
+ *   - legacy v1 capability rows pin the standalone-capability digest, which
+ *     excludes the ARTIFACT-ROOT lock file and nothing else;
  *   - revised-v2 capability rows pin the MATERIALIZED ARTIFACT digest, with no
  *     exclusions at all — capability source, the materialized runtime closure
  *     and the generated provenance file all count, which is precisely what makes
  *     post-approval tampering with any of them invalidate trust.
  * Reproducing only the first is why every real v2-locked provider read as
- * drifted. */
+ * drifted. `exclude` receives the entry AND the directory being walked, because
+ * "the root lock file" is a position, not a name. */
 function treeDigest(dir, exclude = () => false) {
   const hash = createHash("sha256");
   const walk = (d) => {
     for (const e of readdirSync(d, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
-      if (exclude(e)) continue;
+      if (exclude(e, d)) continue;
       const p = join(d, e.name);
       if (e.isDirectory()) walk(p);
       else if (e.isFile()) { hash.update(relative(dir, p)); hash.update("\0file\0"); hash.update(readFileSync(p)); hash.update("\0"); }
@@ -378,8 +380,17 @@ function treeDigest(dir, exclude = () => false) {
   };
   try { walk(dir); return `sha256-${hash.digest("hex")}`; } catch { return undefined; }
 }
-/** Kernel-compatible standalone capability digest (excludes VCS + lock). */
-const capabilityIntegrity = (dir) => treeDigest(dir, (e) => e.name === ".git" || e.name === "oas-lock.json");
+/** Kernel-compatible standalone capability digest: excludes exactly the
+ * generated lock file at the ARTIFACT ROOT, nothing else.
+ *
+ * `.git` is NOT an exclusion, at any depth. Acquisition strips root VCS
+ * metadata before locking, so a `.git` appearing afterwards is inserted payload
+ * and must change the digest — excluded-but-present bytes are mutable,
+ * approval-invisible input. A nested `oas-lock.json` is ordinary payload for
+ * the same reason. Excluding either by NAME at every depth (as this reader once
+ * did) let a planted `.git` payload or a nested lock read as trusted in the
+ * desktop while the kernel reported drift. */
+const capabilityIntegrity = (dir) => treeDigest(dir, (e, d) => d === dir && e.name === "oas-lock.json");
 /** Kernel-compatible MATERIALIZED capability artifact digest (no exclusions). */
 const capabilityArtifactIntegrity = (dir) => treeDigest(dir);
 
