@@ -354,12 +354,22 @@ function readContainedYaml(packageDir, file) {
   try { return parseYamlFlat(readFileSync(file, "utf8")); } catch { return undefined; }
 }
 
-/** Kernel-compatible standalone capability digest (excludes VCS + lock). */
-function capabilityIntegrity(dir) {
+/** Byte-for-byte digest of one directory tree.
+ *
+ * `exclude` is what separates the TWO kernel digests this reader must be able to
+ * reproduce, because a lock row's shape says which one pinned it:
+ *   - legacy v1 capability rows pin the standalone-capability digest;
+ *   - revised-v2 capability rows pin the MATERIALIZED ARTIFACT digest, with no
+ *     exclusions at all — capability source, the materialized runtime closure
+ *     and the generated provenance file all count, which is precisely what makes
+ *     post-approval tampering with any of them invalidate trust.
+ * Reproducing only the first is why every real v2-locked provider read as
+ * drifted. */
+function treeDigest(dir, exclude = () => false) {
   const hash = createHash("sha256");
   const walk = (d) => {
     for (const e of readdirSync(d, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
-      if (e.name === ".git" || e.name === "oas-lock.json") continue;
+      if (exclude(e)) continue;
       const p = join(d, e.name);
       if (e.isDirectory()) walk(p);
       else if (e.isFile()) { hash.update(relative(dir, p)); hash.update("\0file\0"); hash.update(readFileSync(p)); hash.update("\0"); }
@@ -368,45 +378,104 @@ function capabilityIntegrity(dir) {
   };
   try { walk(dir); return `sha256-${hash.digest("hex")}`; } catch { return undefined; }
 }
+/** Kernel-compatible standalone capability digest (excludes VCS + lock). */
+const capabilityIntegrity = (dir) => treeDigest(dir, (e) => e.name === ".git" || e.name === "oas-lock.json");
+/** Kernel-compatible MATERIALIZED capability artifact digest (no exclusions). */
+const capabilityArtifactIntegrity = (dir) => treeDigest(dir);
 
-/** Strict, read-only lock validation. Any invalidity discards the ENTIRE file;
- * the Desktop degrades to invisible but never partially salvages trust data. */
+const LOCK_ID_RE = /^[a-z0-9][a-z0-9._-]*$/;
+const LOCK_SHA256_RE = /^sha256-[0-9a-f]{64}$/;
+/** Revised-v2 package rows lock the TRANSPORT unit only. `capabilities`,
+ * `trustedCapabilities` and `depsIntegrity` are absent from this set on
+ * purpose: their presence is the superseded TRANSITIONAL package-store shape,
+ * which the kernel rejects wholesale, so the unknown-key check below discards
+ * such a document rather than half-reading it. */
+const LOCK_PACKAGE_KEYS = new Set(["source", "path", "version", "commit", "integrity", "dependencies"]);
+/** Revised-v2 capability rows lock the MATERIALIZED entity. */
+const LOCK_CAPABILITY_KEYS = new Set(["version", "package", "path", "integrity", "trusted"]);
+
+/** Strict, read-only lock validation for BOTH supported shapes. Any invalidity
+ * discards the ENTIRE file; the Desktop degrades to invisible but never
+ * partially salvages trust data.
+ *
+ * Returns a null-prototype map of capability id → a REBUILT row
+ * `{ shape, integrity, trusted }`. Rebuilt, never spread: a lock is artifact
+ * data, `shape` decides which digest answers for the artifact and `integrity` is
+ * the value trust compares against, so neither may be something the document
+ * chose to put there.
+ *
+ * v1 and v2 are read as ALTERNATIVES, not as one shape with extras — the
+ * previous reader required the v1 row fields of every capability row and then
+ * additionally demanded transitional-shaped package rows, so a correct revised-v2
+ * lock (capability rows `{version, package, path, integrity, trusted}`; package
+ * rows carrying no capability or trust lists) failed both halves and the whole
+ * file was discarded. On every real v2 scope that made the deployment's
+ * capability agents invisible. */
 function validatedLockCapabilities(file) {
   let p;
   try { p = JSON.parse(readFileSync(file, "utf8")); } catch { return undefined; }
-  const map = (v) => v && typeof v === "object" && !Array.isArray(v);
+  const map = (v) => !!v && typeof v === "object" && !Array.isArray(v);
+  const str = (v) => typeof v === "string" && !!v;
   if (!map(p)) return undefined;
   if (p.lockfileVersion !== undefined && (typeof p.lockfileVersion !== "number" || ![1, 2].includes(p.lockfileVersion))) return undefined;
+  const version = p.lockfileVersion ?? 1;
   const capabilities = p.capabilities === undefined ? {} : p.capabilities;
   if (!map(capabilities)) return undefined;
-  for (const [id, e] of Object.entries(capabilities)) {
-    if (!/^[a-z0-9][a-z0-9._-]*$/.test(id) || !map(e)) return undefined;
-    if (typeof e.source !== "string" || !e.source || typeof e.version !== "string" || !e.version || typeof e.integrity !== "string" || !/^sha256-[0-9a-f]{64}$/.test(e.integrity)) return undefined;
-    if (e.commit !== undefined && typeof e.commit !== "string") return undefined;
-    if (e.trustedExecutables !== undefined && typeof e.trustedExecutables !== "boolean") return undefined;
-  }
-  if ((p.lockfileVersion ?? 1) === 2) {
-    if (!map(p.packages)) return undefined;
-    const allowed = new Set(["source", "version", "commit", "integrity", "depsIntegrity", "capabilities", "dependencies", "trustedCapabilities"]);
-    for (const [id, e] of Object.entries(p.packages)) {
-      if (!/^[a-z0-9][a-z0-9._-]*$/.test(id) || !map(e) || Object.keys(e).some((k) => !allowed.has(k))) return undefined;
-      if (["source", "version", "commit", "integrity"].some((k) => typeof e[k] !== "string" || !e[k])) return undefined;
-      if (!/^sha256-[0-9a-f]{64}$/.test(e.integrity) || (e.depsIntegrity !== undefined && (typeof e.depsIntegrity !== "string" || !/^sha256-[0-9a-f]{64}$/.test(e.depsIntegrity)))) return undefined;
-      for (const k of ["capabilities", "dependencies", "trustedCapabilities"]) if (!Array.isArray(e[k]) || e[k].some((x) => typeof x !== "string")) return undefined;
-      if (e.trustedCapabilities.some((x) => !e.capabilities.includes(x)) || e.dependencies.some((x) => !Object.hasOwn(p.packages, x))) return undefined;
-      if (e.source.startsWith("path:") ? e.commit !== "local" : !/^[0-9a-f]{40}$/.test(e.commit)) return undefined;
+  // Null-prototype: an id like `constructor` must never be answered by
+  // Object.prototype — `agentProviderTrusted` reads `.integrity` off whatever
+  // this map returns.
+  const out = Object.create(null);
+
+  if (version === 1) {
+    // A v1 document carries no packages map at all.
+    if (p.packages !== undefined) return undefined;
+    for (const [id, e] of Object.entries(capabilities)) {
+      if (!LOCK_ID_RE.test(id) || !map(e)) return undefined;
+      if (!str(e.source) || !str(e.version) || !str(e.integrity) || !LOCK_SHA256_RE.test(e.integrity)) return undefined;
+      if (e.commit !== undefined && typeof e.commit !== "string") return undefined;
+      if (e.trustedExecutables !== undefined && typeof e.trustedExecutables !== "boolean") return undefined;
+      out[id] = { shape: 1, integrity: e.integrity, trusted: e.trustedExecutables === true };
     }
-    const visiting = new Set(), done = new Set();
-    const visit = (id) => {
-      if (visiting.has(id)) return false;
-      if (done.has(id)) return true;
-      visiting.add(id);
-      for (const d of p.packages[id].dependencies) if (!visit(d)) return false;
-      visiting.delete(id); done.add(id); return true;
-    };
-    for (const id of Object.keys(p.packages)) if (!visit(id)) return undefined;
+    return out;
   }
-  return capabilities;
+
+  // Revised v2: a packages map is required (an empty one is the canonical empty
+  // lock), package rows lock transport, capability rows lock the artifact.
+  if (!map(p.packages)) return undefined;
+  const packageIds = Object.keys(p.packages);
+  for (const id of packageIds) {
+    const e = p.packages[id];
+    if (!LOCK_ID_RE.test(id) || !map(e)) return undefined;
+    if (Object.keys(e).some((k) => !LOCK_PACKAGE_KEYS.has(k))) return undefined;
+    if (["source", "path", "version", "commit", "integrity"].some((k) => !str(e[k]))) return undefined;
+    if (!LOCK_SHA256_RE.test(e.integrity)) return undefined;
+    if (!Array.isArray(e.dependencies) || e.dependencies.some((d) => !str(d) || !LOCK_ID_RE.test(d))) return undefined;
+    // Local acquisition is exact-directory: the source names the package root.
+    if (e.source.startsWith("path:") ? (e.commit !== "local" || e.path !== ".") : !/^[0-9a-f]{40}$/.test(e.commit)) return undefined;
+    if (e.dependencies.some((d) => d === id || !Object.hasOwn(p.packages, d))) return undefined;
+  }
+  const visiting = new Set(), done = new Set();
+  const visit = (id) => {
+    if (visiting.has(id)) return false;
+    if (done.has(id)) return true;
+    visiting.add(id);
+    for (const d of p.packages[id].dependencies) if (!visit(d)) return false;
+    visiting.delete(id); done.add(id); return true;
+  };
+  for (const id of packageIds) if (!visit(id)) return undefined;
+
+  for (const [id, e] of Object.entries(capabilities)) {
+    if (!LOCK_ID_RE.test(id) || !map(e)) return undefined;
+    if (Object.keys(e).some((k) => !LOCK_CAPABILITY_KEYS.has(k))) return undefined;
+    if (["version", "package", "path", "integrity"].some((k) => !str(e[k]))) return undefined;
+    // The `package` back-reference is the single provider truth: a dangling one
+    // leaves a materialized artifact with no provenance behind it.
+    if (!LOCK_ID_RE.test(e.package) || !Object.hasOwn(p.packages, e.package)) return undefined;
+    if (!LOCK_SHA256_RE.test(e.integrity)) return undefined;
+    if (typeof e.trusted !== "boolean") return undefined;
+    out[id] = { shape: 2, integrity: e.integrity, trusted: e.trusted };
+  }
+  return out;
 }
 
 /** Read-only, fail-quiet strict lock merge (closest scope wins). */
@@ -430,9 +499,12 @@ function agentProviderTrusted(manifest, startDir) {
   if (manifest?._origin === "owned") return true;
   const lock = capabilityLocks(startDir)[manifest?.capability];
   if (!lock) return false;
+  // The DIGEST FOLLOWS THE LOCK SHAPE — a v2 capability row pins every byte of
+  // the materialized artifact, a v1 row pins the standalone-capability digest.
   // An unreadable tree digests to undefined; it must not compare equal to a
-  // missing locked integrity.
-  const integrity = capabilityIntegrity(manifest._dir);
+  // missing locked integrity (which is what a prototype-answered lookup would
+  // hand back).
+  const integrity = lock.shape === 2 ? capabilityArtifactIntegrity(manifest._dir) : capabilityIntegrity(manifest._dir);
   return !!integrity && integrity === lock.integrity;
 }
 
