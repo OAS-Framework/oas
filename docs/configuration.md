@@ -318,6 +318,15 @@ everything else under `capabilities.additive`, regenerating the conventional
 injection comments; custom comments inside the `capabilities:` block are not
 preserved.
 
+`oas use` activates **into a config file**, so it needs one at this scope or an
+outer one. In a scope with no `oas-config.yaml` anywhere in its chain, a
+capability already present in that scope's own `installed/` or `owned/` store
+fails with `E_NO_CONFIG` naming the initialization to run first — exactly
+`oas init --raw --dir <scope>`, which is offline, deterministic and writes only
+the minimal config — and then the same `oas use` command again. It never
+reports the capability as unacquired, and it writes nothing: authoring a
+scope's first config is `oas init`'s job.
+
 ### Templates
 
 `oas init --template <name|path|git-url>` seeds the new config from a template
@@ -361,7 +370,45 @@ capabilities:
 `oas use none --layer tasks` writes this. Pre-v0.9 spellings (`groups:`,
 top-level `layers:`, flat `capabilities.<id>` maps, `source:`,
 `agents-md-injection` on capability entries) are rejected with pointed
-migration errors.
+migration errors. Key names are matched as own properties only, so a key
+spelled `constructor` or `toString` is reported as an unsupported key, never as
+a renamed one. `__proto__` is refused outright by every YAML reader — the
+kernel's and the desktop app's own read-only reader — and by the commands that
+WRITE config keys (`oas use --settings`, `--soul`, `--type`), all with
+`unsafe-config-key`: assigning it rewrites the parsed mapping's prototype
+instead of becoming data, which would hide the entry from every key validator.
+The kernel fails closed and reports the offending file; the desktop reader
+degrades that document to "not visible", per its read-only contract.
+
+Text that cannot be written as ONE YAML scalar on one line is refused. The
+policed inputs are exactly: `oas use --settings` keys and values, `oas use
+--soul` and `--type` names, `oas type add --description`, and the scaffolded
+`name:` value that `oas init` (in every form) and the first `oas use` / `oas
+type add` at a fresh scope take from the target directory's basename — a
+basename is filesystem input, so one carrying a newline would otherwise write
+arbitrary top-level blocks into the config.
+
+Refused: a control character (a newline in a `--settings` value used to inject
+whole extra capability entries into the file) or one of the three line breaks
+outside that range (U+0085, U+2028, U+2029 — U+2028/U+2029 made the reader drop
+the written line entirely, so the command reported success for a setting that
+was not there afterwards); leading or trailing whitespace a read would strip; a
+leading YAML structure indicator (`#`, `|`, `>`, `&`, `*`, `!`, `%`, `@`,
+`` ` ``, `,`, a quote, a flow bracket, or `- `/`? `/`: `); for a VALUE, an
+embedded `" #"` (which opens a trailing comment, so the rest would be dropped
+on read) and an empty value (`key:` with nothing after it reads back as an
+empty map, not an empty string); and — for keys and `--soul`/`--type` names —
+the `:` and `#` that end a key token. Those fail with `unsafe-config-value`
+(values, the scaffolded name included) or `unsafe-config-key` (keys and names),
+and nothing is written.
+
+These refusals police document shape for the OAS reader, not conformance to
+an external YAML parser — and not byte-fidelity: what is accepted stays one
+`key: value` line and comes back as a scalar, but the reader's plain-scalar
+conventions still apply (a value like `8080` comes back as a number, and quote
+characters are interpreted, not stored literally). The listed characters are
+structural only in first position, so `expr=2 > 1`, `tag=v1.0#build`,
+`list=a,b` and even `mode=a: b` come back exactly as they were written.
 
 ## Worked examples
 

@@ -28,7 +28,7 @@ import {
   officialCapabilityPackage, officialPackageCatalog,
   approveCapability, updatePackage, removePackage, migrateLegacyLock, applyLegacyLockMigration,
   packageIntegrity, capabilityArtifactIntegrity, verifyCapabilityInstallation, installedCapabilityDir, installedCapabilitiesDir, ownedCapabilitiesDir, loadPackageManifestAt,
-  resolveOasConfig, resolveWorkMode, composeInstanceAgentsMd, parseYamlNested, packagedInject, teamAgentRoots,
+  resolveOasConfig, resolveWorkMode, composeInstanceAgentsMd, parseYamlNested, assertSafeConfigValue, assertSafeConfigWriteKey, stripInternalAnnotations, withConfigFile, packagedInject, teamAgentRoots,
   findTeamAgent, findTeamInstance, findCapabilityAgent, findInstanceHome, listCapabilityAgents, workspaceOf,
   ensureRoot, findRoot, findAgent, listAgents, listInstances, listAgentDefs, createAgent as coreCreateAgent,
   spawnInstance, retireInstance, upsertLocalAgent, defaultRepo, RELATIONS,
@@ -88,6 +88,18 @@ function shortPath(p) {
 /** Shell-safe single-quoting for copyable human commands (paths may contain spaces/metacharacters). */
 function shellQuote(s) {
   return /^[A-Za-z0-9._/~-]+$/.test(s) ? s : `'${String(s).replace(/'/g, `'\\''`)}'`;
+}
+
+/** The scaffolded `name:` value — the target directory's basename — held to the
+ * SAME write refusal as every other value this CLI renders into a config line.
+ *
+ * A basename is filesystem input, not a literal: a directory whose name embeds
+ * a newline turned one scaffolded `name:` line into arbitrary top-level config
+ * blocks (a live `team:` block smuggled through `oas init`), and a `#`-leading
+ * basename wrote a value that reads back as an empty map. Refusing names the
+ * offending basename and writes nothing — the operator renames the directory. */
+function scaffoldConfigName(dir) {
+  return assertSafeConfigValue(basename(dir), `the scaffolded name from the directory basename ${JSON.stringify(basename(dir))}`);
 }
 
 function offerTmuxMouseScrolling() {
@@ -422,7 +434,15 @@ function doctor(dir) {
     if (!mans[id]) console.log(`  WARNING: ${id} is locked in ${shortPath(lock._file)} but not acquired — run \`oas install\``);
   }
   for (const [id, m] of Object.entries(mans)) {
-    if (String(m._origin).startsWith("installed:") && !locks[id]) console.log(`  WARNING: ${id} at ${shortPath(m._dir)} is in installed/ but has no lock entry — reacquire it or move it to owned/`);
+    if (!String(m._origin).startsWith("installed:")) continue;
+    // SCOPE-EXACT on the v2 side. `m._capabilityLock` is the row from the
+    // artifact's OWN scope's lock (capabilityManifests annotates it there), and
+    // that is the only row that can lock this artifact: the merged chain would
+    // let an outer scope's lock — or a lock-only ancestor with no config at all
+    // — silence an unlocked inner copy that WINS discovery precedence and
+    // activates. The legacy arm stays chain-merged: v1 parity is unchanged.
+    if (m._capabilityLock || Object.hasOwn(locks, id)) continue;
+    console.log(`  WARNING: ${id} at ${shortPath(m._dir)} is in installed/ but has no lock entry — reacquire it or move it to owned/`);
   }
   if (existsSync(LEGACY_HOME_CAPABILITIES_DIR)) console.log(`  WARNING: legacy ~/.oas/capabilities exists and is no longer discovered — reinstall its packages at a config scope and remove it`);
 
@@ -566,7 +586,7 @@ function replaceCapabilitiesBlock(text, caps) {
 /** Load the parsed capabilities model of a config file ({layers:{}, additive:{}}). */
 function readCapabilitiesModel(file) {
   if (!existsSync(file)) return { layers: {}, additive: {} };
-  const cfg = parseYamlNested(readFileSync(file, "utf8"));
+  const cfg = withConfigFile(file, () => parseYamlNested(readFileSync(file, "utf8")));
   const caps = cfg.capabilities || {};
   return { layers: { ...(caps.layers || {}) }, additive: { ...(caps.additive || {}) } };
 }
@@ -580,7 +600,7 @@ function use() {
   const file = join(dir, "oas-config.yaml");
   const layer = flag("layer");
   if (layer && !LAYERS.includes(layer)) die(`--layer must be one of: ${LAYERS.join(", ")}`);
-  let text = existsSync(file) ? readFileSync(file, "utf8") : `name: ${basename(dir)}\n`;
+  let text = existsSync(file) ? readFileSync(file, "utf8") : `name: ${scaffoldConfigName(dir)}\n`;
   const caps = readCapabilitiesModel(file);
   if (requested === "none") {
     if (!layer) die("oas use none requires --layer <name>");
@@ -590,7 +610,25 @@ function use() {
     return;
   }
   const manifest = capabilityManifest(requested, dir);
-  if (!manifest) die(`unknown capability "${requested}" (acquired: ${Object.keys(capabilityManifests(dir)).join(", ") || "none"}) — acquire it with \`oas install ${requested}\` (marketplace: ${Object.keys(marketplaceCapabilities()).join(", ")})`);
+  if (!manifest) {
+    // A scope with NO oas-config.yaml anywhere in its chain is not a config
+    // level, so `capabilityManifests` — which walks the chain — never opens this
+    // scope's installed store: a capability acquired and locked right here would
+    // otherwise be reported as never acquired. Diagnose the missing chain
+    // instead. `oas use` still writes nothing: authoring an adopter's first
+    // config is `oas init`'s job, and guessing it here would be policy.
+    if (!configChain(dir).length && ownScopeCapabilityManifest(dir, requested)) {
+      // The remedy is `--raw` on purpose: it is offline, deterministic, and
+      // writes only the minimal config this scope is missing. It never names
+      // `--package <pkg>` — that arm read the provider out of the MERGED lock
+      // chain while this gate reads own-scope only, and it dead-ends whenever
+      // the provider exports no config template. Both scope mentions use the
+      // same rendering, so the printed command is copyable verbatim.
+      cmdFail("E_NO_CONFIG", `capability "${requested}" is present in the capability store at ${shellQuote(dir)}, but there is no oas-config.yaml at this scope or any level above it — \`oas use\` activates into a config file and this scope has none. Create the minimal one with \`oas init --raw --dir ${shellQuote(dir)}\`, then re-run \`oas use ${requested}\`.`);
+      return;
+    }
+    die(`unknown capability "${requested}" (acquired: ${Object.keys(capabilityManifests(dir)).join(", ") || "none"}) — acquire it with \`oas install ${requested}\` (marketplace: ${Object.keys(marketplaceCapabilities()).join(", ")})`);
+  }
   if (layer && manifest.layer !== layer) die(`capability "${manifest.capability}" declares layer "${manifest.layer || "none"}", not "${layer}"`);
   const targets = [["agent-types", flag("type")], ["souls", flag("soul")]].filter(([, value]) => value);
   if (args.includes("--global")) targets.push(["global", undefined]);
@@ -625,7 +663,17 @@ function use() {
     for (const kv of settingsArgs) {
       const eq = kv.indexOf("=");
       if (eq <= 0) die(`--settings expects key=value, got "${kv}"`);
-      entry.settings[kv.slice(0, eq)] = kv.slice(eq + 1);
+      // WRITE side of the refusals the readers enforce. Two distinct hazards on
+      // this one line:
+      //   - `--settings __proto__=x` assigned through the inherited setter,
+      //     which swallowed the entry, and the command reported success for a
+      //     setting it never wrote;
+      //   - the VALUE is rendered verbatim into one `key: value` line, so a
+      //     newline-bearing value stopped being a value and became document —
+      //     a crafted one added a whole second capability entry.
+      // Both fail closed, before anything is written.
+      const key = assertSafeConfigWriteKey(kv.slice(0, eq), `--settings key ${JSON.stringify(kv.slice(0, eq))}`);
+      entry.settings[key] = assertSafeConfigValue(kv.slice(eq + 1), `--settings value for ${JSON.stringify(key)}`);
     }
   }
   if (targetKind === "global") entry.global = enabled;
@@ -634,7 +682,11 @@ function use() {
     // before narrowing, so adding a soul/type binding doesn't silently drop everyone else.
     if (manifest.layer && entry.global === undefined && !entry["agent-types"] && !entry.souls) entry.global = true;
     entry[targetKind] = entry[targetKind] && typeof entry[targetKind] === "object" ? entry[targetKind] : {};
-    entry[targetKind][targetName] = enabled;
+    // Same write-side refusal, and for the same two reasons: `--soul
+    // __proto__` was swallowed by the inherited setter and reported as
+    // activated, and a `--soul`/`--type` NAME is written as a mapping key, so a
+    // newline in it injects document exactly like a settings value does.
+    entry[targetKind][assertSafeConfigWriteKey(targetName, `--${targetKind === "agent-types" ? "type" : "soul"} name ${JSON.stringify(String(targetName))}`)] = enabled;
   }
   writeFileSync(file, replaceCapabilitiesBlock(text, caps));
   console.log(`${enabled ? "Activated" : "Excluded"} ${manifest.capability} for ${targetKind === "global" ? "global" : `${targetKind === "agent-types" ? "type" : "soul"} ${targetName}`} at ${level} level (${shortPath(file)})`);
@@ -898,7 +950,7 @@ function reconcile(dir) {
 
 function reconcileInner(dir) {
   const cfgFile = join(dir, "oas-config.yaml");
-  const declaresTeamHere = existsSync(cfgFile) && !!parseYamlNested(readFileSync(cfgFile, "utf8")).team;
+  const declaresTeamHere = existsSync(cfgFile) && !!withConfigFile(cfgFile, () => parseYamlNested(readFileSync(cfgFile, "utf8"))).team;
   const recursive = args.includes("--recursive");
   if (!declaresTeamHere && !recursive) {
     // Current-chain behavior, plus the requirements gate for this chain's active capabilities.
@@ -2041,18 +2093,25 @@ function loadTemplateConfig(spec, dir) {
       provenance = `${source}@${commit.slice(0, 12)}`;
     } finally { rmSync(tmp, { recursive: true, force: true }); }
   } else {
-    const path = resolve(source.replace(/^~\//, `${homedir()}/`));
+    // Replacer FUNCTION, not a replacement string: `$&`, `$'`, `` $` `` and
+    // `$1` are substitution syntax in String.replace, and a home directory may
+    // legally contain them.
+    const path = resolve(source.replace(/^~\//, () => `${homedir()}/`));
     if (!existsSync(path)) fail("E_TEMPLATE_SOURCE", `template config not found: ${path}`);
     body = readFileSync(path, "utf8");
     provenance = path;
   }
   // Snapshot: strip template-registry keys that make no sense in the seeded config.
   const lines = body.replace(/\n*$/, "\n").split("\n");
+  const scaffoldName = scaffoldConfigName(dir);
   const out = []; let skipping = false;
   for (const line of lines) {
     if (/^templates:\s*$/.test(line)) { skipping = true; continue; }
     if (skipping) { if (/^\S/.test(line) && line.trim()) skipping = false; else continue; }
-    out.push(line.replace(/^name:.*$/, `name: ${basename(dir)}`));
+    // Replacer FUNCTION, not a replacement string — this is a WRITE, so a
+    // directory named `x$&y` would otherwise persist a corrupted `name:` line
+    // (`name: xname: template-namey`).
+    out.push(line.replace(/^name:.*$/, () => `name: ${scaffoldName}`));
   }
   return `# template: ${provenance} (snapshot — later template edits do not propagate)\n${out.join("\n").replace(/\n*$/, "\n")}`;
 }
@@ -2067,6 +2126,11 @@ function init() {
   const bail = (code, msg) => (JSON_MODE ? jsonFail(code, msg) : die(msg));
   const note = (msg) => (JSON_MODE ? console.error(msg) : console.log(msg));
   if (existsSync(file)) bail("E_CONFIG_EXISTS", `${shortPath(file)} already exists — edit it or use \`oas use\``);
+  // The scaffolded `name:` value is FILESYSTEM input. Refuse it up front, before
+  // any init form mutates anything — a basename that cannot stay one YAML scalar
+  // must abort the run, not be discovered halfway through a transaction.
+  try { scaffoldConfigName(dir); }
+  catch (e) { bail(e.code, e.message); return; }
 
   if (pkgSrc && pkgSrc !== true) { initPackage(pkgSrc, dir, file); return; }
   if (pkgSrc === true) { bail("E_USAGE", "--package needs a package id, local path, or git URL"); return; }
@@ -2116,7 +2180,12 @@ function init() {
   // Own-scope manifests are read DIRECTLY: no oas-config.yaml exists here yet,
   // so the config-chain walk cannot see this scope's own store, and a
   // capability already installed here would look unknown.
-  const mans = { ...market, ...capabilityManifests(dir), ...ownScopeCapabilityManifests(dir) };
+  // Object.assign onto a null prototype, never an object spread: `{ ...map }`
+  // re-plainifies the null-prototype sources, and `mans[v]` is then indexed with
+  // a `--<layer>` value the operator typed — `--knowledge constructor` would
+  // read Object.prototype.constructor as a manifest and report a layer mismatch
+  // for a capability that does not exist.
+  const mans = Object.assign(Object.create(null), market, capabilityManifests(dir), ownScopeCapabilityManifests(dir));
   for (const layer of LAYERS) {
     const v = flag(layer);
     if (v === undefined) continue;
@@ -2180,7 +2249,7 @@ function init() {
   const acquisitions = [];
   let resolved;
   const lines = [
-    `name: ${basename(dir)}`,
+    `name: ${scaffoldConfigName(dir)}`,
     "",
     "# ── Agent types (families) — declared here by name (or via `oas type add`);",
     "# each soul opts in via `type: <name>` in its soul.yaml. Capability entries can target them.",
@@ -2329,7 +2398,11 @@ function acquireLayerCapability(dir, capId, layer, acquired, note) {
  * directly instead, which is also what makes a same-run acquisition visible to
  * the rest of the run. */
 function ownScopeCapabilityManifests(dir) {
-  const out = {};
+  // Capability-id keyed — never answer for `constructor`/`toString`. Belt and
+  // braces on the write side (store directory names are identity-validated at
+  // acquisition); it matters on the read side, where `oas init` indexes this
+  // map with a `--<layer>` flag value the operator typed.
+  const out = Object.create(null);
   for (const [sub, origin] of [[installedCapabilitiesDir(dir), "installed"], [ownedCapabilitiesDir(dir), "owned"]]) {
     if (!existsSync(sub)) continue;
     let entries;
@@ -2337,9 +2410,17 @@ function ownScopeCapabilityManifests(dir) {
     for (const e of entries) {
       // Dot-prefixed entries are transaction staging, never installed content.
       if (!e.isDirectory() || e.name.startsWith(".")) continue;
-      let m;
-      try { m = JSON.parse(readFileSync(join(sub, e.name, "oas.json"), "utf8")); } catch { continue; }
-      if (m && typeof m.capability === "string") out[m.capability] = { ...m, _dir: join(sub, e.name), _origin: `${origin}:${dir}` };
+      let raw;
+      try { raw = JSON.parse(readFileSync(join(sub, e.name, "oas.json"), "utf8")); } catch { continue; }
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+      // Strip BEFORE the spread. `_dir` and `_origin` are reassigned just after
+      // it, but every OTHER annotation in the namespace — `_capabilityLock`,
+      // `_package`, `_soulDir` … — would flow straight out of an
+      // artifact-controlled document. That is the exact shape the kernel's own
+      // manifest reader was fixed for, and this map is merged OVER that
+      // stripped one, so leaving it raw kept the forgery carrier alive.
+      const m = stripInternalAnnotations(raw);
+      if (typeof m.capability === "string") out[m.capability] = { ...m, _dir: join(sub, e.name), _origin: `${origin}:${dir}` };
     }
   }
   return out;
@@ -2484,7 +2565,14 @@ function spawnCmd() {
       work: flag("work"), workDir: flag("work-dir"), runtime: flag("runtime"), model: flag("model"), branch: flag("branch"),
       launch: !args.includes("--no-launch"),
     });
-  } catch (e) { bail(e.code === "E_RELATIVE_AMBIGUOUS" ? "E_RELATIVE_AMBIGUOUS" : "E_SPAWN_FAILED", e.message || e); throw e; }
+  } catch (e) {
+    // A typed CLI failure keeps ITS OWN code: re-badging an unsafe-config-key
+    // (raised by the readers spawn walks) as E_SPAWN_FAILED tells an agent
+    // consumer the spawn mechanism broke, when the fixable fact is a poisoned
+    // document the message already names. The shared boundary renders it.
+    if (TYPED_CLI_FAILURES.has(e?.code)) throw e;
+    bail(e.code === "E_RELATIVE_AMBIGUOUS" ? "E_RELATIVE_AMBIGUOUS" : "E_SPAWN_FAILED", e.message || e); throw e;
+  }
   if (JSON_MODE) {
     // Desktop CLI API v1 spawn result — a FIXED shape (see docs/desktop-cli-api.md).
     jsonOk({
@@ -2596,7 +2684,11 @@ function capabilityCommand() {
     let teamCtx;
     const instanceHome = process.env.PI_AGENT_HOME || process.env.OAS_HOME;
     const metaFile = instanceHome && join(instanceHome, "instance.json");
-    let capSettings = {};
+    // Capability-id keyed — never answer for `constructor`/`toString`. Belt and
+    // braces: the ids come from instance.json, which spawn wrote from resolved
+    // manifests. Null-prototype because the dispatcher indexes it with the
+    // namespace the operator typed on the command line.
+    let capSettings = Object.create(null);
     try {
       if (metaFile && existsSync(metaFile)) {
         const meta = JSON.parse(readFileSync(metaFile, "utf8"));
@@ -2673,10 +2765,16 @@ function typeCmd() {
   const name = args[2];
   if (!/^[a-z][a-z0-9-]*$/.test(name)) die(`agent type "${name}" must be lowercase alphanumeric/hyphens`);
   const description = flag("description");
-  let text = existsSync(file) ? readFileSync(file, "utf8") : `name: ${basename(dir)}\n`;
-  const cfg = existsSync(file) ? parseYamlNested(text) : {};
-  if (cfg["agent-types"]?.[name]) die(`agent type "${name}" already declared in ${shortPath(file)}`);
-  const block = [`  ${name}:`, ...(description ? [`    description: ${description}`] : [])];
+  let text = existsSync(file) ? readFileSync(file, "utf8") : `name: ${scaffoldConfigName(dir)}\n`;
+  const cfg = existsSync(file) ? withConfigFile(file, () => parseYamlNested(text)) : {};
+  // Own-property: `constructor` is a legal agent-type name, and a plain lookup
+  // would report it as already declared in a config that never mentions it.
+  const declaredTypes = cfg["agent-types"];
+  if (declaredTypes && typeof declaredTypes === "object" && Object.hasOwn(declaredTypes, name)) die(`agent type "${name}" already declared in ${shortPath(file)}`);
+  // The NAME is already held to a strict grammar above; the DESCRIPTION was
+  // written verbatim onto its own line, so it could inject document the same
+  // way a `--settings` value could.
+  const block = [`  ${name}:`, ...(description ? [`    description: ${assertSafeConfigValue(description, "--description")}`] : [])];
   const lines = text.replace(/\n*$/, "\n").split("\n");
   // Drop the scaffold comment block once a real agent-types block exists.
   const scaffold = lines.findIndex((l) => /^# ── Agent types/.test(l));
@@ -2802,6 +2900,20 @@ function versionCmd() {
 }
 
 // ---------- main ----------
+// Typed config-shape failures are DEPLOYMENT state the operator can fix, not
+// kernel bugs: an unsafe mapping key anywhere in the visible config chain is
+// raised by the readers, which every command walks before it can do anything.
+// Without this boundary `oas doctor`, `oas use` and every --json mode printed a
+// raw Node stack with empty stdout — no code, no envelope, nothing to act on.
+// Deliberately narrow: only codes with a defined rendering are caught here;
+// anything else still crashes loudly.
+//
+// The dispatch chain below is deliberately NOT re-indented into this try block:
+// keeping it at column 0 makes the whole command table one reviewable diff of
+// added lines rather than ~150 lines of pure whitespace churn, and keeps `git
+// blame` pointing at the commit that last changed each command.
+const TYPED_CLI_FAILURES = new Set(["unsafe-config-key", "unsafe-config-value"]);
+try {
 if (cmd === "doctor") {
   const doctorDir = args[1] && !args[1].startsWith("--") ? args[1] : undefined;
   args.includes("--json") ? doctorJson(doctorDir) : doctor(doctorDir);
@@ -2821,7 +2933,9 @@ else if (cmd === "init") init();
 else if (cmd === "status") status();
 else if (cmd === "pane") await paneCmd();
 else if (cmd === "version" || cmd === "--version" || cmd === "-v") versionCmd();
-else if (cmd === "spawn") { try { spawnCmd(); } catch (e) { if (JSON_MODE) jsonFail("E_SPAWN_FAILED", e.message || e); throw e; } }
+// Same rule as the inner catch: a typed CLI failure surfaces with its own code
+// through the shared boundary, never re-badged as a spawn-mechanism failure.
+else if (cmd === "spawn") { try { spawnCmd(); } catch (e) { if (TYPED_CLI_FAILURES.has(e?.code)) throw e; if (JSON_MODE) jsonFail("E_SPAWN_FAILED", e.message || e); throw e; } }
 else if (cmd === "retire") retireCmd();
 else if (cmd === "create") createCmd();
 // `!HELP_WORDS.has(cmd)`: usage NEVER depends on deployment state. `help` is a
@@ -2944,4 +3058,12 @@ Usage:
 
 Layers: ${LAYERS.join(", ")}. Level detection: ~ → laptop, .git → repo, else workspace.`);
   process.exit(cmd && !HELP_WORDS.has(cmd) ? 1 : 0);
+}
+} catch (e) {
+  if (!TYPED_CLI_FAILURES.has(e?.code)) throw e;
+  // Same two renderings as every other typed failure: one envelope on stdout in
+  // --json mode, one `oas: <message>` line on stderr otherwise. The message
+  // already names the offending file — the readers re-raise it with one.
+  if (JSON_MODE) jsonFail(e.code, e.message);
+  die(e.message);
 }

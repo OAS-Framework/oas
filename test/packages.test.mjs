@@ -229,6 +229,37 @@ test("oas init --package: adopts a template verbatim with a recorded base; defau
   rmSync(base, { recursive: true, force: true });
 });
 
+test("a config template carrying an unsafe mapping key is refused NAMING the template, and nothing is adopted", () => {
+  const base = temp();
+  // A package whose template uses `__proto__` as a mapping key. Package bytes
+  // are config SOURCE MATERIAL and go through the same reader as a config on
+  // disk, so the refusal must name WHICH template — an adopter reading
+  // "unsupported mapping key" alone cannot find it in a package that ships
+  // several.
+  const badPkg = fixturePackage(join(base, "poison"), { id: "poison.pkg", extraFiles: {
+    "configs/x/oas-config.yaml": "name: w\n__proto__:\n  polluted: true\n",
+  }, configs: { x: { path: "configs/x/oas-config.yaml", default: true } } });
+  const ws = join(base, "ws"); mkdirSync(ws);
+
+  const r = cli(["init", "--package", badPkg, "--dir", ws, "--no-tmux-mouse"]);
+  assert.notEqual(r.status, 0, r.stdout);
+  assert.match(r.stderr, /unsupported mapping key "__proto__"/);
+  assert.ok(r.stderr.includes("configs/x/oas-config.yaml"), `the refusal must name the template path: ${r.stderr}`);
+  assert.ok(r.stderr.includes('config template "x" of package poison.pkg'), r.stderr);
+  assert.deepEqual(readdirSync(ws), [], "a refused template must leave no lock, store, or anchor");
+  assert.equal(Object.prototype.polluted, undefined);
+
+  // The engine-level validator says the same thing to a direct caller.
+  const errors = validateConfigTemplate(
+    { template: "x", path: "configs/x/oas-config.yaml", content: "name: w\n__proto__:\n  polluted: true\n" },
+    "poison.pkg",
+  );
+  assert.equal(errors.length, 1, errors.join("; "));
+  assert.match(errors[0], /unsupported mapping key "__proto__"/);
+  assert.ok(errors[0].includes("configs/x/oas-config.yaml"), errors[0]);
+  rmSync(base, { recursive: true, force: true });
+});
+
 // ---------- adopter sovereignty ----------
 
 test("adopted snapshot stays an ordinary scoped config: retarget, disable, settings, and nested repo overrides all work", () => {
@@ -266,6 +297,67 @@ test("adopted snapshot stays an ordinary scoped config: retarget, disable, setti
   write(join(repo, "oas-config.yaml"), "name: member\ncapabilities:\n  layers:\n    knowledge: none\n");
   assert.equal(resolveOasConfig(repo, undefined).layers.knowledge, undefined, "nested repo override wins");
   assert.equal(resolveOasConfig(ws, undefined).layers.knowledge.id, "example.delivery", "workspace scope unaffected");
+});
+
+test("oas use in a scope with no config chain names the initialization remedy instead of reporting an installed capability as unacquired", () => {
+  const base = temp();
+  const pkg = fixturePackage(join(base, "pkg"));
+  const ws = join(base, "ws");
+  // Acquired and locked at this scope, and NOTHING is a config level: no
+  // oas-config.yaml here or anywhere above the temp root.
+  installFixturePackage(ws, pkg);
+  assert.ok(existsSync(join(ws, ".agents", "capabilities", "installed", "example.review", "oas.json")));
+  assert.equal(existsSync(join(ws, "oas-config.yaml")), false);
+
+  const r = cli(["use", "example.review", "--global", "--dir", ws]);
+  assert.notEqual(r.status, 0);
+  assert.doesNotMatch(r.stderr, /acquired: none/, "an installed capability must never be reported as never acquired");
+  // Anchored on the FACTS the diagnosis must carry — the capability id, the
+  // scope it was found at, and the missing file — not on the sentence that
+  // carries them, which is free to be reworded.
+  assert.ok(r.stderr.includes("example.review"), r.stderr);
+  assert.ok(r.stderr.includes(ws), r.stderr);
+  assert.ok(r.stderr.includes("oas-config.yaml"), r.stderr);
+  // The remedy names `oas init --raw`: offline, deterministic, and writing only
+  // the minimal config. It never names `--package`, which read the provider out
+  // of the MERGED lock chain while this gate reads own-scope only, and dead-ends
+  // whenever the provider exports no config template.
+  assert.doesNotMatch(r.stderr, /--package/);
+  assert.equal(existsSync(join(ws, "oas-config.yaml")), false, "diagnosis only — oas use never authors the adopter's first config");
+
+  const j = cli(["use", "example.review", "--global", "--dir", ws, "--json"]);
+  assert.notEqual(j.status, 0);
+  assert.equal(JSON.parse(j.stdout).error.code, "E_NO_CONFIG");
+
+  // A capability that really is absent keeps the acquisition message.
+  const miss = cli(["use", "example.absent", "--global", "--dir", ws]);
+  assert.notEqual(miss.status, 0);
+  assert.match(miss.stderr, /unknown capability "example\.absent" \(acquired: none\)/);
+
+  // The remedy is EXECUTED, not paraphrased: the backticked `oas init` command
+  // is lifted out of stderr and run EXACTLY as printed — no flag the operator
+  // would not have typed is added, because a remedy that only works with an
+  // extra flag is not the remedy that was printed. The only substitution is
+  // argv[0] (`oas` is not installed on the test host), and the one thing the
+  // harness needs — an offline package catalog — is passed through the
+  // environment, never the command line.
+  const printed = r.stderr.match(/`(oas init [^`]+)`/);
+  assert.ok(printed, r.stderr);
+  const command = printed[1];
+  assert.ok(command.includes("--raw"), command);
+  assert.ok(command.includes("--dir"), `the remedy must carry its own --dir: ${command}`);
+  const asNode = command.replace(/^oas\b/, `${JSON.stringify(process.execPath)} ${JSON.stringify(CLI)}`);
+  const run = spawnSync("sh", ["-c", asNode], {
+    encoding: "utf8",
+    env: { ...hermeticEnv(), OAS_PACKAGE_CATALOG: join(base, "no-such-catalog.json") },
+  });
+  assert.equal(run.status, 0, `${run.stdout}\n${run.stderr}`);
+  assert.equal(existsSync(join(ws, "oas-config.yaml")), true, "the printed remedy must actually create the config");
+
+  // …and then the exact `oas use` command the remedy told the adopter to re-run.
+  const ok = cli(["use", "example.review", "--global", "--dir", ws]);
+  assert.equal(ok.status, 0, ok.stderr);
+  assert.equal(resolveOasConfig(ws, "dev").capabilities.some((c) => c.id === "example.review"), true);
 });
 
 // ---------- config diff ----------
