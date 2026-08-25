@@ -28,7 +28,7 @@ import {
   officialCapabilityPackage, officialPackageCatalog,
   approveCapability, updatePackage, removePackage, migrateLegacyLock, applyLegacyLockMigration,
   packageIntegrity, capabilityArtifactIntegrity, verifyCapabilityInstallation, installedCapabilityDir, installedCapabilitiesDir, ownedCapabilitiesDir, loadPackageManifestAt,
-  resolveOasConfig, resolveWorkMode, composeInstanceAgentsMd, parseYamlNested, packagedInject, teamAgentRoots,
+  resolveOasConfig, resolveWorkMode, composeInstanceAgentsMd, parseYamlNested, assertSafeConfigKey, withConfigFile, packagedInject, teamAgentRoots,
   findTeamAgent, findTeamInstance, findCapabilityAgent, findInstanceHome, listCapabilityAgents, workspaceOf,
   ensureRoot, findRoot, findAgent, listAgents, listInstances, listAgentDefs, createAgent as coreCreateAgent,
   spawnInstance, retireInstance, upsertLocalAgent, defaultRepo, RELATIONS,
@@ -574,19 +574,12 @@ function replaceCapabilitiesBlock(text, caps) {
 /** Load the parsed capabilities model of a config file ({layers:{}, additive:{}}). */
 function readCapabilitiesModel(file) {
   if (!existsSync(file)) return { layers: {}, additive: {} };
-  const cfg = parseYamlNested(readFileSync(file, "utf8"));
+  const cfg = withConfigFile(file, () => parseYamlNested(readFileSync(file, "utf8")));
   const caps = cfg.capabilities || {};
   return { layers: { ...(caps.layers || {}) }, additive: { ...(caps.additive || {}) } };
 }
 
 // ---------- use / activation ----------
-/** Provider package of an installed capability, from the visible exact lock.
- * Best effort by design: this only enriches a diagnosis, so a lock the failing
- * command was not otherwise reading must not turn it into invalid-lock. */
-function lockedProviderPackage(dir, capId) {
-  try { return (lockedPackageCapabilities(dir).get(capId) || [])[0]; }
-  catch { return undefined; }
-}
 function use() {
   const requested = args[1];
   if (!requested || requested.startsWith("--")) die("usage: oas use <capability|none> [--global|--type <agent-type>|--soul <name>] [--disable] [--layer <name>] [--settings k=v [k2=v2 ...]] [--dir <dir>]");
@@ -613,8 +606,13 @@ function use() {
     // instead. `oas use` still writes nothing: authoring an adopter's first
     // config is `oas init`'s job, and guessing it here would be policy.
     if (!configChain(dir).length && ownScopeCapabilityManifest(dir, requested)) {
-      const pkg = lockedProviderPackage(dir, requested);
-      cmdFail("E_NO_CONFIG", `capability "${requested}" is installed at ${shortPath(dir)}, but there is no oas-config.yaml at this scope or any level above it — \`oas use\` activates into a config file and this scope has none. Initialize it first with \`oas init${pkg ? ` --package ${pkg}` : ""} --dir ${shellQuote(dir)}\`, then re-run \`oas use ${requested}\`.`);
+      // The remedy is `--raw` on purpose: it is offline, deterministic, and
+      // writes only the minimal config this scope is missing. It never names
+      // `--package <pkg>` — that arm read the provider out of the MERGED lock
+      // chain while this gate reads own-scope only, and it dead-ends whenever
+      // the provider exports no config template. Both scope mentions use the
+      // same rendering, so the printed command is copyable verbatim.
+      cmdFail("E_NO_CONFIG", `capability "${requested}" is present in the capability store at ${shellQuote(dir)}, but there is no oas-config.yaml at this scope or any level above it — \`oas use\` activates into a config file and this scope has none. Create the minimal one with \`oas init --raw --dir ${shellQuote(dir)}\`, then re-run \`oas use ${requested}\`.`);
       return;
     }
     die(`unknown capability "${requested}" (acquired: ${Object.keys(capabilityManifests(dir)).join(", ") || "none"}) — acquire it with \`oas install ${requested}\` (marketplace: ${Object.keys(marketplaceCapabilities()).join(", ")})`);
@@ -653,7 +651,11 @@ function use() {
     for (const kv of settingsArgs) {
       const eq = kv.indexOf("=");
       if (eq <= 0) die(`--settings expects key=value, got "${kv}"`);
-      entry.settings[kv.slice(0, eq)] = kv.slice(eq + 1);
+      // WRITE side of the same refusal the readers enforce: `--settings
+      // __proto__=x` assigned through the inherited setter, which swallowed the
+      // entry, and the command then reported success for a setting it never
+      // wrote. Fail closed instead.
+      entry.settings[assertSafeConfigKey(kv.slice(0, eq))] = kv.slice(eq + 1);
     }
   }
   if (targetKind === "global") entry.global = enabled;
@@ -662,7 +664,9 @@ function use() {
     // before narrowing, so adding a soul/type binding doesn't silently drop everyone else.
     if (manifest.layer && entry.global === undefined && !entry["agent-types"] && !entry.souls) entry.global = true;
     entry[targetKind] = entry[targetKind] && typeof entry[targetKind] === "object" ? entry[targetKind] : {};
-    entry[targetKind][targetName] = enabled;
+    // Same write-side refusal: `--soul __proto__` / `--type __proto__` would be
+    // swallowed by the inherited setter and reported as activated.
+    entry[targetKind][assertSafeConfigKey(targetName)] = enabled;
   }
   writeFileSync(file, replaceCapabilitiesBlock(text, caps));
   console.log(`${enabled ? "Activated" : "Excluded"} ${manifest.capability} for ${targetKind === "global" ? "global" : `${targetKind === "agent-types" ? "type" : "soul"} ${targetName}`} at ${level} level (${shortPath(file)})`);
@@ -926,7 +930,7 @@ function reconcile(dir) {
 
 function reconcileInner(dir) {
   const cfgFile = join(dir, "oas-config.yaml");
-  const declaresTeamHere = existsSync(cfgFile) && !!parseYamlNested(readFileSync(cfgFile, "utf8")).team;
+  const declaresTeamHere = existsSync(cfgFile) && !!withConfigFile(cfgFile, () => parseYamlNested(readFileSync(cfgFile, "utf8"))).team;
   const recursive = args.includes("--recursive");
   if (!declaresTeamHere && !recursive) {
     // Current-chain behavior, plus the requirements gate for this chain's active capabilities.
@@ -2144,7 +2148,12 @@ function init() {
   // Own-scope manifests are read DIRECTLY: no oas-config.yaml exists here yet,
   // so the config-chain walk cannot see this scope's own store, and a
   // capability already installed here would look unknown.
-  const mans = { ...market, ...capabilityManifests(dir), ...ownScopeCapabilityManifests(dir) };
+  // Object.assign onto a null prototype, never an object spread: `{ ...map }`
+  // re-plainifies the null-prototype sources, and `mans[v]` is then indexed with
+  // a `--<layer>` value the operator typed — `--knowledge constructor` would
+  // read Object.prototype.constructor as a manifest and report a layer mismatch
+  // for a capability that does not exist.
+  const mans = Object.assign(Object.create(null), market, capabilityManifests(dir), ownScopeCapabilityManifests(dir));
   for (const layer of LAYERS) {
     const v = flag(layer);
     if (v === undefined) continue;
@@ -2710,7 +2719,7 @@ function typeCmd() {
   if (!/^[a-z][a-z0-9-]*$/.test(name)) die(`agent type "${name}" must be lowercase alphanumeric/hyphens`);
   const description = flag("description");
   let text = existsSync(file) ? readFileSync(file, "utf8") : `name: ${basename(dir)}\n`;
-  const cfg = existsSync(file) ? parseYamlNested(text) : {};
+  const cfg = existsSync(file) ? withConfigFile(file, () => parseYamlNested(text)) : {};
   // Own-property: `constructor` is a legal agent-type name, and a plain lookup
   // would report it as already declared in a config that never mentions it.
   const declaredTypes = cfg["agent-types"];
@@ -2841,6 +2850,15 @@ function versionCmd() {
 }
 
 // ---------- main ----------
+// Typed config-shape failures are DEPLOYMENT state the operator can fix, not
+// kernel bugs: an unsafe mapping key anywhere in the visible config chain is
+// raised by the readers, which every command walks before it can do anything.
+// Without this boundary `oas doctor`, `oas use` and every --json mode printed a
+// raw Node stack with empty stdout — no code, no envelope, nothing to act on.
+// Deliberately narrow: only codes with a defined rendering are caught here;
+// anything else still crashes loudly.
+const TYPED_CLI_FAILURES = new Set(["unsafe-config-key"]);
+try {
 if (cmd === "doctor") {
   const doctorDir = args[1] && !args[1].startsWith("--") ? args[1] : undefined;
   args.includes("--json") ? doctorJson(doctorDir) : doctor(doctorDir);
@@ -2983,4 +3001,12 @@ Usage:
 
 Layers: ${LAYERS.join(", ")}. Level detection: ~ → laptop, .git → repo, else workspace.`);
   process.exit(cmd && !HELP_WORDS.has(cmd) ? 1 : 0);
+}
+} catch (e) {
+  if (!TYPED_CLI_FAILURES.has(e?.code)) throw e;
+  // Same two renderings as every other typed failure: one envelope on stdout in
+  // --json mode, one `oas: <message>` line on stderr otherwise. The message
+  // already names the offending file — the readers re-raise it with one.
+  if (JSON_MODE) jsonFail(e.code, e.message);
+  die(e.message);
 }

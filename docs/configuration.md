@@ -320,11 +320,12 @@ preserved.
 
 `oas use` activates **into a config file**, so it needs one at this scope or an
 outer one. In a scope with no `oas-config.yaml` anywhere in its chain, a
-capability already acquired into that scope's `installed/` store fails with
-`E_NO_CONFIG` naming the initialization to run first (`oas init`, plus
-`--package <id>` when the exact lock records the provider) rather than
-reporting the capability as unacquired. It writes nothing: authoring a scope's
-first config is `oas init`'s job.
+capability already present in that scope's own `installed/` or `owned/` store
+fails with `E_NO_CONFIG` naming the initialization to run first — exactly
+`oas init --raw --dir <scope>`, which is offline, deterministic and writes only
+the minimal config — and then the same `oas use` command again. It never
+reports the capability as unacquired, and it writes nothing: authoring a
+scope's first config is `oas init`'s job.
 
 ### Templates
 

@@ -56,7 +56,12 @@ test("__proto__ is refused by every YAML reader and pollutes nothing", () => {
   for (const doc of documents) {
     assert.throws(() => parseYamlNested(doc), (e) => {
       assert.equal(e.code, "unsafe-config-key");
-      assert.match(e.message, /unsupported oas-config key "__proto__"/);
+      assert.match(e.message, /unsupported mapping key "__proto__"/);
+      // The raw reader parses a STRING and cannot name the document, so it must
+      // not claim the document is an oas-config: soul.yaml and skill
+      // frontmatter go through the same readers. The file is added by whoever
+      // holds the path.
+      assert.doesNotMatch(e.message, /oas-config key/);
       return true;
     }, doc);
   }
@@ -67,7 +72,7 @@ test("__proto__ is refused by every YAML reader and pollutes nothing", () => {
   // so it can neither mutate a prototype nor smuggle an unvalidated key past
   // validateConfigShape by vanishing from Object.keys.
   const file = join(temp(), "oas-config.yaml");
-  assert.throws(() => validateConfigShape(parseYamlNested("__proto__: {name: smuggled}\n"), file), /unsupported oas-config key "__proto__"/);
+  assert.throws(() => validateConfigShape(parseYamlNested("__proto__: {name: smuggled}\n"), file), /unsupported mapping key "__proto__"/);
   assert.equal(Object.prototype.name, undefined);
 });
 
@@ -202,6 +207,87 @@ test("a capability command namespace named constructor is not a duplicate of Obj
     assert.doesNotMatch(e.message, NATIVE_SOURCE);
     return true;
   });
+});
+
+test("oas init: an inherited-name layer flag is unknown-capability, not a prototype dereference", () => {
+  const dir = temp();
+  // `oas init` merges three manifest maps for the `--<layer>` lookup. Spreading
+  // them into an object literal re-plainified the null prototypes, so
+  // `mans["constructor"]` answered Object.prototype.constructor and the run
+  // bailed with a LAYER MISMATCH for a capability that does not exist.
+  const env = { ...process.env, HOME: temp(), OAS_HOME_DIR: join(temp(), ".oas") };
+  for (const k of Object.keys(env)) if (/^(OAS|PI)_/.test(k) && k !== "OAS_HOME_DIR") delete env[k];
+  const r = spawnSync(process.execPath, [CLI, "init", "--raw", "--knowledge", "constructor", "--dir", dir, "--json"], { encoding: "utf8", env });
+  assert.notEqual(r.status, 0, r.stdout);
+  const doc = JSON.parse(r.stdout);
+  assert.equal(doc.ok, false);
+  assert.equal(doc.error.code, "E_UNKNOWN_CAPABILITY", doc.error.message);
+  assert.doesNotMatch(doc.error.message, NATIVE_SOURCE);
+});
+
+/** A hermetic CLI run: the config/lock walk climbs to `/`, so a developer's own
+ * ~/oas-config.yaml must not decide what a case sees. */
+function runCli(argv, cwd) {
+  const env = {};
+  for (const [k, v] of Object.entries(process.env)) if (!/^(OAS|PI)_/.test(k)) env[k] = v;
+  const home = temp();
+  Object.assign(env, { HOME: home, OAS_HOME_DIR: join(home, ".oas") });
+  return spawnSync(process.execPath, [CLI, ...argv], { encoding: "utf8", env, cwd: cwd || home });
+}
+/** A Node crash: an uncaught throw prints the source frame and a stack. */
+const NODE_STACK = /^\s+at |\bthrow oasError\b|node:internal/m;
+
+test("an unsafe config key is a typed CLI failure, not an uncaught stack", () => {
+  const dir = temp();
+  write(join(dir, "oas-config.yaml"), "name: demo\n__proto__:\n  polluted: true\n");
+
+  for (const argv of [["doctor", dir], ["use", "acme.x", "--dir", dir]]) {
+    const human = runCli(argv, dir);
+    assert.notEqual(human.status, 0, human.stdout);
+    assert.doesNotMatch(human.stderr, NODE_STACK, `${argv[0]} crashed instead of reporting`);
+    assert.equal(human.stderr.trim().split("\n").length, 1, human.stderr);
+    assert.match(human.stderr, /^oas: unsupported mapping key "__proto__" in /);
+    assert.ok(human.stderr.includes(join(dir, "oas-config.yaml")), "the message must name the offending file");
+
+    const json = runCli([...argv, "--json"], dir);
+    assert.notEqual(json.status, 0, json.stdout);
+    assert.doesNotMatch(json.stderr, NODE_STACK);
+    const doc = JSON.parse(json.stdout);
+    assert.equal(json.stdout.trim(), JSON.stringify(doc), "exactly one envelope on stdout");
+    assert.equal(doc.schemaVersion, 1);
+    assert.equal(doc.ok, false);
+    assert.equal(doc.error.code, "unsafe-config-key", doc.error.message);
+    assert.ok(doc.error.message.includes(join(dir, "oas-config.yaml")));
+  }
+});
+
+test("write paths refuse an unsafe key instead of dropping it and reporting success", () => {
+  const dir = temp();
+  write(join(dir, ".agents", "capabilities", "owned", "acme.x", "oas.json"),
+    JSON.stringify({ capability: "acme.x", version: "1.0.0", description: "cap" }));
+  write(join(dir, "oas-config.yaml"), "name: demo\n");
+
+  // The inherited setter swallowed the assignment, so the entry never reached
+  // the file — and the command still printed "Activated".
+  for (const argv of [
+    ["use", "acme.x", "--dir", dir, "--settings", "__proto__=x"],
+    ["use", "acme.x", "--dir", dir, "--soul", "__proto__"],
+    ["use", "acme.x", "--dir", dir, "--type", "__proto__"],
+  ]) {
+    const r = runCli(argv, dir);
+    assert.notEqual(r.status, 0, `${argv.join(" ")} => ${r.stdout}`);
+    assert.doesNotMatch(r.stderr, NODE_STACK);
+    assert.match(r.stderr, /^oas: unsupported mapping key "__proto__"/);
+    assert.doesNotMatch(r.stdout, /Activated/);
+  }
+  assert.equal(Object.prototype.x, undefined);
+  assert.equal({}.x, undefined);
+  // The ordinary write still works, and the refusals left nothing behind.
+  const ok = runCli(["use", "acme.x", "--dir", dir, "--settings", "mode=fast"], dir);
+  assert.equal(ok.status, 0, ok.stderr);
+  const written = readFileSync(join(dir, "oas-config.yaml"), "utf8");
+  assert.match(written, /mode: fast/);
+  assert.doesNotMatch(written, /__proto__/);
 });
 
 test("manager allowlists answer for their own entries only", () => {

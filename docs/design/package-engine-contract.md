@@ -751,7 +751,8 @@ Stable `error.code` values (also the `--json` envelope codes):
 | `unknown-config-template` | the package has no config template by that name |
 | `remove-blocked` | removal target is still referenced by config or by a dependent locked package (provenance: the blockers) |
 | `official-mapping-unavailable` | guided official migration cannot map a legacy official capability yet; the scope was left unchanged |
-| `unsafe-config-key` | a YAML document uses `__proto__` as a mapping key — the reader refuses it, because assigning it rewrites the parsed object's prototype instead of becoming data, leaving the entry invisible to every key validator |
+| `unsafe-config-key` | a YAML document uses `__proto__` as a mapping key, or a command was asked to write one (`--settings __proto__=x`, `--soul __proto__`) — refused on both sides, because assigning it rewrites the parsed object's prototype instead of becoming data, leaving the entry invisible to every key validator. The reader names the mapping key; whoever holds the path re-raises it naming the file, and the CLI renders it as an ordinary typed failure (one `oas:` line, or one `--json` envelope) — never an uncaught stack |
+| `E_NO_CONFIG` | the command needs an `oas-config.yaml` and this scope's chain has none (`oas use` into a config-less scope; `oas config *` with nothing adopted). Diagnosis only — nothing is written; the remedy names `oas init --raw --dir <scope>`, which is offline, deterministic, and writes only the minimal config |
 
 Fail-closed enforcement points: `parseLockFileStrict`, `readPackageLocks` and
 `listInstalledPackages` RAISE — consumers never see an invalid lock as absent or

@@ -281,9 +281,12 @@ test("oas use in a scope with no config chain names the initialization remedy in
   const r = cli(["use", "example.review", "--global", "--dir", ws]);
   assert.notEqual(r.status, 0);
   assert.doesNotMatch(r.stderr, /acquired: none/, "an installed capability must never be reported as never acquired");
-  assert.match(r.stderr, /capability "example\.review" is installed at .*, but there is no oas-config\.yaml at this scope or any level above it/);
-  // The provider package comes from the exact lock, so the remedy is copyable.
-  assert.match(r.stderr, /Initialize it first with `oas init --package example\.engineering --dir /);
+  assert.match(r.stderr, /capability "example\.review" is present in the capability store at .*, but there is no oas-config\.yaml at this scope or any level above it/);
+  // The remedy names `oas init --raw`: offline, deterministic, and writing only
+  // the minimal config. It never names `--package`, which read the provider out
+  // of the MERGED lock chain while this gate reads own-scope only, and dead-ends
+  // whenever the provider exports no config template.
+  assert.doesNotMatch(r.stderr, /--package/);
   assert.equal(existsSync(join(ws, "oas-config.yaml")), false, "diagnosis only — oas use never authors the adopter's first config");
 
   const j = cli(["use", "example.review", "--global", "--dir", ws, "--json"]);
@@ -295,8 +298,22 @@ test("oas use in a scope with no config chain names the initialization remedy in
   assert.notEqual(miss.status, 0);
   assert.match(miss.stderr, /unknown capability "example\.absent" \(acquired: none\)/);
 
-  // And the remedy is real: once the scope is a config level, the same command works.
-  assert.equal(cli(["init", "--raw", "--dir", ws, "--no-tmux-mouse"]).status, 0);
+  // The remedy is EXECUTED, not paraphrased: the command is parsed out of
+  // stderr and run verbatim through a shell, with the package catalog pointed at
+  // a nonexistent file so nothing can reach the network. A remedy that does not
+  // run offline, or does not make the follow-up work, is not a remedy.
+  const printed = r.stderr.match(/Create the minimal one with `([^`]+)`/);
+  assert.ok(printed, r.stderr);
+  assert.ok(printed[1].startsWith("oas init --raw --dir "), printed[1]);
+  const asNode = printed[1].replace(/^oas\b/, `${JSON.stringify(process.execPath)} ${JSON.stringify(CLI)}`);
+  const run = spawnSync("sh", ["-c", `${asNode} --no-tmux-mouse`], {
+    encoding: "utf8",
+    env: { ...hermeticEnv(), OAS_PACKAGE_CATALOG: join(base, "no-such-catalog.json") },
+  });
+  assert.equal(run.status, 0, `${run.stdout}\n${run.stderr}`);
+  assert.equal(existsSync(join(ws, "oas-config.yaml")), true, "the printed remedy must actually create the config");
+
+  // …and then the exact `oas use` command the remedy told the adopter to re-run.
   const ok = cli(["use", "example.review", "--global", "--dir", ws]);
   assert.equal(ok.status, 0, ok.stderr);
   assert.equal(resolveOasConfig(ws, "dev").capabilities.some((c) => c.id === "example.review"), true);
