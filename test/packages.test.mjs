@@ -229,6 +229,37 @@ test("oas init --package: adopts a template verbatim with a recorded base; defau
   rmSync(base, { recursive: true, force: true });
 });
 
+test("a config template carrying an unsafe mapping key is refused NAMING the template, and nothing is adopted", () => {
+  const base = temp();
+  // A package whose template uses `__proto__` as a mapping key. Package bytes
+  // are config SOURCE MATERIAL and go through the same reader as a config on
+  // disk, so the refusal must name WHICH template — an adopter reading
+  // "unsupported mapping key" alone cannot find it in a package that ships
+  // several.
+  const badPkg = fixturePackage(join(base, "poison"), { id: "poison.pkg", extraFiles: {
+    "configs/x/oas-config.yaml": "name: w\n__proto__:\n  polluted: true\n",
+  }, configs: { x: { path: "configs/x/oas-config.yaml", default: true } } });
+  const ws = join(base, "ws"); mkdirSync(ws);
+
+  const r = cli(["init", "--package", badPkg, "--dir", ws, "--no-tmux-mouse"]);
+  assert.notEqual(r.status, 0, r.stdout);
+  assert.match(r.stderr, /unsupported mapping key "__proto__"/);
+  assert.ok(r.stderr.includes("configs/x/oas-config.yaml"), `the refusal must name the template path: ${r.stderr}`);
+  assert.ok(r.stderr.includes('config template "x" of package poison.pkg'), r.stderr);
+  assert.deepEqual(readdirSync(ws), [], "a refused template must leave no lock, store, or anchor");
+  assert.equal(Object.prototype.polluted, undefined);
+
+  // The engine-level validator says the same thing to a direct caller.
+  const errors = validateConfigTemplate(
+    { template: "x", path: "configs/x/oas-config.yaml", content: "name: w\n__proto__:\n  polluted: true\n" },
+    "poison.pkg",
+  );
+  assert.equal(errors.length, 1, errors.join("; "));
+  assert.match(errors[0], /unsupported mapping key "__proto__"/);
+  assert.ok(errors[0].includes("configs/x/oas-config.yaml"), errors[0]);
+  rmSync(base, { recursive: true, force: true });
+});
+
 // ---------- adopter sovereignty ----------
 
 test("adopted snapshot stays an ordinary scoped config: retarget, disable, settings, and nested repo overrides all work", () => {

@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import {
   capabilityManifest, marketplaceCapabilities, parseYamlFlat, parseYamlNested,
-  resolveCapabilities, resolveOasConfig, RUNTIME_PACKAGE_MANAGERS, validateConfigShape,
+  resolveCapabilities, resolveOasConfig, RUNTIME_PACKAGE_MANAGERS, validateConfigShape, withConfigFile,
 } from "../lib/core.mjs";
 import { REQUIREMENT_MANAGERS, requirementInstallPlan } from "../lib/packages.mjs";
 
@@ -304,4 +304,73 @@ test("manager allowlists answer for their own entries only", () => {
   const inheritedManager = requirementInstallPlan({ command: "tmux", install: { methods: [{ manager: "toString", package: "tmux" }] } });
   assert.equal(inheritedManager.argv, undefined);
   assert.equal(inheritedManager.unavailable, "no allowlisted install method for this host");
+});
+
+test("a poisoned agent-def frontmatter names the FILE, and keeps its own code through spawn", () => {
+  const dir = temp();
+  write(join(dir, "oas-config.yaml"), "name: demo\n");
+  // One real soul, so `oas status` reaches the importable-defs section.
+  write(join(dir, "agents", "dev", "soul", "soul.yaml"), "name: dev\n");
+  const def = join(dir, ".claude", "agents", "ghost.md");
+  write(def, "---\nname: ghost\n__proto__: polluted\ndescription: d\n---\nBody\n");
+
+  // `oas status` walks .claude/agents and .agents/agents from cwd upward. The
+  // reader's raw message can only say "a mapping key"; the operator needs the
+  // one file among many that carries it.
+  const human = runCli(["status", "--dir", dir], dir);
+  assert.notEqual(human.status, 0, human.stdout);
+  assert.doesNotMatch(human.stderr, NODE_STACK, "status crashed instead of reporting");
+  assert.match(human.stderr, /^oas: unsupported mapping key "__proto__" in /);
+  assert.ok(human.stderr.includes(def), `the message must name the agent def file: ${human.stderr}`);
+
+  // Through spawn the typed failure keeps ITS OWN code: E_SPAWN_FAILED told an
+  // agent consumer the spawn mechanism broke, when the fixable fact is a
+  // poisoned document the message already names.
+  const json = runCli(["spawn", "ghost", "--dir", dir, "--no-launch", "--json"], dir);
+  assert.notEqual(json.status, 0, json.stdout);
+  assert.doesNotMatch(json.stderr, NODE_STACK);
+  const doc = JSON.parse(json.stdout);
+  assert.equal(json.stdout.trim(), JSON.stringify(doc), "exactly one envelope on stdout");
+  assert.equal(doc.ok, false);
+  assert.equal(doc.error.code, "unsafe-config-key", doc.error.message);
+  assert.ok(doc.error.message.includes(def), doc.error.message);
+  assert.equal(Object.prototype.polluted, undefined);
+});
+
+test("a poisoned --def-file names the file too: the import reader is wrapped as well", () => {
+  const dir = temp();
+  write(join(dir, "oas-config.yaml"), "name: demo\n");
+  mkdirSync(join(dir, "agents"), { recursive: true });
+  // Deliberately NOT under .claude/agents — this is the upsertLocalAgent read,
+  // not the roster walk.
+  const def = join(dir, "defs", "imported.md");
+  write(def, "---\nname: imported\n__proto__: polluted\n---\nBody\n");
+
+  const json = runCli(["spawn", "imported", "--def-file", def, "--dir", dir, "--no-launch", "--json"], dir);
+  assert.notEqual(json.status, 0, json.stdout);
+  assert.doesNotMatch(json.stderr, NODE_STACK);
+  const doc = JSON.parse(json.stdout);
+  assert.equal(doc.error.code, "unsafe-config-key", doc.error.message);
+  assert.ok(doc.error.message.includes(def), doc.error.message);
+});
+
+test("the reported filename is the path itself, even when it contains regex substitution syntax", () => {
+  // `$&`, `$'`, "$`" and `$1` are substitution syntax in String.replace, so
+  // inserting the path as a REPLACEMENT STRING expanded them against the match
+  // and corrupted the reported filename. A replacer function passes it as data.
+  const weird = "/tmp/$&$'$`$1/oas-config.yaml";
+  assert.throws(() => withConfigFile(weird, () => parseYamlNested("__proto__: x\n")), (e) => {
+    assert.equal(e.code, "unsafe-config-key");
+    assert.ok(e.message.includes(weird), e.message);
+    assert.deepEqual(e.provenance, [{ file: weird }]);
+    return true;
+  });
+
+  // End to end, with a real directory whose name carries the same characters.
+  const dir = join(temp(), "$&$'dollar");
+  const file = join(dir, "oas-config.yaml");
+  write(file, "name: demo\n__proto__:\n  polluted: true\n");
+  const r = runCli(["doctor", dir], dir);
+  assert.notEqual(r.status, 0, r.stdout);
+  assert.ok(r.stderr.includes(file), r.stderr);
 });

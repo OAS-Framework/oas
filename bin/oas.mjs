@@ -2525,7 +2525,14 @@ function spawnCmd() {
       work: flag("work"), workDir: flag("work-dir"), runtime: flag("runtime"), model: flag("model"), branch: flag("branch"),
       launch: !args.includes("--no-launch"),
     });
-  } catch (e) { bail(e.code === "E_RELATIVE_AMBIGUOUS" ? "E_RELATIVE_AMBIGUOUS" : "E_SPAWN_FAILED", e.message || e); throw e; }
+  } catch (e) {
+    // A typed CLI failure keeps ITS OWN code: re-badging an unsafe-config-key
+    // (raised by the readers spawn walks) as E_SPAWN_FAILED tells an agent
+    // consumer the spawn mechanism broke, when the fixable fact is a poisoned
+    // document the message already names. The shared boundary renders it.
+    if (TYPED_CLI_FAILURES.has(e?.code)) throw e;
+    bail(e.code === "E_RELATIVE_AMBIGUOUS" ? "E_RELATIVE_AMBIGUOUS" : "E_SPAWN_FAILED", e.message || e); throw e;
+  }
   if (JSON_MODE) {
     // Desktop CLI API v1 spawn result — a FIXED shape (see docs/desktop-cli-api.md).
     jsonOk({
@@ -2857,6 +2864,11 @@ function versionCmd() {
 // raw Node stack with empty stdout — no code, no envelope, nothing to act on.
 // Deliberately narrow: only codes with a defined rendering are caught here;
 // anything else still crashes loudly.
+//
+// The dispatch chain below is deliberately NOT re-indented into this try block:
+// keeping it at column 0 makes the whole command table one reviewable diff of
+// added lines rather than ~150 lines of pure whitespace churn, and keeps `git
+// blame` pointing at the commit that last changed each command.
 const TYPED_CLI_FAILURES = new Set(["unsafe-config-key"]);
 try {
 if (cmd === "doctor") {
@@ -2878,7 +2890,9 @@ else if (cmd === "init") init();
 else if (cmd === "status") status();
 else if (cmd === "pane") await paneCmd();
 else if (cmd === "version" || cmd === "--version" || cmd === "-v") versionCmd();
-else if (cmd === "spawn") { try { spawnCmd(); } catch (e) { if (JSON_MODE) jsonFail("E_SPAWN_FAILED", e.message || e); throw e; } }
+// Same rule as the inner catch: a typed CLI failure surfaces with its own code
+// through the shared boundary, never re-badged as a spawn-mechanism failure.
+else if (cmd === "spawn") { try { spawnCmd(); } catch (e) { if (TYPED_CLI_FAILURES.has(e?.code)) throw e; if (JSON_MODE) jsonFail("E_SPAWN_FAILED", e.message || e); throw e; } }
 else if (cmd === "retire") retireCmd();
 else if (cmd === "create") createCmd();
 // `!HELP_WORDS.has(cmd)`: usage NEVER depends on deployment state. `help` is a
