@@ -90,6 +90,18 @@ function shellQuote(s) {
   return /^[A-Za-z0-9._/~-]+$/.test(s) ? s : `'${String(s).replace(/'/g, `'\\''`)}'`;
 }
 
+/** The scaffolded `name:` value — the target directory's basename — held to the
+ * SAME write refusal as every other value this CLI renders into a config line.
+ *
+ * A basename is filesystem input, not a literal: a directory whose name embeds
+ * a newline turned one scaffolded `name:` line into arbitrary top-level config
+ * blocks (a live `team:` block smuggled through `oas init`), and a `#`-leading
+ * basename wrote a value that reads back as an empty map. Refusing names the
+ * offending basename and writes nothing — the operator renames the directory. */
+function scaffoldConfigName(dir) {
+  return assertSafeConfigValue(basename(dir), `the scaffolded name from the directory basename ${JSON.stringify(basename(dir))}`);
+}
+
 function offerTmuxMouseScrolling() {
   if (args.includes("--no-tmux-mouse")) return;
   const configPath = tmuxConfigPath();
@@ -588,7 +600,7 @@ function use() {
   const file = join(dir, "oas-config.yaml");
   const layer = flag("layer");
   if (layer && !LAYERS.includes(layer)) die(`--layer must be one of: ${LAYERS.join(", ")}`);
-  let text = existsSync(file) ? readFileSync(file, "utf8") : `name: ${basename(dir)}\n`;
+  let text = existsSync(file) ? readFileSync(file, "utf8") : `name: ${scaffoldConfigName(dir)}\n`;
   const caps = readCapabilitiesModel(file);
   if (requested === "none") {
     if (!layer) die("oas use none requires --layer <name>");
@@ -2081,18 +2093,25 @@ function loadTemplateConfig(spec, dir) {
       provenance = `${source}@${commit.slice(0, 12)}`;
     } finally { rmSync(tmp, { recursive: true, force: true }); }
   } else {
-    const path = resolve(source.replace(/^~\//, `${homedir()}/`));
+    // Replacer FUNCTION, not a replacement string: `$&`, `$'`, `` $` `` and
+    // `$1` are substitution syntax in String.replace, and a home directory may
+    // legally contain them.
+    const path = resolve(source.replace(/^~\//, () => `${homedir()}/`));
     if (!existsSync(path)) fail("E_TEMPLATE_SOURCE", `template config not found: ${path}`);
     body = readFileSync(path, "utf8");
     provenance = path;
   }
   // Snapshot: strip template-registry keys that make no sense in the seeded config.
   const lines = body.replace(/\n*$/, "\n").split("\n");
+  const scaffoldName = scaffoldConfigName(dir);
   const out = []; let skipping = false;
   for (const line of lines) {
     if (/^templates:\s*$/.test(line)) { skipping = true; continue; }
     if (skipping) { if (/^\S/.test(line) && line.trim()) skipping = false; else continue; }
-    out.push(line.replace(/^name:.*$/, `name: ${basename(dir)}`));
+    // Replacer FUNCTION, not a replacement string — this is a WRITE, so a
+    // directory named `x$&y` would otherwise persist a corrupted `name:` line
+    // (`name: xname: template-namey`).
+    out.push(line.replace(/^name:.*$/, () => `name: ${scaffoldName}`));
   }
   return `# template: ${provenance} (snapshot — later template edits do not propagate)\n${out.join("\n").replace(/\n*$/, "\n")}`;
 }
@@ -2107,6 +2126,11 @@ function init() {
   const bail = (code, msg) => (JSON_MODE ? jsonFail(code, msg) : die(msg));
   const note = (msg) => (JSON_MODE ? console.error(msg) : console.log(msg));
   if (existsSync(file)) bail("E_CONFIG_EXISTS", `${shortPath(file)} already exists — edit it or use \`oas use\``);
+  // The scaffolded `name:` value is FILESYSTEM input. Refuse it up front, before
+  // any init form mutates anything — a basename that cannot stay one YAML scalar
+  // must abort the run, not be discovered halfway through a transaction.
+  try { scaffoldConfigName(dir); }
+  catch (e) { bail(e.code, e.message); return; }
 
   if (pkgSrc && pkgSrc !== true) { initPackage(pkgSrc, dir, file); return; }
   if (pkgSrc === true) { bail("E_USAGE", "--package needs a package id, local path, or git URL"); return; }
@@ -2225,7 +2249,7 @@ function init() {
   const acquisitions = [];
   let resolved;
   const lines = [
-    `name: ${basename(dir)}`,
+    `name: ${scaffoldConfigName(dir)}`,
     "",
     "# ── Agent types (families) — declared here by name (or via `oas type add`);",
     "# each soul opts in via `type: <name>` in its soul.yaml. Capability entries can target them.",
@@ -2733,7 +2757,7 @@ function typeCmd() {
   const name = args[2];
   if (!/^[a-z][a-z0-9-]*$/.test(name)) die(`agent type "${name}" must be lowercase alphanumeric/hyphens`);
   const description = flag("description");
-  let text = existsSync(file) ? readFileSync(file, "utf8") : `name: ${basename(dir)}\n`;
+  let text = existsSync(file) ? readFileSync(file, "utf8") : `name: ${scaffoldConfigName(dir)}\n`;
   const cfg = existsSync(file) ? withConfigFile(file, () => parseYamlNested(text)) : {};
   // Own-property: `constructor` is a legal agent-type name, and a plain lookup
   // would report it as already declared in a config that never mentions it.

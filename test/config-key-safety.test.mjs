@@ -7,7 +7,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import {
@@ -438,4 +438,66 @@ test("a config write refuses text that cannot stay one YAML scalar — no inject
   const okType = runCli(["type", "add", "devs", "--description", "The dev family", "--dir", dir], dir);
   assert.equal(okType.status, 0, okType.stderr);
   assert.equal(parseYamlNested(readFileSync(file, "utf8"))["agent-types"].devs.description, "The dev family");
+});
+
+test("a directory basename is DATA on every write path: replacement syntax is stored literally", () => {
+  // `$&`, `$'`, `` $` `` and `$1` are substitution syntax in String.replace, and
+  // all four are legal POSIX filename characters. `oas init --template` seeded
+  // the scaffolded name with a replacement STRING, so a directory named `x$&y`
+  // persisted `name: xname: <template's name>y` — a corrupted config on disk,
+  // not just a corrupted message.
+  const base = temp();
+  const template = join(base, "template.yaml");
+  write(template, "name: template-name\ncapabilities:\n  additive: {}\n");
+  for (const name of ["x$&y", "x$`y", "x$'y", "x$1y", "x$$y", "plain"]) {
+    const dir = join(base, `run-${Buffer.from(name).toString("hex")}`, name);
+    mkdirSync(dir, { recursive: true });
+    const r = runCli(["init", "--template", template, "--dir", dir, "--no-tmux-mouse"], dir);
+    assert.equal(r.status, 0, `${name}: ${r.stderr}`);
+    const written = readFileSync(join(dir, "oas-config.yaml"), "utf8");
+    assert.ok(written.includes(`name: ${name}\n`), `${name} was not written literally: ${JSON.stringify(written.split("\n")[1])}`);
+    assert.equal(parseYamlNested(written).name, name, `${name} did not read back`);
+    assert.doesNotMatch(written, /template-name/, `${name} leaked the template's own name`);
+  }
+});
+
+test("a directory basename that cannot stay one YAML scalar refuses the whole init", () => {
+  const base = temp();
+  // THE attack: the scaffolded `name:` line is the one config value that comes
+  // from the FILESYSTEM rather than from a flag, and it was written verbatim. A
+  // basename carrying a newline plus a top-level block therefore smuggled real
+  // configuration — here a `team:` block — into a config the operator never
+  // wrote. A `#`-leading basename is the quieter half: it writes a value the
+  // next read sees as a comment, i.e. an empty map.
+  // No "/" anywhere: a slash would end the basename and defuse the case by
+  // accident rather than by the guard.
+  const smuggled = "acme\nteam:\n  name: Smuggled";
+  for (const [name, why] of [[smuggled, "newline"], ["#acme", "comment introducer"], ["  padded  ", "surrounding whitespace"], ["{a: b}", "flow mapping"]]) {
+    const dir = join(base, `run-${Buffer.from(name).toString("hex")}`, name);
+    mkdirSync(dir, { recursive: true });
+    const file = join(dir, "oas-config.yaml");
+
+    const r = runCli(["init", "--raw", "--dir", dir, "--no-tmux-mouse"], dir);
+    assert.notEqual(r.status, 0, `${why}: init must refuse — ${r.stdout}`);
+    assert.doesNotMatch(r.stderr, NODE_STACK, why);
+    assert.ok(r.stderr.includes(JSON.stringify(name)), `${why}: the refusal must name the offending basename — ${r.stderr}`);
+    assert.equal(existsSync(file), false, `${why}: nothing may be written`);
+
+    const json = runCli(["init", "--raw", "--dir", dir, "--no-tmux-mouse", "--json"], dir);
+    assert.notEqual(json.status, 0, json.stdout);
+    const doc = JSON.parse(json.stdout);
+    assert.equal(doc.ok, false);
+    assert.equal(doc.error.code, "unsafe-config-value", doc.error.message);
+    assert.equal(existsSync(file), false, `${why}: --json must not write either`);
+  }
+
+  // Control: an ordinary basename still scaffolds, and the smuggled text never
+  // reaches disk by any route.
+  const okDir = join(base, "ordinary-scope");
+  mkdirSync(okDir, { recursive: true });
+  const ok = runCli(["init", "--raw", "--dir", okDir, "--no-tmux-mouse"], okDir);
+  assert.equal(ok.status, 0, ok.stderr);
+  const written = readFileSync(join(okDir, "oas-config.yaml"), "utf8");
+  assert.equal(parseYamlNested(written).name, "ordinary-scope");
+  assert.doesNotMatch(written, /Smuggled/);
 });
