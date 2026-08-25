@@ -752,7 +752,19 @@ Stable `error.code` values (also the `--json` envelope codes):
 | `remove-blocked` | removal target is still referenced by config or by a dependent locked package (provenance: the blockers) |
 | `official-mapping-unavailable` | guided official migration cannot map a legacy official capability yet; the scope was left unchanged |
 | `unsafe-config-key` | a YAML document uses `__proto__` as a mapping key, or a command was asked to write one (`--settings __proto__=x`, `--soul __proto__`) — refused on both sides, because assigning it rewrites the parsed object's prototype instead of becoming data, leaving the entry invisible to every key validator. The reader names the mapping key; whoever holds the path re-raises it naming the file, and the CLI renders it as an ordinary typed failure (one `oas:` line, or one `--json` envelope) — never an uncaught stack |
-| `E_NO_CONFIG` | the command needs an `oas-config.yaml` and this scope's chain has none (`oas use` into a config-less scope; `oas config *` with nothing adopted). Diagnosis only — nothing is written; the remedy names `oas init --raw --dir <scope>`, which is offline, deterministic, and writes only the minimal config |
+| `E_NO_CONFIG` | the command needs an `oas-config.yaml` it cannot find. TWO emitters, with different conditions and different remedies — stated separately below, because no single sentence is true of both |
+
+`E_NO_CONFIG` is shared by two commands that ask different questions. Both are
+diagnosis only: neither writes anything.
+
+| emitter | condition | remedy named |
+|---|---|---|
+| `oas use <capability>` | the capability IS present in this scope's own `installed/`/`owned/` store, **and** there is no `oas-config.yaml` at this scope or at any level above it — the chain is empty, so the chain walk never opens this scope's store and the capability would otherwise be reported as never acquired | `oas init --raw --dir <scope>` — offline, deterministic, writes only the minimal config — then the same `oas use` again |
+| `oas config <diff\|sync\|adopt>` | there is no `oas-config.yaml` **at this exact directory**, whatever the chain above it holds: the three-way template lane compares THIS scope's file against its recorded adopted base, so an outer scope's config is not a substitute and the chain is not consulted | `oas init --package <source> --config <name>` — the adopting form, because this lane needs a config that carries a recorded template base |
+
+Neither is `E_NO_ADOPTED_BASE`, the next check in the same lane: there the file
+exists but was not adopted from a config template, so no recorded base exists to
+compare against (remedy: `oas config adopt <package> --config <name>`).
 
 Fail-closed enforcement points: `parseLockFileStrict`, `readPackageLocks` and
 `listInstalledPackages` RAISE — consumers never see an invalid lock as absent or
