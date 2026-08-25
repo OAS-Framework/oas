@@ -380,8 +380,8 @@ The official catalog is data (`package-catalog.json`, or the file named by
 ```json
 {
   "packages": {
-    "oas.okf": { "url": "https://github.com/OAS-Framework/oas-okf.git", "ref": "v1.4.1", "path": "oas-package" },
-    "oas.dev": { "url": "https://github.com/OAS-Framework/oas-dev.git", "ref": "v1.0.0", "path": "oas-package" }
+    "oas.okf": { "url": "https://github.com/OAS-Framework/oas-okf.git", "ref": "v2.0.0", "path": "oas-package" },
+    "oas.dev": { "url": "https://github.com/OAS-Framework/oas-dev.git", "ref": "v2.0.0", "path": "oas-package" }
   },
   "capabilities": { "oas.review": "oas.dev" }
 }
