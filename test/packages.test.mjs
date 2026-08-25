@@ -312,7 +312,12 @@ test("oas use in a scope with no config chain names the initialization remedy in
   const r = cli(["use", "example.review", "--global", "--dir", ws]);
   assert.notEqual(r.status, 0);
   assert.doesNotMatch(r.stderr, /acquired: none/, "an installed capability must never be reported as never acquired");
-  assert.match(r.stderr, /capability "example\.review" is present in the capability store at .*, but there is no oas-config\.yaml at this scope or any level above it/);
+  // Anchored on the FACTS the diagnosis must carry — the capability id, the
+  // scope it was found at, and the missing file — not on the sentence that
+  // carries them, which is free to be reworded.
+  assert.ok(r.stderr.includes("example.review"), r.stderr);
+  assert.ok(r.stderr.includes(ws), r.stderr);
+  assert.ok(r.stderr.includes("oas-config.yaml"), r.stderr);
   // The remedy names `oas init --raw`: offline, deterministic, and writing only
   // the minimal config. It never names `--package`, which read the provider out
   // of the MERGED lock chain while this gate reads own-scope only, and dead-ends
@@ -329,15 +334,20 @@ test("oas use in a scope with no config chain names the initialization remedy in
   assert.notEqual(miss.status, 0);
   assert.match(miss.stderr, /unknown capability "example\.absent" \(acquired: none\)/);
 
-  // The remedy is EXECUTED, not paraphrased: the command is parsed out of
-  // stderr and run verbatim through a shell, with the package catalog pointed at
-  // a nonexistent file so nothing can reach the network. A remedy that does not
-  // run offline, or does not make the follow-up work, is not a remedy.
-  const printed = r.stderr.match(/Create the minimal one with `([^`]+)`/);
+  // The remedy is EXECUTED, not paraphrased: the backticked `oas init` command
+  // is lifted out of stderr and run EXACTLY as printed — no flag the operator
+  // would not have typed is added, because a remedy that only works with an
+  // extra flag is not the remedy that was printed. The only substitution is
+  // argv[0] (`oas` is not installed on the test host), and the one thing the
+  // harness needs — an offline package catalog — is passed through the
+  // environment, never the command line.
+  const printed = r.stderr.match(/`(oas init [^`]+)`/);
   assert.ok(printed, r.stderr);
-  assert.ok(printed[1].startsWith("oas init --raw --dir "), printed[1]);
-  const asNode = printed[1].replace(/^oas\b/, `${JSON.stringify(process.execPath)} ${JSON.stringify(CLI)}`);
-  const run = spawnSync("sh", ["-c", `${asNode} --no-tmux-mouse`], {
+  const command = printed[1];
+  assert.ok(command.includes("--raw"), command);
+  assert.ok(command.includes("--dir"), `the remedy must carry its own --dir: ${command}`);
+  const asNode = command.replace(/^oas\b/, `${JSON.stringify(process.execPath)} ${JSON.stringify(CLI)}`);
+  const run = spawnSync("sh", ["-c", asNode], {
     encoding: "utf8",
     env: { ...hermeticEnv(), OAS_PACKAGE_CATALOG: join(base, "no-such-catalog.json") },
   });

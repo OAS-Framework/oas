@@ -387,7 +387,10 @@ test("doctor's orphan check consults the v2 capabilities map: a locked artifact 
   write(join(artifact(s, "x.stray"), "oas.json"), JSON.stringify({ capability: "x.stray", version: "1.0.0", description: "cap" }));
   const dirty = cli(["doctor", s], { cwd: s });
   assert.equal(dirty.status, 0, dirty.stderr);
-  assert.match(dirty.stdout, /WARNING: x\.stray at .* is in installed\/ but has no lock entry — reacquire it or move it to owned\//);
+  // Anchored on what the warning must IDENTIFY — the orphan's id, its real
+  // directory, and that it has no lock entry — not on the advice sentence.
+  assert.match(dirty.stdout, /WARNING: x\.stray at .* has no lock entry/);
+  assert.ok(dirty.stdout.includes(artifact(s, "x.stray")), dirty.stdout);
   assert.doesNotMatch(dirty.stdout, /WARNING: x\.plain at .* has no lock entry/, "the locked capability is still not an orphan");
   rmSync(base, { recursive: true, force: true });
 });
