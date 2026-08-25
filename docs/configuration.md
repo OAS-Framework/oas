@@ -402,9 +402,12 @@ the `:` and `#` that end a key token. Those fail with `unsafe-config-value`
 (values, the scaffolded name included) or `unsafe-config-key` (keys and names),
 and nothing is written.
 
-The guarantee is a round trip through the OAS reader, not conformance to an
-external YAML parser: ordinary values are untouched because those characters
-are structural only in first position, so `expr=2 > 1`, `tag=v1.0#build`,
+These refusals police document shape for the OAS reader, not conformance to
+an external YAML parser — and not byte-fidelity: what is accepted stays one
+`key: value` line and comes back as a scalar, but the reader's plain-scalar
+conventions still apply (a value like `8080` comes back as a number, and quote
+characters are interpreted, not stored literally). The listed characters are
+structural only in first position, so `expr=2 > 1`, `tag=v1.0#build`,
 `list=a,b` and even `mode=a: b` come back exactly as they were written.
 
 ## Worked examples
