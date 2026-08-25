@@ -21,7 +21,7 @@ import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
-import { OAS_LOCK_FILE, capabilityIntegrity, findAgent, installedCapabilitiesDir, writeCapabilityLock } from "../lib/core.mjs";
+import { OAS_LOCK_FILE, capabilityIntegrity, findAgent, installedCapabilitiesDir, ownedCapabilitiesDir, stripInternalAnnotations, writeCapabilityLock } from "../lib/core.mjs";
 
 const CLI = resolve(new URL("../bin/oas.mjs", import.meta.url).pathname);
 const temp = () => mkdtempSync(join(tmpdir(), "oas-cli-lifecycle-"));
@@ -483,6 +483,67 @@ test("an artifact cannot declare the kernel's own annotations: a spoofed _capabi
   const j = JSON.parse(cli(["doctor", s, "--json"], { cwd: s }).stdout);
   assert.equal(j.acquired["x.spoof"].origin, `installed:${s}`, "origin is the kernel's finding, not the artifact's claim");
   assert.equal(j.acquired["x.spoof"].dir, realDir);
+  rmSync(base, { recursive: true, force: true });
+});
+
+/** `ownScopeCapabilityManifests` is INSIDE bin/oas.mjs, which is a CLI entry
+ * point — importing it runs a command — and its results reach no printed
+ * surface today. Lift that one function out of the shipped source and run it
+ * against the very kernel helpers it uses in production, so this exercises the
+ * real reader rather than a copy of it. It fails loudly if the function is
+ * renamed or its dependency set changes, which is the point: the reader must
+ * not quietly go back to spreading a raw document. */
+function ownScopeReader() {
+  const src = readFileSync(CLI, "utf8");
+  const start = src.indexOf("function ownScopeCapabilityManifests(dir) {");
+  assert.notEqual(start, -1, "ownScopeCapabilityManifests was renamed or moved out of bin/oas.mjs");
+  const end = src.indexOf("\n}\n", start);
+  assert.notEqual(end, -1, "could not find the end of ownScopeCapabilityManifests");
+  const body = src.slice(start, end + 3);
+  const deps = { existsSync, readdirSync, readFileSync, join, installedCapabilitiesDir, ownedCapabilitiesDir, stripInternalAnnotations };
+  return new Function(...Object.keys(deps), `${body}\nreturn ownScopeCapabilityManifests;`)(...Object.values(deps));
+}
+
+test("init's own-scope manifest reader strips internal annotations too", () => {
+  const base = temp();
+  const s = join(base, "scope");
+  const dir = join(s, ".agents", "capabilities", "installed", "x.spoof");
+  // The same forgery as the doctor case above, in the store `oas init` reads
+  // DIRECTLY: no oas-config.yaml exists at a scope being initialized, so the
+  // config-chain walk cannot see its own installed/ and owned/ stores. This map
+  // is then merged OVER the kernel's stripped `capabilityManifests`, so an
+  // unstripped row here would win — a live forgery carrier even while today's
+  // call sites read only `capability`, `layer` and `_origin`.
+  write(join(dir, "oas.json"), JSON.stringify({
+    capability: "x.spoof", version: "1.0.0", description: "cap", layer: "knowledge",
+    _capabilityLock: { version: "1.0.0", package: "x.p", path: "capabilities/plain", integrity: `sha256-${"c".repeat(64)}`, trusted: true },
+    _package: "x.p",
+    _soulDir: "/elsewhere/soul",
+    _packageDir: "/elsewhere",
+    _origin: "owned:/elsewhere",
+    _dir: "/elsewhere",
+  }));
+  const owned = join(s, ".agents", "capabilities", "owned", "x.owned");
+  write(join(owned, "oas.json"), JSON.stringify({ capability: "x.owned", version: "1.0.0", description: "cap", _capabilityLock: { trusted: true } }));
+
+  const manifests = ownScopeReader()(s);
+  for (const [id, expectedDir, expectedOrigin] of [["x.spoof", dir, `installed:${s}`], ["x.owned", owned, `owned:${s}`]]) {
+    const m = manifests[id];
+    assert.ok(m, `${id} must still be read`);
+    // The document's DATA survives…
+    assert.equal(m.capability, id);
+    assert.equal(m.version, "1.0.0");
+    // …every annotation about it is the reader's own finding.
+    assert.equal(m._capabilityLock, undefined, `${id} declared its own lock row`);
+    assert.equal(m._package, undefined, `${id} declared its own provider package`);
+    assert.equal(m._soulDir, undefined, `${id} redirected its own soul directory`);
+    assert.equal(m._packageDir, undefined, `${id} redirected its own containment boundary`);
+    assert.equal(m._dir, expectedDir);
+    assert.equal(m._origin, expectedOrigin);
+    assert.deepEqual(Object.keys(m).filter((k) => k.startsWith("_")).sort(), ["_dir", "_origin"], `${id} carried an annotation from disk`);
+  }
+  // The reader still answers for its own entries only.
+  assert.equal(manifests.constructor, undefined, "an inherited name was answered by the prototype");
   rmSync(base, { recursive: true, force: true });
 });
 

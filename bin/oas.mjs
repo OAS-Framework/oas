@@ -28,7 +28,7 @@ import {
   officialCapabilityPackage, officialPackageCatalog,
   approveCapability, updatePackage, removePackage, migrateLegacyLock, applyLegacyLockMigration,
   packageIntegrity, capabilityArtifactIntegrity, verifyCapabilityInstallation, installedCapabilityDir, installedCapabilitiesDir, ownedCapabilitiesDir, loadPackageManifestAt,
-  resolveOasConfig, resolveWorkMode, composeInstanceAgentsMd, parseYamlNested, assertSafeConfigValue, assertSafeConfigWriteKey, withConfigFile, packagedInject, teamAgentRoots,
+  resolveOasConfig, resolveWorkMode, composeInstanceAgentsMd, parseYamlNested, assertSafeConfigValue, assertSafeConfigWriteKey, stripInternalAnnotations, withConfigFile, packagedInject, teamAgentRoots,
   findTeamAgent, findTeamInstance, findCapabilityAgent, findInstanceHome, listCapabilityAgents, workspaceOf,
   ensureRoot, findRoot, findAgent, listAgents, listInstances, listAgentDefs, createAgent as coreCreateAgent,
   spawnInstance, retireInstance, upsertLocalAgent, defaultRepo, RELATIONS,
@@ -2410,9 +2410,17 @@ function ownScopeCapabilityManifests(dir) {
     for (const e of entries) {
       // Dot-prefixed entries are transaction staging, never installed content.
       if (!e.isDirectory() || e.name.startsWith(".")) continue;
-      let m;
-      try { m = JSON.parse(readFileSync(join(sub, e.name, "oas.json"), "utf8")); } catch { continue; }
-      if (m && typeof m.capability === "string") out[m.capability] = { ...m, _dir: join(sub, e.name), _origin: `${origin}:${dir}` };
+      let raw;
+      try { raw = JSON.parse(readFileSync(join(sub, e.name, "oas.json"), "utf8")); } catch { continue; }
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+      // Strip BEFORE the spread. `_dir` and `_origin` are reassigned just after
+      // it, but every OTHER annotation in the namespace — `_capabilityLock`,
+      // `_package`, `_soulDir` … — would flow straight out of an
+      // artifact-controlled document. That is the exact shape the kernel's own
+      // manifest reader was fixed for, and this map is merged OVER that
+      // stripped one, so leaving it raw kept the forgery carrier alive.
+      const m = stripInternalAnnotations(raw);
+      if (typeof m.capability === "string") out[m.capability] = { ...m, _dir: join(sub, e.name), _origin: `${origin}:${dir}` };
     }
   }
   return out;
