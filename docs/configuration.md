@@ -389,14 +389,23 @@ basename is filesystem input, so one carrying a newline would otherwise write
 arbitrary top-level blocks into the config.
 
 Refused: a control character (a newline in a `--settings` value used to inject
-whole extra capability entries into the file), leading or trailing whitespace a
-read would strip, a leading YAML structure indicator (`#`, `|`, `>`, `&`, `*`,
-`!`, `%`, `@`, `` ` ``, `,`, a quote, a flow bracket, or `- `/`? `/`: `), and —
-for keys and `--soul`/`--type` names — the `:` and `#` that end a key token.
-Those fail with `unsafe-config-value` (values, the scaffolded name included) or
-`unsafe-config-key` (keys and names), and nothing is written. Ordinary values
-are untouched: those characters are structural only in first position, so
-`expr=2 > 1`, `tag=v1.0#build` and `list=a,b` round-trip unchanged.
+whole extra capability entries into the file) or one of the three line breaks
+outside that range (U+0085, U+2028, U+2029 — U+2028/U+2029 made the reader drop
+the written line entirely, so the command reported success for a setting that
+was not there afterwards); leading or trailing whitespace a read would strip; a
+leading YAML structure indicator (`#`, `|`, `>`, `&`, `*`, `!`, `%`, `@`,
+`` ` ``, `,`, a quote, a flow bracket, or `- `/`? `/`: `); for a VALUE, an
+embedded `" #"` (which opens a trailing comment, so the rest would be dropped
+on read) and an empty value (`key:` with nothing after it reads back as an
+empty map, not an empty string); and — for keys and `--soul`/`--type` names —
+the `:` and `#` that end a key token. Those fail with `unsafe-config-value`
+(values, the scaffolded name included) or `unsafe-config-key` (keys and names),
+and nothing is written.
+
+The guarantee is a round trip through the OAS reader, not conformance to an
+external YAML parser: ordinary values are untouched because those characters
+are structural only in first position, so `expr=2 > 1`, `tag=v1.0#build`,
+`list=a,b` and even `mode=a: b` come back exactly as they were written.
 
 ## Worked examples
 

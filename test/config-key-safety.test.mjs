@@ -403,6 +403,22 @@ test("a config write refuses text that cannot stay one YAML scalar — no inject
     [["use", "acme.x", "--dir", dir, "--type", "devs\n    acme.injected:\n      global: true"], "unsafe-config-key"],
     // `oas type add --description` writes its own line too.
     [["type", "add", "devs", "--description", "d\nteam:\n  name: Smuggled"], "unsafe-config-value"],
+    // Line breaks OUTSIDE the C0 range. U+2028/U+2029 are excluded by
+    // JavaScript's `.`, so the written line no longer matched the reader's own
+    // `key: value` regex and `parseYamlNested` DROPPED it — the command
+    // reported success for a setting that did not exist afterwards, and the
+    // same silent drop on `--disable --soul` is fail-open. U+0085 survives this
+    // reader but is a line break to a conforming YAML parser.
+    [["use", "acme.x", "--global", "--dir", dir, "--settings", `mode=a\u2028b`], "unsafe-config-value"],
+    [["use", "acme.x", "--global", "--dir", dir, "--settings", `mode=a\u2029b`], "unsafe-config-value"],
+    [["use", "acme.x", "--global", "--dir", dir, "--settings", `mode=a\u0085b`], "unsafe-config-value"],
+    [["use", "acme.x", "--dir", dir, "--soul", `alice\u2028bob`], "unsafe-config-key"],
+    [["type", "add", "devs", "--description", `d\u2028e`], "unsafe-config-value"],
+    // Two values that were WRITTEN but did not come back: a plain scalar ends
+    // at " #" (the rest is a comment the read strips), and `key:` with nothing
+    // after it reads back as an empty MAP, not an empty string.
+    [["use", "acme.x", "--global", "--dir", dir, "--settings", "mode=a #c"], "unsafe-config-value"],
+    [["use", "acme.x", "--global", "--dir", dir, "--settings", "mode="], "unsafe-config-value"],
   ];
   for (const [argv, code] of refusals) {
     const r = runCli(argv, dir);
