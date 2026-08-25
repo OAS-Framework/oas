@@ -57,7 +57,12 @@ before its details. Does this belong in OAS, in this form?
 - **RETURN**: request changes with a structured comment — verdict, findings
   per gate, concrete asks. Hand it BACK to whoever owns the PR (the
   coordinator for multi-dev features, the developer otherwise): notify them
-  via messaging or their task. Never fix their branch yourself.
+  via messaging or their task. Never fix their branch yourself. If the owner
+  lineage is gone (retired author, no live coordinator, no named successor),
+  keep the structured RETURN on the PR for the record, commission a bounded
+  fixer agent from the exact returned PR head to address only your findings,
+  require the fixer to push and report the new SHA plus patch, then re-review
+  that exact new head before merge.
   **Then STAY ALIVE — you own this PR until it merges or closes.** Go idle;
   the owner mails you when fixes are pushed. On their "fixed" mail, re-run
   the affected gates on the new commits (full gate if the diff moved
@@ -152,6 +157,13 @@ BEFORE retiring — it is the last gate of the review.
   verify each ask against the exact delta. The owner's summary and parallel
   reviewer verdicts are evidence, not substitutes; superficially similar tests
   may prove different invariants (for example, two distinct symlink boundaries).
+- **Ownerless returned PRs need a commissioned fixer, not maintainer self-fix**:
+  when a PR's author lineage has fully retired before a RETURN can be fixed,
+  do not collapse the maintainer gate by editing the branch yourself. Post the
+  RETURN, commission a separate bounded fixer from the exact returned head,
+  require a new SHA and patch report, and re-review that exact head before an
+  expected-head merge. See
+  `knowledge/lessons/ownerless-returned-pr-needs-commissioned-fixer.md`.
 - **Final handback can be stale while reviewer nits are still landing**: a
   green exact SHA from the coordinator does not prove the merge head if an
   in-flight reviewer can still add a test-only fix or regression. Treat
