@@ -40,12 +40,28 @@ const OWNED_SUBDIR = "owned";
 
 // ---- tiny YAML subset (same shapes the kernel accepts) --------------------
 
+/** `__proto__` is never data in a plain-object mapping: assigning it REWRITES
+ * the parsed object's prototype, so the entry vanishes from `Object.keys` while
+ * still answering property reads. These readers duplicate the kernel's, so they
+ * duplicate its refusal — the documented "refused by every YAML reader" has to
+ * be true of the app-owned reader too. The desktop's own contract then applies:
+ * every call site here catches, so the document degrades to "not visible"
+ * instead of crashing the server. */
+function yamlKey(key) {
+  if (key === "__proto__") {
+    const e = new Error(`unsupported mapping key "__proto__" — it rewrites the parsed object's prototype instead of becoming data`);
+    e.code = "unsafe-config-key";
+    throw e;
+  }
+  return key;
+}
+
 /** Flat `key: value` YAML (soul.yaml, skill frontmatter). */
 export function parseYamlFlat(text) {
   const o = {};
   for (const line of String(text).split("\n")) {
     const m = line.match(/^([A-Za-z_][A-Za-z0-9_-]*):\s*(.*?)\s*(#.*)?$/);
-    if (m) o[m[1]] = m[2].replace(/^["']|["']$/g, "");
+    if (m) o[yamlKey(m[1])] = m[2].replace(/^["']|["']$/g, "");
   }
   return o;
 }
@@ -63,7 +79,7 @@ function yamlScalar(raw) {
     for (const part of val.slice(1, -1).split(",")) {
       const i = part.indexOf(":");
       if (i < 0) continue;
-      out[part.slice(0, i).trim().replace(/^["']|["']$/g, "")] = yamlScalar(part.slice(i + 1));
+      out[yamlKey(part.slice(0, i).trim().replace(/^["']|["']$/g, ""))] = yamlScalar(part.slice(i + 1));
     }
     return out;
   }
@@ -79,7 +95,7 @@ export function parseYamlNested(text) {
     const m = raw.match(/^(\s*)((?:["'][^"']+["'])|(?:[^:#][^:]*?)):\s*(.*?)\s*$/);
     if (!m) continue;
     const [, ws, rawKey, rawVal] = m;
-    const key = rawKey.trim().replace(/^["']|["']$/g, "");
+    const key = yamlKey(rawKey.trim().replace(/^["']|["']$/g, ""));
     const indent = ws.length;
     while (stack.length > 1 && indent <= stack[stack.length - 1].indent) stack.pop();
     const parent = stack[stack.length - 1].node;
@@ -255,7 +271,10 @@ function configCapabilityIds(cfg) {
  * no framework checkout; a manifest path that does not exist inside the
  * package simply does not resolve (fail-quiet, read-only degradation). */
 function capabilityManifests(startDir) {
-  const out = {};
+  // Capability-id keyed and indexed with ids straight out of oas-config.yaml
+  // (`manifests[id]`, `capabilitySkillDirs(name, …)`): a plain map would answer
+  // Object.prototype for `constructor`/`toString`.
+  const out = Object.create(null);
   const loadDir = (dir, origin, level) => {
     let entries = [];
     try { entries = existsSync(dir) ? readdirSync(dir, { withFileTypes: true }) : []; } catch { return; }
@@ -372,7 +391,12 @@ function validatedLockCapabilities(file) {
 
 /** Read-only, fail-quiet strict lock merge (closest scope wins). */
 function capabilityLocks(startDir) {
-  const out = {};
+  // Null-prototype: `agentProviderTrusted` compares an artifact digest against
+  // `locks[capability].integrity`, and on a plain map an id like `constructor`
+  // would hand back Object — whose `.integrity` is undefined, which matches the
+  // undefined a failed digest returns. Trust must never be answered by the
+  // prototype.
+  const out = Object.create(null);
   for (const cfg of [...configChain(startDir)].reverse()) {
     const capabilities = validatedLockCapabilities(join(cfg._level, "oas-lock.json"));
     if (!capabilities) continue;
@@ -386,7 +410,10 @@ function agentProviderTrusted(manifest, startDir) {
   if (manifest?._origin === "owned") return true;
   const lock = capabilityLocks(startDir)[manifest?.capability];
   if (!lock) return false;
-  return capabilityIntegrity(manifest._dir) === lock.integrity;
+  // An unreadable tree digests to undefined; it must not compare equal to a
+  // missing locked integrity.
+  const integrity = capabilityIntegrity(manifest._dir);
+  return !!integrity && integrity === lock.integrity;
 }
 
 /** All capability-declared agents (souls shipped by active packages). */

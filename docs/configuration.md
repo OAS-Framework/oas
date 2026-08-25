@@ -372,9 +372,13 @@ top-level `layers:`, flat `capabilities.<id>` maps, `source:`,
 `agents-md-injection` on capability entries) are rejected with pointed
 migration errors. Key names are matched as own properties only, so a key
 spelled `constructor` or `toString` is reported as an unsupported key, never as
-a renamed one. `__proto__` is refused outright by the YAML readers
-(`unsafe-config-key`): assigning it rewrites the parsed mapping's prototype
+a renamed one. `__proto__` is refused outright by every YAML reader — the
+kernel's and the desktop app's own read-only reader — and by the commands that
+WRITE config keys (`oas use --settings`, `--soul`, `--type`), all with
+`unsafe-config-key`: assigning it rewrites the parsed mapping's prototype
 instead of becoming data, which would hide the entry from every key validator.
+The kernel fails closed and reports the offending file; the desktop reader
+degrades that document to "not visible", per its read-only contract.
 
 ## Worked examples
 

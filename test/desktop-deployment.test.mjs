@@ -389,3 +389,53 @@ test("desktop discards whole invalid lock files before capability-agent trust", 
   }
   fsExtra.rmSync(scope, { recursive: true, force: true });
 });
+
+test("the app-owned readers refuse __proto__ as a mapping key and pollute nothing", () => {
+  // The kernel's readers refuse it; the docs say "refused by every YAML reader".
+  // The desktop reader is a SECOND implementation of the same subset, so the
+  // claim is only true if it refuses too.
+  for (const doc of [
+    "__proto__:\n  polluted: true\n",                                      // nested map
+    "__proto__: {polluted: true}\n",                                       // inline map
+    "capabilities:\n  additive:\n    __proto__:\n      polluted: true\n",  // nested under a real key
+    'name: demo\n"__proto__": {polluted: true}\n',                         // quoted spelling
+  ]) {
+    assert.throws(() => reader.parseYamlNested(doc), (e) => e.code === "unsafe-config-key", doc);
+  }
+  assert.throws(() => reader.parseYamlFlat("__proto__: polluted\n"), (e) => e.code === "unsafe-config-key");
+  assert.throws(() => reader.parseFrontmatter("---\n__proto__: polluted\n---\nbody\n"), (e) => e.code === "unsafe-config-key");
+  assert.equal(Object.prototype.polluted, undefined);
+  assert.equal({}.polluted, undefined);
+  // Ordinary documents still parse (control).
+  assert.equal(reader.parseYamlNested("name: demo\nteam:\n  name: Demo\n").team.name, "Demo");
+  assert.deepEqual(reader.parseYamlFlat("name: helper\nkind: local\n"), { name: "helper", kind: "local" });
+});
+
+test("a config carrying __proto__ degrades to not-visible, it does not crash the reader", () => {
+  const scope = mkdtempSync(join(tmpdir(), "oas-reader-proto-"));
+  writeFileSync(join(scope, "oas-config.yaml"), "name: demo\n__proto__:\n  team:\n    name: Smuggled\n");
+  // The reader's contract: a document it refuses is skipped, never fatal.
+  assert.deepEqual(reader.configChain(scope), []);
+  assert.equal(reader.resolveDeployment(scope).team, null);
+  assert.deepEqual(reader.listCapabilityAgents(scope), []);
+  // A soul.yaml doing the same is invisible rather than fatal.
+  const root = join(scope, "agents");
+  mkdirSync(join(root, "ghost", "soul"), { recursive: true });
+  writeFileSync(join(root, "ghost", "soul", "soul.yaml"), "__proto__: polluted\nname: ghost\n");
+  assert.deepEqual(reader.listAgents(root).map((a) => a.name), []);
+  assert.equal(Object.prototype.polluted, undefined);
+  fsExtra.rmSync(scope, { recursive: true, force: true });
+});
+
+test("capability-id keyed reader maps never answer for an inherited name", () => {
+  const scope = mkdtempSync(join(tmpdir(), "oas-reader-inherited-"));
+  writeFileSync(join(scope, "oas-config.yaml"), "name: demo\ncapabilities:\n  additive:\n    constructor:\n      from: installed\n");
+  // No such capability is installed. A plain manifest map would answer
+  // Object.prototype.constructor, and a plain LOCK map would answer `Object`
+  // for the trust lookup — whose `.integrity` is the same `undefined` a failed
+  // digest returns, i.e. trust decided by the prototype.
+  assert.deepEqual(reader.listCapabilityAgents(scope), []);
+  assert.deepEqual(reader.capabilitySkillDirs("constructor", scope), []);
+  assert.deepEqual(reader.capabilitySkillDirs("toString", scope), []);
+  fsExtra.rmSync(scope, { recursive: true, force: true });
+});
