@@ -318,6 +318,14 @@ everything else under `capabilities.additive`, regenerating the conventional
 injection comments; custom comments inside the `capabilities:` block are not
 preserved.
 
+`oas use` activates **into a config file**, so it needs one at this scope or an
+outer one. In a scope with no `oas-config.yaml` anywhere in its chain, a
+capability already acquired into that scope's `installed/` store fails with
+`E_NO_CONFIG` naming the initialization to run first (`oas init`, plus
+`--package <id>` when the exact lock records the provider) rather than
+reporting the capability as unacquired. It writes nothing: authoring a scope's
+first config is `oas init`'s job.
+
 ### Templates
 
 `oas init --template <name|path|git-url>` seeds the new config from a template
@@ -361,7 +369,11 @@ capabilities:
 `oas use none --layer tasks` writes this. Pre-v0.9 spellings (`groups:`,
 top-level `layers:`, flat `capabilities.<id>` maps, `source:`,
 `agents-md-injection` on capability entries) are rejected with pointed
-migration errors.
+migration errors. Key names are matched as own properties only, so a key
+spelled `constructor` or `toString` is reported as an unsupported key, never as
+a renamed one. `__proto__` is refused outright by the YAML readers
+(`unsafe-config-key`): assigning it rewrites the parsed mapping's prototype
+instead of becoming data, which would hide the entry from every key validator.
 
 ## Worked examples
 
