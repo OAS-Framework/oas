@@ -1,5 +1,9 @@
 # Knowledge Log
 
+## 2026-08-25
+* **Delivery**: OAS-Framework/oas-jira PR #2, oas-aweb PR #2, and oas-linear PR #2 knowledge harvests MERGED (`fde9297`/`1d692be`/`abb35cf`) at expected exact heads after 3-lens review; oas-linear required one truthfulness RETURN fixed at `314dc00`; [repo state](/stewardship/repo-state.md) and the [delivery log](/stewardship/delivery-log.md) record custody verification, branch cleanup, and jira/aweb/linear specialist retirement.
+* **Update**: [Repo state](/stewardship/repo-state.md) In flight now reflects: five immutable leaf v2.0.0 tags, leaf knowledge custody closed, authoring pair deferred on the pending human retirement answer, and the remaining oas.dev v2 / kernel v0.20.1 / catalog / clean-room / rebuild sequence under oas-expert-final-v2-migration.
+
 ## 2026-08-20
 * **Update**: [Repo state](/stewardship/repo-state.md) records the human retirement of the package-wave coordinator and direct `oas-expert-1` coordination of preserved package reviews; existing merge/tag/lifecycle/notes holds remain and no replacement coordinator is authorized.
 * **Update**: skills/pr-review — merged the pending fix-handback note: on re-review, use the maintainer's own structured RETURN as the acceptance checklist rather than an owner's summary or an overlapping parallel-review verdict.
