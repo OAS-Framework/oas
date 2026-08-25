@@ -405,6 +405,65 @@ const LOCK_PACKAGE_KEYS = new Set(["source", "path", "version", "commit", "integ
 /** Revised-v2 capability rows lock the MATERIALIZED entity. */
 const LOCK_CAPABILITY_KEYS = new Set(["version", "package", "path", "integrity", "trusted"]);
 
+/** The kernel's canonical package-path form, as a read-only PREDICATE.
+ *
+ * A lock is never normalized or repaired on read, so the stored spelling must
+ * already BE canonical: `normalizePackagePath(path) === path`. That single test
+ * is what rejects the non-canonical spellings ("sub/", "./sub", ""), and it is
+ * also what rejects an escaping "../x" or an absolute "/etc" — the shapes that
+ * decide which directory an artifact is read from. Mirrors
+ * `normalizePackagePath` exactly, minus the typed errors it raises. */
+function canonicalPackagePath(raw) {
+  if (typeof raw !== "string") return undefined;
+  const s = raw.trim();
+  if (s.includes("\0") || s.startsWith("~") || s.includes("\\")) return undefined;
+  if (/^[A-Za-z]:[/\\]/.test(s) || isAbsolute(s)) return undefined;
+  const segments = s.split("/").filter((seg) => seg !== "" && seg !== ".");
+  if (segments.includes("..")) return undefined;
+  return segments.length ? segments.join("/") : ".";
+}
+const lockPathIsCanonical = (p) => typeof p === "string" && canonicalPackagePath(p) === p;
+
+/** The kernel's `parseLockSource` grammar, as a read-only classifier: returns
+ * "path" | "catalog" | "git", or undefined for anything the kernel would refuse.
+ *
+ * Strictness is the point. A lock source is not decoration — the kernel turns it
+ * back into a source spec on update, so a payload that merely "starts with
+ * catalog:" but is not a valid catalog id gets RECLASSIFIED downstream. Checking
+ * only the commit shape (as this reader did) accepted `gopher://evil` and a
+ * bodiless `path:`, which the kernel calls invalid-lock. A lock also never
+ * carries a `#<path>` fragment: the selected root is the row's own `path`. */
+function lockSourceKind(src) {
+  const s = String(src || "");
+  if (s.includes("#")) return undefined;
+  if (s.startsWith("path:")) {
+    const p = s.slice(5);
+    // The writer always resolves a local source to an absolute directory.
+    return p && isAbsolute(p) ? "path" : undefined;
+  }
+  if (s.startsWith("catalog:")) {
+    // Split at the FIRST "@": the catalog id grammar cannot contain one, so
+    // everything after it is the selector (`oas.okf@release@candidate` is one
+    // id and one ref, not the id `oas.okf@release`).
+    const body = s.slice(8);
+    const at = body.indexOf("@");
+    const id = at > 0 ? body.slice(0, at) : body;
+    if (!LOCK_ID_RE.test(id)) return undefined;
+    if (at > 0 && !body.slice(at + 1)) return undefined;
+    return "catalog";
+  }
+  if (s.startsWith("git:")) {
+    const body = s.slice(4);
+    const at = body.lastIndexOf("@") > body.lastIndexOf("/") ? body.lastIndexOf("@") : -1;
+    const url = at > 0 ? body.slice(0, at) : body;
+    if (!url) return undefined;
+    if (at > 0 && !body.slice(at + 1)) return undefined;
+    if (!/^(https?:\/\/|file:\/\/|git@|ssh:\/\/|git:\/\/)/.test(url)) return undefined;
+    return "git";
+  }
+  return undefined;
+}
+
 /** Strict, read-only lock validation for BOTH supported shapes. Any invalidity
  * discards the ENTIRE file; the Desktop degrades to invisible but never
  * partially salvages trust data.
@@ -424,7 +483,15 @@ const LOCK_CAPABILITY_KEYS = new Set(["version", "package", "path", "integrity",
  * lock (capability rows `{version, package, path, integrity, trusted}`; package
  * rows carrying no capability or trust lists) failed both halves and the whole
  * file was discarded. On every real v2 scope that made the deployment's
- * capability agents invisible. */
+ * capability agents invisible.
+ *
+ * The BAR is the kernel's own `validateLockEntry` / `validateCapabilityLockEntry`:
+ * a document those refuse with invalid-lock must be discarded here too, or the
+ * app shows a provider as trusted that the kernel will not serve. That parity
+ * is why the path spelling, the source grammar and dependency uniqueness are
+ * all checked here and not only the field types — each of them decides
+ * something real: which directory an artifact was taken from, and what the
+ * source string turns back into on update. */
 function validatedLockCapabilities(file) {
   let p;
   try { p = JSON.parse(readFileSync(file, "utf8")); } catch { return undefined; }
@@ -463,9 +530,20 @@ function validatedLockCapabilities(file) {
     if (Object.keys(e).some((k) => !LOCK_PACKAGE_KEYS.has(k))) return undefined;
     if (["source", "path", "version", "commit", "integrity"].some((k) => !str(e[k]))) return undefined;
     if (!LOCK_SHA256_RE.test(e.integrity)) return undefined;
+    // The selected package root is stored in CANONICAL form only — "sub/",
+    // "./sub" and "" are invalid spellings, not shorthand, and the same test
+    // rejects an escaping "../x" or an absolute "/etc".
+    if (!lockPathIsCanonical(e.path)) return undefined;
     if (!Array.isArray(e.dependencies) || e.dependencies.some((d) => !str(d) || !LOCK_ID_RE.test(d))) return undefined;
+    // `dependencies` is a SET: a repeated id is a malformed row, not a hint.
+    if (new Set(e.dependencies).size !== e.dependencies.length) return undefined;
+    // The source must parse against the exact grammar the writer produces —
+    // checking only the commit shape accepted `gopher://evil` and a bodiless
+    // `path:`, both of which the kernel calls invalid-lock.
+    const kind = lockSourceKind(e.source);
+    if (!kind) return undefined;
     // Local acquisition is exact-directory: the source names the package root.
-    if (e.source.startsWith("path:") ? (e.commit !== "local" || e.path !== ".") : !/^[0-9a-f]{40}$/.test(e.commit)) return undefined;
+    if (kind === "path" ? (e.commit !== "local" || e.path !== ".") : !/^[0-9a-f]{40}$/.test(e.commit)) return undefined;
     if (e.dependencies.some((d) => d === id || !Object.hasOwn(p.packages, d))) return undefined;
   }
   const visiting = new Set(), done = new Set();
@@ -485,6 +563,10 @@ function validatedLockCapabilities(file) {
     // The `package` back-reference is the single provider truth: a dangling one
     // leaves a materialized artifact with no provenance behind it.
     if (!LOCK_ID_RE.test(e.package) || !Object.hasOwn(p.packages, e.package)) return undefined;
+    // Canonical form here too: this path is where inside the provider package
+    // the materialized artifact came from, so a non-canonical, escaping or
+    // absolute spelling is a lock the kernel refuses outright.
+    if (!lockPathIsCanonical(e.path)) return undefined;
     if (!LOCK_SHA256_RE.test(e.integrity)) return undefined;
     if (typeof e.trusted !== "boolean") return undefined;
     out[id] = { shape: 2, integrity: e.integrity };

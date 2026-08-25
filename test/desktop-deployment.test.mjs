@@ -596,6 +596,9 @@ test("invalid v2 shapes — including the superseded transitional one — discar
   const capRow = good.capabilities["x.helper"];
   const pkgRow = good.packages["x.p"];
   const clone = () => JSON.parse(JSON.stringify(good));
+  /** Repoint the package row at a git source, so a case can vary ONE field
+   * without also tripping the `path:`-source exact-directory rule. */
+  const asGitSource = (l) => { l.packages["x.p"].source = "git:https://example.invalid/x.git"; l.packages["x.p"].commit = "a".repeat(40); };
 
   const invalid = {
     "transitional package row (capabilities list)": (l) => { l.packages["x.p"].capabilities = ["x.helper"]; },
@@ -616,6 +619,26 @@ test("invalid v2 shapes — including the superseded transitional one — discar
       Object.defineProperty(l.capabilities, "__proto__", { value: { ...capRow }, enumerable: true, writable: true, configurable: true });
     },
     "a package id outside the identity grammar": (l) => { l.packages["../escape"] = { ...pkgRow }; },
+
+    // ---- shapes the kernel rejects with invalid-lock that this reader used to
+    // accept. Each one decides something real: which directory an artifact came
+    // from, or what `oas update` would turn the row back into. The reader's own
+    // docstring says any invalidity discards the ENTIRE file — it has to be true
+    // for BOTH shapes, or the app shows trust the kernel refuses to serve.
+    //
+    // A lock is never normalized on read, so a path must already BE canonical.
+    "capability row path with a trailing slash": (l) => { l.capabilities["x.helper"].path = "sub/"; },
+    "capability row path escaping the package": (l) => { l.capabilities["x.helper"].path = "../x"; },
+    "capability row path that is absolute": (l) => { l.capabilities["x.helper"].path = "/etc"; },
+    // Repointed to a git source first, so ONLY the path spelling is wrong (a
+    // `path:` row is refused by the exact-directory rule before canonicality).
+    "package row path with a trailing slash": (l) => { asGitSource(l); l.packages["x.p"].path = "sub/"; },
+    // The source grammar, not just the commit shape: `updatePackage` turns this
+    // string back into a source spec.
+    "package row with an unknown source scheme": (l) => { asGitSource(l); l.packages["x.p"].source = "gopher://evil"; },
+    "package row with a bodiless path: source": (l) => { l.packages["x.p"].source = "path:"; },
+    // `dependencies` is a set.
+    "package row with duplicate dependencies": (l) => { l.packages["x.q"] = { ...pkgRow }; l.packages["x.p"].dependencies = ["x.q", "x.q"]; },
   };
   for (const [why, mutate] of Object.entries(invalid)) {
     const l = clone();
@@ -627,6 +650,21 @@ test("invalid v2 shapes — including the superseded transitional one — discar
   // A v1 document that also carries a packages map is not a v1 document.
   writeFileSync(lockFile, JSON.stringify({ lockfileVersion: 1, packages: good.packages, capabilities: {} }));
   assert.deepEqual(reader.listCapabilityAgents(scope), []);
+  // Control for the newly enforced grammars: the VALID spellings of the same
+  // fields still read, so the refusals above are the shapes and not the checks
+  // being blunt. A git source with a real ref, a catalog source with a
+  // selector, a nested-but-canonical capability path, distinct dependencies.
+  for (const [why, mutate] of Object.entries({
+    "a git source with a ref": (l) => { asGitSource(l); l.packages["x.p"].source = "git:https://example.invalid/x.git@main"; },
+    "a catalog source with a selector": (l) => { asGitSource(l); l.packages["x.p"].source = "catalog:oas.okf@release"; },
+    "a canonical nested package path": (l) => { asGitSource(l); l.packages["x.p"].path = "sub/pkg"; },
+    "two distinct dependencies": (l) => { l.packages["x.q"] = { ...pkgRow, dependencies: [] }; l.packages["x.r"] = { ...pkgRow, dependencies: [] }; l.packages["x.p"].dependencies = ["x.q", "x.r"]; },
+  })) {
+    const l = clone();
+    mutate(l);
+    writeFileSync(lockFile, JSON.stringify(l));
+    assert.deepEqual(reader.listCapabilityAgents(scope).map((a) => a.name), ["helper"], `valid lock must still read: ${why}`);
+  }
   // Restoring the real lock makes the provider visible again (control: the
   // discards above are the shapes, not the fixture).
   writeFileSync(lockFile, JSON.stringify(good));
