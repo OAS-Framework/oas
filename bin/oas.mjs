@@ -2357,7 +2357,11 @@ function acquireLayerCapability(dir, capId, layer, acquired, note) {
  * directly instead, which is also what makes a same-run acquisition visible to
  * the rest of the run. */
 function ownScopeCapabilityManifests(dir) {
-  const out = Object.create(null); // capability-id keyed — never answer for `constructor`/`toString`
+  // Capability-id keyed — never answer for `constructor`/`toString`. Belt and
+  // braces on the write side (store directory names are identity-validated at
+  // acquisition); it matters on the read side, where `oas init` indexes this
+  // map with a `--<layer>` flag value the operator typed.
+  const out = Object.create(null);
   for (const [sub, origin] of [[installedCapabilitiesDir(dir), "installed"], [ownedCapabilitiesDir(dir), "owned"]]) {
     if (!existsSync(sub)) continue;
     let entries;
@@ -2624,7 +2628,11 @@ function capabilityCommand() {
     let teamCtx;
     const instanceHome = process.env.PI_AGENT_HOME || process.env.OAS_HOME;
     const metaFile = instanceHome && join(instanceHome, "instance.json");
-    let capSettings = Object.create(null); // capability-id keyed — never answer for `constructor`/`toString`
+    // Capability-id keyed — never answer for `constructor`/`toString`. Belt and
+    // braces: the ids come from instance.json, which spawn wrote from resolved
+    // manifests. Null-prototype because the dispatcher indexes it with the
+    // namespace the operator typed on the command line.
+    let capSettings = Object.create(null);
     try {
       if (metaFile && existsSync(metaFile)) {
         const meta = JSON.parse(readFileSync(metaFile, "utf8"));

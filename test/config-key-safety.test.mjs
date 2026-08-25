@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import {
   capabilityManifest, marketplaceCapabilities, parseYamlFlat, parseYamlNested,
-  resolveOasConfig, RUNTIME_PACKAGE_MANAGERS, validateConfigShape,
+  resolveCapabilities, resolveOasConfig, RUNTIME_PACKAGE_MANAGERS, validateConfigShape,
 } from "../lib/core.mjs";
 import { REQUIREMENT_MANAGERS, requirementInstallPlan } from "../lib/packages.mjs";
 
@@ -120,6 +120,88 @@ test("an inherited-name agent type is declarable, and refused only once really d
   const again = spawnSync(process.execPath, [CLI, "type", "add", "constructor", "--dir", repo], { encoding: "utf8" });
   assert.notEqual(again.status, 0);
   assert.match(again.stderr, /agent type "constructor" already declared/);
+});
+
+test("a soul named __proto__ gets no binding: targeting reads own properties only", () => {
+  const repo = temp();
+  write(join(repo, ".agents", "capabilities", "owned", "acme.x", "oas.json"),
+    JSON.stringify({ capability: "acme.x", version: "1.0.0", description: "cap" }));
+  write(join(repo, "oas-config.yaml"), [
+    "name: keysafe",
+    "capabilities:",
+    "  additive:",
+    "    acme.x:",
+    "      from: owned",
+    "      global: false",
+    "      souls:",
+    "        alice: true",
+    "",
+  ].join("\n"));
+
+  // `souls.__proto__` is Object.prototype — an object, so `bindingObject`
+  // accepted it and filed it at specificity 2 (the highest), overriding the
+  // explicit global: false for a soul the config never mentions.
+  const ids = (soul) => resolveCapabilities(repo, soul).map((c) => c.id);
+  assert.deepEqual(ids("__proto__"), [], "an inherited soul name enabled an excluded capability");
+  assert.deepEqual(ids("constructor"), []);
+  assert.deepEqual(ids("hasOwnProperty"), []);
+  // The declared soul still wins over the exclusion, unchanged.
+  assert.deepEqual(ids("alice"), ["acme.x"]);
+  assert.deepEqual(ids("bob"), []);
+  assert.equal(Object.prototype.enabled, undefined);
+});
+
+test("an agent type named constructor is matched by declaration, never by inheritance", () => {
+  const repo = temp();
+  write(join(repo, ".agents", "capabilities", "owned", "acme.x", "oas.json"),
+    JSON.stringify({ capability: "acme.x", version: "1.0.0", description: "cap" }));
+  write(join(repo, "agents", "dev", "soul", "soul.yaml"), "name: dev\ntype: constructor\n");
+  write(join(repo, "oas-config.yaml"), [
+    "name: keysafe",
+    "capabilities:",
+    "  additive:",
+    "    acme.x:",
+    "      from: owned",
+    "      global: false",
+    "      agent-types:",
+    "        constructor: true",
+    "",
+  ].join("\n"));
+  // Declared: ordinary type targeting applies.
+  assert.deepEqual(resolveCapabilities(repo, "dev").map((c) => c.id), ["acme.x"]);
+  // Undeclared: a soul of ANOTHER type gets nothing, and no inherited name
+  // stands in for the declaration.
+  write(join(repo, "agents", "other", "soul", "soul.yaml"), "name: other\ntype: toString\n");
+  assert.deepEqual(resolveCapabilities(repo, "other").map((c) => c.id), []);
+});
+
+test("a capability command namespace named constructor is not a duplicate of Object.prototype", () => {
+  const repo = temp();
+  write(join(repo, ".agents", "capabilities", "owned", "acme.x", "oas.json"),
+    JSON.stringify({ capability: "acme.x", version: "1.0.0", description: "cap", command: "constructor" }));
+  write(join(repo, "oas-config.yaml"), [
+    "name: keysafe",
+    "capabilities:",
+    "  additive:",
+    "    acme.x:",
+    "      from: owned",
+    "      global: true",
+    "",
+  ].join("\n"));
+  // The owner table used to answer `Object` for "constructor", so a SINGLE
+  // capability collided with the prototype and the diagnostic embedded native
+  // function source.
+  assert.deepEqual(resolveOasConfig(repo).capabilities.map((c) => c.command), ["constructor"]);
+  // A REAL duplicate is still refused, and names only real owners.
+  write(join(repo, ".agents", "capabilities", "owned", "acme.y", "oas.json"),
+    JSON.stringify({ capability: "acme.y", version: "1.0.0", description: "cap", command: "constructor" }));
+  writeFileSync(join(repo, "oas-config.yaml"),
+    readFileSync(join(repo, "oas-config.yaml"), "utf8") + "    acme.y:\n      from: owned\n      global: true\n");
+  assert.throws(() => resolveOasConfig(repo), (e) => {
+    assert.match(e.message, /duplicate capability command namespace "constructor": acme\.[xy], acme\.[xy]/);
+    assert.doesNotMatch(e.message, NATIVE_SOURCE);
+    return true;
+  });
 });
 
 test("manager allowlists answer for their own entries only", () => {
