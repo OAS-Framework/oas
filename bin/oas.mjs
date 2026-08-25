@@ -584,6 +584,13 @@ function readCapabilitiesModel(file) {
 }
 
 // ---------- use / activation ----------
+/** Provider package of an installed capability, from the visible exact lock.
+ * Best effort by design: this only enriches a diagnosis, so a lock the failing
+ * command was not otherwise reading must not turn it into invalid-lock. */
+function lockedProviderPackage(dir, capId) {
+  try { return (lockedPackageCapabilities(dir).get(capId) || [])[0]; }
+  catch { return undefined; }
+}
 function use() {
   const requested = args[1];
   if (!requested || requested.startsWith("--")) die("usage: oas use <capability|none> [--global|--type <agent-type>|--soul <name>] [--disable] [--layer <name>] [--settings k=v [k2=v2 ...]] [--dir <dir>]");
@@ -602,7 +609,20 @@ function use() {
     return;
   }
   const manifest = capabilityManifest(requested, dir);
-  if (!manifest) die(`unknown capability "${requested}" (acquired: ${Object.keys(capabilityManifests(dir)).join(", ") || "none"}) — acquire it with \`oas install ${requested}\` (marketplace: ${Object.keys(marketplaceCapabilities()).join(", ")})`);
+  if (!manifest) {
+    // A scope with NO oas-config.yaml anywhere in its chain is not a config
+    // level, so `capabilityManifests` — which walks the chain — never opens this
+    // scope's installed store: a capability acquired and locked right here would
+    // otherwise be reported as never acquired. Diagnose the missing chain
+    // instead. `oas use` still writes nothing: authoring an adopter's first
+    // config is `oas init`'s job, and guessing it here would be policy.
+    if (!configChain(dir).length && ownScopeCapabilityManifest(dir, requested)) {
+      const pkg = lockedProviderPackage(dir, requested);
+      cmdFail("E_NO_CONFIG", `capability "${requested}" is installed at ${shortPath(dir)}, but there is no oas-config.yaml at this scope or any level above it — \`oas use\` activates into a config file and this scope has none. Initialize it first with \`oas init${pkg ? ` --package ${pkg}` : ""} --dir ${shellQuote(dir)}\`, then re-run \`oas use ${requested}\`.`);
+      return;
+    }
+    die(`unknown capability "${requested}" (acquired: ${Object.keys(capabilityManifests(dir)).join(", ") || "none"}) — acquire it with \`oas install ${requested}\` (marketplace: ${Object.keys(marketplaceCapabilities()).join(", ")})`);
+  }
   if (layer && manifest.layer !== layer) die(`capability "${manifest.capability}" declares layer "${manifest.layer || "none"}", not "${layer}"`);
   const targets = [["agent-types", flag("type")], ["souls", flag("soul")]].filter(([, value]) => value);
   if (args.includes("--global")) targets.push(["global", undefined]);

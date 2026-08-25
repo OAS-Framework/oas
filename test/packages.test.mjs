@@ -268,6 +268,40 @@ test("adopted snapshot stays an ordinary scoped config: retarget, disable, setti
   assert.equal(resolveOasConfig(ws, undefined).layers.knowledge.id, "example.delivery", "workspace scope unaffected");
 });
 
+test("oas use in a scope with no config chain names the initialization remedy instead of reporting an installed capability as unacquired", () => {
+  const base = temp();
+  const pkg = fixturePackage(join(base, "pkg"));
+  const ws = join(base, "ws");
+  // Acquired and locked at this scope, and NOTHING is a config level: no
+  // oas-config.yaml here or anywhere above the temp root.
+  installFixturePackage(ws, pkg);
+  assert.ok(existsSync(join(ws, ".agents", "capabilities", "installed", "example.review", "oas.json")));
+  assert.equal(existsSync(join(ws, "oas-config.yaml")), false);
+
+  const r = cli(["use", "example.review", "--global", "--dir", ws]);
+  assert.notEqual(r.status, 0);
+  assert.doesNotMatch(r.stderr, /acquired: none/, "an installed capability must never be reported as never acquired");
+  assert.match(r.stderr, /capability "example\.review" is installed at .*, but there is no oas-config\.yaml at this scope or any level above it/);
+  // The provider package comes from the exact lock, so the remedy is copyable.
+  assert.match(r.stderr, /Initialize it first with `oas init --package example\.engineering --dir /);
+  assert.equal(existsSync(join(ws, "oas-config.yaml")), false, "diagnosis only — oas use never authors the adopter's first config");
+
+  const j = cli(["use", "example.review", "--global", "--dir", ws, "--json"]);
+  assert.notEqual(j.status, 0);
+  assert.equal(JSON.parse(j.stdout).error.code, "E_NO_CONFIG");
+
+  // A capability that really is absent keeps the acquisition message.
+  const miss = cli(["use", "example.absent", "--global", "--dir", ws]);
+  assert.notEqual(miss.status, 0);
+  assert.match(miss.stderr, /unknown capability "example\.absent" \(acquired: none\)/);
+
+  // And the remedy is real: once the scope is a config level, the same command works.
+  assert.equal(cli(["init", "--raw", "--dir", ws, "--no-tmux-mouse"]).status, 0);
+  const ok = cli(["use", "example.review", "--global", "--dir", ws]);
+  assert.equal(ok.status, 0, ok.stderr);
+  assert.equal(resolveOasConfig(ws, "dev").capabilities.some((c) => c.id === "example.review"), true);
+});
+
 // ---------- config diff ----------
 
 test("oas config diff is report-only: shows drift three ways, never writes a byte", () => {
