@@ -409,6 +409,45 @@ test("a legacy v1 capability lock still answers the orphan check for its own art
   rmSync(base, { recursive: true, force: true });
 });
 
+test("the v2 orphan check is SCOPE-EXACT: an outer scope's lock does not answer for an unlocked inner copy", () => {
+  const base = temp();
+  const src = fixture(base);
+  const outer = scope(base, "outer");
+  assert.equal(cli(["install", src, "--dir", outer]).status, 0);
+  assert.ok(lockOf(outer).capabilities["x.plain"], "the outer scope must really be v2-locked");
+
+  // An inner config scope holds its OWN unlocked copy of the same id. It wins
+  // discovery precedence (inner beats outer) and is what actually activates,
+  // so the outer scope's lock says nothing about it.
+  const inner = join(outer, "inner");
+  write(join(inner, "oas-config.yaml"), "name: inner\n");
+  write(join(artifact(inner, "x.plain"), "oas.json"), JSON.stringify({ capability: "x.plain", version: "9.9.9", description: "cap" }));
+
+  const r = cli(["doctor", inner], { cwd: inner });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /WARNING: x\.plain at .*inner.* is in installed\/ but has no lock entry/);
+  rmSync(base, { recursive: true, force: true });
+});
+
+test("a lock-only ancestor never answers the orphan check for a config scope below it", () => {
+  const base = temp();
+  // A lock file with NO oas-config.yaml beside it: `readPackageLocks` walks it
+  // (lock levels are not config levels), so the merged chain would have
+  // silenced the orphan below — a strict widening over the legacy behaviour.
+  write(join(base, OAS_LOCK_FILE), JSON.stringify({
+    lockfileVersion: 2,
+    packages: { "x.p": { source: `path:${join(base, "src")}`, path: ".", version: "1.0.0", commit: "local", integrity: `sha256-${"a".repeat(64)}`, dependencies: [] } },
+    capabilities: { "x.plain": { version: "1.0.0", package: "x.p", path: "capabilities/plain", integrity: `sha256-${"b".repeat(64)}`, trusted: false } },
+  }, null, 2));
+  const s = scope(base);
+  write(join(artifact(s, "x.plain"), "oas.json"), JSON.stringify({ capability: "x.plain", version: "1.0.0", description: "cap" }));
+
+  const r = cli(["doctor", s], { cwd: s });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /WARNING: x\.plain at .* is in installed\/ but has no lock entry/);
+  rmSync(base, { recursive: true, force: true });
+});
+
 // ---------- canonical dispatch ----------
 
 test("a capability command runs through the CLI that dispatched it: a hostile PATH cannot intercept it", () => {
