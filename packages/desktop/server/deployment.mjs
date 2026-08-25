@@ -399,10 +399,13 @@ const LOCK_CAPABILITY_KEYS = new Set(["version", "package", "path", "integrity",
  * partially salvages trust data.
  *
  * Returns a null-prototype map of capability id → a REBUILT row
- * `{ shape, integrity, trusted }`. Rebuilt, never spread: a lock is artifact
- * data, `shape` decides which digest answers for the artifact and `integrity` is
- * the value trust compares against, so neither may be something the document
- * chose to put there.
+ * `{ shape, integrity }` — the two things this read-only reader acts on. Rebuilt
+ * and narrowed, never spread: a lock is artifact data, `shape` decides which
+ * digest answers for the artifact and `integrity` is the value trust compares
+ * against, so neither may be something the document chose to put there. The
+ * executable-approval flags are still VALIDATED above (a malformed one discards
+ * the file) and then deliberately dropped: the desktop never runs anything, so
+ * carrying a trust flag it cannot act on would be trust data with no consumer.
  *
  * v1 and v2 are read as ALTERNATIVES, not as one shape with extras — the
  * previous reader required the v1 row fields of every capability row and then
@@ -434,7 +437,7 @@ function validatedLockCapabilities(file) {
       if (!str(e.source) || !str(e.version) || !str(e.integrity) || !LOCK_SHA256_RE.test(e.integrity)) return undefined;
       if (e.commit !== undefined && typeof e.commit !== "string") return undefined;
       if (e.trustedExecutables !== undefined && typeof e.trustedExecutables !== "boolean") return undefined;
-      out[id] = { shape: 1, integrity: e.integrity, trusted: e.trustedExecutables === true };
+      out[id] = { shape: 1, integrity: e.integrity };
     }
     return out;
   }
@@ -473,7 +476,7 @@ function validatedLockCapabilities(file) {
     if (!LOCK_ID_RE.test(e.package) || !Object.hasOwn(p.packages, e.package)) return undefined;
     if (!LOCK_SHA256_RE.test(e.integrity)) return undefined;
     if (typeof e.trusted !== "boolean") return undefined;
-    out[id] = { shape: 2, integrity: e.integrity, trusted: e.trusted };
+    out[id] = { shape: 2, integrity: e.integrity };
   }
   return out;
 }
