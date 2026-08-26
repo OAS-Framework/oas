@@ -14,8 +14,9 @@ is locked by the OAS-Framework organization policy. The repo API returned 409
 "disabled by the organization", and changing the organization setting requires
 an organization admin token with `admin:org` scope.
 
-**The same restriction has two surfaces.** Until v0.20.0 it always showed as a
-run with `conclusion=failure` whose only failed step was the bump-PR create.
+**The same restriction has two surfaces.** Until v0.20.0 the known failure
+mode was a run with `conclusion=failure` whose only failed step was the
+bump-PR create.
 On the v0.20.1 release (run `32888965280`, 2026-08-25) it produced a silent
 one instead: the run finished **fully green**, the `release-bump/v0.20.1`
 branch was pushed, and **no PR existed** — main still carried the previous

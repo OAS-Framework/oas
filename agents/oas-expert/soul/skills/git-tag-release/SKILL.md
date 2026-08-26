@@ -106,8 +106,8 @@ remove.
   the run went fully green, pushed `release-bump/vX.Y.Z`, and created no PR at
   all (the same org restriction, silent surface — seen on v0.20.1). The
   trigger for this rescue is main's version, not the run conclusion. Check
-  `npm view @oas-framework/oas version` first. Publishing completed before this step, so do not retag for
-  the bump-PR failure alone. The repo-level "Allow GitHub Actions to create
+  `npm view @oas-framework/oas version` first. Publishing completed before
+  this step, so do not retag for a missing bump alone. The repo-level "Allow GitHub Actions to create
   and approve pull requests" toggle is locked by the OAS-Framework org policy
   (repo API returns 409 "disabled by the organization"; changing it requires
   org admin + `admin:org`). Until an org admin relaxes the policy, create and
