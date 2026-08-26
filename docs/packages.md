@@ -196,12 +196,24 @@ workspace instead of only the ancestor chain:
 3. discovers descendant scopes containing `oas-config.yaml` or `oas-lock.json`,
    in deterministic path order, pruning `.git`, generated stores (`.agents/`),
    dependency/vendor directories (`node_modules`, `vendor`, virtualenvs), agent
-   instances/worktrees, `local-agents/`, and **nested team boundaries** (each is
-   its own reconciliation unit);
+   instances/worktrees, `local-agents/`, **package payload** (below), and
+   **nested team boundaries** (each is its own reconciliation unit);
 4. restores each descendant scope once;
 5. validates that every config-referenced installed capability is supplied by a
    visible locked package (or capability lock); and
 6. aggregates missing requirements and failures **by scope**.
+
+**Package payload is never a scope.** A directory holding an `oas-package.json`
+is a package root, and everything beneath it is content the package *exports* —
+including the `configTemplates` files under `config-templates/`. Those templates
+bind layers to capabilities the adopting deployment has not installed yet, so
+reconciling one as a live scope would report phantom "supplied by no visible
+locked package" failures for the whole team. Discovery therefore excludes any
+candidate whose containing **ancestor** directory carries an `oas-package.json`,
+whatever the payload root is named — templates are never reconciled, validated,
+or acquired. The rule is the manifest, not the path: a repository that ships a
+package *and* is itself a deployment scope (its own `oas-config.yaml` at the
+root, with the manifest in a subdirectory) stays a scope exactly as before.
 
 At a non-team scope, bare `oas install` keeps current-chain behavior. Pass
 `--recursive` to request descendant reconciliation outside a team boundary — the
