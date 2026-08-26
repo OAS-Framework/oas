@@ -461,7 +461,7 @@ function doctor(dir) {
   if (cat.provenance === "override") console.log(`  OAS_PACKAGE_CATALOG replaces the catalog: no fetch of ${cat.url}, and no cache is written`);
   else if (cat.provenance === "remote") console.log(`  fetched from ${cat.url}; cached at ${shortPath(cat.cacheFile)}`);
   else if (cat.provenance === "cache") console.log(`  ${cat.url} was unreachable — this copy was fetched ${officialCatalogAge(cat.ageMs)}`);
-  else if (cat.provenance === "bundled") console.log(`  seed shipped with this release — ${cat.url} has never been reached on this host (no cache at ${shortPath(cat.cacheFile)})`);
+  else if (cat.provenance === "bundled") console.log(`  seed shipped with this release — ${cat.url} was not read, and there is no cached copy at ${shortPath(cat.cacheFile)}`);
   else console.log(`  ERROR: ${cat.error}`);
   console.log("\nInstalled packages:");
   if (pkg.lockError) {
