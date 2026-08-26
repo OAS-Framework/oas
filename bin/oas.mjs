@@ -456,13 +456,21 @@ function doctor(dir) {
   // doctorPackagesData computation (reviewer-455ba15 fix 4); fail-closed
   // invalid-lock raises are diagnosed here, never consumed as data.
   const pkg = doctorPackagesData(ctx, chain, { teamScope: r.team?.scope });
+  // Official catalog provenance. Doctor does NOT fetch — diagnostics stay off
+  // the network — so every line here describes what this host ALREADY has, and
+  // says which commands do refresh it. Never claim the remote "was unreachable"
+  // when no fetch was attempted this run.
   const cat = pkg.catalog;
+  const refreshedBy = `a refresh from ${cat.url} happens on acquiring commands (${cat.refreshedBy.join(", ")}) — not on doctor`;
   console.log(`\nOfficial package catalog: ${cat.provenance} — ${cat.source || "unreadable"}`);
   if (cat.provenance === "override") console.log(`  OAS_PACKAGE_CATALOG replaces the catalog: no fetch of ${cat.url}, and no cache is written`);
-  else if (cat.provenance === "remote") console.log(`  fetched from ${cat.url}; cached at ${shortPath(cat.cacheFile)}`);
-  else if (cat.provenance === "cache") console.log(`  ${cat.url} was unreachable — this copy was fetched ${officialCatalogAge(cat.ageMs)}`);
-  else if (cat.provenance === "bundled") console.log(`  seed shipped with this release — ${cat.url} was not read, and there is no cached copy at ${shortPath(cat.cacheFile)}`);
+  else if (cat.provenance === "remote") console.log(`  fetched from ${cat.url} by this run; cached at ${shortPath(cat.cacheFile)}`);
+  else if (cat.provenance === "cache") console.log(`  the cached copy at ${shortPath(cat.cacheFile)}, fetched ${officialCatalogAge(cat.ageMs)}; ${refreshedBy}`);
+  else if (cat.provenance === "bundled") console.log(`  the seed shipped with this release — there is no cached copy at ${shortPath(cat.cacheFile)}; ${refreshedBy}`);
   else console.log(`  ERROR: ${cat.error}`);
+  if (cat.provenance !== "override" && cat.fetchDisabled) console.log(`  the remote refresh is disabled by OAS_CATALOG_FETCH — no fetch of ${cat.url} is attempted on any command`);
+  if (cat.error && cat.provenance === "override") console.log(`  ERROR: ${cat.error} — every command that reads the catalog fails until this file is valid or the variable is unset`);
+  if (cat.cacheError) console.log(`  WARNING: this run could not write the cache: ${cat.cacheError}`);
   console.log("\nInstalled packages:");
   if (pkg.lockError) {
     console.log(`  ERROR: ${pkg.lockError.message} [${pkg.lockError.code}]`);

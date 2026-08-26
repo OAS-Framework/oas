@@ -543,7 +543,10 @@ test("a deployment created seconds ago is never told to migrate: doctor reports 
   assert.ok(!d.lockError, JSON.stringify(d.lockError));
   assert.deepEqual(d.legacyLockFiles, [], "a brand-new deployment has no v1 lock files");
   assert.ok(!d.officialMigration, "doctor must not ask a fresh init to run oas migrate --official");
-  assert.equal(JSON.stringify(d).includes("oas migrate"), false, "no migration advice anywhere in the report");
+  // Everything EXCEPT the catalog provenance block, which legitimately names
+  // `oas migrate` among the acquiring commands that refresh the catalog — that
+  // is static metadata about the kernel, not advice about THIS deployment.
+  assert.equal(JSON.stringify({ ...d, catalog: undefined }).includes("oas migrate"), false, "no migration advice anywhere in the report");
 
   // The only thing wrong with a fresh deployment is what the operator has not
   // consented to yet: the executable surfaces are untrusted, by design.
