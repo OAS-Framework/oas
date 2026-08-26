@@ -26,6 +26,7 @@ import {
   readCapabilityLocks, writeCapabilityLock,
   parsePackageSource, inspectGitSourceRoot, acquirePackage, restorePackages, listInstalledPackages, readPackageLocks, readLockedConfigTemplates,
   officialCapabilityPackage, officialPackageCatalog,
+  commandNeedsOfficialCatalog, officialCatalogAge, officialCatalogProvenance, refreshOfficialCatalog,
   approveCapability, updatePackage, removePackage, migrateLegacyLock, applyLegacyLockMigration,
   packageIntegrity, capabilityArtifactIntegrity, verifyCapabilityInstallation, installedCapabilityDir, installedCapabilitiesDir, ownedCapabilitiesDir, loadPackageManifestAt,
   resolveOasConfig, resolveWorkMode, composeInstanceAgentsMd, parseYamlNested, assertSafeConfigValue, assertSafeConfigWriteKey, stripInternalAnnotations, withConfigFile, packagedInject, teamAgentRoots,
@@ -302,7 +303,10 @@ function doctorPackagesData(ctx, chain, { teamScope } = {}) {
       ? `oas install --accept-requirement ${req.command} --dir ${shellQuote(ctx)}`
       : null,
   }));
-  return { lockError: lockBroken, packages, legacyLockFiles, adoptedTemplates, missingHostRequirements, officialMigration: officialMigrationState(pkgLocks.legacy, { teamScope, ctx }) };
+  // Where the official catalog this run served actually came from. Doctor is
+  // the observability surface for it: a deployment that silently fell back to a
+  // stale cache or to the release's bundled seed must be able to SAY so.
+  return { lockError: lockBroken, packages, legacyLockFiles, adoptedTemplates, missingHostRequirements, catalog: officialCatalogProvenance(), officialMigration: officialMigrationState(pkgLocks.legacy, { teamScope, ctx }) };
 }
 
 function doctorJson(dir) {
@@ -338,6 +342,7 @@ retiredLocks: (() => { try { return Object.entries(readCapabilityLocks(ctx)); } 
     // from ONE computation; fail-closed reads are diagnosed via lockError —
     // doctorPackagesData carries the engine's legacy-lock shapes).
     packages: pkg.packages,
+    catalog: pkg.catalog,
     lockError: pkg.lockError,
     legacyLockFiles: pkg.legacyLockFiles,
     officialMigration: pkg.officialMigration,
@@ -450,8 +455,23 @@ function doctor(dir) {
   // failures. Doctor is the DIAGNOSIS surface — human and JSON render the SAME
   // doctorPackagesData computation (reviewer-455ba15 fix 4); fail-closed
   // invalid-lock raises are diagnosed here, never consumed as data.
-  console.log("\nInstalled packages:");
   const pkg = doctorPackagesData(ctx, chain, { teamScope: r.team?.scope });
+  // Official catalog provenance. Doctor does NOT fetch — diagnostics stay off
+  // the network — so every line here describes what this host ALREADY has, and
+  // says which commands do refresh it. Never claim the remote "was unreachable"
+  // when no fetch was attempted this run.
+  const cat = pkg.catalog;
+  const refreshedBy = `a refresh from ${cat.url} happens on acquiring commands (${cat.refreshedBy.join(", ")}) — not on doctor`;
+  console.log(`\nOfficial package catalog: ${cat.provenance} — ${cat.source || "unreadable"}`);
+  if (cat.provenance === "override") console.log(`  OAS_PACKAGE_CATALOG replaces the catalog: no fetch of ${cat.url}, and no cache is written`);
+  else if (cat.provenance === "remote") console.log(`  fetched from ${cat.url} by this run; cached at ${shortPath(cat.cacheFile)}`);
+  else if (cat.provenance === "cache") console.log(`  the cached copy at ${shortPath(cat.cacheFile)}, fetched ${officialCatalogAge(cat.ageMs)}; ${refreshedBy}`);
+  else if (cat.provenance === "bundled") console.log(`  the seed shipped with this release — there is no cached copy at ${shortPath(cat.cacheFile)}; ${refreshedBy}`);
+  else console.log(`  ERROR: ${cat.error}`);
+  if (cat.provenance !== "override" && cat.fetchDisabled) console.log(`  the remote refresh is disabled by OAS_CATALOG_FETCH — no fetch of ${cat.url} is attempted on any command`);
+  if (cat.error && cat.provenance === "override") console.log(`  ERROR: ${cat.error} — every command that reads the catalog fails until this file is valid or the variable is unset`);
+  if (cat.cacheError) console.log(`  WARNING: this run could not write the cache: ${cat.cacheError}`);
+  console.log("\nInstalled packages:");
   if (pkg.lockError) {
     console.log(`  ERROR: ${pkg.lockError.message} [${pkg.lockError.code}]`);
     if (pkg.lockError.file) console.log(`         fix or remove the offending entry in ${shortPath(pkg.lockError.file)} — the lock is never auto-repaired; package operations fail closed until it is valid`);
@@ -2914,6 +2934,15 @@ function versionCmd() {
 // blame` pointing at the commit that last changed each command.
 const TYPED_CLI_FAILURES = new Set(["unsafe-config-key", "unsafe-config-value"]);
 try {
+// The official catalog is resolved from the OAS repo at resolution time, and
+// ONLY for commands that consume it for new work (contract: identity and
+// discovery, never a lock). Everything else — a bare `oas install` restore
+// above all — stays entirely off the network: the lock already names its exact
+// commits. A refresh never throws: a failed fetch degrades to the cached copy
+// (one staleness line on stderr) and then to the bundled seed, and an
+// OAS_PACKAGE_CATALOG override is left for the consumer to read and fail on
+// exactly where it always did.
+if (commandNeedsOfficialCatalog(cmd, args.slice(1))) await refreshOfficialCatalog();
 if (cmd === "doctor") {
   const doctorDir = args[1] && !args[1].startsWith("--") ? args[1] : undefined;
   args.includes("--json") ? doctorJson(doctorDir) : doctor(doctorDir);

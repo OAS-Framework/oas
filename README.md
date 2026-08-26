@@ -150,7 +150,9 @@ example-package-repo/
 ```
 
 ```bash
-# Official short id (from the kernel-bundled catalog)
+# Official short id — resolved at install time from the package catalog on
+# `main` in the OAS repository (cached locally; the catalog bundled with the
+# release is the offline seed)
 oas install oas.okf
 
 # Git source: defaults to oas-package/

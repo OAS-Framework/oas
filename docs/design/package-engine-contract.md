@@ -112,6 +112,70 @@ advancement** and grants **no executable trust**; after catalog resolution the
 source behaves exactly like a pinned git source. The engine ships a fixture
 catalog for tests.
 
+### 1.2 Catalog provenance and fallback
+
+The catalog document itself is resolved from the OAS repository at resolution
+time. Provenance is a first-class, reportable property of a run:
+
+| Provenance | Source | Selected when | Cache written | Fetch attempted |
+|---|---|---|---|---|
+| `override` | the file named by `OAS_PACKAGE_CATALOG` | that variable is set | no | **no** |
+| `remote` | `https://raw.githubusercontent.com/OAS-Framework/oas/main/package-catalog.json` | the fetch succeeded and the payload validated | yes | yes |
+| `cache` | `$OAS_HOME_DIR/package-catalog.cache.json` (default `~/.oas/`) | **any read that did not just fetch** — no override, and either no refresh ran or the refresh failed | no | maybe |
+| `bundled` | `<pkg-root>/package-catalog.json` | no override, no successful fetch, no usable cache | no | maybe |
+
+Rules the engine holds to:
+
+- the remote URL is a **constant**, never user, config, lock or catalog input —
+  the kernel resolves exactly one address and is not a fetch proxy; the override
+  is a local **file path**, as it always was;
+- redirects are followed, but the **final** response URL must be `https` on a
+  `github.com`/`githubusercontent.com` host, and the body is capped in **bytes**
+  (declared `content-length` first, then the buffered payload);
+- the document is **validated before use**: the root must be a JSON object for
+  every source (an override file whose root is not one keeps failing at the
+  consumer with the unchanged `invalid-source` /
+  `broken package catalog <file>` message), and a *remote* payload — plus the
+  cache, which only ever holds remote-derived content — is additionally
+  validated **entry by entry**: valid package id, `https://`-only `url`, an
+  option-free plain `ref`, a canonical relative `path`, unknown keys dropped.
+  Any failure on a remote payload is a *fetch failure* (fall through to `cache`,
+  then `bundled`) and any failure on the cache makes it **absent**;
+- **override files are exempt** from the entry rules: they are operator-owned
+  and local, and keep base semantics exactly (`file://` urls included, which the
+  hermetic suites depend on);
+- the cache stores `{ fetchedAt, url, catalog }`, is written to an exclusively
+  created (`O_EXCL`) temp file with a random unguessable name, `fchmod`ed `0600`
+  before any byte is written, `fsync`ed, then renamed; the directory is created
+  `0700` **when the kernel creates it** and a pre-existing directory is left
+  alone. A cache that cannot be written never fails the command — it is reported
+  as `cacheError`;
+- `cache` and `bundled` each emit **one** line on stderr *from the command that
+  attempted the refresh* — the `cache` line names the cache age — so a `--json`
+  run stays exactly one envelope on stdout. When the fetch was switched off with
+  `OAS_CATALOG_FETCH`, the line says **disabled**, never "unreachable";
+- trust is untouched: provenance decides *which identity map* is read, never
+  what is locked, materialized or approved.
+
+**Which paths may fetch.** Only catalog consumption for NEW work resolves the
+catalog; everything else is offline by construction:
+
+| Path | Classification |
+|---|---|
+| `oas install <catalog-id>` — a bare official short id, optionally `@selector` (the command reads the catalog to choose the package vs legacy-capability route) | fetching |
+| `oas update <package>` | fetching |
+| `oas migrate` / `oas migrate --official` (v1 → package mapping) | fetching |
+| `oas init` (fundamental-layer acquisition, `--package`, unknown-capability remedy listing) | fetching |
+| `oas install <path>` / `git:…` / `https://…` / any source naming its own transport | **no fetch — the source is not a catalog lookup** |
+| `oas doctor` (including `--json`) | **no fetch — diagnostics stay off the network; it REPORTS provenance and names the acquiring commands that refresh it** |
+| bare `oas install` restore of an existing lock, incl. `--recursive` reconciliation | **lock-only — no fetch** |
+| `oas list`, `trust`, `use`, `remove`, `config`, `status`, `spawn`, `retire`, `type`, `inject`, `root`, `version`, `pane`, capability command dispatch | **lock-only — no fetch** |
+| every library consumer of `officialPackageCatalog()` / `officialCapabilityAliases()` / the catalog resolver called without a CLI refresh | **lock-only — resolves from cache, else the bundled seed** |
+
+A restore therefore works fully offline: the lock already names the exact
+commits, and a `catalog:` lock source needs only the id → URL mapping, which the
+cache or the bundled seed supplies with no network call.
+
 ## 2. Package manifest: what a package must declare
 
 ```json

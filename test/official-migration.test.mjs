@@ -18,6 +18,7 @@ import {
   officialCapabilityPackage, resolveOasConfig, writeCapabilityLock,
 } from "../lib/core.mjs";
 import { discoverMigrationScopes } from "../lib/packages.mjs";
+import { BUNDLED_CATALOG } from "./catalog-hermetic.mjs";
 
 const CLI = resolve(new URL("../bin/oas.mjs", import.meta.url).pathname);
 function temp() { return mkdtempSync(join(tmpdir(), "oas-official-mig-")); }
@@ -49,8 +50,9 @@ function hermeticEnv() {
 /** Run the CLI with a fixture catalog bound through OAS_PACKAGE_CATALOG. */
 function cli(cwd, catalogFile, ...argv) {
   const env = hermeticEnv();
-  if (catalogFile) env.OAS_PACKAGE_CATALOG = catalogFile;
-  else delete env.OAS_PACKAGE_CATALOG;
+  // Always a FILE, never the network: hermeticEnv() strips every OAS_* variable,
+  // so an unbound catalog would fall through to the v0.21 remote fetch.
+  env.OAS_PACKAGE_CATALOG = catalogFile || BUNDLED_CATALOG;
   return spawnSync(process.execPath, [CLI, ...argv], { cwd, env, encoding: "utf8" });
 }
 function json(r) {

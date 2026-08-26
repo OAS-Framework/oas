@@ -95,7 +95,7 @@ test("desktop server: /api/cli reports discovery status; compatible fake CLI acc
     assert.equal(s.ok, true, JSON.stringify(s));
     assert.equal(s.version, "0.18.0");
     assert.equal(s.source, "env");
-    assert.deepEqual(s.required, { desktopApi: 1, range: ">=0.18.0 <0.21.0" });
+    assert.deepEqual(s.required, { desktopApi: 1, range: ">=0.18.0 <0.22.0" });
     // The recovery command is DERIVED from this app's own version, so it names
     // the lockstep-published kernel and always lands inside the band above —
     // never a hand-pinned version that rots below a feature floor.
@@ -137,28 +137,28 @@ test("desktop server: incompatible CLI → status carries per-candidate diagnost
 // release published, so it degraded to observation-only in the field while
 // every unit test passed. These two fakes are the released kernel this
 // Desktop ships beside (accepted) and the next minor (rejected).
-test("desktop server: a released 0.20.x CLI is ACCEPTED and 0.21.0 is REJECTED at the band ceiling", async () => {
-  const okDir = mkdtempSync(join(tmpdir(), "oas-cli020-"));
-  const ok020 = fakeCli(okDir, { version: "0.20.4" });
-  const a = await startServer({ OAS_DESKTOP_OAS_BIN: ok020.bin, PATH: "/nonexistent", SHELL: "/bin/false" });
+test("desktop server: a released 0.21.x CLI is ACCEPTED and 0.22.0 is REJECTED at the band ceiling", async () => {
+  const okDir = mkdtempSync(join(tmpdir(), "oas-cli021-"));
+  const ok021 = fakeCli(okDir, { version: "0.21.4" });
+  const a = await startServer({ OAS_DESKTOP_OAS_BIN: ok021.bin, PATH: "/nonexistent", SHELL: "/bin/false" });
   try {
     const s = await (await fetch(`http://127.0.0.1:${a.port}/api/cli/reprobe`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })).json();
-    assert.equal(s.ok, true, `0.20.4 rejected by discovery: ${JSON.stringify(s.tried)}`);
-    assert.equal(s.version, "0.20.4");
-    assert.equal(s.bin, ok020.real);
-    assert.equal(s.relations, true, "a 0.20.x CLI is above the spawn-relations floor");
+    assert.equal(s.ok, true, `0.21.4 rejected by discovery: ${JSON.stringify(s.tried)}`);
+    assert.equal(s.version, "0.21.4");
+    assert.equal(s.bin, ok021.real);
+    assert.equal(s.relations, true, "a 0.21.x CLI is above the spawn-relations floor");
   } finally { a.proc.kill(); }
 
-  const badDir = mkdtempSync(join(tmpdir(), "oas-cli021-"));
-  const next = fakeCli(badDir, { version: "0.21.0" });
+  const badDir = mkdtempSync(join(tmpdir(), "oas-cli022-"));
+  const next = fakeCli(badDir, { version: "0.22.0" });
   const b = await startServer({ OAS_DESKTOP_OAS_BIN: next.bin, PATH: "/nonexistent", SHELL: "/bin/false" });
   try {
     const s = await (await fetch(`http://127.0.0.1:${b.port}/api/cli/reprobe`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })).json();
-    assert.equal(s.ok, false, "0.21.0 is past the exclusive ceiling and must not become the mutation binary");
+    assert.equal(s.ok, false, "0.22.0 is past the exclusive ceiling and must not become the mutation binary");
     const tried = s.tried.find((t) => t.path === next.real);
     assert.ok(tried, "the rejected candidate is in diagnostics");
-    assert.match(tried.reason, /outside >=0\.18\.0 <0\.21\.0/);
-    assert.equal(tried.version, "0.21.0");
+    assert.match(tried.reason, /outside >=0\.18\.0 <0\.22\.0/);
+    assert.equal(tried.version, "0.22.0");
   } finally { b.proc.kill(); }
 });
 

@@ -17,8 +17,8 @@ prints exactly one JSON object on stdout:
 {"schemaVersion":1,"name":"@oas-framework/oas","version":"<installed version>","desktopApi":1}
 ```
 
-`version` is the installed package's exact semver (e.g. `0.20.0`).
-Desktop 0.20 accepts `desktopApi === 1` and semver `>=0.18.0 <0.21.0`.
+`version` is the installed package's exact semver (e.g. `0.21.0`).
+Desktop 0.21 accepts `desktopApi === 1` and semver `>=0.18.0 <0.22.0`.
 
 The band is widened one kernel minor at a time, after confirming this v1
 surface is unchanged, and always admits the kernel published by the same

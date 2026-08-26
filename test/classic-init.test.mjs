@@ -26,6 +26,7 @@ import { dirname, join, relative, resolve } from "node:path";
 import {
   OAS_LOCK_FILE, capabilityIntegrity, installedCapabilitiesDir, ownedCapabilitiesDir, writeCapabilityLock,
 } from "../lib/core.mjs";
+import { BUNDLED_CATALOG } from "./catalog-hermetic.mjs";
 
 const CLI = resolve(new URL("../bin/oas.mjs", import.meta.url).pathname);
 const temp = () => mkdtempSync(join(tmpdir(), "oas-classic-init-"));
@@ -56,13 +57,15 @@ function hermeticEnv() {
   return env;
 }
 
-/** Run the CLI with a fixture catalog bound through OAS_PACKAGE_CATALOG.
- * Passing `null` binds an EMPTY catalog — the clean-room shape, where the
- * official route is unavailable and init must say so instead of guessing. */
+/** Run the CLI with a catalog bound through OAS_PACKAGE_CATALOG: the fixture
+ * when the case supplies one, else this repository's bundled catalog. The
+ * clean-room shape (no official route at all) is bound with `emptyCatalog()`. */
 function cli(argv, { catalog, cwd, env: extra } = {}) {
   const env = hermeticEnv();
-  if (catalog) env.OAS_PACKAGE_CATALOG = catalog;
-  else delete env.OAS_PACKAGE_CATALOG;
+  // Always a FILE, never the network: hermeticEnv() strips every OAS_* variable,
+  // so an unbound catalog would fall through to the remote fetch. The bundled
+  // file is byte-for-byte what an unbound run read before that contract existed.
+  env.OAS_PACKAGE_CATALOG = catalog || BUNDLED_CATALOG;
   Object.assign(env, extra);
   return spawnSync(process.execPath, [CLI, ...argv], { cwd: cwd || tmpdir(), env, encoding: "utf8" });
 }
@@ -540,7 +543,10 @@ test("a deployment created seconds ago is never told to migrate: doctor reports 
   assert.ok(!d.lockError, JSON.stringify(d.lockError));
   assert.deepEqual(d.legacyLockFiles, [], "a brand-new deployment has no v1 lock files");
   assert.ok(!d.officialMigration, "doctor must not ask a fresh init to run oas migrate --official");
-  assert.equal(JSON.stringify(d).includes("oas migrate"), false, "no migration advice anywhere in the report");
+  // Everything EXCEPT the catalog provenance block, which legitimately names
+  // `oas migrate` among the acquiring commands that refresh the catalog — that
+  // is static metadata about the kernel, not advice about THIS deployment.
+  assert.equal(JSON.stringify({ ...d, catalog: undefined }).includes("oas migrate"), false, "no migration advice anywhere in the report");
 
   // The only thing wrong with a fresh deployment is what the operator has not
   // consented to yet: the executable surfaces are untrusted, by design.

@@ -12,6 +12,7 @@ import {
   requirementInstallPlan,
   runRequirementInstall, selectConfigTemplate, validateConfigTemplate,
 } from "../lib/packages.mjs";
+import { BUNDLED_CATALOG } from "./catalog-hermetic.mjs";
 
 const CLI = resolve(new URL("../bin/oas.mjs", import.meta.url).pathname);
 function temp() { return mkdtempSync(join(tmpdir(), "oas-pkg-test-")); }
@@ -28,6 +29,9 @@ function hermeticEnv() {
   for (const [k, v] of Object.entries(process.env)) if (!/^(OAS|PI)_/.test(k)) env[k] = v;
   env.HOME = HERMETIC_HOME;
   env.OAS_HOME_DIR = join(HERMETIC_HOME, ".oas");
+  //   - OAS_PACKAGE_CATALOG: with every OAS_* variable stripped, an unbound
+  //     catalog would fall through to the v0.21 remote fetch. Always a FILE.
+  env.OAS_PACKAGE_CATALOG = BUNDLED_CATALOG;
   return env;
 }
 
