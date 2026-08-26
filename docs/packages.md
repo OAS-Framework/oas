@@ -374,8 +374,7 @@ for it.
 
 ### Catalog shape
 
-The official catalog is data (`package-catalog.json`, or the file named by
-`OAS_PACKAGE_CATALOG`):
+The official catalog is data:
 
 ```json
 {
@@ -388,13 +387,62 @@ The official catalog is data (`package-catalog.json`, or the file named by
 ```
 
 `packages` is identity and discovery only — resolving through it never advances
-a lock and never grants executable trust. The released kernel bundles the
-official OAS-Framework entries. Once a short id appears there, `oas install <id>`
-prefers the distribution package over the legacy bundled capability marketplace.
-Existing v1 locks and artifacts remain supported until you run guided migration.
-`capabilities` is the legacy-capability → package alias map the guided migration
-reads; identity mappings need no entry. An alias value may also be spelled
-`{ "package": "<id>" }`.
+a lock and never grants executable trust. Once a short id appears there,
+`oas install <id>` prefers the distribution package over the legacy bundled
+capability marketplace. Existing v1 locks and artifacts remain supported until
+you run guided migration. `capabilities` is the legacy-capability → package
+alias map the guided migration reads; identity mappings need no entry. An alias
+value may also be spelled `{ "package": "<id>" }`.
+
+### Where the catalog comes from
+
+The **source of truth is `package-catalog.json` on `main` in the OAS
+repository**, read at resolution time. A newly published official package
+therefore reaches every deployment without waiting for a kernel release. The
+kernel resolves it in this order:
+
+| # | Source | When | Cached? |
+|---|---|---|---|
+| a | the file named by `OAS_PACKAGE_CATALOG` | that variable is set | no — and no fetch is attempted |
+| b | `https://raw.githubusercontent.com/OAS-Framework/oas/main/package-catalog.json` | a catalog-consuming command runs | yes, on success |
+| c | `~/.oas/package-catalog.cache.json` | the fetch failed or returned an invalid payload | it *is* the cache |
+| d | the `package-catalog.json` bundled in the npm package | no cache exists yet | no |
+
+The fetched URL is a **constant** — never config, lock, or catalog input — so
+the kernel can never be pointed at another address; the only override names a
+local *file*. The payload is shape-validated before it is used or cached, so an
+invalid remote document is a fetch failure and the cache answers instead.
+
+**Cache.** `~/.oas/package-catalog.cache.json` (or the same file under
+`$OAS_HOME_DIR`) stores the last successful payload with its fetch timestamp. It
+is replaced atomically (temp + rename) with `0600` perms under a `0700`
+directory. A missing, truncated or corrupt cache is treated as *absent*: the
+bundled seed answers, and nothing crashes.
+
+**Offline.** Falling back to the cache prints one line to **stderr** naming the
+cache age — never to stdout, so `--json` stays exactly one envelope:
+
+```
+oas: official package catalog unreachable (timed out after 4000ms) — using the cached copy from 26h ago (~/.oas/package-catalog.cache.json)
+```
+
+Only commands that consume the catalog for **new work** resolve it at all:
+`oas install <source>`, `oas update <package>`, `oas migrate`, `oas doctor`, and
+the `oas init` forms that resolve a fundamental layer or `--package`. Everything
+lock-driven stays entirely off the network — a **bare `oas install` restore of
+an existing lock never attempts a fetch**, because the lock already names the
+exact commits to restore. Reproducibility is unaffected either way: locks pin
+commits, and the catalog only ever supplies identity.
+
+**`OAS_CATALOG_FETCH=off`** skips the remote attempt entirely and resolves
+straight to the cache, then the seed — for air-gapped hosts that want the
+fallbacks without waiting for the timeout.
+
+**`OAS_PACKAGE_CATALOG`** is the hermetic escape hatch: it *replaces* the
+catalog with the named file, suppresses the fetch, writes no cache, and keeps
+the exact failure behavior for a broken file (`broken package catalog <file>`,
+typed `invalid-source`). It is what every test in this repository binds so the
+suite never touches the network.
 
 ## Doctor
 
@@ -407,6 +455,9 @@ reads; identity mappings need no entry. An alias value may also be spelled
   it;
 - **available-but-unadopted templates** — a locked, installed package exporting
   config templates that no scope has adopted;
+- **official catalog provenance** (`catalog` in `--json`) — which of
+  `override | remote | cache | bundled` answered, the source path or URL, the
+  cache path, and the cache age when a cached copy is being served;
 - **missing host commands** for active capabilities, with the exact consent
   command when a safe installer exists;
 - **official capability migration** (`officialMigration` in `--json`) when the
