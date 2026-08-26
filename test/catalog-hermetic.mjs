@@ -5,9 +5,18 @@
  * GitHub at resolution time, so any spawned CLI that reaches a catalog-consuming
  * command would go to the network. `OAS_PACKAGE_CATALOG` is the documented
  * hermetic escape hatch: it names a local FILE and suppresses the remote fetch
- * entirely. Every CLI-spawning test therefore binds a catalog file explicitly —
- * a fixture where the test has one, and otherwise this repository's own bundled
- * `package-catalog.json`, which is byte-for-byte what those runs already read.
+ * entirely. Every CLI-spawning test OUTSIDE the catalog suites therefore binds a
+ * catalog file explicitly — a fixture where the test has one, and otherwise this
+ * repository's own bundled `package-catalog.json`, which is byte-for-byte what
+ * those runs already read.
+ *
+ * The catalog suites themselves (`package-catalog-remote.test.mjs`,
+ * `package-catalog-hardening.test.mjs`) are the exception, and have to be: their
+ * whole subject is what happens when the override is ABSENT. They stay offline a
+ * different way — an injected fetcher in-process, `OAS_CATALOG_FETCH=off` in a
+ * child, or `test/catalog-fetch-canary.mjs`, which replaces `fetch` in the child
+ * with a recorder that fails, so a run that must not touch the network can be
+ * PROVEN not to rather than merely prevented.
  */
 import { fileURLToPath } from "node:url";
 

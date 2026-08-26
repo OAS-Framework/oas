@@ -35,7 +35,13 @@ const REMOTE_DOC = {
 };
 const CACHED_DOC = { packages: { "x.cached": { url: "https://example.invalid/cached.git", ref: "v1.0.0" } } };
 
-const okResponse = (doc) => ({ ok: true, status: 200, text: async () => JSON.stringify(doc) });
+/** A response in the shape real `fetch` returns — `url` is the FINAL url after
+ * redirects, which the kernel requires to be an https GitHub host, so every
+ * fixture carries it. */
+const okResponse = (doc, url = OFFICIAL_CATALOG_URL) => ({
+  ok: true, status: 200, url, headers: { get: () => null },
+  text: async () => JSON.stringify(doc),
+});
 /** An injected fetcher that records every call — the proof that a path did or
  * did not go to the network, and that it asked for the CONSTANT catalog URL. */
 function spyFetch(handler) {
@@ -176,12 +182,11 @@ test("(d) no cache and no bundled file: an empty catalog, never a crash", async 
 });
 
 test("only NEW-work commands may resolve the catalog — lock-driven work never fetches", () => {
-  // Fetching: a new acquisition, an update, migrate mapping, doctor's alias
-  // listing and provenance, and the layer/remedy resolution inside init.
+  // Fetching: acquiring a bare catalog id, an update, migrate mapping, and the
+  // layer/remedy resolution inside init.
   assert.equal(commandNeedsOfficialCatalog("install", ["oas.okf", "--dir", "/x"]), true);
   assert.equal(commandNeedsOfficialCatalog("update", ["oas.okf"]), true);
   assert.equal(commandNeedsOfficialCatalog("migrate", ["--official", "--dry-run"]), true);
-  assert.equal(commandNeedsOfficialCatalog("doctor", ["--json"]), true);
   assert.equal(commandNeedsOfficialCatalog("init", []), true);
   assert.equal(commandNeedsOfficialCatalog("init", ["--raw", "--knowledge", "oas.okf"]), true);
   assert.equal(commandNeedsOfficialCatalog("init", ["--package", "oas.dev"]), true);
@@ -189,6 +194,12 @@ test("only NEW-work commands may resolve the catalog — lock-driven work never 
   // Lock-driven or catalog-free: a bare restore above all.
   assert.equal(commandNeedsOfficialCatalog("install", []), false, "bare `oas install` restore is fully offline");
   assert.equal(commandNeedsOfficialCatalog("install", ["--recursive", "--dir", "/x"]), false);
+  // A source that names its own transport is not a catalog lookup (see
+  // package-catalog-hardening.test.mjs for the full matrix).
+  assert.equal(commandNeedsOfficialCatalog("install", ["git:github.com/o/r"]), false);
+  assert.equal(commandNeedsOfficialCatalog("install", ["./local-package"]), false);
+  // Diagnostics stay off the network: doctor REPORTS provenance, never refreshes it.
+  assert.equal(commandNeedsOfficialCatalog("doctor", ["--json"]), false, "doctor must never fetch the catalog");
   assert.equal(commandNeedsOfficialCatalog("update", ["--check"]), false, "the kernel self-update check is not a catalog path");
   assert.equal(commandNeedsOfficialCatalog("init", ["--raw"]), false);
   assert.equal(commandNeedsOfficialCatalog("init", ["--template", "team"]), false);
@@ -207,7 +218,7 @@ function cliEnv(home, extra = {}) {
   return Object.assign(env, { HOME: home, OAS_HOME_DIR: join(home, ".oas"), OAS_CATALOG_FETCH: "off" }, extra);
 }
 
-test("doctor reports catalog provenance; the staleness line is stderr-only and --json stays ONE envelope", () => {
+test("doctor REPORTS the catalog provenance without refreshing it, and --json stays ONE envelope", () => {
   const home = temp();
   const scope = temp();
   const cacheFile = join(home, ".oas", "package-catalog.cache.json");
@@ -220,14 +231,18 @@ test("doctor reports catalog provenance; the staleness line is stderr-only and -
   assert.equal(doc.catalog.source, cacheFile);
   assert.equal(doc.catalog.url, OFFICIAL_CATALOG_URL);
   assert.equal(doc.catalog.cacheFile, cacheFile);
-  assert.match(j.stderr, /26h ago/, "the staleness line names the cache age");
-  assert.doesNotMatch(j.stdout, /26h ago/, "and it never lands inside the JSON envelope");
+  assert.equal(doc.catalog.refreshedThisRun, false, "doctor attempted no fetch");
+  assert.ok(doc.catalog.ageMs >= 26 * HOUR, "the age of the copy it is serving is in the envelope");
 
+  // The age belongs on the human line — doctor refreshed nothing, so there is
+  // no staleness WARNING to emit at all (that line is the acquiring commands').
   const h = spawnSync(process.execPath, [CLI, "doctor", scope], { cwd: scope, env: cliEnv(home), encoding: "utf8" });
   assert.equal(h.status, 0, h.stderr);
   assert.match(h.stdout, /Official package catalog: cache/);
+  assert.match(h.stdout, /26h ago/);
   assert.match(h.stdout, new RegExp(OFFICIAL_CATALOG_URL.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-  assert.match(h.stderr, /26h ago/);
+  assert.doesNotMatch(h.stdout, /unreachable/, "nothing was unreachable — nothing was contacted");
+  assert.doesNotMatch(h.stderr, /26h ago/, "and doctor emits no staleness line of its own");
 });
 
 test("the env override is reported as the provenance, and suppresses the staleness line", () => {
