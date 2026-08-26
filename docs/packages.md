@@ -404,45 +404,82 @@ kernel resolves it in this order:
 | # | Source | When | Cached? |
 |---|---|---|---|
 | a | the file named by `OAS_PACKAGE_CATALOG` | that variable is set | no — and no fetch is attempted |
-| b | `https://raw.githubusercontent.com/OAS-Framework/oas/main/package-catalog.json` | a catalog-consuming command runs | yes, on success |
-| c | `~/.oas/package-catalog.cache.json` | the fetch failed or returned an invalid payload | it *is* the cache |
-| d | the `package-catalog.json` bundled in the npm package | no cache exists yet | no |
+| b | `https://raw.githubusercontent.com/OAS-Framework/oas/main/package-catalog.json` | an **acquiring** command runs (listed below) and the fetch succeeds | yes, on success |
+| c | `~/.oas/package-catalog.cache.json` | **every read that did not just fetch** — no override, and either no refresh ran for this command or the refresh failed | it *is* the cache |
+| d | the `package-catalog.json` bundled in the npm package | no override, no successful fetch, and no usable cache | no |
+
+Row (c) is not only a failure path. Most commands never refresh at all, and a
+library consumer of `lib/core.mjs` never does; for all of them the cache is the
+*normal* source, and the bundled seed answers only when no cache exists yet.
 
 The fetched URL is a **constant** — never config, lock, or catalog input — so
 the kernel can never be pointed at another address; the only override names a
-local *file*. The payload is shape-validated before it is used or cached, so an
-invalid remote document is a fetch failure and the cache answers instead.
+local *file*. Redirects are followed, but the **final** response URL must still
+be an `https` GitHub host; the body is capped in **bytes** (declared
+`content-length` first, then the buffered payload); and the document is
+validated before it is used or cached — so an invalid remote document is a fetch
+failure and the cache answers instead.
+
+**Remote documents are untrusted input.** A `url`/`ref`/`path` from the network
+ends up in a `git clone` argv and on your filesystem, so every entry in a
+*remote* payload — and in the cache, which only ever holds remote-derived
+content — must satisfy: a valid package id; `url` a plain `https://` URL (no
+`file:`, `ssh:`, `git:` or scp-like spellings); `ref` a plain branch, tag or
+commit (never an option-like `-…`, never whitespace or `..`); `path` a
+canonical repository-relative path. Unknown keys are dropped. One bad entry
+disqualifies the whole payload, which then falls through to the cache and the
+seed. An **override file is exempt**: it is operator-controlled and local, and
+keeps the pre-remote semantics exactly — `file://` urls included.
 
 **Cache.** `~/.oas/package-catalog.cache.json` (or the same file under
-`$OAS_HOME_DIR`) stores the last successful payload with its fetch timestamp. It
-is replaced atomically (temp + rename) with `0600` perms under a `0700`
-directory. A missing, truncated or corrupt cache is treated as *absent*: the
-bundled seed answers, and nothing crashes.
+`$OAS_HOME_DIR`) stores the last successful payload with its fetch timestamp.
+It is replaced atomically: an exclusively created (`O_EXCL`) temp file with an
+unguessable random name, `0600` **always**, `fsync`ed, then renamed. The
+containing directory is created `0700` **when the kernel creates it**; a
+directory that already exists is left with whatever permissions the host gave
+it. A missing, truncated, corrupt or entry-invalid cache is treated as
+*absent*: the bundled seed answers, and nothing crashes. A cache that cannot be
+written never fails the command — the fresh catalog is still used, and
+`oas doctor --json` reports it as `catalog.cacheError`.
 
-**Offline.** Falling back to the cache prints one line to **stderr** naming the
-cache age — never to stdout, so `--json` stays exactly one envelope:
+**Offline.** When an acquiring command falls back, it prints one line to
+**stderr** naming the cache age — never to stdout, so `--json` stays exactly one
+envelope:
 
 ```
 oas: official package catalog unreachable (timed out after 4000ms) — using the cached copy from 26h ago (~/.oas/package-catalog.cache.json)
 ```
 
 Only commands that consume the catalog for **new work** resolve it at all:
-`oas install <source>`, `oas update <package>`, `oas migrate`, `oas doctor`, and
-the `oas init` forms that resolve a fundamental layer or `--package`. Everything
-lock-driven stays entirely off the network — a **bare `oas install` restore of
-an existing lock never attempts a fetch**, because the lock already names the
-exact commits to restore. Reproducibility is unaffected either way: locks pin
-commits, and the catalog only ever supplies identity.
+`oas install <catalog-id>`, `oas update <package>`, `oas migrate`, and the
+`oas init` forms that resolve a fundamental layer or `--package`. Everything
+else stays entirely off the network:
 
-**`OAS_CATALOG_FETCH=off`** skips the remote attempt entirely and resolves
-straight to the cache, then the seed — for air-gapped hosts that want the
-fallbacks without waiting for the timeout.
+- a **bare `oas install` restore** of an existing lock never attempts a fetch —
+  the lock already names the exact commits to restore;
+- `oas install ./some/dir`, `oas install git:host/org/repo` and
+  `oas install https://…` name their own transport, so no catalog is fetched
+  for them either;
+- **`oas doctor` never fetches.** Diagnostics stay off the network: doctor
+  reports the provenance this host already has (override, cache with its age,
+  or bundled seed), names the commands that do refresh it, and reports a broken
+  override truthfully instead of rendering it as healthy.
+
+Reproducibility is unaffected either way: locks pin commits, and the catalog
+only ever supplies identity.
+
+**`OAS_CATALOG_FETCH=off`** switches the remote attempt off entirely and
+resolves straight to the cache, then the seed — for air-gapped hosts that want
+the fallbacks without waiting for the timeout. Its messages say the fetch was
+**disabled**, never that the remote was unreachable: nothing was contacted.
 
 **`OAS_PACKAGE_CATALOG`** is the hermetic escape hatch: it *replaces* the
 catalog with the named file, suppresses the fetch, writes no cache, and keeps
 the exact failure behavior for a broken file (`broken package catalog <file>`,
-typed `invalid-source`). It is what every test in this repository binds so the
-suite never touches the network.
+typed `invalid-source`). Every test in this repository that **spawns the CLI**
+binds it (see `test/catalog-hermetic.mjs`) so those runs never touch the
+network; the catalog suites themselves instead inject a fetcher, or run a child
+CLI under a fetch canary that records and fails every attempt.
 
 ## Doctor
 
@@ -457,7 +494,11 @@ suite never touches the network.
   config templates that no scope has adopted;
 - **official catalog provenance** (`catalog` in `--json`) — which of
   `override | remote | cache | bundled` answered, the source path or URL, the
-  cache path, and the cache age when a cached copy is being served;
+  cache path, the cache age when a cached copy is being served, whether this run
+  refreshed anything (`refreshedThisRun`, always `false` for doctor), which
+  commands do refresh it (`refreshedBy`), whether the fetch is switched off
+  (`fetchDisabled`), any `cacheError` from a refresh, and `error` when the
+  override file itself is broken. Doctor **never fetches**;
 - **missing host commands** for active capabilities, with the exact consent
   command when a safe installer exists;
 - **official capability migration** (`officialMigration` in `--json`) when the
