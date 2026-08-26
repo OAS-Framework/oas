@@ -1,6 +1,9 @@
 # Knowledge Log
 
 ## 2026-08-26
+* **Release**: kernel v0.21.2 published from PR #78 merge `30734a70` at exact head `99211455` (bump PR #79) — package payload config templates are no longer treated as deployment scopes (manifest-ancestor rule in scope discovery); found live by bare team reconciliation on the rebuilt deployment; [repo state](/stewardship/repo-state.md) and the [delivery log](/stewardship/delivery-log.md) record the fix and the two coverage follow-ups.
+* **Release**: kernel v0.21.1 published from PR #76 merge `b5a56bf` at exact head `aaf50a5` (bump PR #77) — scope-exact provenance/trust corrective, same defect family as the v0.20.1 doctor-orphan fix; verified CLEAN at all three live scopes on the published artifact; [repo state](/stewardship/repo-state.md) and the [delivery log](/stewardship/delivery-log.md) record the scope-exact invariant and the remaining desktop open thread.
+* **Release**: kernel v0.21.0 published from PR #74 merge `f967e128` at exact head `f94d196f` (bump PR #75) — the [remote official catalog decision](/decisions/remote-official-catalog.md) implemented: constant-URL fetch from this repo's main, env-override/fetch/cache/seed resolution order, untrusted-payload validation, diagnostics never fetch; 3-lens adversarial review closed a security blocker before merge; [repo state](/stewardship/repo-state.md) and the [delivery log](/stewardship/delivery-log.md) record the full round trail. The `OAS_PACKAGE_CATALOG`-undocumented open thread is RESOLVED by this release.
 * **Creation**: [The official catalog is remote — read from the OAS repo on GitHub](/decisions/remote-official-catalog.md) — founder decision superseding the bundled-catalog follow-up; resolution order, untrusted-payload validation, diagnostics-never-fetch ruling, and the v0.21.0 release plan recorded.
 
 ## 2026-08-25
