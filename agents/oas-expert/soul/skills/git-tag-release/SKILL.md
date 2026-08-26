@@ -44,6 +44,10 @@ creates and merges a `release: vX.Y.Z` version-bump PR back to main.
 6. Confirm publish: `npm view @oas-framework/oas version` (and `/pi`). If the
    later version-bump PR step fails, treat the npm publish as already done and
    follow the manual bump-PR rescue below instead of retagging.
+7. Confirm the bump landed — **a green run does not prove it**. Check
+   `git show origin/main:package.json`; if main still shows the previous
+   version, apply the manual bump-PR rescue below even when nothing failed
+   (`gh pr list --search release`, `git branch -r | grep release-bump`).
 
 ## Verify the deployment (mandatory)
 
@@ -77,7 +81,7 @@ Pi install cleanup gotcha: after installing a new `@oas-framework/pi` version,
 package name, not just the old spec. Reinstall the new version after any
 remove.
 
-## If the run failed
+## If the run failed — or the bump is not on main
 
 - **"Version not changed"**: you bumped package.json locally. Revert the
   bump on main (commit + push), then re-cut the tag on the fixed commit:
@@ -97,9 +101,12 @@ remove.
   tag is still safe; repo renames do not matter because npm authority is
   token/account/package-scoped. See
   `knowledge/lessons/npm-eotp-in-tag-release.md`.
-- **Version-bump PR creation fails with `GraphQL: Resource not accessible by
-  integration (createPullRequest)`**: check `npm view @oas-framework/oas
-  version` first. Publishing completed before this step, so do not retag for
+- **The version bump is not on main** — either the bump-PR step failed with
+  `GraphQL: Resource not accessible by integration (createPullRequest)`, or
+  the run went fully green, pushed `release-bump/vX.Y.Z`, and created no PR at
+  all (the same org restriction, silent surface — seen on v0.20.1). The
+  trigger for this rescue is main's version, not the run conclusion. Check
+  `npm view @oas-framework/oas version` first. Publishing completed before this step, so do not retag for
   the bump-PR failure alone. The repo-level "Allow GitHub Actions to create
   and approve pull requests" toggle is locked by the OAS-Framework org policy
   (repo API returns 409 "disabled by the organization"; changing it requires
