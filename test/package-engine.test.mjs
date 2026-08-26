@@ -1119,6 +1119,84 @@ test("approval verifies PROVENANCE, not just integrity: a re-hashed .oas-install
   rmSync(t, { recursive: true, force: true });
 });
 
+/** The two-scope deployment shape that made cross-scope provenance visible:
+ * an OUTER scope that acquired a package directly (no selector, source
+ * "catalog:x.official") and an INNER scope that got the SAME package id through
+ * a dependency closure, whose rows carry the selector form
+ * ("catalog:x.official@v2.0.0"). Each scope is internally consistent — every
+ * artifact's `.oas-installation.json` agrees with the lock of the scope it
+ * lives at — and the two scopes disagree with each other, which is legal. */
+function twoScopeSameIdChain(t) {
+  const officialRoot = join(t, "official-repo");
+  pkgSource(join(officialRoot, "oas-package"), { package: "x.official" }, { "capabilities/a": { capability: "x.a", commands: { go: "bin/go.mjs run" } } });
+  write(join(officialRoot, "oas-package/capabilities/a/bin/go.mjs"), "//\n");
+  const officialCommit = gitify(officialRoot);
+  execFileSync("git", ["-C", officialRoot, "tag", "v2.0.0"]);
+
+  const devRoot = join(t, "dev-repo");
+  pkgSource(join(devRoot, "oas-package"), { package: "x.dev", dependencies: ["x.official@v2.0.0"] }, { "capabilities/d": { capability: "x.d" } });
+  const devCommit = gitify(devRoot);
+
+  const catalog = (id, selector) => {
+    if (id === "x.official") return { url: `file://${officialRoot}`, ref: selector || officialCommit, path: "oas-package" };
+    if (id === "x.dev") return { url: `file://${devRoot}`, ref: selector || devCommit, path: "oas-package" };
+    return undefined;
+  };
+  // The outer scope activates x.a: the capability whose trust must survive being
+  // queried from the inner scope.
+  const outer = scope(t, "outer", "name: outer\ncapabilities:\n  additive:\n    x.a:\n      from: installed\n      global: true\n");
+  acquirePackage(outer, "x.official", { catalog });
+  const inner = scope(outer, "inner", "name: inner\n");
+  acquirePackage(inner, "x.dev", { catalog });
+  return { outer, inner, catalog, officialCommit };
+}
+
+test("trust resolves the lock row SCOPE-EXACTLY: an artifact is judged against ITS OWN scope's lock, never a nearer scope's row for the same id", () => {
+  const t = temp();
+  const { outer, inner } = twoScopeSameIdChain(t);
+  // Precondition: one package id, two scopes, two internally consistent source
+  // spellings — the shape that made a merged lookup pair the wrong rows.
+  assert.equal(lockOf(outer).packages["x.official"].source, "catalog:x.official");
+  assert.equal(lockOf(inner).packages["x.official"].source, "catalog:x.official@v2.0.0");
+  assert.notEqual(lockOf(outer).capabilities["x.a"].integrity, lockOf(inner).capabilities["x.a"].integrity, "the provenance file differs, so the artifacts differ");
+
+  // Each scope alone is healthy.
+  approveCapability(outer, "x.a");
+  assert.equal(capabilityTrust(outer, "x.a").trusted, true);
+  approveCapability(inner, "x.a");
+  assert.equal(capabilityTrust(inner, "x.a").trusted, true);
+
+  // The inner scope keeps its lock row but loses its artifact (locked, not
+  // materialized). Discovery now hands the OUTER artifact to the inner scope —
+  // and that artifact answers to the OUTER lock, which approved it. A merged
+  // lookup would judge it against the inner row and hide a trusted capability.
+  rmSync(artifact(inner, "x.a"), { recursive: true, force: true });
+  const t1 = capabilityTrust(inner, "x.a");
+  assert.equal(t1.trusted, true, `outer artifact judged from the inner scope: ${t1.reason}`);
+  assert.equal(t1.lock._file, join(outer, OAS_LOCK_FILE), "the row that answered came from the artifact's own scope");
+
+  // NEGATIVE CONTROL: an artifact that genuinely disagrees with ITS OWN scope's
+  // lock still fails — integrity rebound so only the ORIGIN is in dispute.
+  const file = join(artifact(outer, "x.a"), CAPABILITY_INSTALLATION_FILE);
+  write(file, JSON.stringify({ ...JSON.parse(readFileSync(file, "utf8")), package: "somebody.else" }, null, 2) + "\n");
+  const doc = lockOf(outer);
+  doc.capabilities["x.a"].integrity = capabilityArtifactIntegrity(artifact(outer, "x.a"));
+  write(join(outer, OAS_LOCK_FILE), JSON.stringify(doc, null, 2));
+  const t2 = capabilityTrust(inner, "x.a");
+  assert.equal(t2.trusted, false, "a real provenance disagreement at the owning scope is still a finding");
+  assert.match(t2.reason, new RegExp(`${CAPABILITY_INSTALLATION_FILE.replace(".", "\\.")} "package"`));
+
+  // FAIL CLOSED: an artifact whose OWN scope does not lock it is unlocked, even
+  // when another scope in the chain locks that capability id.
+  const orphaned = lockOf(outer);
+  delete orphaned.capabilities["x.a"];
+  write(join(outer, OAS_LOCK_FILE), JSON.stringify(orphaned, null, 2));
+  const t3 = capabilityTrust(inner, "x.a");
+  assert.equal(t3.trusted, false);
+  assert.match(t3.reason, /not locked/);
+  rmSync(t, { recursive: true, force: true });
+});
+
 test("trust queries RAISE on an invalid lock — a bad lock is never served as untrusted-but-fine", () => {
   const t = temp();
   const s = scope(t);
