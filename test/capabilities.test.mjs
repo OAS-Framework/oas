@@ -8,6 +8,12 @@ import {
   capabilityIntegrity, capabilityManifest, composeInstanceAgentsMd, createAgent, findAgent, findInstanceHomes, resolveOasConfig,
   listInstances, resolveClaudeBinary, resolveWorkMode, retireInstance, runLifecycleHooks, spawnInstance, writeCapabilityLock,
 } from "../lib/core.mjs";
+import { pinAmbientCatalog } from "./catalog-hermetic.mjs";
+
+// Several cases here spawn the CLI with the ambient environment and reach
+// catalog-consuming commands (`init`, `install`, `doctor`). Bind the bundled
+// catalog FILE so none of them falls through to the v0.21 remote fetch.
+pinAmbientCatalog();
 
 const CLI = resolve(new URL("../bin/oas.mjs", import.meta.url).pathname);
 /** Parse a `--json` CLI success envelope (Desktop CLI API v1): stdout must be

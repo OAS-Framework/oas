@@ -15,6 +15,7 @@ import {
   resolveCapabilities, resolveOasConfig, RUNTIME_PACKAGE_MANAGERS, validateConfigShape, withConfigFile,
 } from "../lib/core.mjs";
 import { REQUIREMENT_MANAGERS, requirementInstallPlan } from "../lib/packages.mjs";
+import { BUNDLED_CATALOG } from "./catalog-hermetic.mjs";
 
 const CLI = resolve(new URL("../bin/oas.mjs", import.meta.url).pathname);
 function temp() { return mkdtempSync(join(tmpdir(), "oas-keysafe-test-")); }
@@ -217,6 +218,9 @@ test("oas init: an inherited-name layer flag is unknown-capability, not a protot
   // bailed with a LAYER MISMATCH for a capability that does not exist.
   const env = { ...process.env, HOME: temp(), OAS_HOME_DIR: join(temp(), ".oas") };
   for (const k of Object.keys(env)) if (/^(OAS|PI)_/.test(k) && k !== "OAS_HOME_DIR") delete env[k];
+  // The remedy this case reads names the catalog's ids: bind the bundled FILE
+  // so `init` reports them without going to the network.
+  env.OAS_PACKAGE_CATALOG = BUNDLED_CATALOG;
   const r = spawnSync(process.execPath, [CLI, "init", "--raw", "--knowledge", "constructor", "--dir", dir, "--json"], { encoding: "utf8", env });
   assert.notEqual(r.status, 0, r.stdout);
   const doc = JSON.parse(r.stdout);
@@ -231,7 +235,7 @@ function runCli(argv, cwd) {
   const env = {};
   for (const [k, v] of Object.entries(process.env)) if (!/^(OAS|PI)_/.test(k)) env[k] = v;
   const home = temp();
-  Object.assign(env, { HOME: home, OAS_HOME_DIR: join(home, ".oas") });
+  Object.assign(env, { HOME: home, OAS_HOME_DIR: join(home, ".oas"), OAS_PACKAGE_CATALOG: BUNDLED_CATALOG });
   return spawnSync(process.execPath, [CLI, ...argv], { encoding: "utf8", env, cwd: cwd || home });
 }
 /** A Node crash: an uncaught throw prints the source frame and a stack. */

@@ -22,6 +22,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSyn
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { OAS_LOCK_FILE, capabilityIntegrity, findAgent, installedCapabilitiesDir, ownedCapabilitiesDir, stripInternalAnnotations, writeCapabilityLock } from "../lib/core.mjs";
+import { BUNDLED_CATALOG } from "./catalog-hermetic.mjs";
 
 const CLI = resolve(new URL("../bin/oas.mjs", import.meta.url).pathname);
 const temp = () => mkdtempSync(join(tmpdir(), "oas-cli-lifecycle-"));
@@ -36,8 +37,8 @@ function gitify(dir) {
   return dir;
 }
 
-/** Run the CLI. `catalog` binds a fixture catalog; `null` binds an EMPTY one so
- * no case can silently reach the real one — or the network. */
+/** Run the CLI. `catalog` binds a fixture catalog; otherwise this repository's
+ * bundled catalog is bound so no case can silently reach the network. */
 const HERMETIC_HOME = mkdtempSync(join(tmpdir(), "oas-cli-lifecycle-home-"));
 function cli(argv, { catalog, cwd, env: extra } = {}) {
   // Hermetic environment. Two distinct leaks have to be closed, and neither is
@@ -52,8 +53,9 @@ function cli(argv, { catalog, cwd, env: extra } = {}) {
   const env = {};
   for (const [k, v] of Object.entries(process.env)) if (!/^(OAS|PI)_/.test(k)) env[k] = v;
   Object.assign(env, { HOME: HERMETIC_HOME, OAS_HOME_DIR: join(HERMETIC_HOME, ".oas") }, extra);
-  if (catalog) env.OAS_PACKAGE_CATALOG = catalog;
-  else delete env.OAS_PACKAGE_CATALOG;
+  //   - OAS_PACKAGE_CATALOG: with every OAS_* variable stripped, an unbound
+  //     catalog would fall through to the v0.21 remote fetch. Always a FILE.
+  env.OAS_PACKAGE_CATALOG = catalog || BUNDLED_CATALOG;
   return spawnSync(process.execPath, [CLI, ...argv], { cwd: cwd || tmpdir(), env, encoding: "utf8" });
 }
 

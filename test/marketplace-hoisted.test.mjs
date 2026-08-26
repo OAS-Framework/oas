@@ -66,7 +66,11 @@ function frameworkAuthor(base) {
   mkdirSync(join(root, "framework-author", "instances"), { recursive: true });
   return { repo, root };
 }
-const oasCli = (kernel, ...argv) => spawnSync(process.execPath, [join(kernel, "bin", "oas.mjs"), ...argv], { encoding: "utf8" });
+// The fixture kernel deliberately has NO package-catalog.json, so the official
+// route must resolve to nothing. Bind that absent file explicitly: an unbound
+// catalog would fall through to the v0.21 remote fetch instead.
+const oasCli = (kernel, ...argv) => spawnSync(process.execPath, [join(kernel, "bin", "oas.mjs"), ...argv],
+  { encoding: "utf8", env: { ...process.env, OAS_PACKAGE_CATALOG: join(kernel, "package-catalog.json") } });
 function install(kernel, id, dir) {
   const r = oasCli(kernel, "install", id, "--dir", dir);
   assert.equal(r.status, 0, `${r.stdout}\n${r.stderr}`);
