@@ -1818,6 +1818,76 @@ test("doctor --json carries schemaVersion 1 and the WS2 payload with field parit
   assert.match(human.stdout, /oas install --accept-requirement json-doctor-missing-cmd --dir /);
 });
 
+test("doctor judges every artifact against ITS OWN scope's lock: one package id at two scopes with different source spellings is clean in both renderings", () => {
+  const base = temp();
+  /** A minimal package source repo, committed and tagged v2.0.0. */
+  const pkgRepo = (dir, id, capabilities, dependencies) => {
+    const rels = [];
+    for (const [rel, cm] of Object.entries(capabilities)) {
+      rels.push(rel);
+      write(join(dir, "oas-package", rel, "oas.json"), JSON.stringify({ version: "2.0.0", description: "cap", ...cm }, null, 2));
+    }
+    write(join(dir, "oas-package", "oas-package.json"), JSON.stringify({
+      package: id, version: "2.0.0", description: "pkg", compatibility: { oas: ">=0.1.0" },
+      capabilities: rels, ...(dependencies ? { dependencies } : {}),
+    }, null, 2));
+    gitRepo(dir);
+    execFileSync("git", ["-C", dir, "tag", "v2.0.0"]);
+    return execFileSync("git", ["-C", dir, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  };
+  const officialRoot = join(base, "official-repo");
+  const officialCommit = pkgRepo(officialRoot, "x.official", { "capabilities/a": { capability: "x.a" } });
+  const devRoot = join(base, "dev-repo");
+  const devCommit = pkgRepo(devRoot, "x.dev", { "capabilities/d": { capability: "x.d" } }, ["x.official@v2.0.0"]);
+  const catalog = (id, selector) => {
+    if (id === "x.official") return { url: `file://${officialRoot}`, ref: selector || officialCommit, path: "oas-package" };
+    if (id === "x.dev") return { url: `file://${devRoot}`, ref: selector || devCommit, path: "oas-package" };
+    return undefined;
+  };
+
+  // OUTER: a direct, no-selector acquisition. INNER: the SAME package id
+  // arriving through a dependency closure, whose rows carry the selector form.
+  // Each scope's artifacts agree with the lock of the scope they live at.
+  const outer = join(base, "outer");
+  write(join(outer, "oas-config.yaml"), "name: outer\n");
+  acquirePackage(outer, "x.official", { catalog });
+  const inner = join(outer, "inner");
+  write(join(inner, "oas-config.yaml"), "name: inner\n");
+  acquirePackage(inner, "x.dev", { catalog });
+  const lockOf = (dir) => JSON.parse(readFileSync(join(dir, "oas-lock.json"), "utf8"));
+  assert.equal(lockOf(outer).packages["x.official"].source, "catalog:x.official");
+  assert.equal(lockOf(inner).packages["x.official"].source, "catalog:x.official@v2.0.0");
+
+  // Doctor at the INNER scope sees both scopes' rows and must judge each
+  // artifact against its own — human and --json alike.
+  const human = cli(["doctor", inner], { cwd: inner });
+  assert.equal(human.status, 0, human.stderr);
+  assert.doesNotMatch(human.stdout, /invalid-lock/, human.stdout);
+  assert.doesNotMatch(human.stdout, /\.oas-installation\.json/, human.stdout);
+  const doc = JSON.parse(cli(["doctor", inner, "--json"], { cwd: inner }).stdout);
+  for (const p of doc.packages) assert.deepEqual(p.problems, [], `${p.id} at ${p.level}`);
+  // Each package row is rendered with its OWN scope's source, not the nearest
+  // scope's row for the same id.
+  const rowFor = (level) => doc.packages.find((p) => p.id === "x.official" && p.level === level);
+  assert.equal(rowFor(outer).source, "catalog:x.official");
+  assert.equal(rowFor(inner).source, "catalog:x.official@v2.0.0");
+
+  // NEGATIVE CONTROL: an artifact that genuinely disagrees with ITS OWN scope's
+  // lock is still diagnosed. Integrity is rebound so only the ORIGIN disputes.
+  const art = join(outer, ".agents", "capabilities", "installed", "x.a");
+  const provenance = join(art, ".oas-installation.json");
+  write(provenance, JSON.stringify({ ...JSON.parse(readFileSync(provenance, "utf8")), source: "catalog:somebody.else" }, null, 2) + "\n");
+  const doctored = lockOf(outer);
+  doctored.capabilities["x.a"].integrity = capabilityArtifactIntegrity(art);
+  write(join(outer, "oas-lock.json"), JSON.stringify(doctored, null, 2));
+  const broken = cli(["doctor", inner], { cwd: inner });
+  assert.match(broken.stdout, /ERROR: capability x\.a: .*"source" is "catalog:somebody\.else" but the lock records "catalog:x\.official" \[invalid-lock\]/);
+  const brokenJson = JSON.parse(cli(["doctor", inner, "--json"], { cwd: inner }).stdout);
+  assert.deepEqual(brokenJson.packages.find((p) => p.id === "x.official" && p.level === outer).problems.map((x) => x.code), ["invalid-lock"]);
+  assert.deepEqual(brokenJson.packages.find((p) => p.id === "x.official" && p.level === inner).problems, [], "the healthy scope is untouched by its neighbour's dispute");
+  rmSync(base, { recursive: true, force: true });
+});
+
 test("malformed requirement commands reach the fail-closed policy: empty and non-string commands, canonical sort", () => {
   const base = temp();
   const ws = join(base, "ws");

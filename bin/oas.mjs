@@ -230,7 +230,17 @@ function doctorPackagesData(ctx, chain, { teamScope } = {}) {
   }
   const packages = [];
   for (const p of installedPkgs) {
-    const lock = pkgLocks.packages[p.package];
+    // SCOPE-EXACT, like `oas list` and `oas trust` above: `p` was derived from
+    // the lock AT `p.level`, and its artifacts live under that scope, so only
+    // that scope's rows can judge them. The MERGED maps resolve each identity
+    // closest-scope-first — right for "which capability is active here", wrong
+    // here — so a chain holding one package id at two scopes (a direct
+    // acquisition outside, the same id pulled in by a dependency closure
+    // inside, each with its own source spelling) would compare an outer
+    // artifact's provenance against the inner row it was never projected from
+    // and report a self-consistent pair as invalid-lock.
+    const rows = levelRows(pkgLocks, p.level);
+    const lock = Object.hasOwn(rows.packages, p.package) ? { ...rows.packages[p.package], _file: join(p.level, OAS_LOCK_FILE), _level: p.level } : undefined;
     const problems = [];
     if (!lock) problems.push({ code: "invalid-lock", detail: "installed but not locked — reacquire it" });
     else {
@@ -239,7 +249,7 @@ function doctorPackagesData(ctx, chain, { teamScope } = {}) {
       // artifacts. So every health check is per capability, against the artifact
       // integrity the engine recorded for it.
       for (const c of p.capabilities) {
-        const h = capabilityHealth(p.level, c, pkgLocks.capabilities[c.id], lock);
+        const h = capabilityHealth(p.level, c, Object.hasOwn(rows.capabilities, c.id) ? rows.capabilities[c.id] : undefined, lock);
         if (h.status !== "ok") problems.push({ code: h.code, detail: h.detail });
       }
     }
