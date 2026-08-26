@@ -1,5 +1,8 @@
 # Knowledge Log
 
+## 2026-08-26
+* **Creation**: [The official catalog is remote — read from the OAS repo on GitHub](/decisions/remote-official-catalog.md) — founder decision superseding the bundled-catalog follow-up; resolution order, untrusted-payload validation, diagnostics-never-fetch ruling, and the v0.21.0 release plan recorded.
+
 ## 2026-08-25
 * **Update**: clean-room public release gate PASSED — 13/13 proofs, 535 assertions, 50 real sentinels against published 0.20.1 + the activated catalog; two adversarial audit rounds forced harness truthfulness (tautological sentinels rebuilt, disclosures precise); the aweb host fault is refined to hosted-team-join-only and the `OAS_PACKAGE_CATALOG` documentation gap is a recorded follow-up — both in [repo state](/stewardship/repo-state.md) open threads.
 * **Delivery**: PR #73 official v2.0.0 catalog activation MERGED (`a51d032` at exact head `94a99243`) — all six packages pinned at immutable v2.0.0 tags, oas.review→oas.dev, Jira/Linear opt-in, verified against the published 0.20.1 kernel via `OAS_PACKAGE_CATALOG`; [repo state](/stewardship/repo-state.md) and the [delivery log](/stewardship/delivery-log.md) record the closure proof and the bundled-catalog activation semantics.

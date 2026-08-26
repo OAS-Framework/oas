@@ -1,5 +1,6 @@
 # Decisions
 
+* [The official catalog is remote — read from the OAS repo on GitHub](remote-official-catalog.md) - Founder decision (2026-08-26) — the official package catalog's source of truth is package-catalog.json on OAS-Framework/oas main, fetched at resolution time; the bundled copy is only an offline seed, and diagnostics never fetch.
 * [Packages materialize capabilities while config templates remain explicitly adopted local policy](capability-materialization-and-config-template-sync.md) - Packages are temporary transport and atomic update units; capabilities materialize under `.agents/capabilities/installed`, optional `config-templates/` are adopted into the one locally owned config per scope, and synchronization is explicit and guided.
 * [Official OAS development uses a multi-repository workspace with one expert soul per package](official-multi-repo-workspace-and-package-experts.md) - Official framework and package repositories live under one non-Git team scope configured from `oas.dev`, and every official package repository owns a durable package-maintainer expert.
 * [OAS package repositories select an explicit payload root](oas-package-repository-payload-root.md) - A Git repository may contain arbitrary development content while OAS copies, hashes, locks, and installs only a configured package subtree whose official convention is oas-package/.
