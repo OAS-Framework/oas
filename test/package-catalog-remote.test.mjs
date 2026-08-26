@@ -197,3 +197,58 @@ test("only NEW-work commands may resolve the catalog — lock-driven work never 
   }
 });
 
+// ---------- CLI surface ----------
+
+/** A hermetic CLI environment with its own OAS state dir and the remote fetch
+ * switched off, so the cache/bundled fallbacks are exercised without a network. */
+function cliEnv(home, extra = {}) {
+  const env = {};
+  for (const [k, v] of Object.entries(process.env)) if (!/^(OAS|PI)_/.test(k)) env[k] = v;
+  return Object.assign(env, { HOME: home, OAS_HOME_DIR: join(home, ".oas"), OAS_CATALOG_FETCH: "off" }, extra);
+}
+
+test("doctor reports catalog provenance; the staleness line is stderr-only and --json stays ONE envelope", () => {
+  const home = temp();
+  const scope = temp();
+  const cacheFile = join(home, ".oas", "package-catalog.cache.json");
+  seedCache(cacheFile, CACHED_DOC, Date.now() - 26 * HOUR);
+
+  const j = spawnSync(process.execPath, [CLI, "doctor", scope, "--json"], { cwd: scope, env: cliEnv(home), encoding: "utf8" });
+  assert.equal(j.status, 0, j.stderr);
+  const doc = JSON.parse(j.stdout); // throws on ANY stdout contamination
+  assert.equal(doc.catalog.provenance, "cache");
+  assert.equal(doc.catalog.source, cacheFile);
+  assert.equal(doc.catalog.url, OFFICIAL_CATALOG_URL);
+  assert.equal(doc.catalog.cacheFile, cacheFile);
+  assert.match(j.stderr, /26h ago/, "the staleness line names the cache age");
+  assert.doesNotMatch(j.stdout, /26h ago/, "and it never lands inside the JSON envelope");
+
+  const h = spawnSync(process.execPath, [CLI, "doctor", scope], { cwd: scope, env: cliEnv(home), encoding: "utf8" });
+  assert.equal(h.status, 0, h.stderr);
+  assert.match(h.stdout, /Official package catalog: cache/);
+  assert.match(h.stdout, new RegExp(OFFICIAL_CATALOG_URL.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(h.stderr, /26h ago/);
+});
+
+test("the env override is reported as the provenance, and suppresses the staleness line", () => {
+  const home = temp();
+  const scope = temp();
+  seedCache(join(home, ".oas", "package-catalog.cache.json"), CACHED_DOC, Date.now() - 26 * HOUR);
+  const r = spawnSync(process.execPath, [CLI, "doctor", scope, "--json"],
+    { cwd: scope, env: cliEnv(home, { OAS_PACKAGE_CATALOG: BUNDLED_CATALOG }), encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  const doc = JSON.parse(r.stdout);
+  assert.equal(doc.catalog.provenance, "override");
+  assert.equal(doc.catalog.source, BUNDLED_CATALOG);
+  assert.doesNotMatch(r.stderr, /ago/, "an override is never stale — it is what the operator asked for");
+});
+
+test("a bare `oas install` restore resolves NO catalog at all", () => {
+  const home = temp();
+  const scope = temp();
+  writeFileSync(join(scope, "oas-config.yaml"), "capabilities: {}\n");
+  seedCache(join(home, ".oas", "package-catalog.cache.json"), CACHED_DOC, Date.now() - 26 * HOUR);
+  const r = spawnSync(process.execPath, [CLI, "install", "--dir", scope], { cwd: scope, env: cliEnv(home), encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  assert.doesNotMatch(r.stderr, /ago|catalog/, "restore never resolves the catalog, so it can never warn about it");
+});
